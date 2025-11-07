@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>WMS+ — Авторизация</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="wrap" style="max-width:400px; margin:80px auto">
+    <div class="card">
+      <h1>Вход в систему</h1>
+      <div class="row mb">
+        <label>ID пользователя</label>
+        <input type="text" id="login-id" class="input" placeholder="Введите ID">
+      </div>
+      <div class="row mb">
+        <label>Пароль</label>
+        <input type="password" id="login-pass" class="input" placeholder="Введите пароль">
+      </div>
+      <button id="login-btn" class="btn btn-rect">Войти</button>
+      <p id="login-error" class="muted"></p>
+    </div>
+  </div>
+
+  <script>
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyzERbNasc_wF50Dn-4vQjNBag20ICM9M-GAw7VHCnOspkzD7XWymD_kUC-o0tKnJ1e3g/exec';
+
+document.getElementById('login-btn').addEventListener('click', () => {
+  const id = document.getElementById('login-id').value.trim();
+  const pass = document.getElementById('login-pass').value.trim();
+  const errorEl = document.getElementById('login-error');
+
+  if (!id || !pass) {
+    errorEl.textContent = 'Введите ID и пароль';
+    return;
+  }
+
+  fetch(`${SCRIPT_URL}?id=${encodeURIComponent(id)}&pass=${encodeURIComponent(pass)}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.status === 'ok') {
+        localStorage.setItem('user', JSON.stringify(data));
+        window.location.href = 'index.html';
+      } else {
+        errorEl.textContent = data.message;
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      errorEl.textContent = 'Ошибка сервера, попробуйте позже';
+    });
+});
+
+// Если пользователь уже авторизован, сразу редирект
+if (localStorage.getItem('user')) {
+  window.location.href = 'index.html';
+}
+</script>
+
+</body>
+</html>

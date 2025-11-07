@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>WMS+</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="icons/wms_icon.ico" type="image/x-icon">
+    <script src="ui.js" defer></script>
+</head>
+
+<body>
+<!-- Overlay -->
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<!-- Header -->
+<header class="header">
+  <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+  <span class="header-title">Нижний Новгород</span>
+  <div class="header-user">
+    <span id="user-name" class="user-name"></span>
+    <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+  </div>
+</header>
+
+<!-- Боковое меню -->
+<div id="sidebar" class="sidebar">
+  <div class="sidebar-content">
+    <ul>
+        <li><a href="#" data-access="ultimate">Главная</a></li>
+        <li><a href="buffer_constructor.html" data-access="ultimate">Конструктор буфера</a></li>
+        <li><a href="#" data-access="contacts">Контакты</a></li>
+        <li><a href="#" data-access="about">О проекте</a></li>
+    </ul>
+  </div>
+</div>
+
+<!-- Основной контент -->
+<div class="wrap">
+  <div class="card">
+    <h1>Добро пожаловать!</h1>
+    <p>Пример страницы с шапкой и боковым меню.</p>
+    <button class="btn btn-rect">Отправить</button>
+    <button id="toast-ok">Toast OK</button>
+    <button id="toast-info">Toast Info</button>
+    <button id="toast-err">Toast Error</button>
+  </div>
+</div>
+
+<!-- Контейнер уведомлений -->
+<div id="toasts" class="toasts"></div>
+
+<script>
+  console.log('UI script loaded');
+</script>
+
+<style>
+
+</style>
+
+</body>
+</html>
