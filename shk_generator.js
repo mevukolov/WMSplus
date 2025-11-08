@@ -1,7 +1,4 @@
-// shk_generator.js
-// Порт алгоритма Verhoeff + ShkWithCheckSumV1 из Python в JS (1:1 логика)
-// Минимальный UI: ввод числа -> генерируем строку ШК -> показываем строку и QR
-
+// shk_generator.js (исправленная версия — BigInt, валидация диапазона 42 бит)
 (function(){
   // проверка доступа/авторизации (как в constructor.js)
   const logged = localStorage.getItem('user');
@@ -10,13 +7,13 @@
     return;
   }
 
-  // --- Verhoeff / ShkWithCheckSumV1 port ---
+  // --- Verhoeff / ShkWithCheckSumV1 port (BigInt-safe) ---
   const VerhoeffJS = (function(){
     const char_list = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const light_prefix = "*";
     const check_sum_first_size = 4;
     const check_sum_second_size = 4;
-    // tables from python
+
     const d = [
       [0,1,2,3,4,5,6,7,8,9],
       [1,2,3,4,0,6,7,8,9,5],
@@ -41,36 +38,43 @@
     ];
     const inv = [0,4,3,2,1,5,6,7,8,9];
 
+    // common_encode: принимает BigInt (или Number), возвращает строку с префиксом '*'
     function common_encode(j){
-      if(!Number.isFinite(j)) j = Number(j) || 0;
-      if(j === 0) return light_prefix; // but python appends light_prefix at end after building string; handle below
-      let sb = [];
-      const base = char_list.length;
-      while(j !== 0){
-        const idx = j % base;
+      let n = (typeof j === 'bigint') ? j : BigInt(j);
+      const base = BigInt(char_list.length);
+      if(n === 0n){
+        return light_prefix;
+      }
+      const sb = [];
+      while(n > 0n){
+        const idx = Number(n % base); // safe: idx in [0, base-1] small
         sb.push(char_list.charAt(idx));
-        j = Math.floor(j / base);
+        n = n / base;
       }
       sb.push(light_prefix);
       return sb.reverse().join('');
     }
 
+    // generate_verhoeff_shk_checksums_common: использует BigInt операции, 
+    // но считает цифры decimal, поэтому проще работать со строкой
     function generate_verhoeff_shk_checksums_common(j){
-      // mirrors Python implementation
-      let split_count = String(j).length/2 | 0;
-      if(String(j).length % 2 !== 0) split_count = Math.floor(String(j).length/2) + 1;
+      // j может быть Number или BigInt
+      const s = String(j);
+      const len = s.length;
+      const split_count = Math.floor(len/2) + (len % 2 !== 0 ? 1 : 0);
+
       const array_list = [];
       let i = 0;
       let b = 0;
-      let tmp = j;
-      while(tmp > 0){
+      // обходим цифры с конца (как в Python: while j>0 ... j//=10)
+      // проще пройти по строк справа налево
+      for(let k = s.length - 1; k >= 0; k--){
         if(i === split_count){
           array_list.push(inv[b]);
           i = 0;
           b = 0;
         }
-        const i2 = tmp % 10;
-        tmp = Math.floor(tmp / 10);
+        const i2 = Number(s[k]);
         i += 1;
         b = d[b][ p[i % 8][i2] ];
       }
@@ -79,51 +83,48 @@
     }
 
     function generate_light_shk_package(j){
+      // j may be BigInt/Number; compute using BigInt shifts
       const checksums = generate_verhoeff_shk_checksums_common(j);
-      let j_byte_value = checksums[0] || 0;
+      let j_byte_value = BigInt(checksums[0] || 0);
       if(checksums.length === 2){
-        j_byte_value |= (checksums[1] << check_sum_first_size);
+        j_byte_value = j_byte_value | (BigInt(checksums[1]) << BigInt(check_sum_first_size));
       }
-      // shift j left by total checksum bits
-      const totalShift = check_sum_first_size + check_sum_second_size;
-      // Use Number (safe for these bit sizes)
-      return (j * Math.pow(2, totalShift)) | j_byte_value;
+      const jBig = (typeof j === 'bigint') ? j : BigInt(j);
+      const totalShift = BigInt(check_sum_first_size + check_sum_second_size);
+      return (jBig << totalShift) | j_byte_value; // BigInt
     }
 
     function encode_shk_light(j){
-      if(j < 0) j = 0;
-      const pkg = generate_light_shk_package(j);
+      let n = (typeof j === 'bigint') ? j : BigInt(j);
+      if(n < 0n) n = 0n;
+      const pkg = generate_light_shk_package(n);
       return common_encode(pkg);
     }
 
     function common_decode_v2(barcode){
       if(!barcode || barcode.charAt(0) !== light_prefix) return null;
-      let body = barcode.slice(1);
-      // decode base |char_list|
-      let result = 0;
-      const base = char_list.length;
-      // process reversed: least significant char is last in string, but python reverses
-      for(let i=0; i<body.length; i++){
-        const ch = body.charAt(body.length - 1 - i);
-        const idx = char_list.indexOf(ch);
-        if(idx === -1) return null;
-        result += idx * Math.pow(base, i);
+      const body = barcode.slice(1);
+      const base = BigInt(char_list.length);
+      let result = 0n;
+      for(let i = 0; i < body.length; i++){
+        const ch = body.charAt(body.length - 1 - i); // reversed
+        const idx = BigInt(char_list.indexOf(ch));
+        if(idx < 0) return null;
+        result += idx * (base ** BigInt(i));
       }
       return result;
     }
 
     function validate_verhoeff_for_two_checksum(shk_val, chk_sum, chk_sum2){
-      // Transliterate python loop carefully
+      // shk_val might be BigInt or Number; easier to work with its decimal string
       const s = String(shk_val);
       const len = s.length;
       const split_count = Math.floor(len/2) + (len % 2 !== 0 ? 1 : 0);
+      const digits = Array.from(s).map(ch => Number(ch));
 
-      // build digits array from digits of shk_val
-      const digits = Array.from(String(shk_val)).map(ch => Number(ch));
       let b = 0;
       let i = 0;
-
-      for(let idx=0; idx<digits.length; idx++){
+      for(let idx = 0; idx < digits.length; idx++){
         const digit = digits[idx];
         if(i === split_count){
           if(inv[b] !== 0) return false;
@@ -159,7 +160,7 @@
     };
   })();
 
-  // ShkWithCheckSumV1 port
+  // ShkWithCheckSumV1 port (BigInt-aware)
   function ShkWithCheckSumV1JS(){
     const CHECK_SUM_FIRST_SIZE = 4;
     const CHECK_SUM_SECOND_SIZE = 4;
@@ -167,11 +168,9 @@
     const SHK_VALUE_SIZE = 42;
 
     function fix_russian_layout(barcode){
-      // basic transliteration: keep as in Python version (best-effort)
-      // We'll just replace common RU->EN letters that confuse keyboard layout (minimal).
       const rus = 'ёйцукенгшщзхъфывапролджэячсмитьбю';
       const eng = '`qwertyuiop[]asdfghjkl;\'zxcvbnm,./';
-      let map = {};
+      const map = {};
       for(let i=0;i<rus.length;i++){ map[rus[i]] = eng[i]; map[rus[i].toUpperCase()] = eng[i].toUpperCase(); }
       let out = '';
       for(const ch of barcode){
@@ -180,8 +179,9 @@
       return out;
     }
 
-    function get_bits_from_end(decoded, count_of_bits){
-      return decoded & ((1 << count_of_bits) - 1);
+    function get_bits_from_end(decodedBigInt, count_of_bits){
+      const mask = (1n << BigInt(count_of_bits)) - 1n;
+      return Number(decodedBigInt & mask); // small number fits Number
     }
 
     function is_shk_valid(shk_val, chk_sum, chk_sum2){
@@ -200,18 +200,18 @@
         if(decoded === null || decoded === undefined) return null;
 
         const chk_sum = get_bits_from_end(decoded, CHECK_SUM_FIRST_SIZE);
-        const chk_sum2 = get_bits_from_end(decoded >> CHECK_SUM_FIRST_SIZE, CHECK_SUM_SECOND_SIZE);
-        const shk_val = get_bits_from_end(decoded >> (CHECK_SUM_FIRST_SIZE + CHECK_SUM_SECOND_SIZE), SHK_VALUE_SIZE);
-        const remaining = decoded >> (CHECK_SUM_FIRST_SIZE + CHECK_SUM_SECOND_SIZE + SHK_VALUE_SIZE);
+        const chk_sum2 = get_bits_from_end(decoded >> BigInt(CHECK_SUM_FIRST_SIZE), CHECK_SUM_SECOND_SIZE);
+        const shk_val = Number((decoded >> BigInt(CHECK_SUM_FIRST_SIZE + CHECK_SUM_SECOND_SIZE)) & ((1n << BigInt(SHK_VALUE_SIZE)) - 1n));
+        const remaining = decoded >> BigInt(CHECK_SUM_FIRST_SIZE + CHECK_SUM_SECOND_SIZE + SHK_VALUE_SIZE);
 
-        if(remaining !== 0) return null;
+        if(remaining !== 0n) return null;
 
         if(!is_shk_valid(shk_val, chk_sum, chk_sum2)){
           if(!allow_invalid_checksum) return null;
         }
 
-        if(shk_val === 0){
-          // Python raises ValueError here; we return null
+        if(shk_val === 0) {
+          // Python raised ValueError; here return null
           return null;
         }
 
@@ -234,6 +234,9 @@
 
   const decoder = ShkWithCheckSumV1JS();
 
+  // SHK max according to SHK_VALUE_SIZE bits
+  const MAX_SHK = (1n << 42n) - 1n; // 2^42 - 1 = 4398046511103
+
   // allow only digits in input (visual)
   input.addEventListener('input', (e) => {
     input.value = input.value.replace(/[^\d]/g, '');
@@ -249,14 +252,20 @@
       window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Только цифры', {type:'error'});
       return;
     }
-    const num = Number(v);
-    if(!Number.isFinite(num) || num < 0){
-      window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Число вне диапазона', {type:'error'});
+
+    // check range <= MAX_SHK
+    let numBig = BigInt(v);
+    if(numBig <= 0n){
+      window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Число должно быть положительным', {type:'error'});
+      return;
+    }
+    if(numBig > MAX_SHK){
+      window.MiniUI && window.MiniUI.toast && window.MiniUI.toast(`Число должно быть меньше или равно ${String(MAX_SHK)}`, {type:'error', duration:6000});
       return;
     }
 
     try {
-      const barcode = VerhoeffJS.encode_shk_light(num);
+      const barcode = VerhoeffJS.encode_shk_light(numBig);
       const parsed = decoder.try_parse(barcode, true);
 
       let display = '';
@@ -268,17 +277,18 @@
 
       resultTextEl.textContent = display;
 
-      // QR: use qrcode lib if loaded
+      // draw QR (qrcode lib)
       if(window.QRCode && typeof QRCode.toCanvas === 'function'){
-        // QRCode.toCanvas(canvas, text, options, cb)
         try {
-          await QRCode.toCanvas(qrCanvas, display, { width: 150, margin: 1 });
+          // set canvas size explicitly to avoid scaling artifacts
+          const size = 150;
+          qrCanvas.width = size;
+          qrCanvas.height = size;
+          await QRCode.toCanvas(qrCanvas, display, { width: size, margin: 1 });
         } catch(e){
-          // fallback clear
           try { const ctx = qrCanvas.getContext('2d'); ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height); } catch(e){}
         }
       } else {
-        // clear canvas if lib not ready
         try { const ctx = qrCanvas.getContext('2d'); ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height); } catch(e){}
       }
 
@@ -309,7 +319,6 @@
   });
 
   saveBtn.addEventListener('click', () => {
-    // save canvas as png if QR present
     try {
       const dataUrl = qrCanvas.toDataURL('image/png');
       const a = document.createElement('a');
@@ -332,3 +341,4 @@
   } catch(e){}
 
 })();
+
