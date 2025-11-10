@@ -200,15 +200,16 @@ function printQrOnly() {
       <body>
         <img src="${dataUrl}" alt="QR">
         <script>
-          // call print as soon as possible
-          (function(){
+          const img = document.querySelector('img');
+          img.onload = function(){
             try {
-              // call print and then close (delay a bit to allow print dialog)
               window.focus && window.focus();
               window.print();
+              // можно закрывать, можно не закрывать — но обычно лучше оставить, браузер сам закроет
             } catch(e){}
-          })();
+          };
         </script>
+
       </body>
       </html>`;
 
