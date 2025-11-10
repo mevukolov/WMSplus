@@ -163,40 +163,50 @@
 
   // print only QR (P2): open minimal window with image and call print()
   function printQrOnly() {
+  // открыть окно сразу (sync)
+  const printWindow = window.open('', '_blank', 'noopener');
+
+  if (!printWindow) {
+    // реально блокер
+    if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Блокировщик окон мешает печати', {type:'error'});
+    return;
+  }
+
+  // сразу ставим базовую html — иначе большинство браузеров окон не даст
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8"/>
+      <title>Печать QR</title>
+      <style>
+        body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:white;}
+        img{max-width:100%;max-height:100%;display:block;}
+      </style>
+    </head>
+    <body></body>
+    </html>
+  `);
+
+  // уже после
+  requestAnimationFrame(() => {
     try {
       const dataUrl = qrCanvas.toDataURL('image/png');
-      const w = window.open('', '_blank', 'noopener');
-      if (!w) {
-        if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Блокировщик окон мешает печати', {type:'error'});
-        return;
-      }
-      const html = `
-        <!doctype html>
-        <html>
-        <head>
-          <meta charset="utf-8"/>
-          <title>Печать QR</title>
-          <style>
-            body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:white;}
-            img{max-width:100%;max-height:100%;display:block;}
-          </style>
-        </head>
-        <body>
-          <img src="${dataUrl}" alt="QR">
-          <script>
-            window.onload = function(){ setTimeout(()=>{ window.print(); setTimeout(()=>window.close(), 50); }, 150); };
-          </script>
-        </body>
-        </html>
-      `;
-      w.document.open();
-      w.document.write(html);
-      w.document.close();
+      const img = printWindow.document.createElement('img');
+      img.src = dataUrl;
+      printWindow.document.body.appendChild(img);
+
+      setTimeout(() => {
+        printWindow.print();
+        setTimeout(() => printWindow.close(), 50);
+      }, 150);
     } catch (e) {
       console.error('print error', e);
       if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Ошибка печати', {type:'error'});
     }
-  }
+  });
+}
+
 
   // event bindings
   function bindEvents() {
