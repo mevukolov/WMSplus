@@ -166,13 +166,6 @@
   function printQrOnly() {
     try {
       const dataUrl = qrCanvas.toDataURL('image/png');
-      
-      // открываем окно уже с html skeleton — иначе chrome блокирует
-      const w = window.open('about:blank', '_blank');
-      if (!w) {
-        if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Блокировщик окон мешает печати', {type:'error'});
-        return;
-      }
 
       w.document.write(`
         <!doctype html>
@@ -198,6 +191,13 @@
         </body>
         </html>
       `);
+      
+      // открываем окно уже с html skeleton — иначе chrome блокирует
+      const w = window.open('about:blank', '_blank');
+      if (!w) {
+        if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Блокировщик окон мешает печати', {type:'error'});
+        return;
+      }
       
     } catch (e) {
       console.error('print error', e);
