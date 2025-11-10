@@ -1,6 +1,7 @@
 (function () {
   // prefix mapping (фиксированно)
   const PREFIXES = {
+    'BLNK': '',
     'SQUA': 'SQUA',
     'PLCE': 'PLCE',
     'WCT' : 'WCT',
