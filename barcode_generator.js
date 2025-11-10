@@ -164,84 +164,60 @@
   // print only QR via hidden iframe (more reliable than opening new window)
 function printQrOnly() {
   try {
-    // get image data
     const dataUrl = qrCanvas.toDataURL('image/png');
-    if (!dataUrl) {
-      if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('QR пустой — нечего печатать', {type:'error'});
-      return;
-    }
+    const frame = document.createElement('iframe');
+    frame.style.position = 'fixed';
+    frame.style.right = '0';
+    frame.style.bottom = '0';
+    frame.style.width = '0';
+    frame.style.height = '0';
+    frame.style.border = '0';
+    document.body.appendChild(frame);
 
-    // Create hidden iframe
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.style.visibility = 'hidden';
-    iframe.setAttribute('aria-hidden', 'true');
-
-    // Append to DOM synchronously (important)
-    document.body.appendChild(iframe);
-
-    // Build minimal HTML with image (inline data URL)
-    const html = `<!doctype html>
+    const doc = frame.contentWindow.document;
+    doc.open();
+    doc.write(`
+      <!doctype html>
       <html>
       <head>
         <meta charset="utf-8"/>
         <title>Печать QR</title>
         <style>
-          html,body{height:100%;margin:0}
-          body{display:flex;align-items:center;justify-content:center;background:#fff}
-          img{max-width:100%;max-height:100%;display:block}
+          body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:white;}
+          img{max-width:100%;max-height:100%;display:block;}
         </style>
       </head>
       <body>
-        <img src="${dataUrl}" alt="QR">
-        <script>
-          const img = document.querySelector('img');
-          img.onload = function(){
-            try {
-              window.focus && window.focus();
-              window.print();
-              // можно закрывать, можно не закрывать — но обычно лучше оставить, браузер сам закроет
-            } catch(e){}
-          };
-        </script>
-
+        <img id="qrimg" src="${dataUrl}">
       </body>
-      </html>`;
-
-    // Write into iframe document synchronously
-    const doc = iframe.contentWindow && iframe.contentWindow.document;
-    if (!doc) {
-      // fallback to opening new window
-      const w = window.open();
-      if (w) {
-        w.document.open();
-        w.document.write(html);
-        w.document.close();
-      } else {
-        if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Блокировщик окон мешает печати', {type:'error'});
-      }
-      return;
-    }
-
-    doc.open();
-    doc.write(html);
+      </html>
+    `);
     doc.close();
 
-    // Remove iframe after small delay (give browser time to show print dialog)
-    setTimeout(() => {
-      try { document.body.removeChild(iframe); } catch(e) {}
-    }, 1500);
+    function tryPrint(){
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    }
 
+    let imgReady = false;
+    let docReady = false;
+
+    frame.onload = ()=>{
+      docReady = true;
+      if (imgReady) tryPrint();
+    };
+
+    const img = doc.getElementById('qrimg');
+    img.onload = ()=>{
+      imgReady = true;
+      if (docReady) tryPrint();
+    };
   } catch (e) {
-    console.error('printQrOnly error', e);
+    console.error('print error', e);
     if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Ошибка печати', {type:'error'});
   }
 }
+
 
 
 
