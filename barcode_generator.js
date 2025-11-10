@@ -161,28 +161,62 @@
     }
   }
 
-  // print only QR via hidden iframe (more reliable than opening new window)
-function printQrOnly(){
-  const dataUrl = qrCanvas.toDataURL("image/png");
+function printQrOnly() {
+  try {
+    const dataUrl = qrCanvas.toDataURL('image/png');
+    const frame = document.createElement('iframe');
+    frame.style.position = 'fixed';
+    frame.style.right = '0';
+    frame.style.bottom = '0';
+    frame.style.width = '0';
+    frame.style.height = '0';
+    frame.style.border = '0';
+    document.body.appendChild(frame);
 
-  // save current html
-  const original = document.body.innerHTML;
+    const doc = frame.contentWindow.document;
+    doc.open();
+    doc.write(`
+      <!doctype html>
+      <html>
+      <head>
+        <meta charset="utf-8"/>
+        <title>Печать QR</title>
+        <style>
+          body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:white;}
+          img{max-width:100%;max-height:100%;display:block;}
+        </style>
+      </head>
+      <body>
+        <img id="qrimg" src="${dataUrl}">
+      </body>
+      </html>
+    `);
+    doc.close();
 
-  // replace with qr only
-  document.body.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:center;height:100vh;">
-      <img src="${dataUrl}" style="max-width:100%;max-height:100%;"/>
-    </div>
-  `;
+    function tryPrint(){
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    }
 
-  window.print();
+    let imgReady = false;
+    let docReady = false;
 
-  // return page
-  document.body.innerHTML = original;
+    frame.onload = ()=>{
+      docReady = true;
+      if (imgReady) tryPrint();
+    };
 
-  // чтобы все биндинги не потерялись
-  setTimeout(()=>location.reload(),50);
+    const img = doc.getElementById('qrimg');
+    img.onload = ()=>{
+      imgReady = true;
+      if (docReady) tryPrint();
+    };
+  } catch (e) {
+    console.error('print error', e);
+    if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Ошибка печати', {type:'error'});
+  }
 }
+
 
 
 
