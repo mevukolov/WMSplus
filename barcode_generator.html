@@ -43,8 +43,8 @@
 
       <!-- Input row: input left, select right (узкий) -->
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
-        <input id="barcode-input" class="input" placeholder="Введите число (только цифры)" style="flex:1;min-width:220px;max-width:620px;">
-        <select id="barcode-type" class="input" aria-label="Тип баркода" style="width:160px;padding:8px 10px;">
+        <input id="barcode-input" class="input" placeholder="Введите число (только цифры)" style="flex:1;min-width:220px;max-width:420px;">
+        <select id="barcode-type" class="input" aria-label="Тип баркода" style="width:200px;padding:8px 10px;">
           <option value="SQUA">Квадрат сортировки (SQUA)</option>
           <option value="PLCE">МХ (PLCE)</option>
           <option value="WCT">Сетка (WCT)</option>
@@ -71,7 +71,7 @@
             <button id="print-btn" class="btn btn-outline" style="width:100%;display:none">Печать</button>
           </div>
 
-          <div style="font-weight:600;margin-top:6px;">QR</div>
+          <div style="font-weight:600;margin-bottom:6px;">QR</div>
           <div id="qr-wrap" style="width:160px;height:160px;background:#fff;border:1px solid rgba(15,23,42,0.06);display:flex;align-items:center;justify-content:center;border-radius:6px;">
             <canvas id="qr-canvas" width="160" height="160" aria-hidden="true"></canvas>
           </div>
