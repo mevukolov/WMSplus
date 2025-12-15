@@ -1,10 +1,10 @@
 :root{
-    --bg:#CAC4CE;
-    --card:#F7ECE1;
-    --muted:#6CAC4CE;
-    --accent:#9067C6;
+    --bg:#DED4FF;
+    --card:#FFFFFF;
+    --muted:#242038;
+    --accent:#623CEA;
     --secondary: #10b981;
-    --secondary-dark: #059669;
+    --secondary-dark: #242038;
     --accent-dark:#242038;
     --danger:#ef4444;
     --glass: rgba(255,255,255,0.6);
@@ -86,7 +86,7 @@
 
   /* Input */
   .input{
-    width:100%;
+    width:95%;
     padding:10px 12px;
     border-radius:12px;
     border:1px solid rgba(15,23,42,0.06);
@@ -147,7 +147,7 @@
 
   /* Toasts */
   .toasts{
-    position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:60;
+    position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:3000;
   }
   .toast{
     min-width:180px;max-width:340px;padding:10px 14px;border-radius:10px;color:white;background:rgba(0,0,0,0.85);box-shadow:var(--shadow-md);
@@ -314,4 +314,206 @@
   background: transparent;
   max-height: 450px;
   overflow-y: auto;
+}
+
+/* === Современное боковое меню === */
+
+.menu-category {
+    /* убрали разделение между категориями */
+    border-bottom: none;
+}
+
+/* --- Заголовок категории --- */
+.menu-category-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px; /* увеличена высота */
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.25s ease;
+}
+
+.menu-category-header:hover {
+    background: rgba(0,0,0,0.06);
+}
+
+.menu-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* --- Иконка категории --- */
+.menu-icon img {
+    width: 22px;   /* увеличено */
+    height: 22px;
+    color: var(--accent-dark);
+}
+
+/* --- Название категории --- */
+.menu-title {
+    font-weight: 600;
+    font-size: 15px; /* без изменений */
+    color: #222;
+}
+
+/* --- Стрелка --- */
+.menu-arrow img {
+    width: 16px;
+    height: 16px;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    color: var(--accent-dark);
+}
+
+.menu-category.open .menu-arrow img {
+    transform: rotate(180deg);
+}
+
+/* --- Список ссылок --- */
+.menu-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.menu-category.open .menu-list {
+    max-height: 500px;
+}
+
+/* --- Ссылки внутри категорий --- */
+.menu-list li a {
+    display: block;
+    padding: 12px 28px; /* увеличенная высота */
+    text-decoration: none;
+    color: #222;
+    font-weight: 500;
+    font-size: 15px; /* тот же размер */
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.menu-list li a:hover {
+    background: rgba(0,0,0,0.06);
+    color: var(--accent-dark);
+}
+
+/* --- Общие настройки контейнера меню --- */
+.sidebar-content {
+    padding: 0;
+}
+/* ================= MODAL ================= */
+
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    background: rgba(0,0,0,0.45);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    z-index: 700;
+}
+
+.modal.hidden {
+    display: none !important;
+}
+
+.modal-content {
+    background: #fff;
+    padding: 24px;
+    border-radius: 12px;
+    width: 420px;
+    max-height: 80vh;
+    overflow-y: auto;
+
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    animation: modalFadeIn 0.15s ease-out;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+/* ================= ACCESS MANAGER FIX ================= */
+
+/* Карточка управления доступами должна расти, а не фиксироваться */
+.access-manager-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.table-wrapper {
+    max-height: 550px;  /* тот же лимит, что в buffer_constructor */
+    overflow-y: auto;
+    padding-right: 6px;
+    box-sizing: border-box;
+}
+
+/* ================= FIXED SCAN MODAL BELOW HEADER & SIDEBAR ================= */
+
+.scan-modal {
+    position: fixed;
+    top: 50px; /* высота шапки */
+    left: 240px; /* ширина меню */
+    width: calc(100% - 240px);
+    height: calc(100% - 50px);
+
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    z-index: 800; /* ниже хедера (1000), ниже сайдбара (900) */
+}
+
+.scan-modal.hidden {
+    display: none !important;
+}
+
+.scan-modal-content {
+    background: var(--card);
+    width: 360px;
+    max-width: 90%;
+    padding: 26px 28px 32px;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(15,23,42,0.06);
+    box-shadow: var(--shadow-md);
+    animation: scanModalFade 0.18s ease-out;
+    box-sizing: border-box;
+}
+
+@keyframes scanModalFade {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.scan-modal-title {
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--muted);
+    font-size: 16px;
+}
+
+
+.scan-feedback {
+    margin-top: 8px;
+    font-size: 14px;
+    min-height: 18px;
+    color: var(--danger);
 }

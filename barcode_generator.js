@@ -1,285 +1,297 @@
-(function () {
-  // prefix mapping (фиксированно)
-  const PREFIXES = {
-    'BLNK': '',
-    'SQUA': 'SQUA',
-    'PLCE': 'PLCE',
-    'WCT' : 'WCT',
-    'WHPT': 'WHPT',
-    'TRBX': 'TRBX'
-  };
+(async function () {
 
-  // элементы
-  const input = document.getElementById('barcode-input');
-  const typeSelect = document.getElementById('barcode-type');
-  const resultTextEl = document.getElementById('result-text');
-  const qrCanvas = document.getElementById('qr-canvas');
-  const copyBtn = document.getElementById('copy-btn');
-  const saveBtn = document.getElementById('save-btn');
-  const printBtn = document.getElementById('print-btn');
+    // prefix mapping (фиксировано)
+    const PREFIXES = {
+        'BLNK': '',
+        'SQUA': 'SQUA',
+        'PLCE': 'PLCE',
+        'WCT':  'WCT',
+        'WHPT': 'WHPT',
+        'TRBX': 'TRBX'
+    };
 
-  // Access control: if no user or no required access => redirect to index + toast
-  function checkPageAccess() {
-    try {
-      const meta = document.querySelector('meta[name="required-access"]');
-      const required = meta ? meta.content : null;
-      const raw = localStorage.getItem('user');
-      if (!raw) {
-        // no auth at all
-        // let ui.js handle redirect earlier, but double-check
-        window.location.href = 'login.html';
-        return false;
-      }
-      const user = JSON.parse(raw);
-      const accesses = Array.isArray(user.accesses) ? user.accesses : (user.accesses ? [user.accesses] : []);
-      // normalize
-      const normalized = accesses.map(a => String(a).trim());
-      if (!required) return true;
-      if (normalized.includes('all') || normalized.includes(required)) {
-        return true;
-      } else {
-        // show toast if possible then redirect
-        if (window.MiniUI && window.MiniUI.toast) {
-          window.MiniUI.toast('У вас нет доступа к этой странице. Перенаправление...', {type:'error', duration:2500});
-        } else {
-          // fallback
-          alert('У вас нет доступа к этой странице.');
+    // UI elements
+    const input = document.getElementById('barcode-input');
+    const typeSelect = document.getElementById('barcode-type');
+    const resultTextEl = document.getElementById('result-text');
+    const qrCanvas = document.getElementById('qr-canvas');
+    const printBtn = document.getElementById('print-btn');
+
+    const mhBlock = document.getElementById('mh-block');
+    const mhNameEl = document.getElementById('mh-name');
+    const generatorCard = document.getElementById('generator-card');
+
+    let user = null;
+    let userWhId = null;
+    let selectedPlace = null;
+    let activeScanModal = null;
+
+    // ----- Access check -----
+    function checkPageAccess() {
+        try {
+            const raw = localStorage.getItem('user');
+            if (!raw) {
+                window.location.href = 'login.html';
+                return false;
+            }
+            user = JSON.parse(raw);
+            userWhId = user.user_wh_id;
+
+            const meta = document.querySelector('meta[name="required-access"]');
+            const required = meta ? meta.content : null;
+
+            const accesses = Array.isArray(user.accesses) ? user.accesses : (user.accesses ? [user.accesses] : []);
+            const normalized = accesses.map(a => String(a).trim());
+
+            if (!required) return true;
+            if (normalized.includes('all') || normalized.includes(required)) return true;
+
+            MiniUI.toast('Нет доступа', { type: 'error' });
+            setTimeout(() => window.location.href = 'index.html', 800);
+            return false;
+        } catch (e) {
+            console.error(e);
+            return false;
         }
-        setTimeout(() => window.location.href = 'index.html', 600);
-        return false;
-      }
-    } catch (e) {
-      console.error('checkPageAccess error', e);
-      return false;
-    }
-  }
-
-  // write user name small if present
-  function renderUserNameSmall() {
-    try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const nameEl = document.getElementById('user-name-small');
-      if (nameEl && user && user.name) nameEl.textContent = user.name;
-    } catch (e) {}
-  }
-
-  // sanitize input: keep only digits
-  function sanitizeDigits(value) {
-    return (value || '').toString().replace(/\D+/g, '');
-  }
-
-  // build result string
-  function buildResult() {
-    const digits = sanitizeDigits(input.value);
-    const prefix = PREFIXES[typeSelect.value] || '';
-    return prefix + digits;
-  }
-
-  // UI update: result text + QR + buttons visibility
-  async function updateUI() {
-    const digits = sanitizeDigits(input.value);
-    const prefix = PREFIXES[typeSelect.value] || '';
-    const result = prefix + digits;
-    resultTextEl.textContent = result;
-
-    const valid = digits.length > 0;
-    // show/hide buttons
-    if (valid) {
-      copyBtn.style.display = '';
-      saveBtn.style.display = '';
-      printBtn.style.display = '';
-    } else {
-      copyBtn.style.display = 'none';
-      saveBtn.style.display = 'none';
-      printBtn.style.display = 'none';
     }
 
-    // draw QR (use qrcode library if available)
-    // if result is empty -> clear canvas
-    if (!result) {
-      const ctx = qrCanvas.getContext('2d');
-      ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
-      return;
+    function renderUserNameSmall() {
+        try {
+            const nameEl = document.getElementById('user-name-small');
+            if (nameEl && user?.name) nameEl.textContent = user.name;
+        } catch {}
     }
 
-    try {
-      if (window.QRCode && typeof window.QRCode.toCanvas === 'function') {
-        // default options: fit canvas size
-        await window.QRCode.toCanvas(qrCanvas, result, {
-          errorCorrectionLevel: 'M',
-          width: qrCanvas.width,
-          margin: 1,
-          color: { dark: '#000000', light: '#FFFFFF' }
+    // ------------------------------------
+    // СКАНИРОВАНИЕ МХ ПРИ ЗАПУСКЕ
+    // ------------------------------------
+
+    async function lookupPlace(sticker) {
+        const trimmedSticker = sticker.toString().trim();
+        console.log('Траблшут lookupPlace. Ищем sticker:', trimmedSticker);
+        try {
+            const { data, error } = await supabaseClient
+                .from('places')
+                .select('*')
+                .eq('place_sticker', trimmedSticker)
+                .maybeSingle();
+
+            if (error) {
+                console.error('Ошибка Supabase:', error);
+                return null;
+            }
+
+            console.log('Результат lookupPlace:', data);
+            return data;
+        } catch (e) {
+            console.error(e);
+            return null;
+        }
+    }
+
+    async function handleScannedSticker(sticker) {
+        if (!sticker) return;
+
+        const place = await lookupPlace(sticker);
+        if (!place) {
+            console.error('МХ не найден для кода:', sticker);
+            MiniUI.toast('МХ не найден', { type: 'error' });
+            return;
+        }
+
+        console.log('Найден МХ:', place);
+
+        if (String(place.wh_id) !== String(userWhId)) {
+            console.warn('Склад не совпадает. place.wh_id:', place.wh_id, 'userWhId:', userWhId);
+            MiniUI.toast('Этот МХ относится к другому складу', { type: 'error' });
+            return;
+        }
+
+        // SUCCESS
+        selectedPlace = place;
+
+        if (activeScanModal) {
+            activeScanModal.remove();
+            activeScanModal = null;
+        }
+        // закрыть модалку
+        mhBlock.style.display = ''; // показать блок МХ
+        generatorCard.style.display = ''; // включить генератор
+
+        mhNameEl.textContent = `${place.place_name} (${place.place})`;
+
+        input.focus();
+    }
+
+    function startScanModal() {
+        // Создаем модалку вручную
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+
+        modal.innerHTML = `
+        <div class="modal-content" style="width:360px;max-width:90%;padding:26px 28px 32px;box-sizing:border-box;">
+            <div style="font-weight:600;margin-bottom:12px;">Отсканируйте МХ рядом</div>
+            <input class="input" type="text" placeholder="Сканируйте или введите код">
+            <div id="scan-feedback" style="margin-top:8px;font-size:14px;color:red;min-height:18px;"></div>
+        </div>
+    `;
+
+        document.body.appendChild(modal);
+        activeScanModal = modal;
+
+        const inputEl = modal.querySelector('.input');
+
+        // ✨ Единственная добавка → гарантирует автоматический фокус
+        setTimeout(() => inputEl.focus(), 0);
+
+        let buffer = '';
+        inputEl.addEventListener('keydown', async (ev) => {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                const code = buffer.trim();
+                buffer = '';
+                console.log('Введён код для сканирования:', code);
+
+                if (code) await handleScannedSticker(code);
+                inputEl.value = '';
+                return;
+            }
+            if (ev.key.length === 1) buffer += ev.key;
         });
-      } else if (window.qrcode && typeof window.qrcode.toCanvas === 'function') {
-        // alternative build
-        await window.qrcode.toCanvas(qrCanvas, result, { width: qrCanvas.width, margin: 1 });
-      } else {
-        // fallback: draw text
+    }
+
+
+    // ------------------------------------
+    // Основной функционал генератора
+    // ------------------------------------
+
+    function sanitizeDigits(v) {
+        return (v || '').toString().replace(/\D+/g, '');
+    }
+
+    async function updateUI() {
+        const digits = sanitizeDigits(input.value);
+        const prefix = PREFIXES[typeSelect.value] || '';
+        const result = prefix + digits;
+
+        resultTextEl.textContent = result;
+
+        const valid = result.length > 0;
+
+        printBtn.style.display = valid ? '' : 'none';
+
+
         const ctx = qrCanvas.getContext('2d');
-        ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
-        ctx.fillStyle = '#000';
-        ctx.font = '12px sans-serif';
-        ctx.fillText(result, 6, 20);
-      }
-    } catch (err) {
-      console.error('QR render error', err);
-      // clear canvas on error
-      const ctx = qrCanvas.getContext('2d');
-      ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
-    }
-  }
 
-  // copy result to clipboard
-  async function copyResult() {
-    try {
-      const text = resultTextEl.textContent || '';
-      if (!text) return;
-      await navigator.clipboard.writeText(text);
-      if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Скопировано в буфер обмена', {type:'success'});
-    } catch (e) {
-      console.error('copy error', e);
-      if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Ошибка копирования', {type:'error'});
-    }
-  }
+        if (!valid) {
+            ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+            return;
+        }
 
-  // save QR as PNG
-  function savePng() {
-    try {
-      // get dataURL from canvas
-      const dataUrl = qrCanvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      a.download = `barcode_${ts}.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('PNG сохранён', {type:'success'});
-    } catch (e) {
-      console.error('save png error', e);
-      if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Ошибка сохранения', {type:'error'});
-    }
-  }
-
-function printQrOnly() {
-  try {
-    const dataUrl = qrCanvas.toDataURL('image/png');
-    const frame = document.createElement('iframe');
-    frame.style.position = 'fixed';
-    frame.style.right = '0';
-    frame.style.bottom = '0';
-    frame.style.width = '0';
-    frame.style.height = '0';
-    frame.style.border = '0';
-    document.body.appendChild(frame);
-
-    const doc = frame.contentWindow.document;
-    doc.open();
-    doc.write(`
-      <!doctype html>
-      <html>
-      <head>
-        <meta charset="utf-8"/>
-        <title>Печать QR</title>
-        <style>
-          body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:white;}
-          img{max-width:100%;max-height:100%;display:block;}
-        </style>
-      </head>
-      <body>
-        <img id="qrimg" src="${dataUrl}">
-      </body>
-      </html>
-    `);
-    doc.close();
-
-    function tryPrint(){
-      frame.contentWindow.focus();
-      frame.contentWindow.print();
+        try {
+            await QRCode.toCanvas(qrCanvas, result, {
+                errorCorrectionLevel: 'M',
+                width: qrCanvas.width,
+                margin: 1,
+                color: { dark: '#000000', light: '#FFFFFF' }
+            });
+        } catch (e) {
+            console.error(e);
+            ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+        }
     }
 
-    let imgReady = false;
-    let docReady = false;
+    async function copyResult() {
+        try {
+            const text = resultTextEl.textContent;
+            if (!text) return;
+            await navigator.clipboard.writeText(text);
+            MiniUI.toast('Скопировано', { type: 'success' });
+        } catch {
+            MiniUI.toast('Ошибка копирования', { type: 'error' });
+        }
+    }
 
-    frame.onload = ()=>{
-      docReady = true;
-      if (imgReady) tryPrint();
-    };
+    function savePng() {
+        try {
+            const url = qrCanvas.toDataURL('image/png');
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `barcode_${Date.now()}.png`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            MiniUI.toast('PNG сохранён', { type: 'success' });
+        } catch {
+            MiniUI.toast('Ошибка сохранения', { type: 'error' });
+        }
+    }
 
-    const img = doc.getElementById('qrimg');
-    img.onload = ()=>{
-      imgReady = true;
-      if (docReady) tryPrint();
-    };
-  } catch (e) {
-    console.error('print error', e);
-    if (window.MiniUI && window.MiniUI.toast) window.MiniUI.toast('Ошибка печати', {type:'error'});
-  }
-}
+    function printQrOnly() {
+        try {
+            const url = qrCanvas.toDataURL('image/png');
+            const frame = document.createElement('iframe');
+            frame.style.position = 'fixed';
+            frame.style.right = '0';
+            frame.style.bottom = '0';
+            frame.style.width = '0';
+            frame.style.height = '0';
+            frame.style.border = '0';
+            document.body.appendChild(frame);
+
+            const doc = frame.contentWindow.document;
+            doc.open();
+            doc.write(`
+        <html><head><style>
+          body { margin:0;display:flex;align-items:center;justify-content:center;height:100vh; }
+        </style></head>
+        <body><img src="${url}" /></body></html>
+      `);
+            doc.close();
+            frame.contentWindow.focus();
+            frame.contentWindow.print();
+        } catch {
+            MiniUI.toast('Ошибка печати', { type: 'error' });
+        }
+    }
+
+    function bindEvents() {
+        input.addEventListener('input', () => {
+            const clean = sanitizeDigits(input.value);
+            if (input.value !== clean) input.value = clean;
+        });
 
 
+        input.addEventListener('paste', (ev) => {
+            ev.preventDefault();
+            const txt = (ev.clipboardData || window.clipboardData).getData('text') || '';
+            input.value = sanitizeDigits(txt);
+            updateUI();
+        });
+        document.getElementById('generate-btn').addEventListener('click', updateUI);
 
 
+        printBtn.addEventListener('click', printQrOnly);
 
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') ev.preventDefault();
+        });
+    }
 
-  // event bindings
-  function bindEvents() {
-    // input: sanitize and update immediately
-    input.addEventListener('input', (ev) => {
-      const sanitized = sanitizeDigits(input.value);
-      if (input.value !== sanitized) {
-        const pos = input.selectionStart || 0;
-        input.value = sanitized;
-        // try restore caret
-        input.setSelectionRange(pos, pos);
-      }
-      updateUI();
+    // ------------------------------------
+    // Init
+    // ------------------------------------
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const ok = checkPageAccess();
+        if (!ok) return;
+
+        renderUserNameSmall();
+        bindEvents();
+
+        // Показываем обязательное сканирование
+        startScanModal();
     });
-
-    // allow paste but sanitize
-    input.addEventListener('paste', (ev) => {
-      ev.preventDefault();
-      const text = (ev.clipboardData || window.clipboardData).getData('text') || '';
-      const sanitized = sanitizeDigits(text);
-      // insert at caret
-      const start = input.selectionStart || 0;
-      const end = input.selectionEnd || 0;
-      const val = input.value;
-      const newVal = val.slice(0, start) + sanitized + val.slice(end);
-      input.value = sanitizeDigits(newVal);
-      const caret = start + sanitized.length;
-      input.setSelectionRange(caret, caret);
-      updateUI();
-    });
-
-    // select change
-    typeSelect.addEventListener('change', updateUI);
-
-    copyBtn.addEventListener('click', copyResult);
-    saveBtn.addEventListener('click', savePng);
-    printBtn.addEventListener('click', printQrOnly);
-
-    // keyboard: enter shouldn't reload page
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-      }
-    });
-  }
-
-  // initial setup
-  document.addEventListener('DOMContentLoaded', () => {
-    // render user name
-    renderUserNameSmall();
-
-    // access control
-    const ok = checkPageAccess();
-    if (!ok) return;
-
-    // initial empty UI
-    updateUI();
-    bindEvents();
-  });
 
 })();

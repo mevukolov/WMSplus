@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+ — Управление СЦ</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- QRCode library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    <script src="ui.js" defer></script>
+    <script src="wh_manager.js" defer></script>
+
+</head>
+<body>
+
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title">Нижний Новгород</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap" style="max-width:1100px;margin-top:90px;">
+    <div class="card">
+
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h1>Управление сортировочными центрами</h1>
+            <button class="btn btn-rect" id="btn-add-wh">Добавить СЦ</button>
+        </div>
+
+        <div class="table-wrapper" style="border:1px solid rgba(0,0,0,0.06);border-radius:10px;overflow:auto;margin-top:20px;">
+            <table style="width:100%;border-collapse:collapse;">
+                <thead style="background:#f7f7f7;">
+                <tr>
+                    <th style="padding:10px;">ID</th>
+                    <th style="padding:10px;">Название</th>
+                    <th style="padding:10px;">МХ (кол-во)</th>
+                    <th style="padding:10px;">Действия</th>
+                </tr>
+                </thead>
+                <tbody id="wh-tbody"></tbody>
+            </table>
+        </div>
+
+    </div>
+</main>
+
+<!-- ===================== MODAL ===================== -->
+<div id="wh-modal" class="modal hidden">
+    <div class="modal-content">
+
+        <h2 id="modal-title">Редактировать СЦ</h2>
+
+        <div class="mb">
+            <label>ID СЦ</label>
+            <input id="inp-wh-id" class="input">
+        </div>
+
+        <div class="mb">
+            <label>Название СЦ</label>
+            <input id="inp-wh-name" class="input">
+        </div>
+
+        <h3 style="margin-top:20px;">Места хранения (МХ)</h3>
+
+        <div id="places-list" style="
+            border:1px solid rgba(0,0,0,0.1);
+            border-radius:10px;
+            padding:10px;
+            max-height:300px;
+            overflow:auto;
+            background:#fafafa;">
+        </div>
+
+        <button id="btn-add-place" class="btn btn-outline" style="margin-top:10px;">Добавить МХ</button>
+
+        <div class="actions" style="margin-top:20px;">
+            <button id="btn-save-wh" class="btn btn-rect">Сохранить</button>
+            <button id="btn-close-wh" class="btn btn-outline">Закрыть</button>
+        </div>
+
+    </div>
+</div>
+
+<div id="place-modal" class="modal hidden">
+    <div class="modal-content">
+        <h2 id="place-modal-title">Добавить МХ</h2>
+
+        <!-- ID МХ (только текст при редактировании) -->
+        <div class="mb" id="block-place-id">
+            <label>ID МХ</label>
+            <div id="txt-place-id" class="input" style="background:#eee;"></div>
+        </div>
+
+        <!-- Название -->
+        <div class="mb">
+            <label>Название МХ</label>
+            <input id="inp-place-name" class="input" placeholder="Стол 1">
+        </div>
+
+        <!-- Тип -->
+        <div class="mb">
+            <label>Тип МХ</label>
+            <select id="inp-place-type" class="input">
+                <option value="1">Стол</option>
+                <option value="2">Передача</option>
+                <option value="3">Основное МХ</option>
+            </select>
+        </div>
+
+        <!-- Sticker -->
+        <div class="mb">
+            <label>Стикер</label>
+            <div id="sticker-container">
+                <div id="txt-place-sticker" class="input" style="display:none;background:#eee;user-select:text;"></div>
+                <button id="btn-show-sticker" class="btn btn-outline" style="display:none;">Показать стикер МХ</button>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button id="btn-save-place" class="btn btn-rect">Сохранить</button>
+            <button id="btn-close-place" class="btn btn-outline">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<!-- Модалка для картинки стикера -->
+<div id="sticker-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:1100px;">
+        <h2>Стикер МХ</h2>
+        <canvas id="sticker-canvas" width="1000" height="1000" style="border:1px solid black;"></canvas>
+        <div style="margin-top:10px;">
+            <button id="btn-download-sticker" class="btn btn-rect">Скачать</button>
+            <button id="btn-close-sticker" class="btn btn-outline">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+
+
+
+<div id="toasts" class="toasts"></div>
+</body>
+</html>

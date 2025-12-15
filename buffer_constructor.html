@@ -2,13 +2,13 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>WMS+ — Конструктор буфера</title>
+  <title>WMS+</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="required-access" content="buffer_constructor">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
   <!-- main UI (точка A v1.2) чтобы логика доступа/шапки работала -->
-  <script src="ui.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
   <!-- парсер Excel (SheetJS) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" defer></script>
   <script src="constructor.js" defer></script>
@@ -21,24 +21,16 @@
 
   <header class="header">
     <button class="btn btn-round header-btn" id="menu-btn">☰</button>
-    <span class="header-title">Нижний Новгород</span>
+      <span class="header-title" id="header-wh"></span>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
       <span id="user-name-small" class="user-name" aria-hidden="true"></span>
       <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
     </div>
   </header>
 
+  <!-- Боковое меню -->
   <div id="sidebar" class="sidebar">
-    <div class="sidebar-content">
-      <ul>
-        <li><a href="index.html" data-access="ultimate">Главная</a></li>
-        <li><a href="buffer_constructor.html" data-access="ultimate">Конструктор буфера</a></li>
-        <li><a href="barcode_generator.html" data-access="ultimate">Генератор баркодов</a></li>
-        <li><a href="shk_generator.html" data-access="ultimate">Генератор ШК</a></li>
-        <li><a href="contacts.html" data-access="contacts">Контакты</a></li>
-        <li><a href="about.html" data-access="about">О проекте</a></li>
-      </ul>
-    </div>
+      <div class="sidebar-content"></div>
   </div>
 
   <main class="wrap" style="max-width:1200px;">
