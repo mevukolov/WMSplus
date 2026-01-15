@@ -6,6 +6,98 @@
     window.location.href = 'login.html';
     return;
   }
+    const mhBlock = document.getElementById('mh-block');
+    const mhNameEl = document.getElementById('mh-name');
+    const generatorCard = document.getElementById('generator-card');
+
+
+    function fixRussianLayout(str){
+        const rus = 'ёйцукенгшщзхъфывапролджэячсмитьбю';
+        const eng = '`qwertyuiop[]asdfghjkl;\'zxcvbnm,./';
+        const map = {};
+        for(let i=0;i<rus.length;i++){
+            map[rus[i]] = eng[i];
+            map[rus[i].toUpperCase()] = eng[i].toUpperCase();
+        }
+        return str.split('').map(c => map[c] ?? c).join('');
+    }
+    async function lookupPlace(sticker){
+        const code = fixRussianLayout(sticker.trim());
+        const { data } = await supabaseClient
+            .from('places')
+            .select('*')
+            .eq('place_sticker', code)
+            .maybeSingle();
+        return data || null;
+    }
+    async function handleScannedPlace(code) {
+        const place = await lookupPlace(code);
+        if (!place) {
+            MiniUI.toast('МХ не найден', { type: 'error' });
+            return;
+        }
+
+        selectedPlace = place;
+
+        // закрываем модалку
+        if (activeScanModal) {
+            activeScanModal.remove();
+            activeScanModal = null;
+        }
+
+        // ✅ показываем блоки
+        mhBlock.style.display = '';
+        generatorCard.style.display = '';
+
+        mhNameEl.textContent = `${place.place_name} (${place.place})`;
+
+        MiniUI.toast(`МХ выбран: ${place.place_name}`, { type: 'success' });
+
+        // 🎯 фокус в поле генератора
+        setTimeout(() => input.focus(), 0);
+    }
+
+    function startScanModal(){
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+
+        modal.innerHTML = `
+    <div class="modal-content" style="width:360px;padding:26px;">
+      <div style="font-weight:600;margin-bottom:12px;">Отсканируйте МХ</div>
+      <input class="input" placeholder="Сканируйте МХ">
+    </div>
+  `;
+
+        document.body.appendChild(modal);
+        activeScanModal = modal;
+
+        const input = modal.querySelector('input');
+        setTimeout(() => input.focus(), 0);
+
+        setTimeout(() => {
+            input.focus();
+            input.select();
+        }, 0);
+
+
+        let buffer = '';
+        input.addEventListener('keydown', async e => {
+            if(e.key === 'Enter'){
+                e.preventDefault();
+                await handleScannedPlace(buffer);
+                buffer = '';
+                input.value = '';
+            } else if(e.key.length === 1){
+                buffer += e.key;
+            }
+        });
+    }
+
+
+    let selectedPlace = null;
+    let activeScanModal = null;
+
 
   // --- Verhoeff / ShkWithCheckSumV1 port (BigInt-safe) ---
   const VerhoeffJS = (function(){
@@ -55,7 +147,7 @@
       return sb.reverse().join('');
     }
 
-    // generate_verhoeff_shk_checksums_common: использует BigInt операции, 
+    // generate_verhoeff_shk_checksums_common: использует BigInt операции,
     // но считает цифры decimal, поэтому проще работать со строкой
     function generate_verhoeff_shk_checksums_common(j){
       // j может быть Number или BigInt
@@ -230,9 +322,10 @@
   const resultTextEl = document.getElementById('result-text');
   const qrCanvas = document.getElementById('qr-canvas');
   const copyBtn = document.getElementById('copy-btn');
-  const saveBtn = document.getElementById('save-btn');
+  const printBtn = document.getElementById('print-btn');
 
-  const decoder = ShkWithCheckSumV1JS();
+
+    const decoder = ShkWithCheckSumV1JS();
 
   // SHK max according to SHK_VALUE_SIZE bits
   const MAX_SHK = (1n << 42n) - 1n; // 2^42 - 1 = 4398046511103
@@ -241,6 +334,35 @@
   input.addEventListener('input', (e) => {
     input.value = input.value.replace(/[^\d]/g, '');
   });
+    async function logShkGeneration(shk){
+        try {
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+            if(!selectedPlace){
+                console.warn('МХ не выбрано — лог не записан');
+                return;
+            }
+
+            const { error } = await supabaseClient
+                .from('shk_rep')
+                .insert({
+                    // ❗ operation_id НЕ ПЕРЕДАЁМ
+                    shk: shk,
+                    operation: 'Генерация ШК',
+                    emp: user.id,              // ID залогиненного сотрудника
+                    place: selectedPlace.place, // ТЕКУЩЕЕ МХ
+                    place_new: null,
+                    date: new Date().toISOString()
+                });
+
+            if(error){
+                console.error('Ошибка записи в shk_rep:', error);
+            }
+
+        } catch(e){
+            console.error('Ошибка логирования ШК:', e);
+        }
+    }
 
   async function generateAndShow(){
     const v = input.value.trim();
@@ -276,8 +398,9 @@
       }
 
       resultTextEl.textContent = display;
+        await logShkGeneration(v);
 
-      // draw QR (qrcode lib)
+        // draw QR (qrcode lib)
       if(window.QRCode && typeof QRCode.toCanvas === 'function'){
         try {
           // set canvas size explicitly to avoid scaling artifacts
@@ -293,16 +416,39 @@
       }
 
       copyBtn.style.display = 'inline-flex';
-      saveBtn.style.display = 'inline-flex';
-      window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Сгенерировано', {type:'success'});
+        printBtn.style.display = 'inline-flex';
+
+        window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Сгенерировано', {type:'success'});
       input.value = '';
     } catch(err){
       console.error(err);
       window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Ошибка генерации', {type:'error'});
     }
   }
+    function printQr(){
+        const url = qrCanvas.toDataURL('image/png');
 
-  generateBtn.addEventListener('click', generateAndShow);
+        const frame = document.createElement('iframe');
+        frame.style.position = 'fixed';
+        frame.style.width = '0';
+        frame.style.height = '0';
+        frame.style.border = '0';
+
+        document.body.appendChild(frame);
+
+        const doc = frame.contentWindow.document;
+        doc.open();
+        doc.write(`
+    <html>
+      <body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh">
+        <img src="${url}" onload="window.print();window.close();">
+      </body>
+    </html>
+  `);
+        doc.close();
+    }
+
+    generateBtn.addEventListener('click', generateAndShow);
   input.addEventListener('keydown', (ev) => {
     if(ev.key === 'Enter') generateAndShow();
   });
@@ -318,27 +464,34 @@
     }
   });
 
-  saveBtn.addEventListener('click', () => {
-    try {
-      const dataUrl = qrCanvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = 'shk_qr.png';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Сохранено', {type:'success'});
-    } catch(e){
-      window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Ошибка сохранения', {type:'error'});
-    }
-  });
+    printBtn.addEventListener('click', printQr);
 
-  // fill small user name (if any)
+
+    // fill small user name (if any)
   try {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     const nameEl = document.getElementById('user-name-small');
     if(nameEl && user.name) nameEl.textContent = user.name;
   } catch(e){}
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const logged = localStorage.getItem('user');
+        if (!logged) {
+            window.location.href = 'login.html';
+            return;
+        }
+
+        supabaseClient = window.supabaseClient;
+        if (!supabaseClient) {
+            MiniUI.toast('Ошибка Supabase', { type: 'error' });
+            return;
+        }
+        mhBlock.style.display = 'none';
+        generatorCard.style.display = 'none';
+
+        startScanModal();
+    });
+
 
 })();
 

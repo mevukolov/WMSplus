@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" defer></script>
+    <script src="motionless_shk_constructor.js" defer></script>
+</head>
+
+<body>
+
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title" id="header-wh"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap" style="max-width:1200px;">
+
+    <div class="card">
+
+        <h1>Анализатор «ШК без движения»</h1>
+
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+
+            <label class="btn btn-rect">
+                Загрузить .xlsx
+                <input type="file" id="file-input" accept=".xlsx,.xls" hidden>
+            </label>
+
+            <div class="status-dropdown">
+                <button class="btn btn-rect status-btn" id="status-btn">
+                    Статусы
+                    <span class="caret">▾</span>
+                </button>
+
+                <div class="status-panel hidden" id="status-dropdown">
+                    <div class="status-title">Статусы ШК</div>
+                    <div class="status-list"></div>
+                </div>
+            </div>
+
+
+            <button
+                    id="expensive-toggle"
+                    class="btn btn-square"
+                    title="Показать только ШК дороже 1000₽"
+            >
+                ₽
+            </button>
+
+            <button
+                    id="export-filtered"
+                    class="btn btn-rect"
+                    style="margin-left:auto;"
+            >
+                Выгрузить в Excel
+            </button>
+
+
+
+        </div>
+
+        <div id="report-scroll" style="max-height:70vh;overflow:auto;">
+            <div id="report" style="display:flex;flex-direction:column;gap:24px;max-height:68vh;"></div>
+        </div>
+
+    </div>
+
+</main>
+
+<div id="modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+        <div id="modal-body"></div>
+        <button class="btn btn-rect" onclick="closeModal()" style="margin-top:10px;" >Закрыть</button>
+    </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+</body>
+</html>
