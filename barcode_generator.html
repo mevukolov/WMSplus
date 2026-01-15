@@ -57,7 +57,7 @@
         <h1 style="margin:0 0 12px 0">Генератор баркодов</h1>
 
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
-            <input id="barcode-input" class="input" placeholder="Введите число (только цифры)" style="flex:1;min-width:220px;max-width:420px;">
+            <input id="barcode-input" class="input" placeholder="Введите значение" style="flex:1;min-width:220px;max-width:420px;">
 
             <select id="barcode-type" class="input" aria-label="Тип баркода" style="width:200px;padding:8px 10px;">
                 <option value="BLNK"> --- </option>
@@ -68,7 +68,7 @@
                 <option value="SQUA">Квадрат сортировки (SQUA)</option>
             </select>
 
-            <button id="generate-btn" class="btn btn-rect" style="white-space:nowrap;">Генерировать</button>
+
         </div>
 
 
@@ -83,15 +83,20 @@
             <div style="width:2px;background:#eee;height:240px;"></div>
 
             <div style="width:160px;display:flex;flex-direction:column;align-items:center;gap:8px;">
-                <div style="display:flex;justify-content:center;width:100%;margin-top:12px;">
-                    <button id="print-btn" class="btn btn-outline" style="width:140px;display:none;">Печать</button>
+                <div style="width:160px;display:flex;flex-direction:column;align-items:center;gap:8px;">
+                    <button id="generate-btn" class="btn btn-rect" style="width:140px;">
+                        Генерировать
+                    </button>
+
+                    <button id="print-btn" class="btn btn-outline" style="width:140px;display:none;">
+                        Печать
+                    </button>
+
+                    <div id="qr-wrap" style="width:160px;height:160px;background:#fff;border:1px solid rgba(15,23,42,0.06);display:flex;align-items:center;justify-content:center;border-radius:6px;">
+                        <canvas id="qr-canvas" width="160" height="160"></canvas>
+                    </div>
                 </div>
 
-
-                <div style="font-weight:600;margin-bottom:6px;">QR</div>
-                <div id="qr-wrap" style="width:160px;height:160px;background:#fff;border:1px solid rgba(15,23,42,0.06);display:flex;align-items:center;justify-content:center;border-radius:6px;">
-                    <canvas id="qr-canvas" width="160" height="160"></canvas>
-                </div>
             </div>
         </div>
     </div>

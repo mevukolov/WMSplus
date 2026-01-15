@@ -9,6 +9,20 @@
         'WHPT': 'WHPT',
         'TRBX': 'TRBX'
     };
+    const RU_TO_EN = {
+        'й':'q','ц':'w','у':'e','к':'r','е':'t','н':'y','г':'u','ш':'i','щ':'o','з':'p','х':'[','ъ':']',
+        'ф':'a','ы':'s','в':'d','а':'f','п':'g','р':'h','о':'j','л':'k','д':'l','ж':';','э':'\'',
+        'я':'z','ч':'x','с':'c','м':'v','и':'b','т':'n','ь':'m','б':',','ю':'.',
+    };
+
+    function ruToEnLayout(str) {
+        return str
+            .toLowerCase()
+            .split('')
+            .map(ch => RU_TO_EN[ch] || ch)
+            .join('');
+    }
+
 
     // UI elements
     const input = document.getElementById('barcode-input');
@@ -92,7 +106,9 @@
     async function handleScannedSticker(sticker) {
         if (!sticker) return;
 
-        const place = await lookupPlace(sticker);
+            const fixedSticker = ruToEnLayout(sticker);
+
+            const place = await lookupPlace(fixedSticker);
         if (!place) {
             console.error('МХ не найден для кода:', sticker);
             MiniUI.toast('МХ не найден', { type: 'error' });
@@ -166,17 +182,37 @@
     // Основной функционал генератора
     // ------------------------------------
 
-    function sanitizeDigits(v) {
-        return (v || '').toString().replace(/\D+/g, '');
+    async function logBarcodeGeneration(shkValue) {
+        try {
+            const { error } = await supabaseClient
+                .from('shk_rep')
+                .insert({
+                    shk: shkValue,
+                    operation: 'Генерация баркода',
+                    emp: user.id,
+                    place: selectedPlace.place,
+                    place_new: null,
+                    date: new Date().toISOString()
+                });
+
+            if (error) {
+                console.error('Ошибка записи в shk_rep:', error);
+            }
+        } catch (e) {
+            console.error('Ошибка логирования генерации:', e);
+        }
     }
 
+
     async function updateUI() {
-        const digits = sanitizeDigits(input.value);
+        const value = input.value.trim();
         const prefix = PREFIXES[typeSelect.value] || '';
-        const result = prefix + digits;
+        const result = prefix + value;
 
         resultTextEl.textContent = result;
-
+        if (result) {
+            await logBarcodeGeneration(result);
+        }
         const valid = result.length > 0;
 
         printBtn.style.display = valid ? '' : 'none';
@@ -231,6 +267,7 @@
     function printQrOnly() {
         try {
             const url = qrCanvas.toDataURL('image/png');
+
             const frame = document.createElement('iframe');
             frame.style.position = 'fixed';
             frame.style.right = '0';
@@ -238,45 +275,66 @@
             frame.style.width = '0';
             frame.style.height = '0';
             frame.style.border = '0';
+
             document.body.appendChild(frame);
 
             const doc = frame.contentWindow.document;
             doc.open();
             doc.write(`
-        <html><head><style>
-          body { margin:0;display:flex;align-items:center;justify-content:center;height:100vh; }
-        </style></head>
-        <body><img src="${url}" /></body></html>
-      `);
+            <html>
+            <head>
+                <style>
+                    body {
+                        margin: 0;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        height: 100vh;
+                    }
+                    img {
+                        max-width: 100%;
+                        max-height: 100%;
+                    }
+                </style>
+            </head>
+            <body>
+                <img id="qr-img" src="${url}" />
+            </body>
+            </html>
+        `);
             doc.close();
-            frame.contentWindow.focus();
-            frame.contentWindow.print();
-        } catch {
+
+            const img = frame.contentWindow.document.getElementById('qr-img');
+
+            img.onload = () => {
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+
+                // аккуратно удаляем iframe после печати
+                setTimeout(() => frame.remove(), 500);
+            };
+
+        } catch (e) {
+            console.error(e);
             MiniUI.toast('Ошибка печати', { type: 'error' });
         }
     }
 
+
     function bindEvents() {
-        input.addEventListener('input', () => {
-            const clean = sanitizeDigits(input.value);
-            if (input.value !== clean) input.value = clean;
-        });
 
-
-        input.addEventListener('paste', (ev) => {
-            ev.preventDefault();
-            const txt = (ev.clipboardData || window.clipboardData).getData('text') || '';
-            input.value = sanitizeDigits(txt);
-            updateUI();
-        });
         document.getElementById('generate-btn').addEventListener('click', updateUI);
 
 
         printBtn.addEventListener('click', printQrOnly);
 
         input.addEventListener('keydown', (ev) => {
-            if (ev.key === 'Enter') ev.preventDefault();
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                updateUI();
+            }
         });
+
     }
 
     // ------------------------------------

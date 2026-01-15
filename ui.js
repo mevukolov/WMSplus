@@ -160,46 +160,30 @@ async function applyPageTitleFromSupabase() {
 ============================================================================================ */
 
 async function getPageAccessFromSupabase() {
+    const current = window.location.pathname.split('/').pop() || "index.html";
+    const key = "page_access_cache_" + current;
+
+    const cache = loadCache(key);
+    if (cache && Date.now() - cache.timestamp < ACCESS_CACHE_TTL) {
+        return cache.data?.page || cache.data || null; // Кэш первичный
+    }
+
+    // Только если кэш нет — делаем запрос
+    if (!supabaseClient) return null;
+
     try {
-        const current = window.location.pathname.split('/').pop() || "index.html";
-        const key = "page_access_cache_" + current;
-
-        const cache = loadCache(key);
-        if (cache && (Date.now() - cache.timestamp < ACCESS_CACHE_TTL)) {
-            // cache.data === { page_name?, page?, ... } — вернём формат как раньше (page)
-            // Но если в кэше лежит целый объект страницы — вернём page (совместимо)
-            const cachedData = cache.data;
-            if (cachedData && ("page" in cachedData)) {
-                return cachedData.page || null;
-            }
-            // на всякий случай — если в кэше лежит page_name напрямую
-            return cachedData || null;
-        }
-
-        if (!supabaseClient) return null;
-
         const { data, error } = await supabaseClient
             .from("pages")
             .select("page, page_name, url")
             .eq("url", current)
             .maybeSingle();
 
-        if (error || !data) {
-            // не ломаем поведение — возвращаем null
-            return null;
-        }
-
-        // Сохраняем весь объект страницы — это удобно для title и других мест
-        saveCache(key, data); // сохраняем {timestamp, data: {page, page_name, ...}}
-
-        return data.page || null;
-    } catch (e) {
-        console.error("getPageAccessFromSupabase error:", e);
+        if (!error && data) saveCache(key, data);
+        return data?.page || null;
+    } catch {
         return null;
     }
 }
-
-
 
 
 /* ============================================================================================
@@ -236,41 +220,25 @@ async function getWarehouseNameById(whId) {
 ============================================================================================ */
 
 async function checkUserAccess() {
-    // Берём user из localStorage — это поведение оставляем прежним
     let userLocal = JSON.parse(localStorage.getItem('user') || 'null');
     if (!userLocal) {
-        // если нет локального user — идти на login (как было)
         window.location.href = 'login.html';
         return;
     }
 
-    // Попытка взять из кэша
     const cache = loadCache("user_cache");
-    if (cache && (Date.now() - cache.timestamp < USER_CACHE_TTL)) {
+    if (cache && Date.now() - cache.timestamp < USER_CACHE_TTL) {
         const u = cache.data;
-        // u должен содержать: { id, name, accesses, user_wh_id, wh_name } — именно такой объект мы сохраняли ранее
         if (u) {
-            try {
-                updateUserName(u.name);
-                updateHeaderWarehouseName(u.wh_name);
-                filterMenu(u.accesses || []);
-                // синхронизируем localStorage.user с кешем (чтобы другие участки кода видели актуальные данные)
-                localStorage.setItem("user", JSON.stringify(u));
-            } catch (e) {
-                console.error("checkUserAccess (apply cache) failed:", e);
-            }
+            updateUserName(u.name);
+            updateHeaderWarehouseName(u.wh_name);
+            filterMenu(u.accesses || []);
+            localStorage.setItem("user", JSON.stringify(u));
         }
-        return;
+        return; // 🚀 важно: прекращаем функцию, не делаем запрос
     }
 
-    // Если кэша нет или он просрочен — пробуем получить свежие данные
-    if (!supabaseClient) {
-        // В офлайн-режиме используем локальный user как fallback
-        if (userLocal?.name) updateUserName(userLocal.name);
-        if (userLocal?.wh_name) updateHeaderWarehouseName(userLocal.wh_name);
-        if (userLocal?.accesses) filterMenu(userLocal.accesses);
-        return;
-    }
+    if (!supabaseClient) return;
 
     try {
         const { data, error } = await supabaseClient
@@ -279,47 +247,30 @@ async function checkUserAccess() {
             .eq('id', userLocal.id)
             .single();
 
-        if (error || !data) {
-            throw error || new Error("User not found");
-        }
+        if (!data || error) throw error || new Error("User not found");
 
         const accesses = Array.isArray(data.accesses)
             ? data.accesses
-            : String(data.accesses || '')
-                .split(',')
-                .map(a => a.trim())
-                .filter(Boolean);
+            : String(data.accesses || '').split(',').map(a => a.trim()).filter(Boolean);
 
-        // получаем имя склада (используем твою функцию, она сама кэширует wh по id)
         const wh_name = await getWarehouseNameById(data.user_wh_id);
 
-        const fresh = {
-            id: data.id,
-            name: data.fio,
-            accesses,
-            user_wh_id: data.user_wh_id,
-            wh_name
-        };
+        const fresh = { id: data.id, name: data.fio, accesses, user_wh_id: data.user_wh_id, wh_name };
 
-        // сохраняем и в localStorage, и в наш unified cache
         localStorage.setItem("user", JSON.stringify(fresh));
         saveCache("user_cache", fresh);
 
-        // применяем UI
         updateUserName(fresh.name);
         updateHeaderWarehouseName(fresh.wh_name);
         filterMenu(fresh.accesses || []);
 
-    } catch (e) {
-        console.error("checkUserAccess fetch failed:", e);
-        // fallback — используем локальные данные, если есть
+    } catch {
+        // fallback — используем локальный user
         if (userLocal?.name) updateUserName(userLocal.name);
         if (userLocal?.wh_name) updateHeaderWarehouseName(userLocal.wh_name);
         if (userLocal?.accesses) filterMenu(userLocal.accesses);
     }
 }
-
-
 
 
 /* ============================================================================================
@@ -480,56 +431,40 @@ function updateUserName(name) {
    Часть 4 — DOMContentLoaded
 ============================================================================================ */
 
-document.addEventListener('DOMContentLoaded', async () => {
-    t("DOMContentLoaded start");
-
+document.addEventListener('DOMContentLoaded', () => {
     const raw = localStorage.getItem('user');
-    t("localStorage user read");
-
-    // Проверка user
     if (!raw) {
-        t("redirect to login (no user)");
         window.location.href = "login.html";
         return;
     }
 
-    // Получаем user из кэша до запросов
     const cachedUser = JSON.parse(raw);
-    t("parsed cached user");
+    const userAccesses = cachedUser.accesses || [];
 
-    // Пытаемся получить доступы страницы
-    const requiredAccess = await getPageAccessFromSupabase();
-    t("getPageAccessFromSupabase done");
+    // Получаем текущую страницу
+    const currentPage = window.location.pathname.split('/').pop() || "index.html";
 
-    // КРИТИЧЕСКИЙ МОМЕНТ: показывает, тормозит ли SUPABASE
-    // Если интернет есть — задержка будет здесь!
+    // Сразу проверяем доступ по кэшу
+    // pages_cache хранит все страницы с полем page
+    const pagesCache = loadCache("pages_cache")?.data || [];
+    const pageObj = pagesCache.find(p => p.url === currentPage);
 
-    // Обновление user (+wh_name)
-    await checkUserAccess();
-    t("checkUserAccess done");
+    if (pageObj?.page && !userAccesses.includes(pageObj.page)) {
+        // Пользователь не имеет доступа → редирект мгновенно
+        console.warn(`No access to page "${pageObj.page}". Redirecting...`);
+        window.location.href = "index.html";
+        return;
+    }
 
-    // Теперь user обновлён
-    const user = JSON.parse(localStorage.getItem('user'));
-    t("updated user read");
+    // Мгновенно обновляем UI
+    updateUserName(cachedUser.name);
+    updateHeaderWarehouseName(cachedUser.wh_name || "");
+    filterMenu(userAccesses);
 
-    // Рисуем ФИО
-    updateUserName(user.name);
-    t("updateUserName done");
-
-    // Рисуем склад
-    updateHeaderWarehouseName(user.wh_name || "");
-    t("updateHeaderWarehouseName done");
-
-    // Теперь меню
-    await renderMenuFromSupabase();
-    t("renderMenuFromSupabase done");
-
-    filterMenu(user.accesses);
-    t("filterMenu done");
-
-    t("DOMContentLoaded END");
+    // Асинхронно подгружаем свежие данные
+    checkUserAccess();
+    renderMenuFromSupabase();
 });
-
 
 
 /* ============================================================================================
@@ -964,3 +899,4 @@ window.MiniUI = {
         });
     };
 })();
+

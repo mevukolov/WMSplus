@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon"
+          href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico"
+          type="image/x-icon">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="shk_on_places_history.js" defer></script>
+</head>
+<body>
+
+<!-- затемнение меню -->
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title">История ШК</span>
+
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<!-- ВАЖНО: sidebar -->
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap" style="max-width:1200px;margin-top:90px;">
+
+    <div class="card">
+        <h1 style="margin-bottom:16px;">История перемещений на МХ</h1>
+
+        <!-- ФИЛЬТРЫ -->
+        <div
+                id="filters-row"
+                style="
+    display:flex;
+    gap:12px;
+    align-items:flex-end;
+    flex-wrap:nowrap;
+  "
+        >
+
+            <div style="width:140px">
+                <label>Тип</label>
+                <select id="search-type" class="input">
+                    <option value="place">МХ</option>
+                    <option value="emp">Сотрудник</option>
+                </select>
+            </div>
+
+            <div style="width:220px">
+                <label>Значение</label>
+                <input id="search-value" class="input" placeholder="TB00001 / Админка / ID">
+            </div>
+
+            <div style="width:130px; margin-left:20px">
+                <label>Дата с</label>
+                <input id="date-from" class="input" placeholder="ДД.ММ.ГГГГ">
+            </div>
+
+            <div style="width:110px; margin-left:20px">
+                <label>Время с</label>
+                <input id="time-from" class="input" placeholder="ЧЧ:ММ:СС">
+            </div>
+
+            <div style="width:130px; margin-left:20px">
+                <label>Дата по</label>
+                <input id="date-to" class="input" placeholder="ДД.ММ.ГГГГ">
+            </div>
+
+            <div style="width:110px; margin-left:20px">
+                <label>Время по</label>
+                <input id="time-to" class="input" placeholder="ЧЧ:ММ:СС">
+            </div>
+
+            <button
+                    id="search-btn"
+                    class="btn btn-rect"
+                    style="height:40px; margin-left:20px"
+            >
+                Поиск
+            </button>
+
+        </div>
+
+
+
+        <div style="height:16px"></div>
+
+        <button id="export-btn"
+                class="btn btn-outline"
+                style="display:none;margin-bottom:12px;">
+            Экспорт в Excel
+        </button>
+
+        <!-- ТАБЛИЦА -->
+        <div id="table-wrap"
+             style="display:none;
+                max-height:500px;
+                overflow:auto;
+                border-radius:10px;
+                border:1px solid rgba(15,23,42,0.06);">
+
+            <table class="table modal-table">
+                <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th>Значение</th>
+                    <th>Операция</th>
+                    <th>МХ</th>
+                    <th>Новое МХ</th>
+                    <th>Сотрудник</th>
+                </tr>
+                </thead>
+                <tbody id="result-body"></tbody>
+            </table>
+        </div>
+
+    </div>
+</main>
+<div id="toasts" class="toasts"></div>
+
+</body>
+</html>

@@ -29,15 +29,27 @@
       <div class="sidebar-content"></div>
   </div>
 
+
+
+
+
+
+
   <main class="wrap" style="max-width:900px;margin-top:90px;">
-    <div class="card">
+      <!-- Блок МХ -->
+      <div id="mh-block" class="card" style="display:none; margin-bottom: 20px;">
+          <div style="font-size:18px;font-weight:600;">Вы работаете с МХ:</div>
+          <div id="mh-name" style="font-size:20px;margin-top:4px;"></div>
+      </div>
+      <div class="card" id="generator-card" style="display:none;">
       <h1 style="margin:0 0 12px 0">Генератор ШК</h1>
 
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <input id="shk-input" class="input" placeholder="Введите число (только цифры)" style="flex:1;min-width:220px;max-width:420px">
+        <input id="shk-input" class="input" placeholder="Введите значение" style="flex:1;min-width:220px;max-width:420px">
         <button id="generate-btn" class="btn btn-rect">Генерировать ШК</button>
         <button id="copy-btn" class="btn btn-outline" style="display:none">Копировать</button>
-        <button id="save-btn" class="btn btn-outline" style="display:none">Сохранить PNG</button>
+          <button id="print-btn" class="btn btn-outline" style="display:none">Печать</button>
+
       </div>
 
       <div style="height:12px"></div>
