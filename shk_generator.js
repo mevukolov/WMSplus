@@ -6,20 +6,31 @@
     window.location.href = 'login.html';
     return;
   }
+  let userWhId = null;
+  try {
+    const userData = JSON.parse(logged || '{}');
+    userWhId = userData?.user_wh_id ?? null;
+  } catch (e) {}
     const mhBlock = document.getElementById('mh-block');
     const mhNameEl = document.getElementById('mh-name');
     const generatorCard = document.getElementById('generator-card');
 
 
-    function fixRussianLayout(str){
-        const rus = 'ёйцукенгшщзхъфывапролджэячсмитьбю';
-        const eng = '`qwertyuiop[]asdfghjkl;\'zxcvbnm,./';
+    function buildRuToEnMap() {
+        const ruLow = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю.";
+        const enLow = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./";
+        const ruHigh = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
+        const enHigh = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
+
         const map = {};
-        for(let i=0;i<rus.length;i++){
-            map[rus[i]] = eng[i];
-            map[rus[i].toUpperCase()] = eng[i].toUpperCase();
-        }
-        return str.split('').map(c => map[c] ?? c).join('');
+        for (let i = 0; i < ruLow.length; i++) map[ruLow[i]] = enLow[i];
+        for (let i = 0; i < ruHigh.length; i++) map[ruHigh[i]] = enHigh[i];
+        return map;
+    }
+    const RU_TO_EN = buildRuToEnMap();
+
+    function fixRussianLayout(str){
+        return String(str || '').split('').map(c => RU_TO_EN[c] ?? c).join('');
     }
     async function lookupPlace(sticker){
         const code = fixRussianLayout(sticker.trim());
@@ -34,6 +45,11 @@
         const place = await lookupPlace(code);
         if (!place) {
             MiniUI.toast('МХ не найден', { type: 'error' });
+            return;
+        }
+
+        if (String(place.wh_id) !== String(userWhId)) {
+            MiniUI.toast('Этот МХ относится к другому складу', { type: 'error' });
             return;
         }
 
@@ -63,9 +79,9 @@
         modal.style.display = 'flex';
 
         modal.innerHTML = `
-    <div class="modal-content" style="width:360px;padding:26px;">
+    <div class="modal-content" style="width:360px;max-width:90%;padding:26px 28px 32px;box-sizing:border-box;">
       <div style="font-weight:600;margin-bottom:12px;">Отсканируйте МХ</div>
-      <input class="input" placeholder="Сканируйте МХ">
+      <input class="input" placeholder="Сканируйте МХ" style="width:100%;display:block;box-sizing:border-box;margin:0;">
     </div>
   `;
 
@@ -85,7 +101,8 @@
         input.addEventListener('keydown', async e => {
             if(e.key === 'Enter'){
                 e.preventDefault();
-                await handleScannedPlace(buffer);
+                const scanned = (buffer || input.value || '').trim();
+                await handleScannedPlace(scanned);
                 buffer = '';
                 input.value = '';
             } else if(e.key.length === 1){
@@ -352,7 +369,7 @@
                     emp: user.id,              // ID залогиненного сотрудника
                     place: selectedPlace.place, // ТЕКУЩЕЕ МХ
                     place_new: null,
-                    date: new Date().toISOString()
+                    date: (window.MiniUI?.nowIsoPlus3 ? window.MiniUI.nowIsoPlus3() : new Date().toISOString())
                 });
 
             if(error){
@@ -494,4 +511,3 @@
 
 
 })();
-

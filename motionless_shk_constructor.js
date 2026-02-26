@@ -506,7 +506,7 @@ function exportToExcel(items, filename) {
 function buildExportFilename() {
     const statuses = [...activeStatuses].join('_') || 'Все_статусы';
     const expensive = expensiveOnly ? '_дорогостой' : '';
-    const date = new Date().toISOString().slice(0,10);
+    const date = (window.MiniUI?.todayIsoDatePlus3 ? window.MiniUI.todayIsoDatePlus3() : new Date().toISOString().slice(0,10));
 
     return `ШК_${statuses}${expensive}_${date}`;
 }

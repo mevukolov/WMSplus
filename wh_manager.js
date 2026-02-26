@@ -287,8 +287,11 @@
         let finalSticker = editPlaceId ? txtPlaceSticker.textContent : "";
 
         if (!editPlaceId) {
-            const now = new Date();
-            const gent = (now.getHours()*10000 + now.getMinutes()*100 + now.getSeconds()) * 6;
+            const fallbackNow = new Date();
+            const nowParts = (window.MiniUI?.nowPartsPlus3
+                ? window.MiniUI.nowPartsPlus3()
+                : { hours: fallbackNow.getHours(), minutes: fallbackNow.getMinutes(), seconds: fallbackNow.getSeconds() });
+            const gent = (nowParts.hours * 10000 + nowParts.minutes * 100 + nowParts.seconds) * 6;
             finalSticker = `$$WMSPLUSSC${editWhId}${placeId}${gent}`;
         }
 
