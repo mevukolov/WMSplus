@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" defer></script>
+    <script src="pure_losses_constructor.js" defer></script>
+</head>
+
+<body>
+
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title">Потери по Pure</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap" style="max-width:1200px;">
+
+    <div class="card">
+
+        <h1>Анализатор «<a class="accent-fill-link" href="https://fin-reports.wb.ru/superset/dashboard/1422" data-text="Чистые списания">Чистые списания</a>»</h1>
+
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+
+            <label class="btn btn-rect">
+                Загрузить .xlsx
+                <input type="file" id="file-input" accept=".xlsx,.xls" hidden>
+            </label>
+
+            <button
+                    id="unit-toggle-btn"
+                    class="btn btn-square"
+                    title="Переключить режим графиков: ₽ / ШТ"
+            >
+                ₽
+            </button>
+
+            <button id="export-filtered" class="btn btn-rect" style="margin-left:auto;">
+                Выгрузить в Excel
+            </button>
+
+            <button id="export-pdf" class="btn btn-rect">
+                Выгрузить PDF
+            </button>
+
+        </div>
+
+        <div id="report-scroll" style="max-height:70vh;overflow:auto;">
+            <div id="report" style="display:flex;flex-direction:column;gap:24px;"><canvas id="totalChart"></canvas></div>
+        </div>
+
+    </div>
+</main>
+
+<div id="modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+        <div id="modal-body"></div>
+        <button class="btn btn-rect" onclick="closeModal()">Закрыть</button>
+    </div>
+</div>
+
+<div id="pdf-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+        <div class="modal-body">
+            <h2>Экспорт PDF</h2>
+            <div style="margin:12px 0;">
+                <label for="pdf-title-input" style="display:block;margin-bottom:6px;">Название презентации</label>
+                <input id="pdf-title-input" class="input" type="text" placeholder="Чистые списания">
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;">
+                <button id="pdf-cancel-btn" class="btn btn-rect secondary">Отмена</button>
+                <button id="pdf-generate-btn" class="btn btn-rect">Сформировать PDF</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+</body>
+</html>

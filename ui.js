@@ -11,6 +11,55 @@ function t(label) {
     console.log(`⏱ ${label}: ${(performance.now() - T0).toFixed(1)}ms`);
 }
 
+const WMS_TIME_OFFSET_MINUTES = 180; // GMT+3
+
+function _pad2(value) {
+    return String(value).padStart(2, '0');
+}
+
+function _pad3(value) {
+    return String(value).padStart(3, '0');
+}
+
+function getShiftedNow(offsetMinutes = WMS_TIME_OFFSET_MINUTES) {
+    const offset = Number(offsetMinutes) || 0;
+    return new Date(Date.now() + offset * 60000);
+}
+
+function nowIsoAtOffset(offsetMinutes = WMS_TIME_OFFSET_MINUTES) {
+    const offset = Number(offsetMinutes) || 0;
+    const shifted = getShiftedNow(offset);
+
+    const y = shifted.getUTCFullYear();
+    const m = _pad2(shifted.getUTCMonth() + 1);
+    const d = _pad2(shifted.getUTCDate());
+    const hh = _pad2(shifted.getUTCHours());
+    const mm = _pad2(shifted.getUTCMinutes());
+    const ss = _pad2(shifted.getUTCSeconds());
+    const ms = _pad3(shifted.getUTCMilliseconds());
+
+    const sign = offset >= 0 ? '+' : '-';
+    const abs = Math.abs(offset);
+    const offH = _pad2(Math.floor(abs / 60));
+    const offM = _pad2(abs % 60);
+
+    return `${y}-${m}-${d}T${hh}:${mm}:${ss}.${ms}${sign}${offH}:${offM}`;
+}
+
+function todayIsoDateAtOffset(offsetMinutes = WMS_TIME_OFFSET_MINUTES) {
+    return nowIsoAtOffset(offsetMinutes).slice(0, 10);
+}
+
+function nowPartsAtOffset(offsetMinutes = WMS_TIME_OFFSET_MINUTES) {
+    const shifted = getShiftedNow(offsetMinutes);
+    return {
+        hours: shifted.getUTCHours(),
+        minutes: shifted.getUTCMinutes(),
+        seconds: shifted.getUTCSeconds(),
+        date: todayIsoDateAtOffset(offsetMinutes)
+    };
+}
+
 
 
 /* ============================================================================================
@@ -559,7 +608,10 @@ window.MiniUI = {
     toast: createToast,
     setLoaderVisible: v => {
         if (loader) loader.style.display = v ? 'block' : 'none';
-    }
+    },
+    nowIsoPlus3: () => nowIsoAtOffset(WMS_TIME_OFFSET_MINUTES),
+    todayIsoDatePlus3: () => todayIsoDateAtOffset(WMS_TIME_OFFSET_MINUTES),
+    nowPartsPlus3: () => nowPartsAtOffset(WMS_TIME_OFFSET_MINUTES)
 };
 /* ============================================================================================
    MiniUI.confirm() & MiniUI.alert() — JS-МОДАЛКИ (динамические, без HTML в документе)

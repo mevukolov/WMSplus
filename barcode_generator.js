@@ -9,15 +9,21 @@
         'WHPT': 'WHPT',
         'TRBX': 'TRBX'
     };
-    const RU_TO_EN = {
-        'й':'q','ц':'w','у':'e','к':'r','е':'t','н':'y','г':'u','ш':'i','щ':'o','з':'p','х':'[','ъ':']',
-        'ф':'a','ы':'s','в':'d','а':'f','п':'g','р':'h','о':'j','л':'k','д':'l','ж':';','э':'\'',
-        'я':'z','ч':'x','с':'c','м':'v','и':'b','т':'n','ь':'m','б':',','ю':'.',
-    };
+    function buildRuToEnMap() {
+        const ruLow = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю.";
+        const enLow = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./";
+        const ruHigh = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
+        const enHigh = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
+
+        const map = {};
+        for (let i = 0; i < ruLow.length; i++) map[ruLow[i]] = enLow[i];
+        for (let i = 0; i < ruHigh.length; i++) map[ruHigh[i]] = enHigh[i];
+        return map;
+    }
+    const RU_TO_EN = buildRuToEnMap();
 
     function ruToEnLayout(str) {
-        return str
-            .toLowerCase()
+        return String(str || '')
             .split('')
             .map(ch => RU_TO_EN[ch] || ch)
             .join('');
@@ -106,8 +112,7 @@
     async function handleScannedSticker(sticker) {
         if (!sticker) return;
 
-            const fixedSticker = ruToEnLayout(sticker);
-
+            const fixedSticker = ruToEnLayout(sticker).trim();
             const place = await lookupPlace(fixedSticker);
         if (!place) {
             console.error('МХ не найден для кода:', sticker);
@@ -135,22 +140,21 @@
         generatorCard.style.display = ''; // включить генератор
 
         mhNameEl.textContent = `${place.place_name} (${place.place})`;
+        MiniUI.toast(`МХ выбран: ${place.place_name}`, { type: 'success' });
 
-        input.focus();
+        setTimeout(() => input.focus(), 0);
     }
 
     function startScanModal() {
-        // Создаем модалку вручную
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.style.display = 'flex';
 
         modal.innerHTML = `
-        <div class="modal-content" style="width:360px;max-width:90%;padding:26px 28px 32px;box-sizing:border-box;">
-            <div style="font-weight:600;margin-bottom:12px;">Отсканируйте МХ рядом</div>
-            <input class="input" type="text" placeholder="Сканируйте или введите код">
-            <div id="scan-feedback" style="margin-top:8px;font-size:14px;color:red;min-height:18px;"></div>
-        </div>
+    <div class="modal-content" style="width:360px;max-width:90%;padding:26px 28px 32px;box-sizing:border-box;">
+      <div style="font-weight:600;margin-bottom:12px;">Отсканируйте МХ</div>
+      <input class="input" placeholder="Сканируйте МХ" style="width:100%;display:block;box-sizing:border-box;margin:0;">
+    </div>
     `;
 
         document.body.appendChild(modal);
@@ -158,14 +162,17 @@
 
         const inputEl = modal.querySelector('.input');
 
-        // ✨ Единственная добавка → гарантирует автоматический фокус
         setTimeout(() => inputEl.focus(), 0);
+        setTimeout(() => {
+            inputEl.focus();
+            inputEl.select();
+        }, 0);
 
         let buffer = '';
         inputEl.addEventListener('keydown', async (ev) => {
             if (ev.key === 'Enter') {
                 ev.preventDefault();
-                const code = buffer.trim();
+                const code = (buffer || inputEl.value || '').trim();
                 buffer = '';
                 console.log('Введён код для сканирования:', code);
 
@@ -192,7 +199,7 @@
                     emp: user.id,
                     place: selectedPlace.place,
                     place_new: null,
-                    date: new Date().toISOString()
+                    date: (window.MiniUI?.nowIsoPlus3 ? window.MiniUI.nowIsoPlus3() : new Date().toISOString())
                 });
 
             if (error) {

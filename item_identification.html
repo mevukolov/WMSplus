@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon" />
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js" defer></script>
+    <script src="item_identification.js" defer></script>
+</head>
+
+<body>
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title" id="header-wh"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap" style="max-width:1100px;margin-top:90px;">
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+        <div class="card" id="identification-card" style="flex:1 1 620px;min-width:320px;">
+            <h1 style="margin:0 0 16px 0;">Оприходование товара</h1>
+
+            <div style="margin-bottom:14px;">
+                <div style="font-weight:600;margin-bottom:6px;">ШК</div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <input
+                        id="item-shk-input"
+                        class="input"
+                        type="text"
+                        placeholder="Введите цифры или сканируйте стикер"
+                        style="flex:1;min-width:240px;max-width:560px;box-sizing:border-box;"
+                    />
+                    <button id="find-item-btn" class="btn btn-rect" type="button">Найти</button>
+                </div>
+            </div>
+
+            <div id="decoded-group" style="display:none;margin-bottom:14px;">
+                <div style="font-weight:600;margin-bottom:6px;">Распознанный ШК</div>
+                <div id="decoded-shk-value" style="font-size:18px;font-weight:600;"></div>
+                <div id="decoded-source-value" style="font-size:13px;color:#475569;margin-top:4px;"></div>
+            </div>
+
+            <div id="result-group" style="display:none;">
+                <div style="margin-bottom:10px;">
+                    <div style="font-size:12px;color:#64748b;letter-spacing:.3px;text-transform:uppercase;">Номенклатура</div>
+                    <div id="nm-value" style="font-size:20px;font-weight:600;"></div>
+                </div>
+
+                <div>
+                    <div style="font-size:12px;color:#64748b;letter-spacing:.3px;text-transform:uppercase;">Наименование</div>
+                    <div id="description-value" style="font-size:17px;font-weight:500;line-height:1.3;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" id="photo-group" style="display:none;width:280px;max-width:100%;flex:0 0 280px;">
+            <div style="font-weight:600;margin-bottom:6px;">Фото товара</div>
+            <div id="photo-status" style="font-size:13px;color:#475569;margin-bottom:8px;"></div>
+            <img id="product-photo" alt="Фото товара" style="display:none;width:100%;height:280px;object-fit:contain;background:#fff;border:1px solid rgba(15,23,42,0.06);border-radius:8px;cursor:pointer;" />
+
+            <div id="nm-qr-group" style="display:none;margin-top:12px;width:100%;padding-top:10px;border-top:1px solid rgba(15,23,42,0.08);">
+                <div style="font-weight:600;font-size:13px;margin-bottom:8px;">QR Номенклатуры</div>
+                <div style="display:flex;justify-content:center;width:100%;">
+                    <canvas id="nm-qr-canvas" width="128" height="128" style="width:128px;height:128px;background:#fff;border:1px solid rgba(15,23,42,0.06);border-radius:8px;"></canvas>
+                </div>
+                <div id="nm-qr-value" style="margin-top:8px;text-align:center;font-size:13px;font-weight:600;word-break:break-all;"></div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div id="toasts" class="toasts"></div>
+</body>
+</html>

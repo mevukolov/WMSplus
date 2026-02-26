@@ -97,7 +97,16 @@
         function iso(d,t){
             if(!d) return null;
             const [dd,mm,yy]=d.split('.');
-            return `${yy}-${mm}-${dd}T${t||'00:00:00'}.000Z`;
+            return `${yy}-${mm}-${dd}T${t||'00:00:00'}.000+03:00`;
+        }
+
+        function formatDateMsk(value){
+            if(!value) return '';
+            try {
+                return new Date(value).toLocaleString('ru-RU', { timeZone:'Europe/Moscow' });
+            } catch {
+                return new Date(value).toLocaleString('ru-RU');
+            }
         }
 
         const from = iso(dateFromEl.value,timeFromEl.value);
@@ -121,7 +130,7 @@
         data.forEach(r=>{
             const tr=document.createElement('tr');
             tr.innerHTML=`
-        <td>${new Date(r.date).toLocaleString('ru-RU')}</td>
+        <td>${formatDateMsk(r.date)}</td>
         <td>${r.shk}</td>
         <td>${r.operation}</td>
         <td>${r.place||''}</td>
@@ -140,7 +149,7 @@
         const rows=[
             ['Дата','Значение','Операция','МХ','Новое МХ','Сотрудник'],
             ...lastResult.map(r=>[
-                new Date(r.date).toLocaleString('ru-RU'),
+                formatDateMsk(r.date),
                 r.shk,r.operation,r.place||'',r.place_new||'',r.emp||''
             ])
         ];
