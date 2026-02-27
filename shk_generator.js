@@ -500,7 +500,7 @@
 
         supabaseClient = window.supabaseClient;
         if (!supabaseClient) {
-            MiniUI.toast('Ошибка Supabase', { type: 'error' });
+            MiniUI.toast('Ошибка связи с базой данных', { type: 'error' });
             return;
         }
         mhBlock.style.display = 'none';

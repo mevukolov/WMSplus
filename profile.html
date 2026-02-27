@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    <script src="ui.js" defer></script>
+    <script src="profile.js" defer></script>
+    <style>
+        .profile-wrap {
+            max-width: 680px;
+            margin-top: 90px;
+        }
+
+        .profile-card {
+            padding: 16px;
+        }
+
+        .profile-top {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .profile-main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .profile-side {
+            width: 250px;
+            min-width: 250px;
+            border: 1px solid #d6d9de;
+            border-radius: 10px;
+            padding: 10px 12px;
+            background: #f8fafc;
+            box-sizing: border-box;
+        }
+
+        .profile-side-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 8px;
+        }
+
+        .profile-fio {
+            margin: 0;
+            font-size: 30px;
+            line-height: 1.12;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .profile-wh {
+            margin-top: 8px;
+            font-size: 17px;
+            color: #4b5563;
+            font-weight: 600;
+        }
+
+        .profile-photo {
+            margin-top: 16px;
+            width: 260px;
+            height: 320px;
+            max-width: 100%;
+            border-radius: 8px;
+            background: #d1d5db;
+            border: 1px solid #c7ccd3;
+        }
+
+        .profile-rows {
+            margin-top: 16px;
+            border-top: 1px solid #d6d9de;
+        }
+
+        .profile-row {
+            display: flex;
+            gap: 14px;
+            border-bottom: 1px solid #d6d9de;
+            padding: 12px 0;
+            align-items: flex-start;
+        }
+
+        .profile-label {
+            width: 150px;
+            min-width: 150px;
+            font-size: 18px;
+            font-weight: 700;
+            color: #1f2937;
+        }
+
+        .profile-value {
+            flex: 1;
+            font-size: 18px;
+            color: #1f2937;
+            line-height: 1.32;
+        }
+
+        .profile-status-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 12px;
+            border-radius: 999px;
+            font-size: 15px;
+            background: #dff6e7;
+            color: #0e8f4d;
+        }
+
+        .profile-access-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 520px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .profile-access-item {
+            font-size: 15px;
+            color: #111827;
+            line-height: 1.25;
+            word-break: break-word;
+        }
+
+        .profile-actions {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .profile-actions .btn {
+            min-width: 170px;
+        }
+
+        .btn:disabled,
+        .btn[disabled] {
+            opacity: 0.55;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .modal-field {
+            margin-bottom: 12px;
+        }
+
+        .modal-field-label {
+            margin-bottom: 6px;
+            font-size: 14px;
+            color: #374151;
+            font-weight: 600;
+        }
+
+        .scan-result {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .scan-result-row {
+            font-size: 14px;
+            color: #1f2937;
+            margin-bottom: 8px;
+            line-height: 1.35;
+        }
+
+        .scan-result-row span {
+            font-weight: 600;
+        }
+
+        @media (max-width: 860px) {
+            .profile-top {
+                flex-direction: column;
+            }
+
+            .profile-side {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .profile-fio {
+                font-size: 26px;
+            }
+
+            .profile-wh {
+                font-size: 16px;
+            }
+
+            .profile-label,
+            .profile-value {
+                font-size: 17px;
+            }
+
+            .profile-photo {
+                width: 240px;
+                height: 300px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .profile-fio {
+                font-size: 23px;
+            }
+
+            .profile-wh {
+                font-size: 15px;
+            }
+
+            .profile-row {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .profile-label {
+                width: auto;
+                min-width: 0;
+                font-size: 16px;
+            }
+
+            .profile-value,
+            .profile-side-title {
+                font-size: 16px;
+            }
+
+            .profile-access-item {
+                font-size: 14px;
+            }
+
+            .profile-photo {
+                width: 100%;
+                max-width: 280px;
+                height: 340px;
+            }
+
+            .profile-actions .btn {
+                width: 100%;
+                min-width: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title" id="header-wh"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap profile-wrap">
+    <div class="card profile-card" id="profile-card" style="display:none;">
+        <div class="profile-top">
+            <div class="profile-main">
+                <h1 id="profile-fio" class="profile-fio">-</h1>
+                <div id="profile-wh" class="profile-wh">-</div>
+
+                <div class="profile-photo" aria-label="Фото сотрудника"></div>
+
+                <div class="profile-rows">
+                    <div class="profile-row">
+                        <div class="profile-label">ID сотрудника</div>
+                        <div class="profile-value" id="profile-id">-</div>
+                    </div>
+
+                    <div class="profile-row">
+                        <div class="profile-label">Статус</div>
+                        <div class="profile-value"><span class="profile-status-pill">Активен</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="profile-side">
+                <div class="profile-side-title">Доступы</div>
+                <div id="profile-accesses" class="profile-access-list"></div>
+            </div>
+        </div>
+
+        <div class="profile-actions">
+            <button class="btn btn-outline" id="badge-btn">Бейдж</button>
+            <button class="btn btn-outline" id="change-password-btn">Сменить пароль</button>
+            <button class="btn btn-outline" id="sync-warehouse-btn">Актуализировать склад</button>
+        </div>
+    </div>
+</main>
+
+<div id="badge-modal" class="modal hidden">
+    <div class="modal-content" style="padding:16px;box-sizing:border-box;">
+        <h2>Стикер бейджа</h2>
+        <canvas id="badge-canvas" width="350" height="350" style="border:1px solid black;max-width:100%;height:auto;"></canvas>
+        <div style="margin-top:10px;">
+            <button id="badge-download-btn" class="btn btn-rect">Скачать</button>
+            <button id="badge-print-btn" class="btn btn-outline">Печать</button>
+            <button id="badge-close-btn" class="btn btn-outline">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<div id="password-modal" class="modal hidden">
+    <div class="modal-content" style="width:420px;max-width:92%;padding:22px 24px;box-sizing:border-box;">
+        <div style="font-size:20px;font-weight:700;margin-bottom:14px;">Сменить пароль</div>
+
+        <div class="modal-field">
+            <div class="modal-field-label">Старый пароль</div>
+            <input id="old-password" type="password" class="input" style="width:100%;box-sizing:border-box;">
+        </div>
+
+        <div class="modal-field">
+            <div class="modal-field-label">Новый пароль</div>
+            <input id="new-password" type="password" class="input" style="width:100%;box-sizing:border-box;">
+        </div>
+
+        <div class="modal-field">
+            <div class="modal-field-label">Подтвердите новый пароль</div>
+            <input id="confirm-password" type="password" class="input" style="width:100%;box-sizing:border-box;">
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+            <button id="password-cancel" class="btn btn-outline">Отмена</button>
+            <button id="password-submit" class="btn btn-rect">Сменить</button>
+        </div>
+    </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon" />
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="shk_info.js" defer></script>
+</head>
+<body>
+
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title" id="header-wh"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap" style="max-width:1400px;width:100%;margin-top:90px;margin-left:auto;margin-right:auto;">
+    <div class="card" style="padding:22px 22px 18px;min-width:0;">
+        <h1 style="margin:0 0 14px 0;">Статус вещи</h1>
+
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <input
+                id="shk-input"
+                class="input"
+                type="text"
+                placeholder="Введите ШК или сканируйте WB стикер"
+                style="flex:1;min-width:260px;max-width:760px;"
+            />
+            <button id="search-btn" class="btn btn-rect" type="button">Найти</button>
+        </div>
+
+        <div id="identifier-line" style="display:none;margin:16px 0 12px;font-size:24px;font-weight:700;color:#1f2937;"></div>
+
+        <div id="table-wrap"
+             style="display:none;width:100%;min-width:0;padding:0;overflow:auto;border:1px solid rgba(15,23,42,0.06);border-radius:10px;background:#f8fafc;">
+            <div id="history-head"
+                 style="display:grid;grid-template-columns:190px 130px 340px 200px 220px 130px 240px;gap:0;padding:9px 10px;background:#f3f4f6;border-bottom:1px solid rgba(15,23,42,0.08);font-weight:700;font-size:14px;color:#1f2937;min-width:1450px;">
+                <div>Дата</div>
+                <div>ВБ Стикер</div>
+                <div>Описание</div>
+                <div>Блок</div>
+                <div>МХ</div>
+                <div>ID</div>
+                <div>ФИО</div>
+            </div>
+            <div id="result-body" style="min-width:1450px;"></div>
+        </div>
+    </div>
+</main>
+
+<div id="toasts" class="toasts"></div>
+</body>
+</html>

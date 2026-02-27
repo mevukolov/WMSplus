@@ -965,7 +965,7 @@
         }
 
         if (!normalized.startsWith("*")) {
-            return { ok: false, message: "Некорректный стикер: нужен префикс \"*\" или \"!\"" };
+            return { ok: false, message: "Ожидается WB стикер" };
         }
 
         const decoded = decodeStickerBarcode(normalized);
@@ -1019,11 +1019,7 @@
         decodedStickerValueEl.textContent = parsed.value;
         decodedBarcodeValueEl.textContent = `Скан: ${parsed.barcode}`;
         updateFormVisibility();
-        if (parsed.checksumValid) {
-            MiniUI.toast(`Стикер распознан: ${parsed.value}`, { type: "success" });
-        } else {
-            MiniUI.toast(`Стикер распознан: ${parsed.value} (контрольная сумма невалидна)`, { type: "info", duration: 4500 });
-        }
+        MiniUI.toast(`Стикер распознан: ${parsed.value}`, { type: "success" });
     }
 
     function bindStickerScannerInput() {
@@ -1146,7 +1142,7 @@
             nmInput.focus();
         } catch (e) {
             console.error(e);
-            MiniUI.toast("Ошибка отправки", { type: "error" });
+            MiniUI.toast("Ошибка связи с базой данных", { type: "error" });
         } finally {
             isSubmitting = false;
             assignBtn.disabled = false;
@@ -1205,7 +1201,7 @@
 
         supabaseClient = window.supabaseClient;
         if (!supabaseClient) {
-            MiniUI.toast("Ошибка Supabase", { type: "error" });
+            MiniUI.toast("Ошибка связи с базой данных", { type: "error" });
             return;
         }
 

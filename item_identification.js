@@ -700,10 +700,10 @@
             const found = await lookupNmRepByShk(parsed.shk);
             if (!found.ok) {
                 if (found.notFound) {
-                    MiniUI.toast("ШК не найден в nm_rep", { type: "info" });
+                    MiniUI.toast("В репозитории ШК нет данных о вещи", { type: "info" });
                 } else {
                     console.error("Ошибка поиска в nm_rep:", found.error);
-                    MiniUI.toast("Ошибка поиска в nm_rep", { type: "error" });
+                    MiniUI.toast("Ошибка связи с базой данных", { type: "error" });
                 }
 
                 resultGroupEl.style.display = "none";
@@ -769,7 +769,7 @@
 
         supabaseClient = window.supabaseClient;
         if (!supabaseClient) {
-            MiniUI.toast("Ошибка Supabase", { type: "error" });
+            MiniUI.toast("Ошибка связи с базой данных", { type: "error" });
             return;
         }
 
