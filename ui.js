@@ -99,6 +99,58 @@ const WH_CACHE_TTL    = 30 * 1000;
 const PAGES_CACHE_TTL = 30 * 1000;
 const ACCESS_CACHE_TTL = 30 * 1000;
 
+const EXTENDED_MENU_ACCESS_CODE = "extended_menu";
+const EXTENDED_MENU_LINKS = [
+    {
+        title: "Band",
+        short: "B",
+        icon: "https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/images/band.png",
+        url: "https://band.wb.ru"
+    },
+    {
+        title: "WMS",
+        short: "W",
+        icon: "https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/images/wms.ico",
+        url: "https://wms.wbwh.tech"
+    },
+    {
+        title: "Reports",
+        short: "R",
+        icon: "https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/images/reports.ico",
+        url: "https://reports.wbwh.tech"
+    },
+    {
+        title: "Logistics",
+        short: "L",
+        icon: "https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/images/logistics.ico",
+        url: "https://logistics.wildberries.ru"
+    },
+    {
+        title: "Камеры",
+        short: "К",
+        icon: "https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/images/cam.ico",
+        url: "https://nizhniynovgorod4-video.sc.wb.ru"
+    },
+    {
+        title: "СС",
+        short: "СС",
+        icon: "https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/images/cc.ico",
+        url: "https://portal-cc.wildberries.ru"
+    },
+    {
+        title: "IDM",
+        short: "I",
+        icon: "https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/images/idm.ico",
+        url: "https://idm.wb.ru"
+    },
+    {
+        title: "Выход из Keycloak",
+        short: "В",
+        icon: "https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/logout.svg",
+        url: "https://keycloak.wildberries.ru/realms/infrastructure/protocol/openid-connect/logout"
+    }
+];
+
 
 
 /* ============================================================================================
@@ -357,11 +409,14 @@ async function renderMenuFromSupabase() {
     const wrap = sidebar.querySelector('.sidebar-content');
     if (!wrap) return;
 
-    // Если меню уже есть в DOM — не перерисовываем (чтобы не ломать состояние, listeners и т.д.)
-    if (wrap.childElementCount > 0) {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const accesses = Array.isArray(user.accesses) ? user.accesses : [];
+    ensureSidebarTopPanel(wrap, accesses);
+
+    // Если категории уже есть в DOM — не перерисовываем (чтобы не ломать состояние, listeners и т.д.)
+    if (wrap.querySelector('.menu-category')) {
         // Но мы всё равно могут триггернуть фильтрацию в зависимости от текущего user
-        const user = JSON.parse(localStorage.getItem('user') || '{}');
-        filterMenu(user.accesses || []);
+        filterMenu(accesses);
         return;
     }
 
@@ -369,8 +424,6 @@ async function renderMenuFromSupabase() {
     const pages = await loadPagesFromSupabase();
 
     // группируем и рендерим — логика идентична оригиналу
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    const accesses = Array.isArray(user.accesses) ? user.accesses : [];
 
     const groups = {};
     pages.forEach(p => {
@@ -432,6 +485,8 @@ async function renderMenuFromSupabase() {
         catDiv.appendChild(list);
         wrap.appendChild(catDiv);
     }
+
+    applySidebarSearchFilter(getSidebarSearchQuery());
 }
 
 
@@ -442,7 +497,7 @@ async function renderMenuFromSupabase() {
 ============================================================================================ */
 
 function filterMenu(accesses = []) {
-    document.querySelectorAll('#sidebar a').forEach(a => {
+    document.querySelectorAll('#sidebar .menu-list a').forEach(a => {
         const access = a.getAttribute('data-access');
         if (!access) {
             a.style.display = '';
@@ -453,6 +508,141 @@ function filterMenu(accesses = []) {
             return;
         }
         a.style.display = accesses.includes(access) ? '' : 'none';
+    });
+
+    toggleExtendedMenuBlock(accesses);
+    applySidebarSearchFilter(getSidebarSearchQuery());
+}
+
+function ensureSidebarTopPanel(wrap, accesses = []) {
+    if (!wrap) return;
+
+    let panel = wrap.querySelector('#sidebar-top-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'sidebar-top-panel';
+        panel.className = 'sidebar-top-panel';
+
+        panel.innerHTML = `
+            <div id="extended-menu-block" class="extended-menu-block">
+                <div class="extended-menu-grid"></div>
+            </div>
+            <div class="sidebar-search-wrap">
+                <input id="sidebar-search-input" class="sidebar-search-input" type="text" placeholder="Поиск по разделам..." autocomplete="off">
+            </div>
+        `;
+
+        wrap.prepend(panel);
+
+        const searchInput = panel.querySelector('#sidebar-search-input');
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                applySidebarSearchFilter(searchInput.value);
+            });
+            searchInput.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+
+                const first = Array.from(document.querySelectorAll('#sidebar .menu-list li a')).find(link => {
+                    const li = link.closest('li');
+                    const category = link.closest('.menu-category');
+                    return link.style.display !== 'none'
+                        && li && li.style.display !== 'none'
+                        && category && category.style.display !== 'none';
+                });
+
+                if (first) {
+                    window.location.href = first.getAttribute('href');
+                }
+            });
+        }
+    }
+
+    const grid = panel.querySelector('.extended-menu-grid');
+    if (grid && grid.childElementCount === 0) {
+        EXTENDED_MENU_LINKS.forEach(item => {
+            const link = document.createElement('a');
+            link.className = 'extended-menu-link';
+            link.href = item.url || '#';
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.title = item.title || '';
+            link.setAttribute('aria-label', item.title || '');
+
+            if (item.icon) {
+                const icon = document.createElement('img');
+                icon.className = 'extended-menu-icon';
+                icon.src = item.icon;
+                icon.alt = item.title || '';
+                icon.loading = 'lazy';
+                link.appendChild(icon);
+            } else {
+                link.textContent = item.short || (item.title ? item.title.charAt(0).toUpperCase() : '?');
+            }
+
+            link.addEventListener('click', (event) => {
+                if ((item.url || '#') === '#') {
+                    event.preventDefault();
+                }
+            });
+            grid.appendChild(link);
+        });
+    }
+
+    toggleExtendedMenuBlock(accesses);
+}
+
+function toggleExtendedMenuBlock(accesses = []) {
+    const block = document.getElementById('extended-menu-block');
+    if (!block) return;
+
+    const list = Array.isArray(accesses) ? accesses : [];
+    block.style.display = list.includes(EXTENDED_MENU_ACCESS_CODE) ? '' : 'none';
+}
+
+function getSidebarSearchQuery() {
+    const input = document.getElementById('sidebar-search-input');
+    return input ? input.value : '';
+}
+
+function applySidebarSearchFilter(rawQuery = '') {
+    const query = String(rawQuery || '').trim().toLowerCase();
+
+    document.querySelectorAll('#sidebar .menu-category').forEach(category => {
+        let visibleCount = 0;
+
+        category.querySelectorAll('.menu-list li').forEach(li => {
+            const link = li.querySelector('a');
+            if (!link) {
+                li.style.display = 'none';
+                return;
+            }
+
+            const hiddenByAccess = link.style.display === 'none';
+            if (hiddenByAccess) {
+                li.style.display = 'none';
+                return;
+            }
+
+            if (!query) {
+                li.style.display = '';
+                visibleCount += 1;
+                return;
+            }
+
+            const text = (link.textContent || '').toLowerCase();
+            const match = text.includes(query);
+            li.style.display = match ? '' : 'none';
+            if (match) visibleCount += 1;
+        });
+
+        category.style.display = visibleCount > 0 ? '' : 'none';
+
+        if (query) {
+            category.classList.toggle('open', visibleCount > 0);
+        } else {
+            category.classList.remove('open');
+        }
     });
 }
 

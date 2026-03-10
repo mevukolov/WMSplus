@@ -1,4 +1,5 @@
 (function () {
+    const EXTENDED_MENU_ACCESS_CODE = "extended_menu";
 
     if (typeof supabaseClient === "undefined") {
         console.error("supabaseClient missing — ui.js must be loaded first");
@@ -16,6 +17,7 @@
     const mPass = document.getElementById("m-pass");
     const mSave = document.getElementById("m-save");
     const mCancel = document.getElementById("m-cancel");
+    const specialAccessesWrap = document.getElementById("special-accesses");
     const accessGroupsWrap = document.getElementById("access-groups");
 
     let users = [];
@@ -125,6 +127,36 @@
     // ===============================================
 
     function buildAccessCheckboxes(activePages = []) {
+        if (specialAccessesWrap) {
+            specialAccessesWrap.innerHTML = "";
+
+            const block = document.createElement("div");
+            block.style.marginBottom = "8px";
+
+            const title = document.createElement("div");
+            title.style.fontWeight = "700";
+            title.style.marginBottom = "6px";
+            title.textContent = "Специальные доступы";
+            block.appendChild(title);
+
+            const label = document.createElement("label");
+            label.style.display = "flex";
+            label.style.alignItems = "center";
+            label.style.gap = "6px";
+            label.style.cursor = "pointer";
+
+            const chk = document.createElement("input");
+            chk.type = "checkbox";
+            chk.value = EXTENDED_MENU_ACCESS_CODE;
+            chk.checked = activePages.includes(EXTENDED_MENU_ACCESS_CODE);
+
+            label.appendChild(chk);
+            label.appendChild(document.createTextNode("Расширенное боковое меню"));
+            block.appendChild(label);
+
+            specialAccessesWrap.appendChild(block);
+        }
+
         accessGroupsWrap.innerHTML = "";
 
         const groups = {};
@@ -218,7 +250,7 @@
             return;
         }
 
-        const checks = accessGroupsWrap.querySelectorAll("input[type=checkbox]");
+        const checks = modal.querySelectorAll("#special-accesses input[type=checkbox], #access-groups input[type=checkbox]");
         const accesses = Array.from(checks)
             .filter(ch => ch.checked)
             .map(ch => ch.value);

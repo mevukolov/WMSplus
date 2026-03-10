@@ -59,7 +59,8 @@
 
 <!-- ===================== MODAL ===================== -->
 <div id="wh-modal" class="modal hidden">
-    <div class="modal-content">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:560px;">
 
         <h2 id="modal-title">Редактировать СЦ</h2>
 
@@ -73,19 +74,6 @@
             <input id="inp-wh-name" class="input">
         </div>
 
-        <h3 style="margin-top:20px;">Места хранения (МХ)</h3>
-
-        <div id="places-list" style="
-            border:1px solid rgba(0,0,0,0.1);
-            border-radius:10px;
-            padding:10px;
-            max-height:300px;
-            overflow:auto;
-            background:#fafafa;">
-        </div>
-
-        <button id="btn-add-place" class="btn btn-outline" style="margin-top:10px;">Добавить МХ</button>
-
         <div class="actions" style="margin-top:20px;">
             <button id="btn-save-wh" class="btn btn-rect">Сохранить</button>
             <button id="btn-close-wh" class="btn btn-outline">Закрыть</button>
@@ -94,23 +82,42 @@
     </div>
 </div>
 
+<div id="places-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:900px;">
+        <h2 id="places-modal-title">Управление МХ</h2>
+
+        <div id="places-list" style="
+            border:1px solid rgba(0,0,0,0.1);
+            border-radius:10px;
+            padding:10px;
+            max-height:420px;
+            overflow:auto;
+            background:#fafafa;">
+        </div>
+
+        <div class="actions" style="margin-top:16px;">
+            <button id="btn-add-place" class="btn btn-rect">Добавить МХ</button>
+            <button id="btn-close-places" class="btn btn-outline">Закрыть</button>
+        </div>
+    </div>
+</div>
+
 <div id="place-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
     <div class="modal-content">
         <h2 id="place-modal-title">Добавить МХ</h2>
 
-        <!-- ID МХ (только текст при редактировании) -->
         <div class="mb" id="block-place-id">
             <label>ID МХ</label>
             <div id="txt-place-id" class="input" style="background:#eee;"></div>
         </div>
 
-        <!-- Название -->
         <div class="mb">
             <label>Название МХ</label>
             <input id="inp-place-name" class="input" placeholder="Стол 1">
         </div>
 
-        <!-- Тип -->
         <div class="mb">
             <label>Тип МХ</label>
             <select id="inp-place-type" class="input">
@@ -120,7 +127,6 @@
             </select>
         </div>
 
-        <!-- Sticker -->
         <div class="mb">
             <label>Стикер</label>
             <div id="sticker-container">
@@ -136,13 +142,58 @@
     </div>
 </div>
 
+<div id="data-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:900px;">
+        <h2 id="data-modal-title">Управление контейнерами данных</h2>
+
+        <div id="data-list" style="
+            border:1px solid rgba(0,0,0,0.1);
+            border-radius:10px;
+            padding:10px;
+            max-height:420px;
+            overflow:auto;
+            background:#fafafa;">
+        </div>
+
+        <div class="actions" style="margin-top:16px;">
+            <button id="btn-open-create-data" class="btn btn-rect">Создать контейнер данных</button>
+            <button id="btn-close-data" class="btn btn-outline">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<div id="data-create-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:640px;">
+        <h2>Создать контейнер данных</h2>
+
+        <div class="mb">
+            <label>Название контейнера (data_type, только англ)</label>
+            <input id="inp-data-type" class="input" placeholder="container_name">
+        </div>
+
+        <div class="mb">
+            <label>Данные (data)</label>
+            <textarea id="inp-data-value" class="input" rows="8" placeholder='{"key":"value"}'></textarea>
+        </div>
+
+        <div class="actions">
+            <button id="btn-create-data" class="btn btn-rect">Создать</button>
+            <button id="btn-close-create-data" class="btn btn-outline">Отмена</button>
+        </div>
+    </div>
+</div>
+
 <!-- Модалка для картинки стикера -->
 <div id="sticker-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
     <div class="modal-content" style="max-width:1100px;">
         <h2>Стикер МХ</h2>
         <canvas id="sticker-canvas" width="1000" height="1000" style="border:1px solid black;"></canvas>
         <div style="margin-top:10px;">
             <button id="btn-download-sticker" class="btn btn-rect">Скачать</button>
+            <button id="btn-print-sticker" class="btn btn-outline">Печать</button>
             <button id="btn-close-sticker" class="btn btn-outline">Закрыть</button>
         </div>
     </div>
