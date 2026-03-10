@@ -1,50 +1,703 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>WMS+</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js/dist/umd/supabase.min.js"></script>
-    <script src="auth.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        .home-wrap {
+            max-width: 1120px;
+            gap: 14px;
+        }
 
+        .home-hero {
+            background: linear-gradient(135deg, #ffffff 0%, #f6f7ff 58%, #eff5ff 100%);
+        }
+
+        .home-hero-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+
+        .home-hero h1 {
+            margin: 0 0 8px 0;
+            font-size: 30px;
+            line-height: 1.1;
+        }
+
+        .home-hero-subtitle {
+            margin: 0;
+            color: #475569;
+            font-size: 15px;
+        }
+
+        .home-clock {
+            min-width: 190px;
+            border-radius: 12px;
+            padding: 10px 14px;
+            border: 1px solid rgba(98, 60, 234, 0.22);
+            background: rgba(98, 60, 234, 0.08);
+        }
+
+        .home-clock-time {
+            font-size: 29px;
+            line-height: 1;
+            font-weight: 700;
+            color: #1e293b;
+        }
+
+        .home-clock-date {
+            margin-top: 6px;
+            font-size: 13px;
+            color: #475569;
+        }
+
+        .home-stats {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 10px;
+        }
+
+        .home-stat {
+            background: #ffffff;
+            border-radius: 12px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            padding: 10px 12px;
+        }
+
+        .home-stat-label {
+            margin: 0 0 4px 0;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: #64748b;
+        }
+
+        .home-stat-value {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .home-grid {
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        }
+
+        .home-card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .home-card-title {
+            margin: 0;
+            font-size: 18px;
+            color: #111827;
+        }
+
+        .home-quick-links {
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            gap: 10px;
+        }
+
+        .home-link-tile {
+            display: block;
+            text-decoration: none;
+            border-radius: 12px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background: #f8fafc;
+            padding: 12px;
+            color: #0f172a;
+            transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+        }
+
+        .home-link-tile:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 14px rgba(2, 6, 23, 0.08);
+            background: #fff;
+        }
+
+        .home-link-title {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+
+        .home-link-group {
+            display: block;
+            margin-top: 6px;
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .home-search-input {
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 8px;
+        }
+
+        .home-search-results {
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 270px;
+            overflow: auto;
+            padding-right: 2px;
+        }
+
+        .home-search-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            padding: 10px 12px;
+            text-decoration: none;
+            background: #fff;
+            color: #0f172a;
+        }
+
+        .home-search-item:hover {
+            background: #f8fafc;
+        }
+
+        .home-search-title {
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+
+        .home-search-path {
+            font-size: 12px;
+            color: #64748b;
+            white-space: nowrap;
+        }
+
+        .home-empty {
+            margin-top: 10px;
+            border-radius: 10px;
+            border: 1px dashed rgba(15, 23, 42, 0.15);
+            background: #f8fafc;
+            padding: 10px 12px;
+            color: #475569;
+            font-size: 13px;
+        }
+
+        .home-notes {
+            width: 100%;
+            min-height: 150px;
+            resize: vertical;
+            box-sizing: border-box;
+            line-height: 1.45;
+        }
+
+        .home-note-status {
+            margin-top: 8px;
+            color: #64748b;
+            font-size: 13px;
+        }
+
+        @media (max-width: 720px) {
+            .home-hero h1 {
+                font-size: 25px;
+            }
+
+            .home-clock {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .home-card-head {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .home-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
-
 <body>
-<!-- Overlay -->
 <div id="menu-overlay" class="menu-overlay"></div>
 
-<!-- Header -->
 <header class="header">
-  <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
     <span class="header-title" id="header-wh"></span>
     <div class="header-user">
-      <span id="user-name" class="user-name"></span>
-      <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
-  </div>
+        <span id="user-name" class="user-name"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
 </header>
 
-<!-- Боковое меню -->
 <div id="sidebar" class="sidebar">
     <div class="sidebar-content"></div>
 </div>
 
-<!-- Затем (внизу страницы перед </body>) -->
-<script src="ui.js"></script>
+<main class="wrap home-wrap">
+    <section class="card home-hero">
+        <div class="home-hero-top">
+            <div>
+                <h1 id="personal-greeting">Добро пожаловать!</h1>
+                <p id="personal-subtitle" class="home-hero-subtitle">Готово к работе. Выберите действие ниже.</p>
+            </div>
+            <div class="home-clock">
+                <div id="home-clock-time" class="home-clock-time">--:--:--</div>
+                <div id="home-clock-date" class="home-clock-date">дата</div>
+            </div>
+        </div>
+        <div class="home-stats">
+            <div class="home-stat">
+                <p class="home-stat-label">Склад</p>
+                <p id="hero-wh" class="home-stat-value">-</p>
+            </div>
+            <div class="home-stat">
+                <p class="home-stat-label">ID пользователя</p>
+                <p id="hero-user-id" class="home-stat-value">-</p>
+            </div>
+            <div class="home-stat">
+                <p class="home-stat-label">Доступов</p>
+                <p id="hero-access-count" class="home-stat-value">0</p>
+            </div>
+        </div>
+    </section>
 
+    <section class="grid home-grid">
+        <article class="card">
+            <div class="home-card-head">
+                <h2 class="home-card-title">Быстрые действия</h2>
+                <button id="refresh-quick-links" class="btn btn-outline" type="button">Обновить</button>
+            </div>
+            <p class="muted">Только доступные разделы. Нажмите и сразу переходите в работу.</p>
+            <div id="quick-links" class="home-quick-links"></div>
+            <div id="quick-links-empty" class="home-empty" style="display:none;">
+                Не удалось получить список разделов. Откройте меню слева или нажмите "Обновить".
+            </div>
+        </article>
 
-<!-- Основной контент -->
-<div class="wrap">
-  <div class="card">
-    <h1>Добро пожаловать!</h1>
-    <p>Выберите раздел в боковом меню.</p>
-  </div>
-</div>
+        <article class="card">
+            <h2 class="home-card-title">Быстрый поиск раздела</h2>
+            <p class="muted">Введите название страницы и откройте её по Enter.</p>
+            <input id="home-page-search" class="input home-search-input" type="text" placeholder="Например: Оприходование" autocomplete="off">
+            <div id="home-search-results" class="home-search-results"></div>
+        </article>
+    </section>
 
-<!-- Контейнер уведомлений -->
+    <section class="card">
+        <div class="home-card-head">
+            <h2 class="home-card-title">Заметки на смену</h2>
+            <button id="clear-home-notes" class="btn btn-outline" type="button">Очистить</button>
+        </div>
+        <textarea id="shift-notes" class="input home-notes" placeholder="Сюда можно записать задачи, номера поставок или напоминания..."></textarea>
+        <div id="home-note-status" class="home-note-status">Все изменения сохраняются автоматически.</div>
+    </section>
+</main>
+
 <div id="toasts" class="toasts"></div>
+
+<script src="ui.js"></script>
 <script>
-  console.log('UI script loaded');
+    (function () {
+        const QUICK_LINK_LIMIT = 8;
+        const PREFERRED_URL_ORDER = [
+            "item_identification.html",
+            "shk_info.html",
+            "transfer_to_identification.html",
+            "shk_generator.html",
+            "barcode_generator.html",
+            "profile.html"
+        ];
+
+        const greetingEl = document.getElementById("personal-greeting");
+        const subtitleEl = document.getElementById("personal-subtitle");
+        const clockTimeEl = document.getElementById("home-clock-time");
+        const clockDateEl = document.getElementById("home-clock-date");
+        const heroWhEl = document.getElementById("hero-wh");
+        const heroUserIdEl = document.getElementById("hero-user-id");
+        const heroAccessCountEl = document.getElementById("hero-access-count");
+
+        const quickLinksRoot = document.getElementById("quick-links");
+        const quickLinksEmpty = document.getElementById("quick-links-empty");
+        const refreshQuickLinksBtn = document.getElementById("refresh-quick-links");
+
+        const searchInput = document.getElementById("home-page-search");
+        const searchResultsRoot = document.getElementById("home-search-results");
+
+        const notesInput = document.getElementById("shift-notes");
+        const notesStatusEl = document.getElementById("home-note-status");
+        const clearNotesBtn = document.getElementById("clear-home-notes");
+
+        let availablePages = [];
+        let currentUser = getUser();
+        let notesSaveTimer = null;
+
+        function parseJsonSafe(value, fallback) {
+            try {
+                return JSON.parse(value);
+            } catch {
+                return fallback;
+            }
+        }
+
+        function normalizeAccesses(accesses) {
+            if (Array.isArray(accesses)) return accesses.map(a => String(a).trim()).filter(Boolean);
+            return String(accesses || "")
+                .split(",")
+                .map(a => a.trim())
+                .filter(Boolean);
+        }
+
+        function getUser() {
+            const stored = parseJsonSafe(localStorage.getItem("user"), {}) || {};
+            return {
+                ...stored,
+                accesses: normalizeAccesses(stored.accesses)
+            };
+        }
+
+        function getFirstName(fullName) {
+            const name = String(fullName || "").trim();
+            if (!name) return "коллега";
+            const parts = name.split(/\s+/).filter(Boolean);
+            if (parts.length >= 2) {
+                return parts[1];
+            }
+            return parts[0];
+        }
+
+        const moscowTimeFormatter = new Intl.DateTimeFormat("ru-RU", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+            timeZone: "Europe/Moscow"
+        });
+        const moscowDateFormatter = new Intl.DateTimeFormat("ru-RU", {
+            weekday: "short",
+            day: "2-digit",
+            month: "long",
+            timeZone: "Europe/Moscow"
+        });
+        const moscowHourFormatter = new Intl.DateTimeFormat("ru-RU", {
+            hour: "2-digit",
+            hour12: false,
+            timeZone: "Europe/Moscow"
+        });
+
+        function getGreetingByHour(hour) {
+            if (hour < 12) return "Доброе утро";
+            if (hour < 18) return "Добрый день";
+            return "Добрый вечер";
+        }
+
+        function tickClockAndGreeting() {
+            const now = new Date();
+            const timeText = moscowTimeFormatter.format(now);
+            const dateText = moscowDateFormatter.format(now);
+
+            const userName = currentUser.name || currentUser.fio || "";
+            const firstName = getFirstName(userName);
+            const greet = getGreetingByHour(Number(moscowHourFormatter.format(now)));
+
+            clockTimeEl.textContent = timeText;
+            clockDateEl.textContent = dateText + ", МСК";
+            greetingEl.textContent = greet + ", " + firstName + "!";
+        }
+
+        function updateHeroStats() {
+            currentUser = getUser();
+            const accessCount = currentUser.accesses.length;
+            const whFromHeader = (document.getElementById("header-wh")?.textContent || "").trim();
+            const whName = currentUser.wh_name || whFromHeader || "не указан";
+
+            heroWhEl.textContent = whName;
+            heroUserIdEl.textContent = currentUser.id || "-";
+            heroAccessCountEl.textContent = String(accessCount);
+            subtitleEl.textContent = accessCount > 0
+                ? "Доступно разделов: " + accessCount + ". Используйте быстрые действия ниже."
+                : "Доступы загружаются. Пока можно перейти через боковое меню.";
+        }
+
+        function getPagesFromCache() {
+            const cached = parseJsonSafe(localStorage.getItem("pages_cache"), null);
+            if (!cached) return [];
+
+            if (Array.isArray(cached)) return cached;
+            if (cached && Array.isArray(cached.data)) return cached.data;
+            return [];
+        }
+
+        function isPageAllowed(page, accesses) {
+            if (!page || !page.url) return false;
+            if (page.url === "index.html") return false;
+            if (!page.page) return true;
+            return accesses.includes(page.page);
+        }
+
+        function sortPages(pages) {
+            return pages.slice().sort((a, b) => {
+                const aUrl = String(a.url || "");
+                const bUrl = String(b.url || "");
+                const aPriority = PREFERRED_URL_ORDER.indexOf(aUrl);
+                const bPriority = PREFERRED_URL_ORDER.indexOf(bUrl);
+
+                if (aPriority !== -1 || bPriority !== -1) {
+                    if (aPriority === -1) return 1;
+                    if (bPriority === -1) return -1;
+                    if (aPriority !== bPriority) return aPriority - bPriority;
+                }
+
+                const aTitle = String(a.page_name || a.page || a.url || "");
+                const bTitle = String(b.page_name || b.page || b.url || "");
+                return aTitle.localeCompare(bTitle, "ru");
+            });
+        }
+
+        function dedupeByUrl(pages) {
+            const map = new Map();
+            pages.forEach(page => {
+                const url = String(page.url || "").trim();
+                if (!url || map.has(url)) return;
+                map.set(url, page);
+            });
+            return Array.from(map.values());
+        }
+
+        function getPagesFromSidebar() {
+            const links = Array.from(document.querySelectorAll("#sidebar a[href]"));
+            return links.map(link => {
+                const href = link.getAttribute("href") || "";
+                const label = link.querySelector("span")?.textContent?.trim() || link.textContent.trim();
+                const group = link.closest(".menu-category")?.querySelector(".menu-title")?.textContent?.trim() || "";
+                return {
+                    url: href.split("/").pop(),
+                    page: link.dataset.access || "",
+                    page_name: label,
+                    menu_group: group
+                };
+            });
+        }
+
+        function computeAvailablePages() {
+            const accesses = currentUser.accesses || [];
+
+            const fromCache = dedupeByUrl(
+                getPagesFromCache().filter(page => isPageAllowed(page, accesses))
+            );
+
+            if (fromCache.length > 0) {
+                return sortPages(fromCache);
+            }
+
+            const fromSidebar = dedupeByUrl(
+                getPagesFromSidebar().filter(page => isPageAllowed(page, accesses))
+            );
+
+            return sortPages(fromSidebar);
+        }
+
+        function buildQuickLink(page) {
+            const link = document.createElement("a");
+            link.className = "home-link-tile";
+            link.href = page.url;
+
+            const title = document.createElement("span");
+            title.className = "home-link-title";
+            title.textContent = page.page_name || page.page || page.url;
+
+            const group = document.createElement("span");
+            group.className = "home-link-group";
+            group.textContent = page.menu_group || page.page || "Раздел";
+
+            link.appendChild(title);
+            link.appendChild(group);
+            return link;
+        }
+
+        function renderQuickLinks() {
+            availablePages = computeAvailablePages();
+            quickLinksRoot.innerHTML = "";
+
+            const topPages = availablePages.slice(0, QUICK_LINK_LIMIT);
+            if (topPages.length === 0) {
+                quickLinksEmpty.style.display = "";
+                return;
+            }
+
+            quickLinksEmpty.style.display = "none";
+            topPages.forEach(page => quickLinksRoot.appendChild(buildQuickLink(page)));
+        }
+
+        function buildSearchItem(page) {
+            const item = document.createElement("a");
+            item.className = "home-search-item";
+            item.href = page.url;
+
+            const left = document.createElement("div");
+            const title = document.createElement("div");
+            title.className = "home-search-title";
+            title.textContent = page.page_name || page.page || page.url;
+            left.appendChild(title);
+
+            const right = document.createElement("div");
+            right.className = "home-search-path";
+            right.textContent = page.menu_group || page.url;
+
+            item.appendChild(left);
+            item.appendChild(right);
+            return item;
+        }
+
+        function renderSearchResults() {
+            const query = searchInput.value.trim().toLowerCase();
+            searchResultsRoot.innerHTML = "";
+
+            let items = availablePages;
+            if (query) {
+                items = availablePages.filter(page => {
+                    const haystack = [
+                        page.page_name,
+                        page.page,
+                        page.menu_group,
+                        page.url
+                    ]
+                        .join(" ")
+                        .toLowerCase();
+
+                    return haystack.includes(query);
+                });
+            }
+
+            const subset = items.slice(0, 8);
+            if (subset.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "home-empty";
+                empty.textContent = query
+                    ? "По вашему запросу ничего не найдено."
+                    : "Начните вводить название раздела для быстрого перехода.";
+                searchResultsRoot.appendChild(empty);
+                return;
+            }
+
+            subset.forEach(page => searchResultsRoot.appendChild(buildSearchItem(page)));
+        }
+
+        function getNotesStorageKey() {
+            const userId = currentUser.id || "common";
+            return {
+                textKey: "wms_home_notes_" + userId,
+                tsKey: "wms_home_notes_saved_at_" + userId
+            };
+        }
+
+        function formatSavedTime(ts) {
+            return new Date(ts).toLocaleTimeString("ru-RU", {
+                hour: "2-digit",
+                minute: "2-digit"
+            });
+        }
+
+        function loadNotes() {
+            const keys = getNotesStorageKey();
+            notesInput.value = localStorage.getItem(keys.textKey) || "";
+
+            const savedAt = Number(localStorage.getItem(keys.tsKey) || 0);
+            if (savedAt > 0) {
+                notesStatusEl.textContent = "Сохранено в " + formatSavedTime(savedAt) + ".";
+            } else {
+                notesStatusEl.textContent = "Все изменения сохраняются автоматически.";
+            }
+        }
+
+        function saveNotesNow() {
+            const keys = getNotesStorageKey();
+            const value = notesInput.value;
+            localStorage.setItem(keys.textKey, value);
+
+            const now = Date.now();
+            localStorage.setItem(keys.tsKey, String(now));
+            notesStatusEl.textContent = "Сохранено в " + formatSavedTime(now) + ".";
+        }
+
+        function attachEvents() {
+            refreshQuickLinksBtn.addEventListener("click", () => {
+                updateHeroStats();
+                renderQuickLinks();
+                renderSearchResults();
+            });
+
+            searchInput.addEventListener("input", renderSearchResults);
+            searchInput.addEventListener("keydown", event => {
+                if (event.key !== "Enter") return;
+
+                const first = searchResultsRoot.querySelector("a.home-search-item");
+                if (first) {
+                    window.location.href = first.getAttribute("href");
+                }
+            });
+
+            notesInput.addEventListener("input", () => {
+                if (notesSaveTimer) clearTimeout(notesSaveTimer);
+                notesStatusEl.textContent = "Сохранение...";
+                notesSaveTimer = setTimeout(saveNotesNow, 260);
+            });
+
+            clearNotesBtn.addEventListener("click", () => {
+                if (!window.confirm("Очистить заметки для текущего пользователя?")) return;
+
+                const keys = getNotesStorageKey();
+                notesInput.value = "";
+                localStorage.removeItem(keys.textKey);
+                localStorage.removeItem(keys.tsKey);
+                notesStatusEl.textContent = "Заметки очищены.";
+            });
+
+            const sidebarContent = document.querySelector("#sidebar .sidebar-content");
+            if (sidebarContent) {
+                const observer = new MutationObserver(() => {
+                    renderQuickLinks();
+                    renderSearchResults();
+                });
+                observer.observe(sidebarContent, { childList: true, subtree: true });
+            }
+        }
+
+        function init() {
+            updateHeroStats();
+            tickClockAndGreeting();
+            renderQuickLinks();
+            renderSearchResults();
+            loadNotes();
+            attachEvents();
+
+            setInterval(tickClockAndGreeting, 1000);
+
+            // Обновляем блоки после того, как ui.js подгрузит свежие user/pages.
+            setTimeout(() => {
+                updateHeroStats();
+                renderQuickLinks();
+                renderSearchResults();
+                loadNotes();
+            }, 1200);
+        }
+
+        init();
+    })();
 </script>
 </body>
 </html>
