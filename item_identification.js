@@ -640,7 +640,7 @@
     async function lookupNmRepByShk(shk) {
         const { data, error } = await supabaseClient
             .from("nm_rep")
-            .select("nm, description, shk, date")
+            .select("*")
             .eq("shk", shk)
             .order("date", { ascending: false })
             .limit(1);
@@ -654,6 +654,45 @@
         }
 
         return { ok: true, row: data[0] };
+    }
+
+    async function markNmRepIdentified(nmRepRow, shk) {
+        const ts = (window.MiniUI?.nowIsoPlus3 ? window.MiniUI.nowIsoPlus3() : new Date().toISOString());
+        const payload = {
+            is_identified: 1,
+            date_identified: ts
+        };
+
+        try {
+            const rowId = nmRepRow?.id ?? nmRepRow?.nm_rep_id ?? null;
+            let query = supabaseClient
+                .from("nm_rep")
+                .update(payload);
+
+            if (rowId !== null && rowId !== undefined && String(rowId).trim() !== "") {
+                if (Object.prototype.hasOwnProperty.call(nmRepRow || {}, "id")) {
+                    query = query.eq("id", rowId);
+                } else {
+                    query = query.eq("nm_rep_id", rowId);
+                }
+            } else {
+                query = query.eq("shk", String(shk || "").trim());
+                const rowDate = String(nmRepRow?.date || "").trim();
+                const rowNm = String(nmRepRow?.nm || "").trim();
+                if (rowDate) query = query.eq("date", rowDate);
+                if (rowNm) query = query.eq("nm", rowNm);
+            }
+
+            const { error } = await query;
+            if (error) {
+                console.error("Ошибка обновления nm_rep (is_identified/date_identified):", error);
+                return false;
+            }
+            return true;
+        } catch (e) {
+            console.error("Ошибка обновления nm_rep:", e);
+            return false;
+        }
     }
 
     async function logAwaitingAcceptance(shk) {
@@ -724,8 +763,13 @@
             descriptionValueEl.textContent = description || "—";
             await renderNmQr(nm);
             await logAwaitingAcceptance(parsed.shk);
+            const marked = await markNmRepIdentified(row, parsed.shk);
 
-            MiniUI.toast("Товар найден", { type: "success" });
+            if (marked) {
+                MiniUI.toast("Товар найден", { type: "success" });
+            } else {
+                MiniUI.toast("Товар найден, но статус в nm_rep не обновлен", { type: "error" });
+            }
 
             const token = ++photoLookupToken;
             if (nm) {
