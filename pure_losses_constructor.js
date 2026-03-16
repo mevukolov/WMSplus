@@ -25,9 +25,48 @@ const DONUT_PALETTE = [
     '#355070','#6d597a','#b56576','#e56b6f','#eaac8b',
     '#5c7c8a','#8d6a9f','#c97f92','#d88c7a','#7a8f9f'
 ];
+const NO_BARCODE_SECTION_TITLE = 'Товар "Без ШК" WMS+';
+const NM_ID_COLUMN_CANDIDATES = [
+    'ID номенклатуры',
+    'ID Номенклатуры',
+    'ID НМ',
+    'НМ',
+    'Номенклатура',
+    'nm',
+    'nm_id',
+    'nmId'
+];
+const NO_BARCODE_KEYS = {
+    lossDate: '__no_barcode_loss_date',
+    nmId: '__no_barcode_nm_id',
+    nearestNmRepDate: '__no_barcode_nearest_nm_rep_date',
+    nmRepEmp: '__no_barcode_nm_rep_emp',
+    nmRepMatches: '__no_barcode_nm_rep_matches',
+    nmRepDates: '__no_barcode_nm_rep_dates'
+};
+const NO_BARCODE_DATE_SORT_KEYS = new Set([
+    COL.dtLost,
+    NO_BARCODE_KEYS.lossDate,
+    NO_BARCODE_KEYS.nearestNmRepDate
+]);
+const NO_BARCODE_MODAL_COLUMNS = [
+    { key:NO_BARCODE_KEYS.lossDate, title:'Дата списания' },
+    { key:NO_BARCODE_KEYS.nmId, title:'ID номенклатуры' },
+    { key:NO_BARCODE_KEYS.nearestNmRepDate, title:'Ближайшая дата в nm_rep' },
+    { key:NO_BARCODE_KEYS.nmRepEmp, title:'ID сотрудника emp (nm_rep)' },
+    { key:NO_BARCODE_KEYS.nmRepMatches, title:'Совпадений в nm_rep' },
+    { key:NO_BARCODE_KEYS.nmRepDates, title:'Даты совпадений nm_rep' },
+    { key:COL.product, title:'ШК' },
+    { key:COL.sum, title:'Сумма' },
+    { key:'Родительская категория товара', title:'Категория' },
+    { key:'Подкатегория товара', title:'Подкатегория' },
+    { key:'Бренд', title:'Бренд' }
+];
 
 const writeoffNameById = new Map();
 let writeoffNamesLoaded = false;
+let noBarcodeNmRepCache = { rowsRef:null, promise:null, result:null };
+let noBarcodeRenderToken = 0;
 
 /* ================= FILE ================= */
 
@@ -71,6 +110,7 @@ function handleFile(e){
         const wb = XLSX.read(buf,{type:'array'});
         const sheet = wb.Sheets[wb.SheetNames[0]];
         rows = XLSX.utils.sheet_to_json(sheet,{defval:''});
+        resetNoBarcodeCache();
 
         if(!rows.length){
             MiniUI.toast('Файл пустой',{type:'error'});
@@ -78,6 +118,10 @@ function handleFile(e){
         }
         renderReport();
     });
+}
+
+function resetNoBarcodeCache(){
+    noBarcodeNmRepCache = { rowsRef:null, promise:null, result:null };
 }
 
 function exportAll(){
@@ -1243,14 +1287,90 @@ function renderReport(){
 
     renderSection(container,'Автосписания',auto,'auto');
     renderSection(container,'Ручные списания',manual,'manual');
+    renderNoBarcodeSection(container);
+}
+
+function renderNoBarcodeSection(container){
+    const box = document.createElement('section');
+    box.className = 'status-box';
+    container.appendChild(box);
+
+    const renderToken = ++noBarcodeRenderToken;
+    setNoBarcodeSectionState(box, {
+        count:null,
+        desc:'Загрузка данных из nm_rep...'
+    });
+
+    getNoBarcodeNmRepMatches(rows).then(result=>{
+        if(renderToken !== noBarcodeRenderToken) return;
+
+        const errorText = String(result?.error || '').trim();
+        if(errorText){
+            setNoBarcodeSectionState(box, {
+                count:0,
+                desc:errorText
+            });
+            return;
+        }
+
+        const detailItems = Array.isArray(result?.items) ? result.items : [];
+        setNoBarcodeSectionState(box, {
+            count:detailItems.length,
+            sum:sumField(detailItems, COL.sum),
+            desc:`Проверено строк: ${format(result?.comparedRows || 0)} | Номенклатур: ${format(result?.nmCount || 0)}`,
+            items:detailItems
+        });
+    }).catch(()=>{
+        if(renderToken !== noBarcodeRenderToken) return;
+        setNoBarcodeSectionState(box, {
+            count:0,
+            desc:'Не удалось загрузить данные nm_rep'
+        });
+    });
+}
+
+function setNoBarcodeSectionState(box, state){
+    const count = state?.count;
+    const hasCount = Number.isFinite(count);
+    const sum = state?.sum;
+    const hasSum = Number.isFinite(sum);
+    const isClickable = hasCount && count > 0 && Array.isArray(state?.items) && state.items.length > 0;
+    const valueText = hasCount ? format(count) : '...';
+    const sumText = hasSum ? `₽ ${format(sum)}` : '...';
+    const descText = state?.desc || '—';
+
+    box.innerHTML = `
+<div class="status-header">
+    <div class="status-center" style="grid-column:2;margin:0 auto;text-align:center;">
+        <div class="status-code">${NO_BARCODE_SECTION_TITLE}</div>
+        <div class="status-desc">${escapeHtml(descText)}</div>
+    </div>
+</div>
+
+<div class="status-metrics">
+    <div class="metric ${isClickable ? 'clickable' : ''}" data-open-no-barcode="${isClickable ? '1' : '0'}">
+        <div class="metric-value">${valueText}</div>
+        <div class="metric-label">Совпавшие строки</div>
+    </div>
+    <div class="metric ${isClickable ? 'clickable' : ''}" data-open-no-barcode="${isClickable ? '1' : '0'}">
+        <div class="metric-value">${sumText}</div>
+        <div class="metric-label">Сумма из файла</div>
+    </div>
+</div>
+`;
+
+    box.querySelectorAll('[data-open-no-barcode="1"]').forEach(detailBtn=>{
+        detailBtn.onclick = ()=>{
+            openModal(state.items, NO_BARCODE_SECTION_TITLE, {
+                columns: NO_BARCODE_MODAL_COLUMNS,
+                exportSuffix: 'no_barcode_wms_plus'
+            });
+        };
+    });
 }
 
 function renderSection(container,title,blocks,groupKey){
     if(!blocks.length) return;
-
-    const h = document.createElement('h2');
-    h.textContent = title;
-    container.appendChild(h);
 
     blocks.sort((a,b)=>b.items.length-a.items.length);
     renderGroupOverview(container, title, blocks, groupKey);
@@ -2411,7 +2531,9 @@ function openModal(items,title){
         type:'table',
         items,
         title,
-        lrId: options.lrId || null
+        lrId: options.lrId || null,
+        columns: Array.isArray(options.columns) ? options.columns : null,
+        exportSuffix: options.exportSuffix || ''
     });
 }
 
@@ -2419,7 +2541,9 @@ function renderTableModal(state){
     const title = withLrTitle(state.title, state.lrId);
     currentModalItems = [...state.items];
     currentSort = { key:null, dir:1 };
-    const columns = getDetailTableColumns(state.lrId);
+    const columns = Array.isArray(state.columns) && state.columns.length
+        ? state.columns
+        : getDetailTableColumns(state.lrId);
 
     modalBody.innerHTML=`
 <h2>${title}</h2>
@@ -2439,7 +2563,7 @@ ${columns.map(c=>`<th data-sort="${escapeAttr(c.key)}">${c.title} <span class="s
     const exportBtn = modalBody.querySelector('[data-export="table"]');
     if(exportBtn){
         exportBtn.onclick = ()=>{
-            const suffix = state.lrId ? `lr_${state.lrId}_table` : 'table';
+            const suffix = state.exportSuffix || (state.lrId ? `lr_${state.lrId}_table` : 'table');
             exportItems(state.items, suffix);
         };
     }
@@ -2467,7 +2591,7 @@ function attachModalTableSortHandlers(columns){
             }
 
             currentModalItems.sort((a,b)=>{
-                if(key === COL.dtLost){
+                if(NO_BARCODE_DATE_SORT_KEYS.has(key)){
                     const da = parseDateValue(a[key] || a[COL.dtLost]);
                     const db = parseDateValue(b[key] || b[COL.dtLost]);
                     if(da && db) return (da - db) * currentSort.dir;
@@ -2518,8 +2642,11 @@ function getDetailTableColumns(lrId){
     ];
 }
 function getCellValue(row, key){
-    if(key===COL.dtLost) return normalizeDate(row[key] || row[COL.dtLost]);
+    if(NO_BARCODE_DATE_SORT_KEYS.has(key)){
+        return normalizeDate(row[key] || row[COL.dtLost]) || '—';
+    }
     if(key===COL.sum) return format(row[key]);
+    if(key===NO_BARCODE_KEYS.nmRepMatches) return format(row[key]);
     const v = row[key];
     return (v===undefined || v===null || v==='') ? '—' : escapeHtml(v);
 }
@@ -2603,6 +2730,343 @@ function renderModalState(state, opts){
 }
 
 /* ================= HELPERS ================= */
+
+async function getNoBarcodeNmRepMatches(sourceRows){
+    if(noBarcodeNmRepCache.rowsRef === sourceRows){
+        if(noBarcodeNmRepCache.result){
+            return noBarcodeNmRepCache.result;
+        }
+        if(noBarcodeNmRepCache.promise){
+            return noBarcodeNmRepCache.promise;
+        }
+    }
+
+    const promise = computeNoBarcodeNmRepMatches(sourceRows).then(result=>{
+        noBarcodeNmRepCache = {
+            rowsRef: sourceRows,
+            promise: null,
+            result
+        };
+        return result;
+    }).catch(err=>{
+        const message = String(err?.message || err || 'Не удалось загрузить данные nm_rep');
+        const fallback = {
+            items: [],
+            comparedRows: 0,
+            nmCount: 0,
+            error: message
+        };
+        noBarcodeNmRepCache = {
+            rowsRef: sourceRows,
+            promise: null,
+            result: fallback
+        };
+        return fallback;
+    });
+
+    noBarcodeNmRepCache = {
+        rowsRef: sourceRows,
+        promise,
+        result: null
+    };
+
+    return promise;
+}
+
+async function computeNoBarcodeNmRepMatches(sourceRows){
+    const inputRows = Array.isArray(sourceRows) ? sourceRows : [];
+    if(!inputRows.length){
+        return {
+            items: [],
+            comparedRows: 0,
+            nmCount: 0,
+            error: ''
+        };
+    }
+    if(typeof supabaseClient === 'undefined' || !supabaseClient){
+        return {
+            items: [],
+            comparedRows: 0,
+            nmCount: 0,
+            error: 'Supabase не инициализирован'
+        };
+    }
+
+    const nmIdColumn = resolveNmIdColumn(inputRows);
+    if(!nmIdColumn){
+        return {
+            items: [],
+            comparedRows: 0,
+            nmCount: 0,
+            error: 'В файле не найдена колонка ID номенклатуры'
+        };
+    }
+
+    const prepared = [];
+    inputRows.forEach(row=>{
+        const nmId = getRowNmId(row, nmIdColumn);
+        const lossDate = parseDateValue(row?.[COL.dtLost]);
+        if(!nmId || !lossDate) return;
+        prepared.push({ row, nmId, lossDate });
+    });
+
+    if(!prepared.length){
+        return {
+            items: [],
+            comparedRows: 0,
+            nmCount: 0,
+            error: ''
+        };
+    }
+
+    const uniqueNmIds = Array.from(new Set(prepared.map(x=>x.nmId)));
+    const lossDates = prepared.map(x=>x.lossDate);
+    const minLossDate = new Date(Math.min(...lossDates.map(d=>d.getTime())));
+    const maxLossDate = new Date(Math.max(...lossDates.map(d=>d.getTime())));
+    const fromDate = shiftDateByMonths(minLossDate, -2);
+    const toDate = shiftDateByMonths(maxLossDate, 2);
+
+    const fetchResult = await fetchNmRepRowsForMatch(uniqueNmIds, fromDate, toDate);
+    if(fetchResult.error){
+        return {
+            items: [],
+            comparedRows: prepared.length,
+            nmCount: uniqueNmIds.length,
+            error: fetchResult.error
+        };
+    }
+
+    const nmEntryMap = buildNmRepEntryMap(fetchResult.rows || []);
+    const matchedItems = [];
+
+    prepared.forEach(item=>{
+        const sourceEntries = nmEntryMap.get(item.nmId);
+        if(!sourceEntries?.length) return;
+
+        const dateFrom = shiftDateByMonths(item.lossDate, -2);
+        const dateTo = shiftDateByMonths(item.lossDate, 2);
+        const matchedEntries = getNmRepEntriesInRange(sourceEntries, dateFrom, dateTo);
+        if(!matchedEntries.length) return;
+
+        const nearestEntry = getClosestNmRepEntry(item.lossDate, matchedEntries);
+        const matchedDates = matchedEntries.map(x=>x.date);
+        matchedItems.push({
+            ...item.row,
+            [NO_BARCODE_KEYS.lossDate]: formatDate(item.lossDate),
+            [NO_BARCODE_KEYS.nmId]: item.nmId,
+            [NO_BARCODE_KEYS.nearestNmRepDate]: nearestEntry?.date ? formatDate(nearestEntry.date) : '',
+            [NO_BARCODE_KEYS.nmRepEmp]: nearestEntry?.emp || '',
+            [NO_BARCODE_KEYS.nmRepMatches]: matchedEntries.length,
+            [NO_BARCODE_KEYS.nmRepDates]: summarizeDateList(matchedDates, 5)
+        });
+    });
+
+    return {
+        items: matchedItems,
+        comparedRows: prepared.length,
+        nmCount: uniqueNmIds.length,
+        error: ''
+    };
+}
+
+async function fetchNmRepRowsForMatch(nmIds, fromDate, toDate){
+    const ids = Array.isArray(nmIds) ? nmIds.filter(Boolean) : [];
+    if(!ids.length){
+        return { rows: [], error: null };
+    }
+
+    const chunkSize = 400;
+    const dateFromIso = formatIsoDate(shiftDateByDays(fromDate, -1));
+    const dateToIso = formatIsoDate(shiftDateByDays(toDate, 1));
+    const allRows = [];
+
+    for(let i=0; i<ids.length; i+=chunkSize){
+        const chunk = ids.slice(i, i + chunkSize);
+
+        const { data, error } = await supabaseClient
+            .from('nm_rep')
+            .select('nm, date, emp')
+            .in('nm', chunk)
+            .gte('date', dateFromIso)
+            .lte('date', dateToIso);
+
+        if(error){
+            console.warn('nm_rep load failed', error);
+            return {
+                rows: [],
+                error: 'Ошибка загрузки данных nm_rep'
+            };
+        }
+
+        allRows.push(...(Array.isArray(data) ? data : []));
+    }
+
+    return { rows: allRows, error: null };
+}
+
+function resolveNmIdColumn(inputRows){
+    const sample = inputRows.find(r=>r && typeof r === 'object');
+    if(!sample) return '';
+
+    const keys = Object.keys(sample);
+    for(const key of NM_ID_COLUMN_CANDIDATES){
+        if(keys.includes(key)) return key;
+    }
+
+    const dynamic = keys.find(rawKey=>{
+        const key = String(rawKey || '').trim().toLowerCase();
+        if(!key) return false;
+        if(key === 'nm' || key === 'nm_id' || key === 'nmid') return true;
+        return key.includes('номенклатур') && key.includes('id');
+    });
+    return dynamic || '';
+}
+
+function getRowNmId(row, nmIdColumn){
+    if(row && nmIdColumn && Object.prototype.hasOwnProperty.call(row, nmIdColumn)){
+        return normalizeNmId(row[nmIdColumn]);
+    }
+    for(const key of NM_ID_COLUMN_CANDIDATES){
+        if(row && Object.prototype.hasOwnProperty.call(row, key)){
+            const normalized = normalizeNmId(row[key]);
+            if(normalized) return normalized;
+        }
+    }
+    return '';
+}
+
+function normalizeNmId(value){
+    if(value === null || value === undefined) return '';
+
+    if(typeof value === 'number' && Number.isFinite(value)){
+        if(Number.isInteger(value)) return String(value);
+        return String(value).replace(/\.0+$/,'');
+    }
+
+    const raw = String(value).trim();
+    if(!raw) return '';
+    const compact = raw.replace(/\s+/g,'');
+    if(!compact) return '';
+    if(/^\d+\.0+$/.test(compact)){
+        return compact.replace(/\.0+$/,'');
+    }
+    return compact;
+}
+
+function shiftDateByMonths(date, delta){
+    const source = date instanceof Date ? date : parseDateValue(date);
+    if(!source) return null;
+
+    const day = source.getDate();
+    const first = new Date(source.getFullYear(), source.getMonth() + delta, 1);
+    const maxDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    first.setDate(Math.min(day, maxDay));
+    return first;
+}
+
+function shiftDateByDays(date, delta){
+    const source = date instanceof Date ? date : parseDateValue(date);
+    if(!source) return null;
+    const d = new Date(source.getFullYear(), source.getMonth(), source.getDate());
+    d.setDate(d.getDate() + delta);
+    return d;
+}
+
+function formatIsoDate(date){
+    const d = date instanceof Date ? date : parseDateValue(date);
+    if(!d) return '';
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2,'0');
+    const dd = String(d.getDate()).padStart(2,'0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function buildNmRepEntryMap(nmRepRows){
+    const map = new Map();
+    (nmRepRows || []).forEach(row=>{
+        const nmId = normalizeNmId(row?.nm);
+        const date = parseDateValue(row?.date);
+        if(!nmId || !date) return;
+        if(!map.has(nmId)){
+            map.set(nmId, []);
+        }
+        map.get(nmId).push({
+            date,
+            emp: String(row?.emp || '').trim()
+        });
+    });
+
+    map.forEach((entries, key)=>{
+        entries.sort((a,b)=>a.date - b.date);
+        map.set(key, entries);
+    });
+
+    return map;
+}
+
+function getNmRepEntriesInRange(sortedEntries, fromDate, toDate){
+    if(!Array.isArray(sortedEntries) || !sortedEntries.length || !fromDate || !toDate){
+        return [];
+    }
+    const from = fromDate.getTime();
+    const to = toDate.getTime();
+    const left = lowerBoundNmRepEntry(sortedEntries, from);
+    const right = upperBoundNmRepEntry(sortedEntries, to) - 1;
+    if(left > right || left >= sortedEntries.length || right < 0){
+        return [];
+    }
+    return sortedEntries.slice(left, right + 1);
+}
+
+function lowerBoundNmRepEntry(sortedEntries, targetTime){
+    let left = 0;
+    let right = sortedEntries.length;
+    while(left < right){
+        const mid = (left + right) >> 1;
+        if(sortedEntries[mid].date.getTime() < targetTime){
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    return left;
+}
+
+function upperBoundNmRepEntry(sortedEntries, targetTime){
+    let left = 0;
+    let right = sortedEntries.length;
+    while(left < right){
+        const mid = (left + right) >> 1;
+        if(sortedEntries[mid].date.getTime() <= targetTime){
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    return left;
+}
+
+function getClosestNmRepEntry(targetDate, entries){
+    if(!entries?.length) return null;
+    let best = entries[0];
+    let bestDiff = Math.abs(best.date.getTime() - targetDate.getTime());
+    for(let i=1; i<entries.length; i++){
+        const diff = Math.abs(entries[i].date.getTime() - targetDate.getTime());
+        if(diff < bestDiff || (diff === bestDiff && entries[i].date > best.date)){
+            best = entries[i];
+            bestDiff = diff;
+        }
+    }
+    return best;
+}
+
+function summarizeDateList(dates, limit){
+    const arr = (dates || []).map(formatDate);
+    if(arr.length <= limit){
+        return arr.join(', ');
+    }
+    return `${arr.slice(0, limit).join(', ')} +${arr.length - limit}`;
+}
 
 function countProducts(arr){
     return arr.reduce((s,r)=>s+(r[COL.product]?1:0),0);

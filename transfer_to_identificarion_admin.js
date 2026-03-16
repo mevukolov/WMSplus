@@ -8,6 +8,8 @@
     const searchBtn = document.getElementById("search-btn");
     const exportBtn = document.getElementById("export-btn");
     const summaryWrap = document.getElementById("summary-wrap");
+    const pageTitleEl = document.getElementById("page-title");
+    const headerWhEl = document.getElementById("header-wh");
 
     const detailModal = document.getElementById("detail-modal");
     const detailModalTitle = document.getElementById("detail-modal-title");
@@ -24,6 +26,7 @@
     let lastAntiEmpId = "";
     let lastModalRows = [];
     let lastModalSuffix = "details";
+    let pageTitleObserver = null;
 
     function toast(message, opts) {
         if (window.MiniUI?.toast) {
@@ -37,6 +40,109 @@
         if (window.MiniUI?.setLoaderVisible) {
             window.MiniUI.setLoaderVisible(isLoading);
         }
+    }
+
+    function normalizeKey(value) {
+        return String(value || "").trim();
+    }
+
+    function getWarehouseNameForTitle() {
+        const fromHeader = normalizeKey(headerWhEl?.textContent);
+        if (fromHeader) return fromHeader;
+
+        try {
+            const user = JSON.parse(localStorage.getItem("user") || "null");
+            const fromUser = normalizeKey(user?.wh_name);
+            if (fromUser) return fromUser;
+        } catch {
+            // ignore
+        }
+
+        return "";
+    }
+
+    function getActiveWarehouseId() {
+        try {
+            const user = JSON.parse(localStorage.getItem("user") || "null");
+            const whId = normalizeKey(user?.user_wh_id);
+            return whId || "";
+        } catch {
+            return "";
+        }
+    }
+
+    function updatePageTitle() {
+        if (!pageTitleEl) return;
+        const whName = getWarehouseNameForTitle();
+        pageTitleEl.textContent = whName
+            ? `Опознание товара "Без ШК" - админка (${whName})`
+            : 'Опознание товара "Без ШК" - админка';
+    }
+
+    function bindPageTitleSync() {
+        updatePageTitle();
+        if (!headerWhEl) return;
+        if (pageTitleObserver) pageTitleObserver.disconnect();
+        pageTitleObserver = new MutationObserver(() => updatePageTitle());
+        pageTitleObserver.observe(headerWhEl, {
+            childList: true,
+            characterData: true,
+            subtree: true
+        });
+    }
+
+    function chunkArray(items, chunkSize) {
+        const out = [];
+        for (let i = 0; i < items.length; i += chunkSize) {
+            out.push(items.slice(i, i + chunkSize));
+        }
+        return out;
+    }
+
+    async function fetchPlaceWarehouseMap(placeIds) {
+        const map = new Map();
+        const cleanIds = Array.from(new Set((placeIds || []).map(normalizeKey).filter(Boolean)));
+        if (!cleanIds.length) return map;
+
+        const chunks = chunkArray(cleanIds, 500);
+        for (const idsChunk of chunks) {
+            const { data, error } = await supabaseClient
+                .from("places")
+                .select("place, wh_id")
+                .in("place", idsChunk);
+            if (error) {
+                console.error("Ошибка чтения places:", error);
+                break;
+            }
+            (data || []).forEach((row) => {
+                const place = normalizeKey(row?.place);
+                const whId = normalizeKey(row?.wh_id);
+                if (!place || !whId) return;
+                map.set(place, whId);
+            });
+        }
+
+        return map;
+    }
+
+    async function filterRowsByActiveWarehouse(rows, activeWhId) {
+        const srcRows = Array.isArray(rows) ? rows : [];
+        if (!srcRows.length) return [];
+        const targetWhId = normalizeKey(activeWhId);
+        if (!targetWhId) return [];
+
+        const placeIds = srcRows.map((row) => row?.place);
+        const placeWhMap = await fetchPlaceWarehouseMap(placeIds);
+
+        return srcRows.filter((row) => {
+            const place = normalizeKey(row?.place);
+            if (!place) return false;
+
+            const placeWh = normalizeKey(placeWhMap.get(place));
+            if (!placeWh) return false;
+
+            return placeWh === targetWhId;
+        });
     }
 
     function autoDate(el) {
@@ -158,6 +264,30 @@
         return "-";
     }
 
+    function getIdentifiedState(row) {
+        const raw = row?.is_identified;
+        if (raw === 1 || raw === "1" || raw === true) return 1;
+        if (raw === 0 || raw === "0" || raw === false) return 0;
+
+        const text = String(raw ?? "").trim().toLowerCase();
+        if (text === "true") return 1;
+        if (text === "false") return 0;
+
+        const num = Number(text);
+        if (Number.isFinite(num)) {
+            if (num === 1) return 1;
+            if (num === 0) return 0;
+        }
+        return null;
+    }
+
+    function getIdentifiedLabel(row) {
+        const state = getIdentifiedState(row);
+        if (state === 1) return "Прошло оприход";
+        if (state === 0) return "Ожидает оприхода";
+        return "Не определено";
+    }
+
     function escapeHtml(value) {
         return String(value ?? "")
             .replace(/&/g, "&amp;")
@@ -196,6 +326,7 @@
                 <td>${escapeHtml(getCodeValue(row))}</td>
                 <td>${escapeHtml(getCodeSource(row))}</td>
                 <td>${escapeHtml(row?.operation || "")}</td>
+                <td>${escapeHtml(getIdentifiedLabel(row))}</td>
                 <td>${escapeHtml(row?.emp || "")}</td>
                 <td>${escapeHtml(row?.place || "")}</td>
             `;
@@ -259,6 +390,30 @@
             return;
         }
 
+        if (detailKey === "passed" || detailKey === "waiting") {
+            const targetState = detailKey === "passed" ? 1 : 0;
+            let rows = lastRows.filter((row) => getIdentifiedState(row) === targetState);
+
+            if (opts.dateKey) {
+                rows = rows.filter((row) => toDateKeyMoscow(row?.date) === opts.dateKey);
+                openDetailModal(
+                    `${titles[detailKey]} — ${opts.dateKey}`,
+                    rows,
+                    "За выбранный день данных нет.",
+                    `${detailKey}_${opts.dateKey}`
+                );
+                return;
+            }
+
+            openDetailModal(
+                `${titles[detailKey]} — ${rows.length}`,
+                rows,
+                "Данных нет.",
+                detailKey
+            );
+            return;
+        }
+
         if (detailKey === "top_emp") {
             const emp = lastTopEmpId;
             if (!emp) {
@@ -314,12 +469,19 @@
             if (!key) return;
             byDate[key] ??= { transferred: 0, passed: 0, waiting: 0 };
             byDate[key].transferred += 1;
+
+            const identifiedState = getIdentifiedState(row);
+            if (identifiedState === 1) {
+                byDate[key].passed += 1;
+            } else if (identifiedState === 0) {
+                byDate[key].waiting += 1;
+            }
         });
 
         const labels = Object.keys(byDate).sort();
         const transferred = labels.map((key) => byDate[key].transferred);
-        const passed = labels.map(() => 0);
-        const waiting = labels.map(() => 0);
+        const passed = labels.map((key) => byDate[key].passed);
+        const waiting = labels.map((key) => byDate[key].waiting);
 
         periodChart = new Chart(canvas, {
             type: "line",
@@ -443,6 +605,8 @@
 
     function renderSummary(rows) {
         const total = rows.length;
+        const passedCount = rows.filter((row) => getIdentifiedState(row) === 1).length;
+        const waitingCount = rows.filter((row) => getIdentifiedState(row) === 0).length;
         const uniqueNm = new Set(rows.map((r) => String(r?.nm || "").trim()).filter(Boolean)).size;
         const employees = getEmployeeStats(rows);
         const uniqueEmpCount = employees.length;
@@ -485,11 +649,11 @@
                     <div class="status-side status-side-inline">
                         <div class="status-inline-row">
                             <div class="status-inline-item opp-clickable" data-detail="passed">
-                                <div class="status-big">-</div>
+                                <div class="status-big">${passedCount}</div>
                                 <div class="status-label">Прошло оприход</div>
                             </div>
                             <div class="status-inline-item opp-clickable" data-detail="waiting">
-                                <div class="status-big">-</div>
+                                <div class="status-big">${waitingCount}</div>
                                 <div class="status-label">Ожидает оприхода</div>
                             </div>
                         </div>
@@ -560,6 +724,16 @@
         exportBtn.disabled = true;
 
         try {
+            const activeWhId = getActiveWarehouseId();
+            if (!activeWhId) {
+                toast("Не удалось определить активный склад пользователя", { type: "error" });
+                lastRows = [];
+                renderSummary(lastRows);
+                closeDetailModal();
+                exportBtn.disabled = true;
+                return;
+            }
+
             let query = supabaseClient
                 .from("nm_rep")
                 .select("*")
@@ -575,7 +749,8 @@
                 return;
             }
 
-            lastRows = Array.isArray(data) ? data : [];
+            const rawRows = Array.isArray(data) ? data : [];
+            lastRows = await filterRowsByActiveWarehouse(rawRows, activeWhId);
             renderSummary(lastRows);
             closeDetailModal();
 
@@ -598,6 +773,7 @@
             "ШК/Стикер": getCodeValue(row),
             "Источник кода": getCodeSource(row),
             "Операция": String(row?.operation || ""),
+            "Статус оприхода": getIdentifiedLabel(row),
             "Сотрудник": String(row?.emp || ""),
             "МХ": String(row?.place || "")
         }));
@@ -661,6 +837,7 @@
         autoTime(timeFromEl);
         autoTime(timeToEl);
         applyDefaultPeriod();
+        bindPageTitleSync();
 
         bindModal();
 
