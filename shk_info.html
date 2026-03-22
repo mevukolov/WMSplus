@@ -11,6 +11,90 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="ui.js" defer></script>
     <script src="shk_info.js" defer></script>
+    <style>
+        .shk-info-layout {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+            width: 100%;
+            min-width: 0;
+        }
+
+        .shk-info-main-col {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .twoshk-panel {
+            width: 300px;
+            flex: 0 0 300px;
+            border: 1px solid rgba(15,23,42,0.08);
+            border-radius: 10px;
+            background: #f8fafc;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        .twoshk-title {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .twoshk-body {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .twoshk-card {
+            border: 1px solid rgba(15,23,42,0.08);
+            border-radius: 10px;
+            background: #fff;
+            padding: 9px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 13px;
+            color: #1f2937;
+        }
+
+        .twoshk-main-line {
+            font-weight: 700;
+            word-break: break-word;
+        }
+
+        .twoshk-media-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 2px;
+        }
+
+        .twoshk-photo-btn {
+            padding: 6px 10px;
+            border-radius: 9px;
+            font-size: 12px;
+            text-decoration: none;
+        }
+
+        .twoshk-empty {
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        @media (max-width: 1160px) {
+            .shk-info-layout {
+                flex-direction: column;
+            }
+
+            .twoshk-panel {
+                width: 100%;
+                flex: 1 1 auto;
+            }
+        }
+    </style>
 </head>
 <body>
 
@@ -46,19 +130,30 @@
 
         <div id="identifier-line" style="display:none;margin:16px 0 12px;font-size:24px;font-weight:700;color:#1f2937;"></div>
 
-        <div id="table-wrap"
-             style="display:none;width:100%;min-width:0;padding:0;overflow:auto;border:1px solid rgba(15,23,42,0.06);border-radius:10px;background:#f8fafc;">
-            <div id="history-head"
-                 style="display:grid;grid-template-columns:190px 130px 340px 200px 220px 130px 240px;gap:0;padding:9px 10px;background:#f3f4f6;border-bottom:1px solid rgba(15,23,42,0.08);font-weight:700;font-size:14px;color:#1f2937;min-width:1450px;">
-                <div>Дата</div>
-                <div>ВБ Стикер</div>
-                <div>Описание</div>
-                <div>Блок</div>
-                <div>МХ</div>
-                <div>ID</div>
-                <div>ФИО</div>
+        <div class="shk-info-layout">
+            <div class="shk-info-main-col">
+                <div id="table-wrap"
+                     style="display:none;width:100%;min-width:0;padding:0;overflow:auto;border:1px solid rgba(15,23,42,0.06);border-radius:10px;background:#f8fafc;">
+                    <div id="history-head"
+                         style="display:grid;grid-template-columns:190px 130px 340px 200px 220px 130px 240px;gap:0;padding:9px 10px;background:#f3f4f6;border-bottom:1px solid rgba(15,23,42,0.08);font-weight:700;font-size:14px;color:#1f2937;min-width:1450px;">
+                        <div>Дата</div>
+                        <div>ВБ Стикер</div>
+                        <div>Описание</div>
+                        <div>Блок</div>
+                        <div>МХ</div>
+                        <div>ID</div>
+                        <div>ФИО</div>
+                    </div>
+                    <div id="result-body" style="min-width:1450px;"></div>
+                </div>
             </div>
-            <div id="result-body" style="min-width:1450px;"></div>
+
+            <aside id="twoshk-panel" class="twoshk-panel">
+                <h2 class="twoshk-title">2 ШК и Пустая упаковка</h2>
+                <div id="twoshk-body" class="twoshk-body">
+                    <div class="twoshk-empty">Введите ШК и нажмите «Найти».</div>
+                </div>
+            </aside>
         </div>
     </div>
 </main>

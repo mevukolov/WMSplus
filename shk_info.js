@@ -23,6 +23,8 @@
     const identifierLineEl = document.getElementById("identifier-line");
     const tableWrapEl = document.getElementById("table-wrap");
     const resultBodyEl = document.getElementById("result-body");
+    const twoShkPanelEl = document.getElementById("twoshk-panel");
+    const twoShkBodyEl = document.getElementById("twoshk-body");
 
     const CHECK_SUM_FIRST_SIZE = 4;
     const CHECK_SUM_SECOND_SIZE = 4;
@@ -184,11 +186,28 @@
 
     function fmtDateMsk(value) {
         if (!value) return "";
-        try {
-            return new Date(value).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
-        } catch {
-            return new Date(value).toLocaleString("ru-RU");
-        }
+
+        const raw = String(value).trim();
+        if (!raw) return "";
+
+        // Supabase часто отдает timestamp в UTC (+00). Нормализуем формат и
+        // принудительно рендерим в Europe/Moscow, чтобы пользователь всегда видел +03.
+        let normalized = raw.replace(" ", "T");
+        normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+
+        const hasOffset = /([zZ]|[+-]\d{2}:\d{2}|[+-]\d{2})$/.test(normalized);
+        const date = hasOffset ? new Date(normalized) : new Date(`${normalized}Z`);
+        if (!Number.isFinite(date.getTime())) return raw;
+
+        return new Intl.DateTimeFormat("ru-RU", {
+            timeZone: "Europe/Moscow",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        }).format(date);
     }
 
     function renderUserNameSmall() {
@@ -213,6 +232,16 @@
     function resetTable() {
         resultBodyEl.innerHTML = "";
         tableWrapEl.style.display = "none";
+    }
+
+    function setTwoShkMessage(message) {
+        if (!twoShkBodyEl) return;
+        twoShkBodyEl.innerHTML = "";
+
+        const msgEl = document.createElement("div");
+        msgEl.className = "twoshk-empty";
+        msgEl.textContent = String(message || "");
+        twoShkBodyEl.appendChild(msgEl);
     }
 
     function isUnknownColumnError(error) {
@@ -270,6 +299,30 @@
         return { rows: mergedRows, error: fatalError };
     }
 
+    async function fetchTwoShkRepRows(shk) {
+        const value = String(shk || "").trim();
+        if (!value) return { rows: [], error: null };
+
+        const orExpr = `shk1.eq.${value},shk2.eq.${value}`;
+
+        let { data, error } = await supabaseClient
+            .from("2shk_rep")
+            .select("*")
+            .or(orExpr)
+            .order("created_at", { ascending: false });
+
+        if (error && isUnknownColumnError(error)) {
+            const fallback = await supabaseClient
+                .from("2shk_rep")
+                .select("*")
+                .or(orExpr);
+            data = fallback.data;
+            error = fallback.error;
+        }
+
+        return { rows: Array.isArray(data) ? data : [], error: error || null };
+    }
+
     function normalizeShkRepRows(rows) {
         return (rows || []).map(row => ({
             source: "shk_rep",
@@ -306,6 +359,20 @@
             if (aValid) return -1;
             if (bValid) return 1;
             return String(a?.date || "").localeCompare(String(b?.date || ""));
+        });
+    }
+
+    function sortRowsByDateDesc(rows, keyName) {
+        const key = String(keyName || "");
+        return [...(rows || [])].sort((a, b) => {
+            const aTime = Date.parse(a?.[key] || "");
+            const bTime = Date.parse(b?.[key] || "");
+            const aValid = Number.isFinite(aTime);
+            const bValid = Number.isFinite(bTime);
+            if (aValid && bValid) return bTime - aTime;
+            if (aValid) return -1;
+            if (bValid) return 1;
+            return String(b?.[key] || "").localeCompare(String(a?.[key] || ""));
         });
     }
 
@@ -391,6 +458,92 @@
         return map;
     }
 
+    function parseMediaLinks(mediaValue) {
+        return String(mediaValue || "")
+            .split(",")
+            .map(v => v.trim().replace(/^"+|"+$/g, ""))
+            .filter(Boolean);
+    }
+
+    function normalizeMediaLink(url) {
+        const value = String(url || "").trim();
+        if (!value) return "";
+        if (/^https?:\/\//i.test(value)) return value;
+        if (/^www\./i.test(value)) return `https://${value}`;
+        return value;
+    }
+
+    function normalizeTwoShkRows(rows, whMap) {
+        const normalizedRows = (rows || []).map(row => {
+            const whId = String(row?.wh_id || "").trim();
+            const whName = whMap.get(whId) || "";
+            const createdAt = row?.created_at || row?.date || "";
+            return {
+                shk1: String(row?.shk1 || "").trim(),
+                shk2: String(row?.shk2 || "").trim(),
+                eventtype: String(row?.eventtype || "").trim(),
+                whId: whId,
+                whName: whName,
+                createdAt: createdAt,
+                mediaLinks: parseMediaLinks(row?.media)
+            };
+        });
+
+        return sortRowsByDateDesc(normalizedRows, "createdAt");
+    }
+
+    function renderTwoShkRows(rows) {
+        if (!twoShkBodyEl) return;
+        twoShkBodyEl.innerHTML = "";
+
+        if (!rows.length) {
+            setTwoShkMessage("Совпадений в 2shk_rep не найдено.");
+            return;
+        }
+
+        rows.forEach((row) => {
+            const card = document.createElement("div");
+            card.className = "twoshk-card";
+
+            const lineShk = document.createElement("div");
+            lineShk.className = "twoshk-main-line";
+            lineShk.textContent = `${row.shk1 || "-"} / ${row.shk2 || "-"}`;
+
+            const lineType = document.createElement("div");
+            lineType.textContent = row.eventtype || "-";
+
+            const lineWh = document.createElement("div");
+            lineWh.textContent = row.whName || (row.whId ? `Склад ID: ${row.whId}` : "-");
+
+            const lineCreatedAt = document.createElement("div");
+            lineCreatedAt.textContent = fmtDateMsk(row.createdAt);
+
+            const mediaRow = document.createElement("div");
+            mediaRow.className = "twoshk-media-row";
+
+            if (!row.mediaLinks.length) {
+                const emptyMedia = document.createElement("div");
+                emptyMedia.className = "twoshk-empty";
+                emptyMedia.textContent = "Фото: -";
+                mediaRow.appendChild(emptyMedia);
+            } else {
+                row.mediaLinks.forEach((link, index) => {
+                    const href = normalizeMediaLink(link);
+                    const btn = document.createElement("a");
+                    btn.className = "btn btn-outline twoshk-photo-btn";
+                    btn.textContent = `Фото ${index + 1}`;
+                    btn.href = href || "#";
+                    btn.target = "_blank";
+                    btn.rel = "noopener noreferrer";
+                    mediaRow.appendChild(btn);
+                });
+            }
+
+            card.append(lineShk, lineType, lineWh, lineCreatedAt, mediaRow);
+            twoShkBodyEl.appendChild(card);
+        });
+    }
+
     function renderHistoryRows(rows, placeMap, whMap, empMap) {
         resultBodyEl.innerHTML = "";
 
@@ -463,18 +616,20 @@
             return;
         }
 
+        const shk = parsed.shk;
+        setIdentifierLine(shk);
+        resetTable();
+        setTwoShkMessage("Поиск...");
+        shkInputEl.value = "";
+
         isSearching = true;
         searchBtnEl.disabled = true;
 
-        const shk = parsed.shk;
-        setIdentifierLine("");
-        resetTable();
-        shkInputEl.value = "";
-
         try {
-            const [shkRepResult, nmRepResult] = await Promise.all([
+            const [shkRepResult, nmRepResult, twoShkResult] = await Promise.all([
                 fetchShkRepRows(shk),
-                fetchNmRepRows(shk)
+                fetchNmRepRows(shk),
+                fetchTwoShkRepRows(shk)
             ]);
 
             if (shkRepResult.error) {
@@ -483,6 +638,18 @@
             if (nmRepResult.error) {
                 console.error("Ошибка поиска по nm_rep:", nmRepResult.error);
             }
+            if (twoShkResult.error) {
+                console.error("Ошибка поиска по 2shk_rep:", twoShkResult.error);
+            }
+
+            const twoShkWhIds = Array.from(new Set(
+                (twoShkResult.rows || [])
+                    .map(row => String(row?.wh_id || "").trim())
+                    .filter(Boolean)
+            ));
+            const twoShkWhMap = await fetchWhMap(twoShkWhIds);
+            const twoShkRows = normalizeTwoShkRows(twoShkResult.rows, twoShkWhMap);
+            renderTwoShkRows(twoShkRows);
 
             const allRows = sortRowsByDateAsc([
                 ...normalizeShkRepRows(shkRepResult.rows),
@@ -494,11 +661,11 @@
                     MiniUI.toast("Ошибка связи с базой данных", { type: "error" });
                     return;
                 }
-                MiniUI.toast("В репозитории ШК нет данных о вещи", { type: "info" });
+                if (!twoShkRows.length) {
+                    MiniUI.toast("В репозитории ШК нет данных о вещи", { type: "info" });
+                }
                 return;
             }
-
-            setIdentifierLine(shk);
 
             const [placeResult, empMap] = await Promise.all([
                 fetchPlacesMap(allRows),
@@ -517,7 +684,7 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-        if (!shkInputEl || !searchBtnEl || !identifierLineEl || !tableWrapEl || !resultBodyEl) {
+        if (!shkInputEl || !searchBtnEl || !identifierLineEl || !tableWrapEl || !resultBodyEl || !twoShkPanelEl || !twoShkBodyEl) {
             console.error("Не найдены элементы страницы shk_info");
             return;
         }
@@ -531,6 +698,7 @@
         renderUserNameSmall();
         setIdentifierLine("");
         resetTable();
+        setTwoShkMessage("Введите ШК и нажмите «Найти».");
 
         searchBtnEl.addEventListener("click", handleSearch);
         shkInputEl.addEventListener("keydown", ev => {
