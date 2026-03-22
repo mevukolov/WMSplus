@@ -359,6 +359,31 @@
         return lastRows.filter((row) => toDateKeyMoscow(row?.date) === dateKey);
     }
 
+    function rowsPassedByDateIdentified(dateKey) {
+        return lastRows.filter((row) => (
+            getIdentifiedState(row) === 1 &&
+            toDateKeyMoscow(row?.date_identified) === dateKey
+        ));
+    }
+
+    function rowsWaitingSnapshotByDate(dateKey) {
+        const targetDateKey = String(dateKey || "").trim();
+        if (!targetDateKey) return [];
+
+        return lastRows.filter((row) => {
+            const recognizedDateKey = toDateKeyMoscow(row?.date);
+            if (!recognizedDateKey || recognizedDateKey > targetDateKey) return false;
+
+            const state = getIdentifiedState(row);
+            if (state !== 1) return true;
+
+            const identifiedDateKey = toDateKeyMoscow(row?.date_identified);
+            if (!identifiedDateKey) return true;
+
+            return identifiedDateKey > targetDateKey;
+        });
+    }
+
     function openDetail(detailKey, options) {
         const opts = options || {};
         const titles = {
@@ -395,9 +420,15 @@
             let rows = lastRows.filter((row) => getIdentifiedState(row) === targetState);
 
             if (opts.dateKey) {
-                rows = rows.filter((row) => toDateKeyMoscow(row?.date) === opts.dateKey);
+                if (detailKey === "passed") {
+                    rows = rowsPassedByDateIdentified(opts.dateKey);
+                } else {
+                    rows = rowsWaitingSnapshotByDate(opts.dateKey);
+                }
                 openDetailModal(
-                    `${titles[detailKey]} — ${opts.dateKey}`,
+                    detailKey === "waiting"
+                        ? `${titles[detailKey]} — ${opts.dateKey} (остаток)`
+                        : `${titles[detailKey]} — ${opts.dateKey}`,
                     rows,
                     "За выбранный день данных нет.",
                     `${detailKey}_${opts.dateKey}`
@@ -465,23 +496,32 @@
 
         const byDate = {};
         rows.forEach((row) => {
-            const key = toDateKeyMoscow(row?.date);
-            if (!key) return;
-            byDate[key] ??= { transferred: 0, passed: 0, waiting: 0 };
-            byDate[key].transferred += 1;
+            const recognizedDateKey = toDateKeyMoscow(row?.date);
+            if (recognizedDateKey) {
+                byDate[recognizedDateKey] ??= { transferred: 0, passed: 0 };
+                byDate[recognizedDateKey].transferred += 1;
+            }
 
-            const identifiedState = getIdentifiedState(row);
-            if (identifiedState === 1) {
-                byDate[key].passed += 1;
-            } else if (identifiedState === 0) {
-                byDate[key].waiting += 1;
+            if (getIdentifiedState(row) === 1) {
+                const identifiedDateKey = toDateKeyMoscow(row?.date_identified);
+                if (identifiedDateKey) {
+                    byDate[identifiedDateKey] ??= { transferred: 0, passed: 0 };
+                    byDate[identifiedDateKey].passed += 1;
+                }
             }
         });
 
         const labels = Object.keys(byDate).sort();
         const transferred = labels.map((key) => byDate[key].transferred);
         const passed = labels.map((key) => byDate[key].passed);
-        const waiting = labels.map((key) => byDate[key].waiting);
+        const waiting = [];
+        let waitingBalance = 0;
+        labels.forEach((key) => {
+            waitingBalance += Number(byDate[key].transferred || 0);
+            waitingBalance -= Number(byDate[key].passed || 0);
+            if (waitingBalance < 0) waitingBalance = 0;
+            waiting.push(waitingBalance);
+        });
 
         periodChart = new Chart(canvas, {
             type: "line",
