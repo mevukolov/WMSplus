@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <script src="ui.js" defer></script>
-    <script src="opp_dashboard.js?v=20260322_01" defer></script>
+    <script src="opp_dashboard.js?v=20260323_02" defer></script>
 
     <style>
         .opp-toolbar {
@@ -269,29 +269,56 @@
 
         .opp-month-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 12px;
-            margin-top: 10px;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 6px;
+            margin-top: 8px;
         }
 
         .opp-month-card {
             border: 1px solid rgba(15, 23, 42, 0.08);
             border-radius: 12px;
             background: #f8fafc;
-            padding: 12px;
+            padding: 4px 6px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 54px;
         }
 
         .opp-month-label {
             font-size: 12px;
             color: #64748b;
-            margin-bottom: 6px;
-            line-height: 1.35;
+            margin-bottom: 1px;
+            line-height: 1.2;
+            text-align: center;
         }
 
         .opp-month-value {
-            font-size: 20px;
+            font-size: 16px;
             font-weight: 700;
             color: #0f172a;
+            text-align: center;
+            line-height: 1.15;
+            word-break: break-word;
+        }
+
+        @media (max-width: 1180px) {
+            .opp-month-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 860px) {
+            .opp-month-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 560px) {
+            .opp-month-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         @media (max-width: 760px) {

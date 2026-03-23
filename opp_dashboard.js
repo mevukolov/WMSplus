@@ -79,6 +79,8 @@
     let lastMissingSheets = [];
     let lastShiftDynamics = [];
     let lastCurrentShift = null;
+    let lastPreviousShift = null;
+    let selectedShiftId = "";
     let shiftBreakdownChart = null;
 
     let pageTitleObserver = null;
@@ -482,6 +484,21 @@
         }
 
         return rows[0] || null;
+    }
+
+    function findPreviousShiftItem(shiftRows, currentShift) {
+        const rows = Array.isArray(shiftRows) ? shiftRows : [];
+        if (!rows.length || !currentShift) return null;
+
+        const idx = rows.findIndex((item) => item.shiftId === currentShift.shiftId);
+        if (idx === -1) return null;
+        return rows[idx + 1] || null;
+    }
+
+    function isPreviousShiftButtonAvailable(nowDate) {
+        const now = nowDate instanceof Date ? nowDate : moscowNowDate();
+        const hh = Number(now.getHours());
+        return (hh >= 8 && hh < 10) || (hh >= 20 && hh < 22);
     }
 
     async function fetchPlaceWarehouseMap(placeIds) {
@@ -1683,12 +1700,32 @@
             return;
         }
 
-        const shiftItem = lastCurrentShift;
+        const selectedShift = lastShiftDynamics.find((item) => item.shiftId === selectedShiftId);
+        const shiftItem = selectedShift || lastCurrentShift;
+        if (!shiftItem) {
+            summaryWrap.innerHTML = `
+                ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
+                <section class="status-box" style="margin-top:0;">
+                    <div class="status-header">
+                        <div class="status-center" style="grid-column:1 / -1;">
+                            <div class="status-code" style="font-size:28px;">ОПП - Главная</div>
+                            <div class="status-desc">Текущая смена не найдена в выгрузке</div>
+                        </div>
+                    </div>
+                    <div class="muted">Проверьте, что в Apps Script API возвращается блок shift_dynamics.</div>
+                </section>
+            `;
+            return;
+        }
+
+        selectedShiftId = shiftItem.shiftId;
         const shiftTitle = `${shiftItem.shiftName} ${shiftItem.displayDate}`;
-        const monthFromText = formatDateRu(lastMonthSummary?.from || "");
-        const monthToText = formatDateRu(lastMonthSummary?.to || "");
-        const monthPeriodText = monthFromText && monthToText ? `${monthFromText} - ${monthToText}` : "Текущий месяц";
+        const employeesText = shiftItem.employeeNames?.length ? shiftItem.employeeNames.join(", ") : "-";
         const lagPercent = Math.max(0, 100 - toNumber(lastMonthSummary?.percentBySum));
+        const canShowPreviousButton = isPreviousShiftButtonAvailable(moscowNowDate());
+        const isViewingPrevious = Boolean(lastPreviousShift && shiftItem.shiftId === lastPreviousShift.shiftId);
+        const switchTargetShift = isViewingPrevious ? lastCurrentShift : lastPreviousShift;
+        const showSwitchButton = canShowPreviousButton && Boolean(switchTargetShift);
 
         const statusCardsHtml = (shiftItem.details || []).map((item) => {
             const statusInfo = computeStatusCardLevel(item);
@@ -1721,29 +1758,38 @@
 
         summaryWrap.innerHTML = `
             ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
+            ${showSwitchButton ? `
+                <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+                    <button id="dashboard-prev-shift-btn" class="btn btn-rect" data-shift-id="${escapeHtml(switchTargetShift.shiftId)}">${escapeHtml(`${switchTargetShift.shiftName} ${switchTargetShift.displayDate}`)}</button>
+                </div>
+            ` : ""}
             <section class="status-box" style="margin-top:0;">
                 <div class="status-header">
                     <div class="status-center" style="grid-column:1 / -1;">
                         <div class="status-code" style="font-size:32px;">${escapeHtml(shiftTitle)}</div>
+                        <div class="status-desc">${escapeHtml(employeesText)}</div>
                     </div>
                 </div>
                 <div class="opp-month-grid">
                     <div class="opp-month-card">
-                        <div class="opp-month-label">Разобрано/Всего</div>
+                        <div class="opp-month-label">Разобрано ШК</div>
                         <div class="opp-month-value">${formatNumber(shiftItem.analyzed)} / ${formatNumber(shiftItem.totalDue)}</div>
                     </div>
                     <div class="opp-month-card">
-                        <div class="opp-month-label">Стоимость разобранного/Всего</div>
+                        <div class="opp-month-label">Сумма ШК</div>
                         <div class="opp-month-value">${escapeHtml(formatCurrency(shiftItem.analyzedSumPrice))} / ${escapeHtml(formatCurrency(shiftItem.dueSumPrice))}</div>
                     </div>
                     <div class="opp-month-card">
-                        <div class="opp-month-label">Разобрано дорогостоя/Всего</div>
+                        <div class="opp-month-label">Дорогостой</div>
                         <div class="opp-month-value">${formatNumber(shiftItem.expensiveAnalyzed)} / ${formatNumber(shiftItem.expensiveDueTotal)}</div>
                     </div>
                     <div class="opp-month-card">
-                        <div class="opp-month-label">Отставание (за месяц)</div>
+                        <div class="opp-month-label">Отставание</div>
                         <div class="opp-month-value">${escapeHtml(formatPercent(lagPercent))}</div>
-                        <div class="opp-shift-meta" style="margin-top:6px;">Период: ${escapeHtml(monthPeriodText)}</div>
+                    </div>
+                    <div class="opp-month-card">
+                        <div class="opp-month-label">Опознано</div>
+                        <div class="opp-month-value">${formatNumber(shiftItem.oppRecognizedCount)}</div>
                     </div>
                 </div>
             </section>
@@ -1751,7 +1797,6 @@
                 <div class="status-header">
                     <div class="status-center" style="grid-column:1 / -1;">
                         <div class="status-code" style="font-size:28px;">Статистика по статусам</div>
-                        <div class="status-desc">Только за текущую смену</div>
                     </div>
                 </div>
                 <div class="opp-deadline-grid">
@@ -1797,6 +1842,15 @@
             </section>
         `;
 
+        const switchBtn = document.getElementById("dashboard-prev-shift-btn");
+        if (switchBtn) {
+            switchBtn.addEventListener("click", () => {
+                const targetId = normalizeKey(switchBtn.getAttribute("data-shift-id"));
+                if (!targetId) return;
+                selectedShiftId = targetId;
+                renderSummary();
+            });
+        }
         renderCurrentShiftBreakdownChart(shiftItem);
         renderCurrentShiftTable(shiftItem);
 
@@ -2111,12 +2165,21 @@
                 console.warn("Не удалось загрузить месячные итоги:", error instanceof Error ? error.message : error);
                 return null;
             });
-            const [report, monthReport] = await Promise.all([reportPromise, monthReportPromise]);
+            const oppPromise = fetchOppRecognizedCountsByShift(shiftPeriod).catch((error) => {
+                console.warn("Не удалось загрузить опознания ОПП по сменам:", error instanceof Error ? error.message : error);
+                return {};
+            });
+            const [report, monthReport, oppByShift] = await Promise.all([reportPromise, monthReportPromise, oppPromise]);
             lastRows = report.rows;
             lastSummary = report.summary;
             lastTodayDeadline = report.todayDeadline;
-            lastShiftDynamics = Array.isArray(report.shiftDynamics) ? report.shiftDynamics : [];
+            lastShiftDynamics = attachOppCountsToShiftDynamics(
+                Array.isArray(report.shiftDynamics) ? report.shiftDynamics : [],
+                oppByShift
+            );
             lastCurrentShift = findCurrentShiftItem(lastShiftDynamics);
+            lastPreviousShift = findPreviousShiftItem(lastShiftDynamics, lastCurrentShift);
+            selectedShiftId = lastCurrentShift?.shiftId || "";
             const monthRowsFallback = lastShiftDynamics.filter((item) => {
                 const d = parseIsoDate(item?.date);
                 return d && d >= monthPeriod.from && d <= monthPeriod.to;
@@ -2159,6 +2222,8 @@
             lastTodayDeadline = null;
             lastShiftDynamics = [];
             lastCurrentShift = null;
+            lastPreviousShift = null;
+            selectedShiftId = "";
             lastMissingSheets = [];
             destroyCurrentShiftBreakdownChart();
         } finally {
