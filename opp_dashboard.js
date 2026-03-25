@@ -4,6 +4,9 @@
     const API_DATA_TYPE = "opp_table_analisys_script";
     const DEADLINES_DATA_TYPE = "opp_table_deadlines";
     const EMPLOYEES_DATA_TYPE = "opp_table_employees";
+    const REPORT_CACHE_TABLE = "opp_reports_cache";
+    const CACHE_SCOPE_DASHBOARD_SHIFT = "opp_dashboard_shift";
+    const CACHE_SCOPE_DASHBOARD_MONTH = "opp_dashboard_month";
     const SUPPORTED_DEADLINE_KEYS = ["SPS_WMI", "SMC", "SMS", "WMI_BZ", "RWP", "24", "ORS", "REPACK"];
     const MAIN_EMPLOYEE_KEYS_FOR_CARD = new Set(["REPACK", "SPS_WMI", "WMI_BZ", "SMC", "SMS", "RWP"]);
     const DEADLINE_LABELS = {
@@ -78,9 +81,11 @@
     let lastTodayDeadline = null;
     let lastMissingSheets = [];
     let lastShiftDynamics = [];
+    let lastMonthShiftDynamics = [];
     let lastCurrentShift = null;
     let lastPreviousShift = null;
     let selectedShiftId = "";
+    let lastReportGeneratedAtText = "";
     let shiftBreakdownChart = null;
 
     let pageTitleObserver = null;
@@ -252,6 +257,8 @@
         const expensiveAnalyzed = toNumber(item?.expensiveAnalyzed);
         const dueSum = toNumber(item?.dueSumPrice);
         const analyzedSum = toNumber(item?.analyzedSumPrice);
+        const uploadStatus = normalizeKey(item?.uploadStatus || item?.upload_status);
+        const hasUpload = !uploadStatus || /есть/i.test(uploadStatus);
 
         const expensivePct = expensiveDue > 0 ? (expensiveAnalyzed / expensiveDue) * 100 : null;
         const sumPct = dueSum > 0 ? (analyzedSum / dueSum) * 100 : null;
@@ -266,7 +273,60 @@
             else if (sumPct < 85 && level !== "red") level = "yellow";
         }
 
-        return { level, expensivePct, sumPct };
+        if (!hasUpload) {
+            level = "red";
+        }
+
+        return { level, expensivePct, sumPct, hasUpload };
+    }
+
+    function calcLagPercent(analyzed, total) {
+        const totalNum = toNumber(total);
+        const analyzedNum = toNumber(analyzed);
+        if (totalNum <= 0) return null;
+        const pct = (analyzedNum / totalNum) * 100;
+        return Math.max(0, 100 - pct);
+    }
+
+    function buildMonthLagByStatus(monthShiftDynamics) {
+        const rows = Array.isArray(monthShiftDynamics) ? monthShiftDynamics : [];
+        const keysBase = getConfiguredDeadlineKeys();
+        const keys = keysBase.length ? keysBase : SUPPORTED_DEADLINE_KEYS.slice();
+        const map = new Map();
+
+        keys.forEach((key) => {
+            map.set(key, {
+                key,
+                label: DEADLINE_LABELS[key] || key,
+                dueSumPrice: 0,
+                analyzedSumPrice: 0
+            });
+        });
+
+        rows.forEach((shift) => {
+            const details = Array.isArray(shift?.details) ? shift.details : [];
+            details.forEach((item) => {
+                const key = normalizeDeadlineKey(item?.key);
+                if (!key || !map.has(key)) return;
+                const target = map.get(key);
+                target.dueSumPrice += toNumber(item?.dueSumPrice);
+                target.analyzedSumPrice += toNumber(item?.analyzedSumPrice);
+            });
+        });
+
+        return keys.map((key) => {
+            const item = map.get(key) || {
+                key,
+                label: DEADLINE_LABELS[key] || key,
+                dueSumPrice: 0,
+                analyzedSumPrice: 0
+            };
+            return {
+                key: item.key,
+                label: item.label,
+                lagPercent: calcLagPercent(item.analyzedSumPrice, item.dueSumPrice)
+            };
+        });
     }
 
     function getUserFromLocalStorage() {
@@ -1329,6 +1389,18 @@
             });
     }
 
+    function normalizeReportPayload(payload) {
+        const rows = normalizeApiRows(payload);
+        const summary = normalizeSummary(payload, rows);
+        const todayDeadline = normalizeTodayDeadline(payload);
+        const shiftDynamics = normalizeShiftDynamics(payload);
+        const missingSheets = Array.isArray(payload?.missing_sheets) ? payload.missing_sheets.filter(Boolean) : [];
+        const generatedAtRaw = normalizeKey(payload?.generated_at || payload?.generatedAt);
+        const generatedAtText = formatDateTimeRu(generatedAtRaw) || generatedAtRaw || "";
+
+        return { rows, summary, todayDeadline, shiftDynamics, missingSheets, generatedAtText };
+    }
+
     async function fetchReport(period) {
         if (!currentApiUrl) {
             throw new Error("URL Apps Script API не определён.");
@@ -1353,13 +1425,78 @@
             throw new Error(payload?.error || `HTTP ${response.status}`);
         }
 
-        const rows = normalizeApiRows(payload);
-        const summary = normalizeSummary(payload, rows);
-        const todayDeadline = normalizeTodayDeadline(payload);
-        const shiftDynamics = normalizeShiftDynamics(payload);
-        const missingSheets = Array.isArray(payload?.missing_sheets) ? payload.missing_sheets.filter(Boolean) : [];
+        return normalizeReportPayload(payload);
+    }
 
-        return { rows, summary, todayDeadline, shiftDynamics, missingSheets };
+    function isCacheFresh(cacheRow) {
+        const staleAfterRaw = normalizeKey(cacheRow?.stale_after);
+        const refreshedRaw = normalizeKey(cacheRow?.refreshed_at);
+        const staleAfterMs = staleAfterRaw ? new Date(staleAfterRaw).getTime() : NaN;
+        if (Number.isFinite(staleAfterMs)) {
+            return staleAfterMs > Date.now();
+        }
+        const refreshedMs = refreshedRaw ? new Date(refreshedRaw).getTime() : NaN;
+        if (Number.isFinite(refreshedMs)) {
+            return (Date.now() - refreshedMs) <= 30 * 60 * 1000;
+        }
+        return false;
+    }
+
+    function parseReportFromCacheRow(cacheRow) {
+        const payload = parseMaybeJson(cacheRow?.payload);
+        if (!payload || typeof payload !== "object") return null;
+        try {
+            const report = normalizeReportPayload(payload);
+            if (!normalizeKey(report?.generatedAtText)) {
+                const fallbackRaw = normalizeKey(cacheRow?.source_generated_at || cacheRow?.refreshed_at);
+                report.generatedAtText = formatDateTimeRu(fallbackRaw) || fallbackRaw || "";
+            }
+            return report;
+        } catch (error) {
+            console.warn("Некорректный payload в кэше OPP:", error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
+    async function fetchCachedReportRow(period, cacheScope) {
+        if (!window.supabaseClient || !currentWhId) return null;
+
+        const { data, error } = await window.supabaseClient
+            .from(REPORT_CACHE_TABLE)
+            .select("payload, refreshed_at, stale_after, source_generated_at")
+            .eq("wh_id", normalizeKey(currentWhId))
+            .eq("cache_scope", normalizeKey(cacheScope))
+            .eq("date_from", parseIsoDate(period?.from))
+            .eq("date_to", parseIsoDate(period?.to))
+            .maybeSingle();
+
+        if (error) {
+            console.warn("Не удалось прочитать кэш OPP из Supabase:", error.message || error);
+            return null;
+        }
+        return data || null;
+    }
+
+    async function fetchReportWithCache(period, cacheScope) {
+        const cacheRow = await fetchCachedReportRow(period, cacheScope).catch(() => null);
+        const cachedReport = parseReportFromCacheRow(cacheRow);
+        if (cachedReport && isCacheFresh(cacheRow)) {
+            return cachedReport;
+        }
+
+        if (cachedReport) {
+            // Возвращаем устаревший кэш сразу, чтобы не блокировать UI медленным API.
+            fetchReport(period)
+                .then(() => {
+                    // no-op: новые данные подтянутся при следующем обновлении страницы
+                })
+                .catch((error) => {
+                    console.warn("Не удалось обновить устаревший кэш OPP в фоне:", error instanceof Error ? error.message : error);
+                });
+            return cachedReport;
+        }
+
+        return await fetchReport(period);
     }
 
     function attachOppCountsToShiftDynamics(shiftDynamics, countsByShift) {
@@ -1584,7 +1721,7 @@
         if (!sorted.length || typeof Chart === "undefined") {
             wrap.style.display = "none";
             empty.style.display = "";
-            empty.textContent = "Нет данных по статусам разбора за текущую смену.";
+            empty.textContent = "Нет данных по статусам разбора за смену.";
             return;
         }
 
@@ -1609,7 +1746,7 @@
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { position: "bottom" },
-                    title: { display: true, text: "Статусы разбора за текущую смену" },
+                    title: { display: true, text: "Статусы разбора за смену" },
                     tooltip: {
                         callbacks: {
                             label: (ctx) => {
@@ -1675,6 +1812,32 @@
         tableWrap.style.display = "";
     }
 
+    function renderLagPanel() {
+        const panel = document.getElementById("dashboard-lag-panel-content");
+        if (!panel) return;
+
+        const overallLag = Math.max(0, 100 - toNumber(lastMonthSummary?.percentBySum));
+        const lagBySheets = buildMonthLagByStatus(lastMonthShiftDynamics)
+            .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+        const lagBySheetsHtml = lagBySheets.map((entry) => {
+            const valueText = entry.lagPercent === null ? "—" : formatPercent(entry.lagPercent);
+            return `
+                <div class="opp-lag-item">
+                    <span class="opp-lag-item-key" title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</span>
+                    <span class="opp-lag-item-value">${escapeHtml(valueText)}</span>
+                </div>
+            `;
+        }).join("");
+
+        panel.innerHTML = `
+            <div class="opp-lag-main-title">Отставание (общее)</div>
+            <div class="opp-lag-main-value">${escapeHtml(formatPercent(overallLag))}</div>
+            <div class="opp-lag-list">
+                ${lagBySheetsHtml || '<div class="muted" style="font-size:11px;">Нет данных по листам</div>'}
+            </div>
+        `;
+    }
+
     function renderSummary() {
         if (!summaryWrap) return;
 
@@ -1683,9 +1846,13 @@
         const missingSheetsText = lastMissingSheets.length
             ? `В таблице не найдены листы: ${lastMissingSheets.map((v) => escapeHtml(String(v))).join(", ")}`
             : "";
+        const generatedText = normalizeKey(lastReportGeneratedAtText);
 
         if (!lastCurrentShift) {
+            renderLagPanel();
+            renderCurrentShiftBreakdownChart(null);
             summaryWrap.innerHTML = `
+                ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Актуально на: ${escapeHtml(generatedText)}</div>` : ""}
                 ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
                 <section class="status-box" style="margin-top:0;">
                     <div class="status-header">
@@ -1703,6 +1870,8 @@
         const selectedShift = lastShiftDynamics.find((item) => item.shiftId === selectedShiftId);
         const shiftItem = selectedShift || lastCurrentShift;
         if (!shiftItem) {
+            renderLagPanel();
+            renderCurrentShiftBreakdownChart(null);
             summaryWrap.innerHTML = `
                 ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
                 <section class="status-box" style="margin-top:0;">
@@ -1721,7 +1890,6 @@
         selectedShiftId = shiftItem.shiftId;
         const shiftTitle = `${shiftItem.shiftName} ${shiftItem.displayDate}`;
         const employeesText = shiftItem.employeeNames?.length ? shiftItem.employeeNames.join(", ") : "-";
-        const lagPercent = Math.max(0, 100 - toNumber(lastMonthSummary?.percentBySum));
         const canShowPreviousButton = isPreviousShiftButtonAvailable(moscowNowDate());
         const isViewingPrevious = Boolean(lastPreviousShift && shiftItem.shiftId === lastPreviousShift.shiftId);
         const switchTargetShift = isViewingPrevious ? lastCurrentShift : lastPreviousShift;
@@ -1734,8 +1902,13 @@
             const percent = item.dueTotal > 0 ? (item.analyzed / item.dueTotal) * 100 : 0;
             const sumPct = item.dueSumPrice > 0 ? (item.analyzedSumPrice / item.dueSumPrice) * 100 : null;
             const expensivePct = item.expensiveDueTotal > 0 ? (item.expensiveAnalyzed / item.expensiveDueTotal) * 100 : null;
+            const uploadTitle = statusInfo.hasUpload ? "Выгрузка есть" : "Нет выгрузки";
+            const uploadClass = statusInfo.hasUpload ? "ok" : "bad";
+            const uploadIcon = statusInfo.hasUpload ? "✓" : "✕";
+            const employeeText = item.employeeNames?.length ? item.employeeNames.join(", ") : "—";
             return `
                 <div class="opp-deadline-card ${statusClass}">
+                    <span class="opp-upload-indicator ${uploadClass}" title="${escapeHtml(uploadTitle)}">${uploadIcon}</span>
                     <div class="opp-deadline-key">${escapeHtml(item.displayKey)}</div>
                     <div class="opp-deadline-target">${escapeHtml(dueLabelShort)}</div>
                     <div class="opp-deadline-progress">
@@ -1752,11 +1925,13 @@
                 ? `Дорогостой: ${formatNumber(item.expensiveAnalyzed)} / ${formatNumber(item.expensiveDueTotal)}${expensivePct === null ? "" : ` (${escapeHtml(formatPercent(expensivePct))})`}`
                 : "Дорогостой: без детализации"}
                     </div>
+                    <div class="opp-deadline-employees">${escapeHtml(employeeText)}</div>
                 </div>
             `;
         }).join("");
 
         summaryWrap.innerHTML = `
+            ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Актуально на: ${escapeHtml(generatedText)}</div>` : ""}
             ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
             ${showSwitchButton ? `
                 <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
@@ -1770,7 +1945,7 @@
                         <div class="status-desc">${escapeHtml(employeesText)}</div>
                     </div>
                 </div>
-                <div class="opp-month-grid">
+                <div class="opp-month-grid opp-month-grid-main">
                     <div class="opp-month-card">
                         <div class="opp-month-label">Разобрано ШК</div>
                         <div class="opp-month-value">${formatNumber(shiftItem.analyzed)} / ${formatNumber(shiftItem.totalDue)}</div>
@@ -1782,10 +1957,6 @@
                     <div class="opp-month-card">
                         <div class="opp-month-label">Дорогостой</div>
                         <div class="opp-month-value">${formatNumber(shiftItem.expensiveAnalyzed)} / ${formatNumber(shiftItem.expensiveDueTotal)}</div>
-                    </div>
-                    <div class="opp-month-card">
-                        <div class="opp-month-label">Отставание</div>
-                        <div class="opp-month-value">${escapeHtml(formatPercent(lagPercent))}</div>
                     </div>
                     <div class="opp-month-card">
                         <div class="opp-month-label">Опознано</div>
@@ -1803,43 +1974,6 @@
                     ${statusCardsHtml || '<div class="muted">По текущей смене нет данных по статусам.</div>'}
                 </div>
             </section>
-            <section class="status-box" style="margin-top:12px;">
-                <div class="status-header">
-                    <div class="status-center" style="grid-column:1 / -1;">
-                        <div class="status-code" style="font-size:28px;">Круговая диаграмма</div>
-                        <div class="status-desc">Статусы разбора за текущую смену</div>
-                    </div>
-                </div>
-                <div id="dashboard-breakdown-wrap" class="opp-breakdown-wrap" style="display:none;">
-                    <canvas id="dashboard-breakdown-chart"></canvas>
-                </div>
-                <div id="dashboard-breakdown-empty" class="muted" style="display:none;"></div>
-            </section>
-            <section class="status-box" style="margin-top:12px;">
-                <div class="status-header">
-                    <div class="status-center" style="grid-column:1 / -1;">
-                        <div class="status-code" style="font-size:28px;">Детализация текущей смены</div>
-                    </div>
-                </div>
-                <div id="dashboard-shift-table-wrap"
-                     style="max-height:520px;overflow:auto;border-radius:10px;border:1px solid rgba(15,23,42,0.06);display:none;">
-                    <table class="table modal-table" style="min-width:1180px;">
-                        <thead>
-                        <tr>
-                            <th>Листы</th>
-                            <th>Должно быть разобрано</th>
-                            <th>Разобрано / Требовалось</th>
-                            <th>Сумма (разобр. / треб.), ₽</th>
-                            <th>Дорогостой (разобр. / треб.)</th>
-                            <th>Сотрудники</th>
-                            <th>Статус выгрузки</th>
-                        </tr>
-                        </thead>
-                        <tbody id="dashboard-shift-table-body"></tbody>
-                    </table>
-                </div>
-                <div id="dashboard-shift-table-empty" class="muted" style="display:none;margin-top:6px;"></div>
-            </section>
         `;
 
         const switchBtn = document.getElementById("dashboard-prev-shift-btn");
@@ -1851,8 +1985,8 @@
                 renderSummary();
             });
         }
+        renderLagPanel();
         renderCurrentShiftBreakdownChart(shiftItem);
-        renderCurrentShiftTable(shiftItem);
 
     }
 
@@ -2146,24 +2280,31 @@
         const todayIso = toIsoDate(moscowNowDate());
         const monthPeriod = getMonthPeriodByDate(todayIso);
         const shiftPeriod = {
-            from: shiftIsoDate(monthPeriod.from, -1) || monthPeriod.from,
+            from: shiftIsoDate(todayIso, -1) || monthPeriod.from,
             to: monthPeriod.to
         };
         lastPeriod = shiftPeriod;
 
         setLoading(true);
         setErrors([]);
-        setStatus("Загружаю данные из Google Apps Script API...", "");
+        setStatus("Загружаю данные (кэш Supabase / Google Apps Script API)...", "");
 
         try {
             if (!currentApiUrl) {
                 await loadWarehouseConfig();
             }
 
-            const reportPromise = fetchReport(shiftPeriod);
-            const monthReportPromise = fetchReport(monthPeriod).catch((error) => {
+            const monthReportPromise = fetchReportWithCache(monthPeriod, CACHE_SCOPE_DASHBOARD_MONTH).catch((error) => {
                 console.warn("Не удалось загрузить месячные итоги:", error instanceof Error ? error.message : error);
                 return null;
+            });
+            const reportPromise = fetchReportWithCache(shiftPeriod, CACHE_SCOPE_DASHBOARD_SHIFT).catch(async (error) => {
+                console.warn("Не удалось загрузить scope opp_dashboard_shift, пробую fallback через opp_dashboard_month:", error instanceof Error ? error.message : error);
+                const fallbackMonthReport = await monthReportPromise;
+                if (fallbackMonthReport) {
+                    return fallbackMonthReport;
+                }
+                throw error;
             });
             const oppPromise = fetchOppRecognizedCountsByShift(shiftPeriod).catch((error) => {
                 console.warn("Не удалось загрузить опознания ОПП по сменам:", error instanceof Error ? error.message : error);
@@ -2173,6 +2314,7 @@
             lastRows = report.rows;
             lastSummary = report.summary;
             lastTodayDeadline = report.todayDeadline;
+            lastReportGeneratedAtText = report.generatedAtText || "";
             lastShiftDynamics = attachOppCountsToShiftDynamics(
                 Array.isArray(report.shiftDynamics) ? report.shiftDynamics : [],
                 oppByShift
@@ -2184,8 +2326,11 @@
                 const d = parseIsoDate(item?.date);
                 return d && d >= monthPeriod.from && d <= monthPeriod.to;
             });
+            lastMonthShiftDynamics = Array.isArray(monthReport?.shiftDynamics)
+                ? monthReport.shiftDynamics
+                : monthRowsFallback;
             lastMonthSummary = buildMonthSummaryFromShiftDynamics(
-                monthReport?.shiftDynamics || monthRowsFallback,
+                lastMonthShiftDynamics,
                 monthPeriod
             );
             lastMissingSheets = report.missingSheets;
@@ -2221,9 +2366,11 @@
             };
             lastTodayDeadline = null;
             lastShiftDynamics = [];
+            lastMonthShiftDynamics = [];
             lastCurrentShift = null;
             lastPreviousShift = null;
             selectedShiftId = "";
+            lastReportGeneratedAtText = "";
             lastMissingSheets = [];
             destroyCurrentShiftBreakdownChart();
         } finally {

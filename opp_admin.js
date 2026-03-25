@@ -4,6 +4,9 @@
     const API_DATA_TYPE = "opp_table_analisys_script";
     const DEADLINES_DATA_TYPE = "opp_table_deadlines";
     const EMPLOYEES_DATA_TYPE = "opp_table_employees";
+    const REPORT_CACHE_TABLE = "opp_reports_cache";
+    const CACHE_SCOPE_ADMIN = "opp_admin";
+    const CACHE_SCOPE_DASHBOARD_MONTH = "opp_dashboard_month";
     const SUPPORTED_DEADLINE_KEYS = ["SPS_WMI", "SMC", "SMS", "WMI_BZ", "RWP", "24", "ORS", "REPACK"];
     const MAIN_EMPLOYEE_KEYS_FOR_CARD = new Set(["REPACK", "SPS_WMI", "WMI_BZ", "SMC", "SMS", "RWP"]);
     const DEADLINE_LABELS = {
@@ -78,6 +81,7 @@
     let lastTodayDeadline = null;
     let lastMissingSheets = [];
     let lastShiftDynamics = [];
+    let lastReportGeneratedAtText = "";
     let shiftBreakdownChart = null;
 
     let pageTitleObserver = null;
@@ -1294,6 +1298,18 @@
             });
     }
 
+    function normalizeReportPayload(payload) {
+        const rows = normalizeApiRows(payload);
+        const summary = normalizeSummary(payload, rows);
+        const todayDeadline = normalizeTodayDeadline(payload);
+        const shiftDynamics = normalizeShiftDynamics(payload);
+        const missingSheets = Array.isArray(payload?.missing_sheets) ? payload.missing_sheets.filter(Boolean) : [];
+        const generatedAtRaw = normalizeKey(payload?.generated_at || payload?.generatedAt);
+        const generatedAtText = formatDateTimeRu(generatedAtRaw) || generatedAtRaw || "";
+
+        return { rows, summary, todayDeadline, shiftDynamics, missingSheets, generatedAtText };
+    }
+
     async function fetchReport(period) {
         if (!currentApiUrl) {
             throw new Error("URL Apps Script API не определён.");
@@ -1318,13 +1334,78 @@
             throw new Error(payload?.error || `HTTP ${response.status}`);
         }
 
-        const rows = normalizeApiRows(payload);
-        const summary = normalizeSummary(payload, rows);
-        const todayDeadline = normalizeTodayDeadline(payload);
-        const shiftDynamics = normalizeShiftDynamics(payload);
-        const missingSheets = Array.isArray(payload?.missing_sheets) ? payload.missing_sheets.filter(Boolean) : [];
+        return normalizeReportPayload(payload);
+    }
 
-        return { rows, summary, todayDeadline, shiftDynamics, missingSheets };
+    function isCacheFresh(cacheRow) {
+        const staleAfterRaw = normalizeKey(cacheRow?.stale_after);
+        const refreshedRaw = normalizeKey(cacheRow?.refreshed_at);
+        const staleAfterMs = staleAfterRaw ? new Date(staleAfterRaw).getTime() : NaN;
+        if (Number.isFinite(staleAfterMs)) {
+            return staleAfterMs > Date.now();
+        }
+        const refreshedMs = refreshedRaw ? new Date(refreshedRaw).getTime() : NaN;
+        if (Number.isFinite(refreshedMs)) {
+            return (Date.now() - refreshedMs) <= 30 * 60 * 1000;
+        }
+        return false;
+    }
+
+    function parseReportFromCacheRow(cacheRow) {
+        const payload = parseMaybeJson(cacheRow?.payload);
+        if (!payload || typeof payload !== "object") return null;
+        try {
+            const report = normalizeReportPayload(payload);
+            if (!normalizeKey(report?.generatedAtText)) {
+                const fallbackRaw = normalizeKey(cacheRow?.source_generated_at || cacheRow?.refreshed_at);
+                report.generatedAtText = formatDateTimeRu(fallbackRaw) || fallbackRaw || "";
+            }
+            return report;
+        } catch (error) {
+            console.warn("Некорректный payload в кэше OPP:", error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
+    async function fetchCachedReportRow(period, cacheScope) {
+        if (!window.supabaseClient || !currentWhId) return null;
+
+        const { data, error } = await window.supabaseClient
+            .from(REPORT_CACHE_TABLE)
+            .select("payload, refreshed_at, stale_after, source_generated_at")
+            .eq("wh_id", normalizeKey(currentWhId))
+            .eq("cache_scope", normalizeKey(cacheScope))
+            .eq("date_from", parseIsoDate(period?.from))
+            .eq("date_to", parseIsoDate(period?.to))
+            .maybeSingle();
+
+        if (error) {
+            console.warn("Не удалось прочитать кэш OPP из Supabase:", error.message || error);
+            return null;
+        }
+        return data || null;
+    }
+
+    async function fetchReportWithCache(period, cacheScope) {
+        const cacheRow = await fetchCachedReportRow(period, cacheScope).catch(() => null);
+        const cachedReport = parseReportFromCacheRow(cacheRow);
+        if (cachedReport && isCacheFresh(cacheRow)) {
+            return cachedReport;
+        }
+
+        if (cachedReport) {
+            // Возвращаем устаревший кэш сразу, чтобы не блокировать UI медленным API.
+            fetchReport(period)
+                .then(() => {
+                    // no-op: новые данные подтянутся при следующем обновлении страницы/поиске
+                })
+                .catch((error) => {
+                    console.warn("Не удалось обновить устаревший кэш OPP в фоне:", error instanceof Error ? error.message : error);
+                });
+            return cachedReport;
+        }
+
+        return await fetchReport(period);
     }
 
     function attachOppCountsToShiftDynamics(shiftDynamics, countsByShift) {
@@ -1521,8 +1602,10 @@
         const missingSheetsText = lastMissingSheets.length
             ? `В таблице не найдены листы: ${lastMissingSheets.map((v) => escapeHtml(String(v))).join(", ")}`
             : "";
+        const generatedText = normalizeKey(lastReportGeneratedAtText);
 
         summaryWrap.innerHTML = `
+            ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Выгрузка: ${escapeHtml(generatedText)}</div>` : ""}
             ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
             ${renderMonthSummarySectionHtml()}
             ${renderTodayDeadlineSectionHtml()}
@@ -1837,16 +1920,19 @@
 
         setLoading(true);
         setErrors([]);
-        setStatus("Загружаю данные из Google Apps Script API...", "");
+        setStatus("Загружаю данные (кэш Supabase / Google Apps Script API)...", "");
 
         try {
             if (!currentApiUrl) {
                 await loadWarehouseConfig();
             }
 
-            const reportPromise = fetchReport(lastPeriod);
+            const reportPromise = fetchReportWithCache(lastPeriod, CACHE_SCOPE_ADMIN);
             const sameAsMainPeriod = monthPeriod.from === lastPeriod.from && monthPeriod.to === lastPeriod.to;
-            const monthReportPromise = (sameAsMainPeriod ? reportPromise : fetchReport(monthPeriod)).catch((error) => {
+            const monthReportPromise = (sameAsMainPeriod
+                ? reportPromise
+                : fetchReportWithCache(monthPeriod, CACHE_SCOPE_DASHBOARD_MONTH)
+            ).catch((error) => {
                 console.warn("Не удалось загрузить месячные итоги:", error instanceof Error ? error.message : error);
                 return null;
             });
@@ -1859,6 +1945,7 @@
             lastRows = report.rows;
             lastSummary = report.summary;
             lastTodayDeadline = report.todayDeadline;
+            lastReportGeneratedAtText = report.generatedAtText || "";
             lastShiftDynamics = attachOppCountsToShiftDynamics(report.shiftDynamics, oppByShift);
             lastMonthSummary = buildMonthSummaryFromShiftDynamics(
                 monthReport?.shiftDynamics || [],
@@ -1896,6 +1983,7 @@
                 hasData: false
             };
             lastTodayDeadline = null;
+            lastReportGeneratedAtText = "";
             lastShiftDynamics = [];
             lastMissingSheets = [];
         } finally {
