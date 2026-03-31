@@ -18,7 +18,22 @@
     const placesModalTitle = document.getElementById("places-modal-title");
     const placesList = document.getElementById("places-list");
     const btnAddPlace = document.getElementById("btn-add-place");
+    const btnManageSquares = document.getElementById("btn-manage-squares");
     const btnClosePlaces = document.getElementById("btn-close-places");
+
+    const squaresModal = document.getElementById("squares-modal");
+    const squaresModalTitle = document.getElementById("squares-modal-title");
+    const squaresList = document.getElementById("squares-list");
+    const btnAddSquare = document.getElementById("btn-add-square");
+    const btnCloseSquares = document.getElementById("btn-close-squares");
+
+    const squareModal = document.getElementById("square-modal");
+    const squareModalTitle = document.getElementById("square-modal-title");
+    const txtSquareId = document.getElementById("txt-square-id");
+    const inpSquareName = document.getElementById("inp-square-name");
+    const inpSquareGroup = document.getElementById("inp-square-group");
+    const btnSaveSquare = document.getElementById("btn-save-square");
+    const btnCloseSquare = document.getElementById("btn-close-square");
 
     const placeModal = document.getElementById("place-modal");
     const placeTitle = document.getElementById("place-modal-title");
@@ -52,9 +67,11 @@
 
     let whList = [];
     let places = [];
+    let squares = [];
 
     let editWhId = null;
     let placesWhId = null;
+    let squaresWhId = null;
     let editPlaceId = null;
     let dataWhId = null;
     let currentStickerPlace = null;
@@ -88,6 +105,12 @@
             }
         }
         return String(value);
+    }
+
+    function compareNatural(a, b) {
+        const aStr = String(a ?? "");
+        const bStr = String(b ?? "");
+        return aStr.localeCompare(bStr, "ru", { numeric: true, sensitivity: "base" });
     }
 
     function setReadOnlyTextField(el, isReadOnly) {
@@ -145,24 +168,29 @@
     }
 
     async function loadData() {
-        const [{ data: wh, error: whError }, { data: plc, error: plcError }] = await Promise.all([
+        const [{ data: wh, error: whError }, { data: plc, error: plcError }, { data: sq, error: sqError }] = await Promise.all([
             supabaseClient.from("wh_rep").select("*").order("wh_id"),
-            supabaseClient.from("places").select("*").order("place")
+            supabaseClient.from("places").select("*").order("place"),
+            supabaseClient.from("sort_squares_rep").select("sq_id, sq_name, sq_group, wh_id")
         ]);
 
-        if (whError || plcError) {
-            console.error("Ошибка загрузки данных:", whError || plcError);
+        if (whError || plcError || sqError) {
+            console.error("Ошибка загрузки данных:", whError || plcError || sqError);
             MiniUI.toast("Ошибка загрузки данных", { type: "error" });
             return;
         }
 
         whList = Array.isArray(wh) ? wh : [];
         places = Array.isArray(plc) ? plc : [];
+        squares = Array.isArray(sq) ? sq : [];
 
         renderWhTable();
 
         if (placesWhId !== null) {
             renderPlacesEditor(placesWhId);
+        }
+        if (squaresWhId !== null) {
+            renderSquaresEditor(squaresWhId);
         }
     }
 
@@ -266,7 +294,7 @@
     }
 
     async function deleteWh(whId) {
-        const ok = await MiniUI.confirm("Удалить СЦ и все его МХ/контейнеры данных?", { title: "Удаление" });
+        const ok = await MiniUI.confirm("Удалить СЦ и все его МХ/КС/контейнеры данных?", { title: "Удаление" });
         if (!ok) return;
 
         const wh_id_fixed = normalizeWhId(whId);
@@ -282,20 +310,27 @@
             return;
         }
 
-        const [{ error: placesError }, { error: dataError }] = await Promise.all([
+        const [{ error: placesError }, { error: dataError }, { error: squaresError }] = await Promise.all([
             supabaseClient.from("places").delete().eq("wh_id", wh_id_fixed),
-            supabaseClient.from("wh_data_rep").delete().eq("wh_id", wh_id_fixed)
+            supabaseClient.from("wh_data_rep").delete().eq("wh_id", wh_id_fixed),
+            supabaseClient.from("sort_squares_rep").delete().eq("wh_id", wh_id_fixed)
         ]);
 
-        if (placesError || dataError) {
-            console.error("Ошибка удаления связей СЦ:", placesError || dataError);
+        if (placesError || dataError || squaresError) {
+            console.error("Ошибка удаления связей СЦ:", placesError || dataError || squaresError);
             MiniUI.toast("СЦ удален, но часть связанных данных удалить не удалось", { type: "error" });
         }
 
         if (String(placesWhId) === String(whId)) {
             closeStickerModal();
             closePlaceModal();
+            closeSquareModal();
+            closeSquaresModal();
             closePlacesModal();
+        }
+        if (String(squaresWhId) === String(whId)) {
+            closeSquareModal();
+            closeSquaresModal();
         }
         if (String(dataWhId) === String(whId)) {
             closeCreateDataModal();
@@ -347,6 +382,8 @@
     function closePlacesModal() {
         closeStickerModal();
         closePlaceModal();
+        closeSquareModal();
+        closeSquaresModal();
         hideModal(placesModal);
         placesWhId = null;
     }
@@ -389,6 +426,128 @@
 
             placesList.appendChild(div);
         });
+    }
+
+    function renderSquaresEditor(whId) {
+        if (whId === null || whId === undefined) {
+            squaresList.innerHTML = `<div style="color:#6b7280;">Сначала выберите СЦ</div>`;
+            return;
+        }
+
+        const whSquares = squares
+            .filter((sq) => String(sq.wh_id) === String(whId))
+            .sort((a, b) => {
+                const byGroup = compareNatural(a.sq_group, b.sq_group);
+                if (byGroup !== 0) return byGroup;
+                return compareNatural(a.sq_id, b.sq_id);
+            });
+
+        if (!whSquares.length) {
+            squaresList.innerHTML = `<div style="color:#6b7280;">Для этого СЦ пока нет КС</div>`;
+            return;
+        }
+
+        squaresList.innerHTML = "";
+
+        whSquares.forEach((sq) => {
+            const div = document.createElement("div");
+            div.style.padding = "10px 8px";
+            div.style.borderBottom = "1px solid #e5e7eb";
+
+            div.innerHTML = `
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                    <div style="min-width:260px;">
+                        <div><b>${escapeHtml(sq.sq_id || "—")}</b> — ${escapeHtml(sq.sq_name || "—")}</div>
+                        <small>Группа: ${escapeHtml(sq.sq_group || "—")}</small>
+                    </div>
+                </div>
+            `;
+
+            squaresList.appendChild(div);
+        });
+    }
+
+    async function openSquaresModal(whId) {
+        const wh = getWhById(whId);
+        if (!wh) return MiniUI.toast("СЦ не найден", { type: "error" });
+
+        squaresWhId = wh.wh_id;
+        squaresModalTitle.textContent = `Управление КС — ${wh.wh_name} (${wh.wh_id})`;
+        renderSquaresEditor(squaresWhId);
+        showModal(squaresModal, closeSquaresModal);
+    }
+
+    function closeSquaresModal() {
+        closeSquareModal();
+        hideModal(squaresModal);
+        squaresWhId = null;
+    }
+
+    function generateNextSquareId(whId) {
+        const whSquares = squares
+            .filter((sq) => String(sq.wh_id) === String(whId))
+            .map((sq) => String(sq.sq_id ?? "").trim())
+            .filter(Boolean);
+
+        const used = new Set(whSquares.map((value) => value.toUpperCase()));
+        let idx = 1;
+        while (used.has(`SQ${String(idx).padStart(5, "0")}`)) idx += 1;
+        return `SQ${String(idx).padStart(5, "0")}`;
+    }
+
+    function openSquareModal() {
+        if (squaresWhId === null || squaresWhId === undefined) {
+            MiniUI.alert("Сначала откройте управление КС для нужного СЦ");
+            return;
+        }
+
+        squareModalTitle.textContent = "Добавить КС";
+        txtSquareId.textContent = generateNextSquareId(squaresWhId);
+        inpSquareName.value = "";
+        inpSquareGroup.value = "";
+        showModal(squareModal, closeSquareModal);
+        setTimeout(() => inpSquareName.focus(), 0);
+    }
+
+    function closeSquareModal() {
+        hideModal(squareModal);
+    }
+
+    async function saveSquare() {
+        if (squaresWhId === null || squaresWhId === undefined) {
+            MiniUI.alert("СЦ не выбран");
+            return;
+        }
+
+        const sqName = inpSquareName.value.trim();
+        const sqGroup = inpSquareGroup.value.trim();
+        const rawSqId = String(txtSquareId.textContent || "").trim();
+
+        if (!sqName) return MiniUI.alert("Название КС обязательно");
+        if (!sqGroup) return MiniUI.alert("Группа КС обязательна");
+
+        const sqId = /^-?\d+$/.test(rawSqId) ? Number(rawSqId) : rawSqId;
+
+        const payload = {
+            sq_id: sqId,
+            sq_name: sqName,
+            sq_group: sqGroup,
+            wh_id: squaresWhId
+        };
+
+        const { error } = await supabaseClient
+            .from("sort_squares_rep")
+            .insert(payload);
+
+        if (error) {
+            console.error("Ошибка создания КС:", error);
+            MiniUI.toast("Не удалось сохранить КС", { type: "error" });
+            return;
+        }
+
+        closeSquareModal();
+        await loadData();
+        MiniUI.toast("КС добавлен", { type: "success" });
     }
 
     async function onPlaceAction(e) {
@@ -882,6 +1041,8 @@
 
     bindModalOverlayClose(whModal, closeWhModal);
     bindModalOverlayClose(placesModal, closePlacesModal);
+    bindModalOverlayClose(squaresModal, closeSquaresModal);
+    bindModalOverlayClose(squareModal, closeSquareModal);
     bindModalOverlayClose(placeModal, closePlaceModal);
     bindModalOverlayClose(dataModal, closeDataModal);
     bindModalOverlayClose(dataCreateModal, closeCreateDataModal);
@@ -895,9 +1056,15 @@
     btnCloseWh.onclick = closeWhModal;
 
     btnAddPlace.onclick = () => openPlaceModal(null);
+    btnManageSquares.onclick = () => openSquaresModal(placesWhId);
     btnSavePlace.onclick = savePlace;
     btnClosePlace.onclick = closePlaceModal;
     btnClosePlaces.onclick = closePlacesModal;
+
+    btnAddSquare.onclick = openSquareModal;
+    btnSaveSquare.onclick = saveSquare;
+    btnCloseSquare.onclick = closeSquareModal;
+    btnCloseSquares.onclick = closeSquaresModal;
 
     btnOpenCreateData.onclick = openCreateDataModal;
     btnCloseData.onclick = closeDataModal;

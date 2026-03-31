@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <script src="ui.js" defer></script>
-    <script src="opp_dashboard.js?v=20260325_04" defer></script>
+    <script src="opp_dashboard.js?v=20260331_07" defer></script>
 
     <style>
         .opp-toolbar {
@@ -265,7 +265,24 @@
         }
 
         .opp-side-card {
+            position: sticky;
+            top: 84px;
+            height: calc(100vh - 116px);
+            max-height: calc(100vh - 116px);
+            overflow-y: auto;
+            overflow-x: hidden;
+            box-sizing: border-box;
+            z-index: 1;
+        }
+
+        .opp-side-card .status-header {
             position: static;
+            top: auto;
+            z-index: auto;
+            background: transparent;
+            padding: 0;
+            border-bottom: 0;
+            margin-bottom: 10px;
         }
 
         .opp-side-card .opp-breakdown-wrap {
@@ -309,6 +326,64 @@
             line-height: 1.25;
             text-align: center;
             min-height: 18px;
+        }
+
+        .opp-unfinished-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .opp-unfinished-card {
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 12px;
+            background: #f8fafc;
+            padding: 10px;
+        }
+
+        .opp-unfinished-card-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+
+        .opp-unfinished-card-sheets {
+            font-size: 12px;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+
+        .opp-unfinished-card-total {
+            font-size: 12px;
+            color: #475569;
+            margin-bottom: 8px;
+        }
+
+        .opp-unfinished-list {
+            display: grid;
+            gap: 6px;
+        }
+
+        .opp-unfinished-row {
+            border: 1px dashed rgba(15, 23, 42, 0.1);
+            border-radius: 8px;
+            padding: 6px 8px;
+            background: #ffffff;
+            display: grid;
+            gap: 2px;
+        }
+
+        .opp-unfinished-row-date {
+            font-size: 12px;
+            color: #334155;
+            font-weight: 600;
+        }
+
+        .opp-unfinished-row-metrics {
+            font-size: 12px;
+            color: #64748b;
         }
 
         .opp-shift-overall {
@@ -360,6 +435,16 @@
             flex-direction: column;
             justify-content: center;
             min-height: 54px;
+        }
+
+        .opp-month-card.opp-month-card-good {
+            border-color: rgba(22, 163, 74, 0.42);
+            background: rgba(22, 163, 74, 0.13);
+        }
+
+        .opp-month-card.opp-month-card-bad {
+            border-color: rgba(239, 68, 68, 0.45);
+            background: rgba(239, 68, 68, 0.14);
         }
 
         .opp-month-label {
@@ -431,6 +516,52 @@
             flex: 0 0 auto;
         }
 
+        .opp-unfinished-mini-panel {
+            gap: 6px;
+        }
+
+        .opp-unfinished-mini-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .opp-unfinished-mini-group {
+            border-top: 1px solid rgba(15, 23, 42, 0.08);
+            padding-top: 6px;
+        }
+
+        .opp-unfinished-mini-group:first-child {
+            border-top: 0;
+            padding-top: 0;
+        }
+
+        .opp-unfinished-mini-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+
+        .opp-unfinished-mini-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 11px;
+            color: #334155;
+            line-height: 1.25;
+            margin-bottom: 2px;
+        }
+
+        .opp-unfinished-mini-date {
+            color: #64748b;
+        }
+
+        .opp-unfinished-mini-count {
+            font-weight: 700;
+            color: #0f172a;
+            flex: 0 0 auto;
+        }
+
         @media (max-width: 1480px) {
             .opp-dashboard-layout {
                 grid-template-columns: 280px minmax(0, 1fr);
@@ -452,6 +583,9 @@
 
             .opp-side-card {
                 position: static;
+                height: auto;
+                max-height: none;
+                overflow: visible;
             }
         }
 
@@ -513,6 +647,15 @@
                 </div>
             </div>
             <div id="dashboard-lag-panel-content" class="opp-lag-panel" style="margin-bottom:12px;">
+                <div class="muted">Нет данных для отображения.</div>
+            </div>
+
+            <div class="status-header">
+                <div class="status-center" style="grid-column:1 / -1;">
+                    <div class="status-code" style="font-size:22px;">Дорогостой без разбора</div>
+                </div>
+            </div>
+            <div id="dashboard-unfinished-panel-content" class="opp-lag-panel opp-unfinished-mini-panel" style="margin-bottom:12px;">
                 <div class="muted">Нет данных для отображения.</div>
             </div>
 

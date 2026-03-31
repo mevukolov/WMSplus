@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+ — Учет ТМЦ</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon" />
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+    <script src="ui.js" defer></script>
+    <script src="tmc_accounting.js" defer></script>
+
+    <style>
+        .tmc-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+            margin-top: 14px;
+        }
+
+        .tmc-action-card {
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            border-radius: 12px;
+            padding: 14px;
+            background: #f8fafc;
+        }
+
+        .tmc-action-card h2 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+        }
+
+        .tmc-action-card p {
+            margin: 0 0 12px 0;
+            color: #475569;
+        }
+
+        .tmc-table-wrap {
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            border-radius: 10px;
+            overflow: auto;
+            max-height: 60vh;
+            background: #ffffff;
+        }
+
+        .tmc-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1060px;
+        }
+
+        .tmc-table th,
+        .tmc-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+        }
+
+        .tmc-table th {
+            background: #f8fafc;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .tmc-actions-bar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .tmc-actions-bar.hidden {
+            display: none !important;
+        }
+
+        .tmc-muted {
+            color: #64748b;
+        }
+
+        .manage-select-cell {
+            width: 44px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .manage-select-cell .manage-row-check {
+            pointer-events: none;
+        }
+
+        .manage-place-btn {
+            width: 100%;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            text-align: left;
+            font: inherit;
+            color: inherit;
+            cursor: pointer;
+        }
+
+        .manage-place-btn:hover {
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
+        .invent-row-recent td {
+            background: #ecfdf3;
+        }
+
+        .invent-row-stale td {
+            background: #fef2f2;
+        }
+    </style>
+</head>
+<body>
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title" id="header-wh"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap" style="max-width:1200px;width:100%;margin-top:90px;margin-left:auto;margin-right:auto;">
+    <section class="card" style="padding:22px;">
+        <h1 style="margin:0;">Учет ТМЦ</h1>
+        <p class="muted" id="tmc-subtitle" style="margin:8px 0 0 0;">
+            Работа с мебелью в эксплуатации текущего склада.
+        </p>
+
+        <div class="tmc-actions">
+            <article class="tmc-action-card">
+                <h2>Введение мебели в эксплуатацию</h2>
+                <p>Создание новых позиций с авто-нумерацией и формированием item_code.</p>
+                <button id="btn-open-intro" class="btn btn-rect" type="button">Открыть</button>
+            </article>
+
+            <article class="tmc-action-card">
+                <h2>Управление мебелью в эксплуатации</h2>
+                <p>Просмотр, удаление и печать этикеток в PDF (A4, сетка 4x7).</p>
+                <button id="btn-open-manage" class="btn btn-rect" type="button">Открыть</button>
+            </article>
+        </div>
+    </section>
+</main>
+
+<div id="intro-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:560px;">
+        <h2 style="margin-top:0;">Введение мебели в эксплуатацию</h2>
+
+        <div class="mb">
+            <label>Тип ТМЦ</label>
+            <input class="input" type="text" value="Мебель" readonly style="width:100%;box-sizing:border-box;background:#f1f5f9;" />
+        </div>
+
+        <div class="mb">
+            <label for="intro-item-name">Базовое название мебели</label>
+            <input id="intro-item-name" class="input" type="text" placeholder="Например: Стол администрации" style="width:100%;box-sizing:border-box;" />
+        </div>
+
+        <div class="mb">
+            <label for="intro-item-qty">Количество</label>
+            <input id="intro-item-qty" class="input" type="number" min="1" step="1" value="1" style="width:100%;box-sizing:border-box;" />
+        </div>
+
+        <p class="tmc-muted" style="margin:10px 0 0 0;">
+            `item_place` при вводе в эксплуатацию не заполняется.
+        </p>
+
+        <div class="actions" style="margin-top:18px;">
+            <button id="btn-intro-save" class="btn btn-rect" type="button">Ввести в эксплуатацию</button>
+            <button id="btn-intro-close" class="btn btn-outline" type="button">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<div id="manage-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:1200px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+            <h2 style="margin:0;">Управление мебелью в эксплуатации</h2>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button id="btn-manage-refresh" class="btn btn-outline" type="button">Обновить</button>
+                <button id="btn-manage-close-top" class="btn btn-outline" type="button">Закрыть</button>
+            </div>
+        </div>
+
+        <div id="manage-actions-bar" class="tmc-actions-bar hidden" style="margin-top:12px;">
+            <span id="manage-selected-count" class="tmc-muted">Выбрано: 0</span>
+            <button id="btn-manage-delete" class="btn btn-outline" type="button" style="border-color:#ef4444;color:#b91c1c;">Удалить предмет</button>
+            <button id="btn-manage-print" class="btn btn-rect" type="button">Распечатать</button>
+        </div>
+
+        <div class="tmc-table-wrap" style="margin-top:10px;">
+            <table class="tmc-table">
+                <thead>
+                <tr>
+                    <th style="width:44px;">
+                        <input id="manage-select-all" type="checkbox" aria-label="Выбрать все строки" />
+                    </th>
+                    <th>Название</th>
+                    <th>Место расположения</th>
+                    <th>Дата инвентаризации</th>
+                    <th>Сотрудник</th>
+                </tr>
+                </thead>
+                <tbody id="manage-tbody">
+                <tr>
+                    <td colspan="5" class="tmc-muted">Загрузка...</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="actions" style="margin-top:14px;">
+            <button id="btn-manage-close" class="btn btn-outline" type="button">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<div id="place-edit-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:560px;">
+        <h2 style="margin-top:0;">Редактирование места расположения</h2>
+
+        <div class="mb">
+            <label>Предмет мебели</label>
+            <div id="place-edit-item-name" class="input" style="width:100%;box-sizing:border-box;background:#f8fafc;color:#334155;" aria-live="polite"></div>
+        </div>
+
+        <div class="mb">
+            <label for="place-edit-input">Место расположения</label>
+            <input id="place-edit-input" class="input" type="text" placeholder="Введите место расположения" style="width:100%;box-sizing:border-box;" />
+        </div>
+
+        <p class="tmc-muted" style="margin:10px 0 0 0;">
+            Оставьте поле пустым, чтобы очистить значение.
+        </p>
+
+        <div class="actions" style="margin-top:18px;">
+            <button id="btn-place-edit-save" class="btn btn-rect" type="button">Сохранить</button>
+            <button id="btn-place-edit-cancel" class="btn btn-outline" type="button">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+</body>
+</html>
