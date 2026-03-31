@@ -98,7 +98,56 @@
 
         <div class="actions" style="margin-top:16px;">
             <button id="btn-add-place" class="btn btn-rect">Добавить МХ</button>
+            <button id="btn-manage-squares" class="btn btn-rect">Управление КС</button>
             <button id="btn-close-places" class="btn btn-outline">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<div id="squares-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:900px;">
+        <h2 id="squares-modal-title">Управление КС</h2>
+
+        <div id="squares-list" style="
+            border:1px solid rgba(0,0,0,0.1);
+            border-radius:10px;
+            padding:10px;
+            max-height:420px;
+            overflow:auto;
+            background:#fafafa;">
+        </div>
+
+        <div class="actions" style="margin-top:16px;">
+            <button id="btn-add-square" class="btn btn-rect">Добавить КС</button>
+            <button id="btn-close-squares" class="btn btn-outline">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<div id="square-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:620px;">
+        <h2 id="square-modal-title">Добавить КС</h2>
+
+        <div class="mb">
+            <label>ID КС</label>
+            <div id="txt-square-id" class="input" style="background:#eee;">(будет сгенерирован)</div>
+        </div>
+
+        <div class="mb">
+            <label>Название КС</label>
+            <input id="inp-square-name" class="input" placeholder="Название КС">
+        </div>
+
+        <div class="mb">
+            <label>Группа КС</label>
+            <input id="inp-square-group" class="input" placeholder="Например: 1">
+        </div>
+
+        <div class="actions">
+            <button id="btn-save-square" class="btn btn-rect">Сохранить</button>
+            <button id="btn-close-square" class="btn btn-outline">Отмена</button>
         </div>
     </div>
 </div>

@@ -71,11 +71,10 @@
   }
 
   function processRows(rows){
-    // фильтруем по условиям: Статус ШК === 'SMS' и MX содержит 'Нижний Новгород_Буфер'
+    // фильтруем по условию: в статусе (из разных названий колонок) значение 'SMS'
     const filtered = rows.filter(r => {
-      const status = (r['Статус ШК'] || r['СтатусШК'] || r['status'] || '').toString();
-      const mx = (r['MX'] || r['Mx'] || r['mx'] || '').toString();
-      return status === 'SMS' && mx.includes('Нижний Новгород_Буфер');
+      const status = String(getStatusValue(r)).trim().toUpperCase();
+      return status === 'SMS';
     });
 
     if(filtered.length === 0){
@@ -194,6 +193,35 @@
   }
 
   function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function normalizeKey(s){
+    return String(s || '')
+      .toLowerCase()
+      .replace(/\u00a0/g, ' ')
+      .replace(/[\s_]+/g, '')
+      .replace(/[^\wа-яё]/gi, '');
+  }
+  function getFirstRowValue(row, keyVariants){
+    for(const key of keyVariants){
+      if(Object.prototype.hasOwnProperty.call(row, key)) return row[key];
+    }
+    const normalized = {};
+    Object.keys(row).forEach(k => { normalized[normalizeKey(k)] = row[k]; });
+    for(const key of keyVariants){
+      const v = normalized[normalizeKey(key)];
+      if(v !== undefined) return v;
+    }
+    return '';
+  }
+  function getStatusValue(row){
+    return getFirstRowValue(row, [
+      'Статус ШК',
+      'СтатусШК',
+      'Статус товара',
+      'СтатусТовара',
+      'status',
+      'item status'
+    ]);
+  }
   function setsEqual(a,b){
     if(a.size !== b.size) return false;
     for(const x of a) if(!b.has(x)) return false;

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" defer></script>
+    <script src="pure_losses.js" defer></script>
+
+    <style>
+        .pure-layout {
+            display: grid;
+            grid-template-columns: 320px minmax(0, 1fr) 320px;
+            gap: 12px;
+            align-items: start;
+            max-width: 1880px;
+            margin: 0 auto;
+            padding: 0 10px;
+        }
+
+        .pure-side-wrap,
+        .pure-center.wrap {
+            max-width: none !important;
+            width: 100%;
+            margin: 0;
+        }
+
+        .pure-side-card {
+            padding: 14px 16px;
+        }
+
+        .pure-side-card .status-header {
+            margin-bottom: 10px;
+        }
+
+        .pure-center-card {
+            min-height: 520px;
+        }
+
+        .pure-status-line {
+            margin-top: 12px;
+            min-height: 20px;
+            font-size: 14px;
+            line-height: 1.3;
+            color: #334155;
+            display: none;
+            word-break: break-word;
+        }
+
+        @media (max-width: 1500px) {
+            .pure-layout {
+                grid-template-columns: 280px minmax(0, 1fr) 280px;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .pure-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .pure-center {
+                order: 1;
+            }
+
+            .pure-side-left {
+                order: 2;
+            }
+
+            .pure-side-right {
+                order: 3;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title">Pure списания</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<div class="pure-layout">
+    <aside class="wrap pure-side-wrap pure-side-left">
+        <div class="card pure-side-card">
+            <div class="status-header">
+                <div class="status-center" style="grid-column:1 / -1;">
+                    <div class="status-code" style="font-size:22px;">Обновить данные</div>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <button id="refresh-btn" class="btn btn-rect">Загрузить .xlsx</button>
+                <input type="file" id="file-input" accept=".xlsx,.xls" hidden>
+            </div>
+
+            <div id="status-line" class="pure-status-line"></div>
+        </div>
+    </aside>
+
+    <main class="wrap pure-center" style="max-width:1200px;">
+        <div class="card pure-center-card">
+            <h1 style="margin:0 0 14px 0;">Статистика</h1>
+        </div>
+    </main>
+
+    <aside class="wrap pure-side-wrap pure-side-right">
+        <div class="card pure-side-card">
+            <div class="status-header">
+                <div class="status-center" style="grid-column:1 / -1;">
+                    <div class="status-code" style="font-size:22px;">Правая секция</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+</body>
+</html>

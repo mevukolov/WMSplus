@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+ — Баланс КС</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="sort_emp_balance_constructor.js" defer></script>
+
+    <style>
+        .balance-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 12px;
+            align-items: start;
+            max-width: 1880px;
+            margin: 0 auto;
+            padding: 0 10px;
+        }
+
+        .balance-center.wrap,
+        .balance-side.wrap {
+            max-width: none !important;
+            width: 100%;
+            margin: 0;
+        }
+
+        .balance-top-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+
+        .balance-kpis {
+            margin-top: 9px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+            gap: 8px;
+        }
+
+        .balance-kpi {
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 10px;
+            background: #f8fafc;
+            padding: 8px 9px;
+        }
+
+        .balance-kpi-label {
+            margin: 0;
+            font-size: 10px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        .balance-kpi-value {
+            margin: 4px 0 0 0;
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .analysis-zone-wrap {
+            margin-top: 10px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 12px;
+            background: #f8fafc;
+            padding: 10px;
+        }
+
+        .analysis-title {
+            margin: 0 0 8px 0;
+            font-size: 13px;
+            font-weight: 700;
+            color: #334155;
+        }
+
+        .analysis-drop-zone {
+            min-height: 64px;
+            border: 1px dashed rgba(15, 23, 42, 0.25);
+            border-radius: 10px;
+            background: #fff;
+            padding: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            transition: border-color .12s ease, background-color .12s ease;
+        }
+
+        .analysis-drop-zone.is-dragover {
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+
+        .analysis-empty {
+            margin: 0;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .analysis-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            border: 1px solid rgba(15, 23, 42, 0.12);
+            background: #fff;
+            padding: 5px 9px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .analysis-chip button {
+            border: 0;
+            background: transparent;
+            cursor: pointer;
+            font-size: 12px;
+            color: #64748b;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .analysis-actions {
+            margin-top: 9px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .balance-status {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #475569;
+        }
+
+        .groups-wrap {
+            margin-top: 10px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(390px, 1fr));
+            gap: 10px;
+        }
+
+        .group-box {
+            border: 1.5px solid rgba(15, 23, 42, 0.8);
+            border-radius: 18px;
+            background: #f7f8fa;
+            padding: 9px 10px 7px;
+        }
+
+        .group-squares {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+            gap: 8px;
+            align-items: start;
+        }
+
+        .sq-item {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 6px;
+        }
+
+        .sq-box {
+            width: 100%;
+            min-height: 106px;
+            border: 3px solid #0f172a;
+            border-radius: 16px;
+            background: #ffffff;
+            box-sizing: border-box;
+            padding: 8px 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: box-shadow .12s ease, background-color .12s ease, border-color .12s ease;
+        }
+
+        .sq-box:hover {
+            background: #f9fafb;
+        }
+
+        .sq-box.is-drop-target {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+            background: #eff6ff;
+        }
+
+        .sq-box.is-open {
+            border-color: #623cea;
+            box-shadow: 0 0 0 2px rgba(98, 60, 234, 0.18);
+        }
+
+        .sq-box.proposed {
+            border-color: #10b981;
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+        }
+
+        .sq-emp-pill-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            border-radius: 999px;
+            background: #e5e7eb;
+            color: #111827;
+            font-weight: 700;
+            font-size: 12px;
+            line-height: 1;
+            padding: 5px 10px;
+            max-width: 100%;
+            cursor: pointer;
+        }
+
+        .sq-emp-pill-btn.proposed {
+            background: #d1fae5;
+            border-color: rgba(16, 185, 129, 0.35);
+        }
+
+        .sq-emp-remove {
+            color: #64748b;
+            font-weight: 700;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        .sq-empty {
+            margin: auto 0;
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .sq-hint {
+            margin: auto 0 0 0;
+            font-size: 10px;
+            color: #94a3b8;
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        .sq-name {
+            margin: 0;
+            font-weight: 700;
+            color: #111827;
+            text-align: center;
+            font-size: 13px;
+            line-height: 1.15;
+        }
+
+        .sq-caption {
+            margin: 0;
+            font-weight: 600;
+            color: #334155;
+            text-align: center;
+            font-size: 12px;
+            line-height: 1.2;
+            min-height: 28px;
+        }
+
+        .sq-assign-panel {
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 9px;
+            background: #ffffff;
+            padding: 6px;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .sq-assign-panel .input {
+            width: 100%;
+        }
+
+        .sq-assign-panel .btn {
+            flex: 0 0 auto;
+            min-width: 32px;
+            height: 32px;
+            padding: 0 8px;
+        }
+
+        .group-footer {
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .group-title {
+            margin: 0;
+            font-size: 16px;
+            line-height: 1.2;
+            color: #111827;
+            font-weight: 700;
+        }
+
+        .group-weight {
+            margin: 0;
+            font-size: 20px;
+            line-height: 1;
+            color: #111827;
+            font-weight: 700;
+        }
+
+        .empty-note {
+            border: 1px dashed rgba(15, 23, 42, 0.22);
+            border-radius: 10px;
+            background: #f8fafc;
+            color: #475569;
+            padding: 10px 11px;
+            font-size: 12px;
+        }
+
+        .side-card {
+            padding: 14px 16px;
+        }
+
+        .side-title {
+            margin: 0;
+            font-size: 19px;
+            color: #111827;
+        }
+
+        .side-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .side-add-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 9px;
+            font-size: 18px;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .side-search {
+            margin-top: 8px;
+        }
+
+        .side-search .input {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .employees-list {
+            margin-top: 10px;
+            max-height: 70vh;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            padding-right: 2px;
+        }
+
+        .emp-item {
+            border: 1px solid rgba(15, 23, 42, 0.09);
+            border-radius: 9px;
+            background: #ffffff;
+            padding: 7px 9px;
+            cursor: grab;
+        }
+
+        .emp-item:active {
+            cursor: grabbing;
+        }
+
+        .emp-item.is-assigned {
+            background: #f8fafc;
+        }
+
+        .emp-main {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 13px;
+            line-height: 1.25;
+            color: #0f172a;
+            font-weight: 600;
+        }
+
+        .emp-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .emp-perf {
+            color: #0f172a;
+            font-weight: 700;
+            white-space: nowrap;
+            font-size: 13px;
+        }
+
+        .emp-actions {
+            margin-top: 5px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .emp-actions .btn {
+            font-size: 11px;
+            padding: 4px 7px;
+            border-radius: 7px;
+        }
+
+        .balance-modal-content {
+            width: min(1200px, 94vw);
+            max-height: 88vh;
+        }
+
+        .balance-modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .balance-modal-title {
+            margin: 0;
+            font-size: 19px;
+        }
+
+        .balance-modal-status {
+            font-size: 12px;
+            color: #475569;
+            margin-bottom: 9px;
+        }
+
+        .balance-modal-actions {
+            margin-top: 10px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        @media (max-width: 1400px) {
+            .balance-layout {
+                grid-template-columns: minmax(0, 1fr) 320px;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .balance-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .balance-side {
+                order: 2;
+            }
+
+            .balance-center {
+                order: 1;
+            }
+
+            .employees-list {
+                max-height: 360px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .groups-wrap {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 620px) {
+            .balance-layout {
+                padding: 0;
+            }
+
+            .group-squares {
+                grid-template-columns: repeat(2, minmax(105px, 1fr));
+            }
+
+            .balance-top-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title" id="header-wh"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<div class="balance-layout">
+    <main class="wrap balance-center">
+        <section class="card">
+            <div class="balance-top-row">
+                <h1 style="margin:0;">Конструктор баланса КС</h1>
+                <button id="reload-btn" class="btn btn-rect" type="button">Обновить</button>
+            </div>
+
+            <div class="analysis-zone-wrap">
+                <p class="analysis-title">Добавьте сотрудников для анализа</p>
+                <div id="analysis-drop-zone" class="analysis-drop-zone">
+                    <p id="analysis-empty" class="analysis-empty">Перетащите сотрудников из списка справа</p>
+                    <div id="analysis-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                </div>
+                <div class="analysis-actions">
+                    <button id="balance-btn" class="btn btn-rect" type="button" style="display:none;">Балансировка</button>
+                </div>
+            </div>
+
+            <div class="balance-kpis">
+                <div class="balance-kpi">
+                    <p class="balance-kpi-label">Групп</p>
+                    <p id="kpi-groups" class="balance-kpi-value">0</p>
+                </div>
+                <div class="balance-kpi">
+                    <p class="balance-kpi-label">КС</p>
+                    <p id="kpi-squares" class="balance-kpi-value">0</p>
+                </div>
+                <div class="balance-kpi">
+                    <p class="balance-kpi-label">Сотрудников</p>
+                    <p id="kpi-employees" class="balance-kpi-value">0</p>
+                </div>
+                <div class="balance-kpi">
+                    <p class="balance-kpi-label">Закреплено на КС</p>
+                    <p id="kpi-assigned" class="balance-kpi-value">0</p>
+                </div>
+                <div class="balance-kpi">
+                    <p class="balance-kpi-label">Суммарный weight</p>
+                    <p id="kpi-total-weight" class="balance-kpi-value">0</p>
+                </div>
+            </div>
+
+            <div id="status-line" class="balance-status">Загрузка данных...</div>
+            <div id="groups-wrap" class="groups-wrap"></div>
+            <div id="groups-empty" class="empty-note" style="display:none; margin-top:10px;">Нет групп/КС для отображения.</div>
+        </section>
+    </main>
+
+    <aside class="wrap balance-side">
+        <section class="card side-card">
+            <div class="side-head">
+                <h2 class="side-title">Сотрудники</h2>
+                <button id="btn-add-employee" class="btn btn-rect side-add-btn" type="button" title="Добавить сотрудника">+</button>
+            </div>
+            <div class="side-search">
+                <input id="employees-search-input" class="input" type="text" placeholder="Поиск сотрудника..." autocomplete="off">
+            </div>
+            <div id="employees-list" class="employees-list"></div>
+            <div id="employees-empty" class="empty-note" style="display:none; margin-top:10px;">Сотрудники не найдены.</div>
+        </section>
+    </aside>
+</div>
+
+<div id="employee-create-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:520px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+            <h2 style="margin:0;">Добавить сотрудника</h2>
+            <button id="employee-create-close-top" class="btn btn-outline" type="button">Закрыть</button>
+        </div>
+
+        <div class="mb">
+            <label for="employee-create-id">ID</label>
+            <input id="employee-create-id" class="input" type="text" inputmode="numeric" placeholder="linear_emp_id">
+        </div>
+
+        <div class="mb">
+            <label for="employee-create-name">ФИО</label>
+            <input id="employee-create-name" class="input" type="text" placeholder="linear_emp_name">
+        </div>
+
+        <div class="mb">
+            <label for="employee-create-shift">Смена</label>
+            <select id="employee-create-shift" class="input">
+                <option value="День">День</option>
+                <option value="Ночь">Ночь</option>
+            </select>
+        </div>
+
+        <div class="mb">
+            <label for="employee-create-performance">Выработка</label>
+            <input id="employee-create-performance" class="input" type="text" inputmode="numeric" placeholder="linear_emp_performance">
+        </div>
+
+        <div class="actions" style="margin-top:16px;justify-content:flex-end;">
+            <button id="employee-create-save" class="btn btn-rect" type="button">Сохранить</button>
+            <button id="employee-create-close" class="btn btn-outline" type="button">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<div id="balance-modal" class="modal hidden">
+    <div id="balance-modal-content" class="modal-content balance-modal-content">
+        <div class="balance-modal-head">
+            <h2 class="balance-modal-title">Предложенная расстановка</h2>
+            <button id="balance-close-btn" class="btn btn-outline" type="button">Закрыть</button>
+        </div>
+
+        <div id="balance-modal-status" class="balance-modal-status"></div>
+        <div id="balance-modal-scheme" class="groups-wrap"></div>
+
+        <div class="balance-modal-actions">
+            <button id="balance-save-btn" class="btn btn-rect" type="button">Сохранить расстановку</button>
+            <button id="balance-reset-btn" class="btn btn-outline" type="button">Сбросить</button>
+        </div>
+    </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+</body>
+</html>

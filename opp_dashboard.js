@@ -457,6 +457,416 @@
         return `${tokens[0]} - ${tokens[tokens.length - 1]}`;
     }
 
+    function hasOwn(obj, key) {
+        return Boolean(obj && Object.prototype.hasOwnProperty.call(obj, key));
+    }
+
+    function parseLooseNumber(value) {
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        const raw = normalizeKey(value);
+        if (!raw) return null;
+        const cleaned = raw.replace(/\s+/g, "").replace(",", ".");
+        if (!/^-?\d+(?:\.\d+)?$/.test(cleaned)) return null;
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function getNumberByKeys(obj, keys) {
+        const row = obj || {};
+        const list = Array.isArray(keys) ? keys : [];
+        for (const key of list) {
+            if (!hasOwn(row, key)) continue;
+            const n = parseLooseNumber(row[key]);
+            if (n !== null) return n;
+        }
+        return null;
+    }
+
+    function computeRemainingExpensiveCount(item, options) {
+        const row = item || {};
+        const opts = options && typeof options === "object" ? options : {};
+        const allowGeneric = Boolean(opts.allowGeneric);
+        const remaining = getNumberByKeys(row, [
+            "remainingExpensiveCount",
+            "remaining_expensive_count",
+            "remaining_expensive_due_unique_shk",
+            "remaining_expensive_due",
+            "remaining_expensive_total"
+        ]);
+        if (remaining !== null) {
+            return Math.max(0, remaining);
+        }
+
+        if (allowGeneric) {
+            const remainingGeneric = getNumberByKeys(row, [
+                "remaining_count",
+                "remaining_due_unique_shk",
+                "remaining_due",
+                "count",
+                "cnt",
+                "qty",
+                "quantity",
+                "shk"
+            ]);
+            if (remainingGeneric !== null) {
+                return Math.max(0, remainingGeneric);
+            }
+        }
+
+        const due = getNumberByKeys(row, [
+            "expensiveDueTotal",
+            "expensive_due_total_unique_shk",
+            "expensive_due_total",
+            "expensive_due_count",
+            "expensive_due",
+            "due_expensive_count"
+        ]);
+        const analyzed = getNumberByKeys(row, [
+            "expensiveAnalyzed",
+            "expensive_analyzed_due_unique_shk",
+            "expensive_analyzed_due",
+            "expensive_analyzed",
+            "expensive_analyzed_count",
+            "analyzed_expensive_count"
+        ]);
+        if (due === null && analyzed === null) return 0;
+        return Math.max(0, due - analyzed);
+    }
+
+    function computeRemainingExpensiveSum(item, options) {
+        const row = item || {};
+        const opts = options && typeof options === "object" ? options : {};
+        const allowGeneric = Boolean(opts.allowGeneric);
+        const remaining = getNumberByKeys(row, [
+            "remainingExpensiveSumPrice",
+            "remaining_expensive_sum_price",
+            "remaining_expensive_due_sum_price",
+            "remaining_expensive_total_sum_price",
+            "remaining_expensive_sum",
+            "remaining_expensive_price",
+            "remaining_expensive_amount"
+        ]);
+        if (remaining !== null) {
+            return Math.max(0, remaining);
+        }
+
+        const dueExp = getNumberByKeys(row, [
+            "expensiveDueSumPrice",
+            "expensive_due_total_sum_price",
+            "expensive_due_sum_price",
+            "expensive_due_price",
+            "expensive_due_sum",
+            "expensive_due_amount",
+            "expensive_due_total_price",
+            "expensive_due_total_amount",
+            "expensive_due_price_total"
+        ]);
+        const analyzedExp = getNumberByKeys(row, [
+            "expensiveAnalyzedSumPrice",
+            "expensive_analyzed_due_sum_price",
+            "expensive_analyzed_sum_price",
+            "expensive_analyzed_due_price",
+            "expensive_analyzed_sum",
+            "expensive_analyzed_amount",
+            "expensive_analyzed_total_price",
+            "expensive_analyzed_total_amount",
+            "expensive_analyzed_price_total"
+        ]);
+        if (dueExp !== null || analyzedExp !== null) {
+            return Math.max(0, toNumber(dueExp) - toNumber(analyzedExp));
+        }
+
+        if (allowGeneric) {
+            const remainingGeneric = getNumberByKeys(row, [
+                "remaining_sum_price",
+                "remaining_sum",
+                "sum_price",
+                "sum",
+                "amount",
+                "cost"
+            ]);
+            if (remainingGeneric !== null) {
+                return Math.max(0, remainingGeneric);
+            }
+        }
+
+        const dueTotal = getNumberByKeys(row, ["dueTotal", "due_total_unique_shk", "due_total", "total_due"]);
+        const analyzedTotal = getNumberByKeys(row, ["analyzed", "analyzed_due_unique_shk", "analyzed_due"]);
+        const expensiveDueTotal = getNumberByKeys(row, ["expensiveDueTotal", "expensive_due_total_unique_shk", "expensive_due_total"]);
+        const expensiveAnalyzedTotal = getNumberByKeys(row, ["expensiveAnalyzed", "expensive_analyzed_due_unique_shk", "expensive_analyzed_due", "expensive_analyzed"]);
+        if (
+            dueTotal !== null &&
+            analyzedTotal !== null &&
+            expensiveDueTotal !== null &&
+            expensiveAnalyzedTotal !== null &&
+            Number(dueTotal) === Number(expensiveDueTotal) &&
+            Number(analyzedTotal) === Number(expensiveAnalyzedTotal)
+        ) {
+            const dueAll = getNumberByKeys(row, ["dueSumPrice", "due_total_sum_price", "due_sum_price", "due_total_price"]);
+            const analyzedAll = getNumberByKeys(row, ["analyzedSumPrice", "analyzed_due_sum_price", "analyzed_sum_price", "analyzed_due_price"]);
+            if (dueAll !== null || analyzedAll !== null) {
+                return Math.max(0, toNumber(dueAll) - toNumber(analyzedAll));
+            }
+        }
+        return null;
+    }
+
+    function normalizeUnfinishedDateLabel(rawValue, fallbackDetail, shiftItem) {
+        const raw = normalizeKey(rawValue);
+        if (raw) {
+            const iso = parseYmd(raw);
+            if (iso) return formatDateRu(iso);
+
+            const fallbackYear = parseIsoDate(shiftItem?.date)?.slice(0, 4) || "";
+            const tokens = extractDateTokensRu(raw).map((token) => withFallbackYearRu(token, fallbackYear));
+            if (tokens.length === 1) return tokens[0];
+            if (tokens.length > 1) return `${tokens[0]} - ${tokens[tokens.length - 1]}`;
+
+            return raw;
+        }
+        return buildShortDueLabelForShiftDetail(fallbackDetail, shiftItem);
+    }
+
+    function parseUnfinishedEntriesFromSource(source, detail, shiftItem) {
+        if (!source) return [];
+
+        const out = [];
+        if (Array.isArray(source)) {
+            source.forEach((entry) => {
+                if (!entry) return;
+                const dateLabel = normalizeUnfinishedDateLabel(
+                    entry?.date ??
+                    entry?.ymd ??
+                    entry?.day ??
+                    entry?.due_date ??
+                    entry?.due_for_date ??
+                    entry?.due_for_date_label ??
+                    entry?.label ??
+                    entry?.name,
+                    detail,
+                    shiftItem
+                );
+                const count = computeRemainingExpensiveCount(entry, { allowGeneric: true });
+                const sum = computeRemainingExpensiveSum(entry, { allowGeneric: true });
+                if (count < 0) return;
+                out.push({ dateLabel, count, sum });
+            });
+            return out;
+        }
+
+        if (typeof source === "object") {
+            Object.entries(source).forEach(([key, rawValue]) => {
+                if (rawValue && typeof rawValue === "object") {
+                    const dateLabel = normalizeUnfinishedDateLabel(key, detail, shiftItem);
+                    const count = computeRemainingExpensiveCount(rawValue, { allowGeneric: true });
+                    const sum = computeRemainingExpensiveSum(rawValue, { allowGeneric: true });
+                    if (count < 0) return;
+                    out.push({ dateLabel, count, sum });
+                    return;
+                }
+
+                const rawNumber = parseLooseNumber(rawValue);
+                if (rawNumber === null) return;
+                const count = Math.max(0, rawNumber);
+                const dateLabel = normalizeUnfinishedDateLabel(key, detail, shiftItem);
+                out.push({ dateLabel, count, sum: null });
+            });
+        }
+
+        return out;
+    }
+
+    function buildUnfinishedExpensiveByStatus(monthShiftDynamics) {
+        const shiftsRaw = Array.isArray(monthShiftDynamics) ? monthShiftDynamics : [];
+        const shifts = shiftsRaw
+            .slice()
+            .sort((a, b) => {
+                const aTs = toNumber(a?.shiftSortTs);
+                const bTs = toNumber(b?.shiftSortTs);
+                if (aTs !== bTs) return aTs - bTs;
+                const aDate = parseIsoDate(a?.date) || "";
+                const bDate = parseIsoDate(b?.date) || "";
+                if (aDate !== bDate) return aDate.localeCompare(bDate);
+                return normalizeKey(a?.shiftId).localeCompare(normalizeKey(b?.shiftId));
+            });
+
+        const statusOrder = getConfiguredDeadlineKeys();
+        const indexMap = new Map(statusOrder.map((key, idx) => [key, idx]));
+        const groupsMap = new Map();
+
+        shifts.forEach((shiftItem) => {
+            const details = Array.isArray(shiftItem?.details) ? shiftItem.details : [];
+            const shiftStamp = `${toNumber(shiftItem?.shiftSortTs)}|${normalizeKey(shiftItem?.shiftId)}`;
+
+            details.forEach((detail) => {
+                const statusKey = normalizeDeadlineKey(detail?.key);
+                if (!statusKey) return;
+
+                if (!groupsMap.has(statusKey)) {
+                    groupsMap.set(statusKey, {
+                        key: statusKey,
+                        displayKey: normalizeKey(detail?.displayKey) || DEADLINE_LABELS[statusKey] || statusKey,
+                        sheetNames: new Set(),
+                        entriesMap: new Map()
+                    });
+                }
+                const group = groupsMap.get(statusKey);
+                (Array.isArray(detail?.sheetNames) ? detail.sheetNames : []).forEach((name) => {
+                    const n = normalizeKey(name);
+                    if (n) group.sheetNames.add(n);
+                });
+
+                const sources = [
+                    detail?.remainingExpensiveByDate,
+                    detail?.remaining_expensive_by_date,
+                    detail?.remaining_expensive_due_by_date,
+                    detail?.expensive_remaining_by_date,
+                    detail?.expensive_due_by_date,
+                    detail?.remaining_due_by_date
+                ];
+
+                let entries = [];
+                for (const source of sources) {
+                    const parsed = parseUnfinishedEntriesFromSource(source, detail, shiftItem);
+                    if (parsed.length) {
+                        entries = parsed;
+                        break;
+                    }
+                }
+
+                if (!entries.length) {
+                    const count = computeRemainingExpensiveCount(detail, { allowGeneric: false });
+                    const sum = computeRemainingExpensiveSum(detail, { allowGeneric: true });
+                    if (count > 0) {
+                        entries = [{
+                            dateLabel: buildShortDueLabelForShiftDetail(detail, shiftItem) || "-",
+                            count,
+                            sum
+                        }];
+                    }
+                }
+                if (!entries.length) return;
+
+                const hasAnySum = entries.some((entry) => entry?.sum !== null && entry?.sum !== undefined);
+                if (!hasAnySum) {
+                    const detailRemainingSum = computeRemainingExpensiveSum(detail, { allowGeneric: true });
+                    if (detailRemainingSum !== null && detailRemainingSum > 0) {
+                        const totalCount = entries.reduce((acc, entry) => acc + Math.max(0, toNumber(entry?.count)), 0);
+                        if (totalCount > 0) {
+                            entries = entries.map((entry) => ({
+                                ...entry,
+                                sum: Math.max(0, toNumber(entry?.count)) > 0
+                                    ? detailRemainingSum * (Math.max(0, toNumber(entry?.count)) / totalCount)
+                                    : null
+                            }));
+                        }
+                    }
+                }
+
+                entries.forEach((entry) => {
+                    const dateLabel = normalizeKey(entry?.dateLabel) || "-";
+                    const count = Math.max(0, toNumber(entry?.count));
+                    const sumRaw = entry?.sum;
+                    let sum = (sumRaw === null || sumRaw === undefined || sumRaw === "")
+                        ? null
+                        : Math.max(0, toNumber(sumRaw));
+                    if (count > 0 && sum !== null && sum <= 0) {
+                        // Для дорогостоя (цена > 1000) нулевая сумма при положительном количестве
+                        // чаще всего означает, что API не вернул сумму, а не реальный ноль.
+                        sum = null;
+                    }
+
+                    const prev = group.entriesMap.get(dateLabel);
+                    if (!prev || prev.lastStamp !== shiftStamp) {
+                        group.entriesMap.set(dateLabel, {
+                            dateLabel,
+                            count,
+                            sum: sum === null ? 0 : sum,
+                            hasSum: sum !== null,
+                            lastStamp: shiftStamp
+                        });
+                        return;
+                    }
+
+                    prev.count += count;
+                    if (sum !== null) {
+                        prev.sum += sum;
+                        prev.hasSum = true;
+                    }
+                    group.entriesMap.set(dateLabel, prev);
+                });
+            });
+        });
+
+        const groups = Array.from(groupsMap.values())
+            .map((group) => {
+                const entries = Array.from(group.entriesMap.values())
+                    .filter((entry) => entry.count > 0)
+                    .sort((a, b) => {
+                        const aIso = parseYmd(a.dateLabel) || "";
+                        const bIso = parseYmd(b.dateLabel) || "";
+                        if (aIso && bIso && aIso !== bIso) return bIso.localeCompare(aIso);
+                        return a.dateLabel.localeCompare(b.dateLabel, "ru");
+                    });
+                if (!entries.length) return null;
+
+                return {
+                    key: group.key,
+                    displayKey: group.displayKey,
+                    sheetNames: Array.from(group.sheetNames),
+                    entries,
+                    totalCount: entries.reduce((acc, entry) => acc + toNumber(entry.count), 0),
+                    totalSum: entries.reduce((acc, entry) => acc + (entry.hasSum ? toNumber(entry.sum) : 0), 0),
+                    hasFullSum: entries.every((entry) => entry.hasSum)
+                };
+            })
+            .filter(Boolean);
+
+        groups.sort((a, b) => {
+            const aIndex = indexMap.has(a.key) ? indexMap.get(a.key) : Number.MAX_SAFE_INTEGER;
+            const bIndex = indexMap.has(b.key) ? indexMap.get(b.key) : Number.MAX_SAFE_INTEGER;
+            if (aIndex !== bIndex) return aIndex - bIndex;
+            return a.displayKey.localeCompare(b.displayKey, "ru");
+        });
+
+        return groups;
+    }
+
+    function compactDueDateLabel(label) {
+        const raw = normalizeKey(label);
+        if (!raw) return "-";
+        return raw.replace(/(\d{2}\.\d{2})\.\d{4}/g, "$1");
+    }
+
+    function renderUnfinishedCompactPanel() {
+        const panel = document.getElementById("dashboard-unfinished-panel-content");
+        if (!panel) return;
+
+        const groups = buildUnfinishedExpensiveByStatus(lastMonthShiftDynamics);
+        if (!groups.length) {
+            panel.innerHTML = `<div class="muted" style="font-size:11px;">Нет хвостов по дорогостою.</div>`;
+            return;
+        }
+
+        const html = groups.map((group) => {
+            const rows = group.entries.map((entry) => `
+                <div class="opp-unfinished-mini-row">
+                    <span class="opp-unfinished-mini-date">${escapeHtml(compactDueDateLabel(entry.dateLabel))}</span>
+                    <span class="opp-unfinished-mini-count">${formatNumber(entry.count)} ШК</span>
+                </div>
+            `).join("");
+
+            return `
+                <div class="opp-unfinished-mini-group">
+                    <div class="opp-unfinished-mini-title">${escapeHtml(group.displayKey)}</div>
+                    ${rows}
+                </div>
+            `;
+        }).join("");
+
+        panel.innerHTML = `<div class="opp-unfinished-mini-list">${html}</div>`;
+    }
+
     function formatDateTimeRu(value) {
         const raw = normalizeKey(value);
         if (!raw) return "";
@@ -1301,6 +1711,16 @@
                             detail?.expensive_analyzed_due_unique_shk ??
                             detail?.expensive_analyzed_due
                         );
+                        const detailExpensiveDueSumPrice = toNumber(
+                            detail?.expensive_due_total_sum_price ??
+                            detail?.expensive_due_sum_price ??
+                            detail?.expensive_due_price
+                        );
+                        const detailExpensiveAnalyzedSumPrice = toNumber(
+                            detail?.expensive_analyzed_due_sum_price ??
+                            detail?.expensive_analyzed_sum_price ??
+                            detail?.expensive_analyzed_due_price
+                        );
                         const detailAnalyzerValues = Array.isArray(detail?.analyzer_values)
                             ? detail.analyzer_values.map((v) => normalizeKey(v)).filter(Boolean)
                             : [];
@@ -1331,6 +1751,8 @@
                             analyzedSumPrice: detailAnalyzedSumPrice,
                             expensiveDueTotal: detailExpensiveDueTotal,
                             expensiveAnalyzed: detailExpensiveAnalyzed,
+                            expensiveDueSumPrice: detailExpensiveDueSumPrice,
+                            expensiveAnalyzedSumPrice: detailExpensiveAnalyzedSumPrice,
                             expensivePercent: detailExpensiveDueTotal > 0
                                 ? (detailExpensiveAnalyzed / detailExpensiveDueTotal) * 100
                                 : toNumber(detail?.expensive_analyzed_percent),
@@ -1339,6 +1761,7 @@
                             breakdownStatuses: detailBreakdownStatuses,
                             uploadStatus: normalizeKey(detail?.upload_status) || (detailDueTotal > 0 ? "Есть" : "Нет выгрузки"),
                             sheetNames,
+                            remainingExpensiveByDate: detail?.remaining_expensive_by_date ?? detail?.expensive_remaining_by_date ?? detail?.remaining_expensive_due_by_date ?? detail?.expensive_due_by_date ?? null,
                             hasPriceDetail: keyNorm !== "ORS"
                         };
                     })
@@ -1817,8 +2240,7 @@
         if (!panel) return;
 
         const overallLag = Math.max(0, 100 - toNumber(lastMonthSummary?.percentBySum));
-        const lagBySheets = buildMonthLagByStatus(lastMonthShiftDynamics)
-            .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+        const lagBySheets = buildMonthLagByStatus(lastMonthShiftDynamics);
         const lagBySheetsHtml = lagBySheets.map((entry) => {
             const valueText = entry.lagPercent === null ? "—" : formatPercent(entry.lagPercent);
             return `
@@ -1850,6 +2272,7 @@
 
         if (!lastCurrentShift) {
             renderLagPanel();
+            renderUnfinishedCompactPanel();
             renderCurrentShiftBreakdownChart(null);
             summaryWrap.innerHTML = `
                 ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Актуально на: ${escapeHtml(generatedText)}</div>` : ""}
@@ -1871,6 +2294,7 @@
         const shiftItem = selectedShift || lastCurrentShift;
         if (!shiftItem) {
             renderLagPanel();
+            renderUnfinishedCompactPanel();
             renderCurrentShiftBreakdownChart(null);
             summaryWrap.innerHTML = `
                 ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
@@ -1929,6 +2353,10 @@
                 </div>
             `;
         }).join("");
+        const expensiveCardClass = toNumber(shiftItem.expensiveDueTotal) <= 0 ||
+            toNumber(shiftItem.expensiveAnalyzed) >= toNumber(shiftItem.expensiveDueTotal)
+            ? "opp-month-card-good"
+            : "opp-month-card-bad";
 
         summaryWrap.innerHTML = `
             ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Актуально на: ${escapeHtml(generatedText)}</div>` : ""}
@@ -1954,11 +2382,11 @@
                         <div class="opp-month-label">Сумма ШК</div>
                         <div class="opp-month-value">${escapeHtml(formatCurrency(shiftItem.analyzedSumPrice))} / ${escapeHtml(formatCurrency(shiftItem.dueSumPrice))}</div>
                     </div>
-                    <div class="opp-month-card">
+                    <div class="opp-month-card ${expensiveCardClass}">
                         <div class="opp-month-label">Дорогостой</div>
                         <div class="opp-month-value">${formatNumber(shiftItem.expensiveAnalyzed)} / ${formatNumber(shiftItem.expensiveDueTotal)}</div>
                     </div>
-                    <div class="opp-month-card">
+                    <div class="opp-month-card ${toNumber(shiftItem.oppRecognizedCount) > 0 ? "opp-month-card-good" : "opp-month-card-bad"}">
                         <div class="opp-month-label">Опознано</div>
                         <div class="opp-month-value">${formatNumber(shiftItem.oppRecognizedCount)}</div>
                     </div>
@@ -1986,6 +2414,7 @@
             });
         }
         renderLagPanel();
+        renderUnfinishedCompactPanel();
         renderCurrentShiftBreakdownChart(shiftItem);
 
     }

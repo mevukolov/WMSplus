@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+ — Инвентаризация ТМЦ</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="tmc_invent.js" defer></script>
+
+    <style>
+        .invent-wrap {
+            max-width: 980px;
+            margin-top: 90px;
+        }
+
+        .invent-result {
+            margin-top: 14px;
+            border-radius: 12px;
+            border: 1px dashed #cbd5e1;
+            background: #f8fafc;
+            padding: 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 118px;
+        }
+
+        .invent-result-icon {
+            width: 66px;
+            text-align: center;
+            font-size: 58px;
+            font-weight: 700;
+            line-height: 1;
+            color: #64748b;
+            flex: 0 0 66px;
+        }
+
+        .invent-result-body {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .invent-result-message {
+            margin: 0 0 7px 0;
+            font-size: 16px;
+            font-weight: 700;
+            color: #1f2937;
+        }
+
+        .invent-result-line {
+            margin: 3px 0;
+            color: #334155;
+            word-break: break-word;
+        }
+
+        .invent-result.neutral .invent-result-message {
+            color: #334155;
+        }
+
+        .invent-result.success {
+            border: 1px solid rgba(34, 197, 94, 0.5);
+            background: #ecfdf3;
+        }
+
+        .invent-result.success .invent-result-icon {
+            color: #16a34a;
+        }
+
+        .invent-result.success .invent-result-message {
+            color: #166534;
+        }
+
+        .invent-result.error {
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            background: #fef2f2;
+        }
+
+        .invent-result.error .invent-result-icon {
+            color: #dc2626;
+        }
+
+        .invent-result.error .invent-result-message {
+            color: #991b1b;
+        }
+
+        #invent-modal-content.scan-state-success {
+            border: 2px solid #22c55e;
+            background: #f0fdf4;
+        }
+
+        #invent-modal-content.scan-state-error {
+            border: 2px solid #ef4444;
+            background: #fef2f2;
+        }
+    </style>
+</head>
+<body>
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title" id="header-wh"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="wrap invent-wrap">
+    <div class="card" style="padding:22px;">
+        <h1 style="margin:0 0 8px 0;">Инвентаризация ТМЦ</h1>
+        <p class="muted" style="margin:0 0 14px 0;">
+            Сканируйте <code>item_code</code> в модальном окне. Результат проверки отображается сразу там же.
+        </p>
+        <button id="btn-open-invent-modal" class="btn btn-rect" type="button">Открыть окно инвентаризации</button>
+    </div>
+</main>
+
+<div id="invent-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div id="invent-modal-content" class="modal-content" style="max-width:640px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <h2 style="margin:0;">Сканирование ТМЦ</h2>
+            <button id="btn-close-invent-modal" class="btn btn-outline" type="button">Закрыть</button>
+        </div>
+
+        <div class="mb" style="margin-top:12px;">
+            <label for="invent-scan-input">Сканируйте item_code</label>
+            <input
+                id="invent-scan-input"
+                class="input"
+                type="text"
+                placeholder="Сканируйте QR item_code"
+                autocomplete="off"
+                style="width:100%;box-sizing:border-box;"
+            />
+        </div>
+
+        <div id="invent-result" class="invent-result neutral" aria-live="polite">
+            <div id="invent-result-icon" class="invent-result-icon">•</div>
+            <div class="invent-result-body">
+                <p id="invent-result-message" class="invent-result-message">Ожидание сканирования</p>
+                <p id="invent-item-name" class="invent-result-line">Название: —</p>
+                <p id="invent-item-place" class="invent-result-line">Место: —</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+</body>
+</html>
