@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8" />
-    <title>WMS+ — Баланс КС</title>
+    <title>WMS+ — Балансировка сотрудников на КС</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
 
     <link rel="stylesheet" href="styles.css">
@@ -13,14 +13,21 @@
     <script src="sort_emp_balance_constructor.js" defer></script>
 
     <style>
+        body {
+            overflow: hidden;
+            padding: 0 10px 10px;
+        }
+
         .balance-layout {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 360px;
+            grid-template-columns: minmax(0, 1fr) 310px;
             gap: 12px;
-            align-items: start;
+            align-items: stretch;
             max-width: 1880px;
             margin: 0 auto;
-            padding: 0 10px;
+            margin-top: 62px;
+            height: calc(100vh - 96px);
+            min-height: 0;
         }
 
         .balance-center.wrap,
@@ -28,6 +35,25 @@
             max-width: none !important;
             width: 100%;
             margin: 0;
+            display: block;
+            height: 100%;
+            min-height: 0;
+            box-sizing: border-box;
+            padding-top: 10px !important;
+        }
+
+        .balance-center > .card {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .balance-side.wrap {
+            position: sticky;
+            top: 0;
+            align-self: start;
         }
 
         .balance-top-row {
@@ -68,31 +94,44 @@
         }
 
         .analysis-zone-wrap {
-            margin-top: 10px;
+            margin-top: 0;
             border: 1px solid rgba(15, 23, 42, 0.08);
             border-radius: 12px;
             background: #f8fafc;
-            padding: 10px;
+            padding: 8px;
         }
 
         .analysis-title {
-            margin: 0 0 8px 0;
+            margin: 0 0 6px 0;
             font-size: 13px;
             font-weight: 700;
             color: #334155;
         }
 
+        .analysis-count {
+            margin: 0 0 6px 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: #64748b;
+        }
+
         .analysis-drop-zone {
-            min-height: 64px;
+            min-height: 44px;
+            max-height: 92px;
+            overflow: auto;
             border: 1px dashed rgba(15, 23, 42, 0.25);
             border-radius: 10px;
             background: #fff;
-            padding: 8px;
+            padding: 7px;
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
             align-items: center;
             transition: border-color .12s ease, background-color .12s ease;
+        }
+
+        .analysis-drop-zone.has-items {
+            min-height: 68px;
         }
 
         .analysis-drop-zone.is-dragover {
@@ -130,9 +169,10 @@
         }
 
         .analysis-actions {
-            margin-top: 9px;
+            margin-top: 7px;
             display: flex;
             justify-content: flex-end;
+            gap: 6px;
         }
 
         .balance-status {
@@ -142,10 +182,23 @@
         }
 
         .groups-wrap {
-            margin-top: 10px;
+            margin-top: 0;
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(390px, 1fr));
             gap: 10px;
+        }
+
+        .groups-canvas {
+            margin-top: 10px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 14px;
+            background: #f8fafc;
+            padding: 10px;
+            flex: 1 1 auto;
+            min-height: 0;
+            max-height: none;
+            overflow: auto;
+            box-sizing: border-box;
         }
 
         .group-box {
@@ -183,6 +236,27 @@
             gap: 6px;
             cursor: pointer;
             transition: box-shadow .12s ease, background-color .12s ease, border-color .12s ease;
+        }
+
+        .sq-box.secondary {
+            border-style: dashed;
+            border-width: 2px;
+        }
+
+        .sq-box.secondary.is-inactive-secondary {
+            width: 54%;
+            min-height: 56px;
+            margin: 0 auto;
+            padding: 5px 4px;
+            border-radius: 12px;
+        }
+
+        .sq-box.secondary.is-inactive-secondary .sq-empty {
+            font-size: 10px;
+        }
+
+        .sq-box.secondary.is-inactive-secondary .sq-hint {
+            font-size: 9px;
         }
 
         .sq-box:hover {
@@ -249,23 +323,22 @@
             line-height: 1.2;
         }
 
-        .sq-name {
+        .sq-caption {
             margin: 0;
             font-weight: 700;
             color: #111827;
             text-align: center;
             font-size: 13px;
             line-height: 1.15;
+            min-height: 16px;
         }
 
-        .sq-caption {
+        .sq-productivity {
             margin: 0;
-            font-weight: 600;
-            color: #334155;
             text-align: center;
-            font-size: 12px;
-            line-height: 1.2;
-            min-height: 28px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #475569;
         }
 
         .sq-assign-panel {
@@ -324,6 +397,12 @@
 
         .side-card {
             padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: 100%;
+            max-height: none;
+            overflow: hidden;
         }
 
         .side-title {
@@ -339,6 +418,12 @@
             gap: 8px;
         }
 
+        .side-head-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
         .side-add-btn {
             width: 32px;
             height: 32px;
@@ -348,8 +433,17 @@
             padding: 0;
         }
 
+        .side-bulk-btn {
+            height: 32px;
+            border-radius: 9px;
+            padding: 0 9px;
+            font-size: 11px;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
         .side-search {
-            margin-top: 8px;
+            margin-top: 2px;
         }
 
         .side-search .input {
@@ -358,8 +452,10 @@
         }
 
         .employees-list {
-            margin-top: 10px;
-            max-height: 70vh;
+            margin-top: 0;
+            min-height: 0;
+            max-height: none;
+            flex: 1 1 auto;
             overflow: auto;
             display: flex;
             flex-direction: column;
@@ -367,26 +463,77 @@
             padding-right: 2px;
         }
 
+        .employees-list > * {
+            flex: 0 0 auto;
+        }
+
+        .emp-drag-handle {
+            border-right: 1px solid rgba(15, 23, 42, 0.12);
+            border-radius: 9px 0 0 9px;
+            background: #f1f5f9;
+            color: #64748b;
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: 1px;
+            min-height: 64px;
+        }
+
+        .emp-drag-handle:active {
+            cursor: grabbing;
+        }
+
         .emp-item {
             border: 1px solid rgba(15, 23, 42, 0.09);
             border-radius: 9px;
             background: #ffffff;
-            padding: 7px 9px;
-            cursor: grab;
-        }
-
-        .emp-item:active {
-            cursor: grabbing;
+            display: grid;
+            grid-template-columns: 18px minmax(0, 1fr);
+            align-items: stretch;
+            overflow: hidden;
+            flex: 0 0 auto;
+            min-height: 64px;
         }
 
         .emp-item.is-assigned {
             background: #f8fafc;
         }
 
+        .emp-item.is-selected {
+            border-color: rgba(37, 99, 235, 0.5);
+            background: #eff6ff;
+            box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
+        }
+
+        .emp-item.is-in-analysis {
+            border-color: rgba(22, 163, 74, 0.32);
+            background: #f0fdf4;
+            box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.18);
+        }
+
+        .emp-item.is-selected.is-in-analysis {
+            border-color: rgba(37, 99, 235, 0.5);
+            background: #eff6ff;
+            box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
+        }
+
+        .emp-content {
+            min-width: 0;
+            padding: 7px 9px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
         .emp-main {
             display: flex;
-            align-items: baseline;
-            justify-content: space-between;
+            align-items: flex-start;
+            justify-content: flex-start;
             gap: 8px;
             font-size: 13px;
             line-height: 1.25;
@@ -394,30 +541,148 @@
             font-weight: 600;
         }
 
+        .emp-check {
+            margin: 0;
+            flex: 0 0 auto;
+            pointer-events: none;
+        }
+
+        .emp-check-hit {
+            width: 22px;
+            min-width: 22px;
+            height: 22px;
+            margin: -2px 0 0 -2px;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            user-select: none;
+            flex: 0 0 auto;
+        }
+
+        .emp-check-hit:hover {
+            background: rgba(15, 23, 42, 0.06);
+        }
+
         .emp-name {
             min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            flex: 1 1 auto;
+            overflow: visible;
+            text-overflow: clip;
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        .emp-bottom {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 7px;
         }
 
         .emp-perf {
             color: #0f172a;
             font-weight: 700;
             white-space: nowrap;
-            font-size: 13px;
+            font-size: 12px;
+            margin-left: 0;
+            flex: 0 0 auto;
         }
 
         .emp-actions {
-            margin-top: 5px;
+            margin-top: 0;
             display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
             justify-content: flex-end;
+            flex: 1 1 auto;
+            align-items: center;
+        }
+
+        .emp-shift-label {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1;
+            color: #111827;
+            background: #e5e7eb;
+            border: 1px solid rgba(15, 23, 42, 0.14);
+            white-space: nowrap;
+            min-width: 58px;
+        }
+
+        .emp-shift-tags {
+            display: inline-flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 4px;
+            justify-content: flex-end;
+        }
+
+        .emp-shift-label.day-1 {
+            background: #fef3c7;
+            border-color: rgba(217, 119, 6, 0.42);
+            color: #92400e;
+        }
+
+        .emp-shift-label.day-2 {
+            background: #fed7aa;
+            border-color: rgba(234, 88, 12, 0.42);
+            color: #9a3412;
+        }
+
+        .emp-shift-label.night-1 {
+            background: #dbeafe;
+            border-color: rgba(37, 99, 235, 0.4);
+            color: #1e3a8a;
+        }
+
+        .emp-shift-label.night-2 {
+            background: #cffafe;
+            border-color: rgba(8, 145, 178, 0.42);
+            color: #0e7490;
         }
 
         .emp-actions .btn {
             font-size: 11px;
             padding: 4px 7px;
             border-radius: 7px;
+        }
+
+        .side-analysis-wrap {
+            margin-top: auto;
+            padding-top: 6px;
+            border-top: 1px dashed rgba(15, 23, 42, 0.12);
+            flex: 0 0 auto;
+        }
+
+        .analysis-clear-btn {
+            white-space: nowrap;
+        }
+
+        .employee-perf-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .employee-perf-grid .input {
+            width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+
+        .employee-perf-avg {
+            margin-top: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #334155;
         }
 
         .balance-modal-content {
@@ -453,13 +718,21 @@
 
         @media (max-width: 1400px) {
             .balance-layout {
-                grid-template-columns: minmax(0, 1fr) 320px;
+                grid-template-columns: minmax(0, 1fr) 290px;
             }
         }
 
         @media (max-width: 1200px) {
+            body {
+                overflow: auto;
+                padding: 0 8px 8px;
+            }
+
             .balance-layout {
                 grid-template-columns: 1fr;
+                height: auto;
+                min-height: 0;
+                margin-top: 60px;
             }
 
             .balance-side {
@@ -470,8 +743,26 @@
                 order: 1;
             }
 
+            .balance-side.wrap {
+                position: static;
+                top: auto;
+            }
+
+            .side-card {
+                height: auto;
+                max-height: none;
+                overflow: visible;
+            }
+
+            .groups-canvas {
+                max-height: none;
+                min-height: 320px;
+            }
+
             .employees-list {
                 max-height: 360px;
+                min-height: 150px;
+                flex: 0 0 auto;
             }
         }
 
@@ -517,47 +808,15 @@
     <main class="wrap balance-center">
         <section class="card">
             <div class="balance-top-row">
-                <h1 style="margin:0;">Конструктор баланса КС</h1>
+                <h1 style="margin:0;">Балансировка сотрудников на КС</h1>
                 <button id="reload-btn" class="btn btn-rect" type="button">Обновить</button>
             </div>
 
-            <div class="analysis-zone-wrap">
-                <p class="analysis-title">Добавьте сотрудников для анализа</p>
-                <div id="analysis-drop-zone" class="analysis-drop-zone">
-                    <p id="analysis-empty" class="analysis-empty">Перетащите сотрудников из списка справа</p>
-                    <div id="analysis-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
-                </div>
-                <div class="analysis-actions">
-                    <button id="balance-btn" class="btn btn-rect" type="button" style="display:none;">Балансировка</button>
-                </div>
-            </div>
-
-            <div class="balance-kpis">
-                <div class="balance-kpi">
-                    <p class="balance-kpi-label">Групп</p>
-                    <p id="kpi-groups" class="balance-kpi-value">0</p>
-                </div>
-                <div class="balance-kpi">
-                    <p class="balance-kpi-label">КС</p>
-                    <p id="kpi-squares" class="balance-kpi-value">0</p>
-                </div>
-                <div class="balance-kpi">
-                    <p class="balance-kpi-label">Сотрудников</p>
-                    <p id="kpi-employees" class="balance-kpi-value">0</p>
-                </div>
-                <div class="balance-kpi">
-                    <p class="balance-kpi-label">Закреплено на КС</p>
-                    <p id="kpi-assigned" class="balance-kpi-value">0</p>
-                </div>
-                <div class="balance-kpi">
-                    <p class="balance-kpi-label">Суммарный weight</p>
-                    <p id="kpi-total-weight" class="balance-kpi-value">0</p>
-                </div>
-            </div>
-
             <div id="status-line" class="balance-status">Загрузка данных...</div>
-            <div id="groups-wrap" class="groups-wrap"></div>
-            <div id="groups-empty" class="empty-note" style="display:none; margin-top:10px;">Нет групп/КС для отображения.</div>
+            <div class="groups-canvas">
+                <div id="groups-wrap" class="groups-wrap"></div>
+                <div id="groups-empty" class="empty-note" style="display:none;">Нет групп/КС для отображения.</div>
+            </div>
         </section>
     </main>
 
@@ -565,13 +824,30 @@
         <section class="card side-card">
             <div class="side-head">
                 <h2 class="side-title">Сотрудники</h2>
-                <button id="btn-add-employee" class="btn btn-rect side-add-btn" type="button" title="Добавить сотрудника">+</button>
+                <div class="side-head-actions">
+                    <button id="btn-bulk-unassign" class="btn btn-outline side-bulk-btn" type="button" style="display:none;">Снять закрепления</button>
+                </div>
             </div>
             <div class="side-search">
                 <input id="employees-search-input" class="input" type="text" placeholder="Поиск сотрудника..." autocomplete="off">
             </div>
             <div id="employees-list" class="employees-list"></div>
             <div id="employees-empty" class="empty-note" style="display:none; margin-top:10px;">Сотрудники не найдены.</div>
+
+            <div class="side-analysis-wrap">
+                <div class="analysis-zone-wrap">
+                    <p class="analysis-title">Добавьте сотрудников для анализа</p>
+                    <p id="analysis-count" class="analysis-count">Добавлено: 0 чел.</p>
+                    <div id="analysis-drop-zone" class="analysis-drop-zone">
+                        <p id="analysis-empty" class="analysis-empty">Перетащите сотрудников сюда</p>
+                        <div id="analysis-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                    </div>
+                    <div class="analysis-actions">
+                        <button id="analysis-clear-btn" class="btn btn-outline analysis-clear-btn" type="button" style="display:none;">Очистить</button>
+                        <button id="balance-btn" class="btn btn-rect" type="button" style="display:none;">Балансировка</button>
+                    </div>
+                </div>
+            </div>
         </section>
     </aside>
 </div>
@@ -580,7 +856,7 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content" style="max-width:520px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
-            <h2 style="margin:0;">Добавить сотрудника</h2>
+            <h2 id="employee-form-title" style="margin:0;">Добавить сотрудника</h2>
             <button id="employee-create-close-top" class="btn btn-outline" type="button">Закрыть</button>
         </div>
 
@@ -603,8 +879,13 @@
         </div>
 
         <div class="mb">
-            <label for="employee-create-performance">Выработка</label>
-            <input id="employee-create-performance" class="input" type="text" inputmode="numeric" placeholder="linear_emp_performance">
+            <label>Производительность за 3 последние смены</label>
+            <div class="employee-perf-grid">
+                <input id="employee-create-performance-1" class="input" type="text" inputmode="numeric" placeholder="Смена 1">
+                <input id="employee-create-performance-2" class="input" type="text" inputmode="numeric" placeholder="Смена 2">
+                <input id="employee-create-performance-3" class="input" type="text" inputmode="numeric" placeholder="Смена 3">
+            </div>
+            <div id="employee-create-performance-avg" class="employee-perf-avg">Средняя выработка: —</div>
         </div>
 
         <div class="actions" style="margin-top:16px;justify-content:flex-end;">
