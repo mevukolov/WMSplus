@@ -43,6 +43,12 @@
             min-height: 520px;
         }
 
+        .pure-last-upload-date {
+            margin-top: 8px;
+            font-size: 13px;
+            color: #64748b;
+        }
+
         .pure-status-line {
             margin-top: 12px;
             min-height: 20px;
@@ -53,9 +59,167 @@
             word-break: break-word;
         }
 
+        .pure-center-toolbar {
+            display: flex;
+            justify-content: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .pure-open-table-btn {
+            min-height: 40px;
+        }
+
+        .pure-full-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 1200;
+            display: flex;
+        }
+
+        .pure-full-modal.hidden {
+            display: none;
+        }
+
+        .pure-full-modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.35);
+        }
+
+        .pure-full-modal-content {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .pure-full-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 14px 18px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #f8fafc;
+        }
+
+        .pure-full-modal-title {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .pure-modal-close-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .pure-table-toolbar {
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            flex-wrap: wrap;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #f3f4f6;
+        }
+
+        .pure-filter-field {
+            min-width: 250px;
+        }
+
+        .pure-filter-field > label {
+            display: block;
+            font-size: 12px;
+            color: #475569;
+            margin-bottom: 6px;
+        }
+
+        .pure-filter-btn {
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        .pure-table-inline-status {
+            min-height: 18px;
+            font-size: 13px;
+            color: #64748b;
+            margin-left: auto;
+            align-self: center;
+            max-width: 360px;
+            text-align: right;
+            word-break: break-word;
+        }
+
+        .pure-table-scroll {
+            flex: 1;
+            overflow: auto;
+            background: #ffffff;
+        }
+
+        .pure-data-table {
+            width: max-content;
+            min-width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .pure-data-table th,
+        .pure-data-table td {
+            border: 1px solid #e5e7eb;
+            padding: 8px 10px;
+            vertical-align: top;
+            background: #ffffff;
+        }
+
+        .pure-data-table th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #f8fafc;
+            font-weight: 600;
+            color: #0f172a;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        .pure-data-table td {
+            white-space: nowrap;
+        }
+
+        .pure-data-table td.pure-wrap-cell {
+            white-space: normal;
+            min-width: 220px;
+            max-width: 320px;
+        }
+
+        .pure-edit-input {
+            width: 220px;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+
+        .pure-edit-input.short {
+            width: 180px;
+        }
+
         @media (max-width: 1500px) {
             .pure-layout {
                 grid-template-columns: 280px minmax(0, 1fr) 280px;
+            }
+
+            .pure-filter-field {
+                min-width: 220px;
             }
         }
 
@@ -74,6 +238,12 @@
 
             .pure-side-right {
                 order: 3;
+            }
+
+            .pure-table-inline-status {
+                margin-left: 0;
+                text-align: left;
+                width: 100%;
             }
         }
     </style>
@@ -102,6 +272,7 @@
             <div class="status-header">
                 <div class="status-center" style="grid-column:1 / -1;">
                     <div class="status-code" style="font-size:22px;">Обновить данные</div>
+                    <div id="last-upload-date" class="pure-last-upload-date">Последняя выгруженная дата: —</div>
                 </div>
             </div>
 
@@ -116,6 +287,9 @@
 
     <main class="wrap pure-center" style="max-width:1200px;">
         <div class="card pure-center-card">
+            <div class="pure-center-toolbar">
+                <button id="open-pure-table-btn" class="btn btn-rect pure-open-table-btn">Открыть таблицу чистых списаний</button>
+            </div>
             <h1 style="margin:0 0 14px 0;">Статистика</h1>
         </div>
     </main>
@@ -129,6 +303,73 @@
             </div>
         </div>
     </aside>
+</div>
+
+<div id="pure-table-modal" class="pure-full-modal hidden">
+    <div class="pure-full-modal-backdrop" data-close-pure-table="1"></div>
+    <div class="pure-full-modal-content">
+        <div class="pure-full-modal-header">
+            <div class="pure-full-modal-title">Таблица чистых списаний</div>
+            <button id="pure-table-close-btn" class="pure-modal-close-btn" type="button" aria-label="Закрыть">✕</button>
+        </div>
+
+        <div class="pure-table-toolbar">
+            <div class="pure-filter-field">
+                <label>Лостризон*</label>
+                <div class="status-dropdown">
+                    <button class="btn btn-rect status-btn pure-filter-btn" id="pure-filter-lr-btn" type="button">
+                        Выбраны все
+                        <span class="caret">▾</span>
+                    </button>
+                    <div class="status-panel hidden" id="pure-filter-lr-panel">
+                        <div class="status-title">Лостризон</div>
+                        <div class="status-list" id="pure-filter-lr-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pure-filter-field">
+                <label>Статус до списания*</label>
+                <div class="status-dropdown">
+                    <button class="btn btn-rect status-btn pure-filter-btn" id="pure-filter-status-btn" type="button">
+                        Выбраны все
+                        <span class="caret">▾</span>
+                    </button>
+                    <div class="status-panel hidden" id="pure-filter-status-panel">
+                        <div class="status-title">Статус до списания</div>
+                        <div class="status-list" id="pure-filter-status-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="pure-table-refresh-btn" class="btn btn-rect" type="button">Обновить</button>
+            <div id="pure-table-inline-status" class="pure-table-inline-status"></div>
+        </div>
+
+        <div class="pure-table-scroll">
+            <table class="pure-data-table">
+                <thead>
+                <tr>
+                    <th>ШК</th>
+                    <th>Номенклатура</th>
+                    <th>Название</th>
+                    <th>Бренд</th>
+                    <th>Статус ШК до списания</th>
+                    <th>Дата списания</th>
+                    <th>Лостризон</th>
+                    <th>Цена</th>
+                    <th>Вердикт</th>
+                    <th>Комментарий</th>
+                </tr>
+                </thead>
+                <tbody id="pure-table-body">
+                <tr>
+                    <td colspan="10" class="muted">Нажмите «Открыть таблицу чистых списаний».</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <div id="toasts" class="toasts"></div>

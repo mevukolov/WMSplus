@@ -387,6 +387,14 @@
             const prevDateIso = shiftIsoDate(shiftDateIso, -1) || shiftDateIso;
             return `${formatDateRu(prevDateIso)} После 13:00`;
         }
+        if (key === "ORS") {
+            if (!shiftDateIso) return "-";
+            if (shiftItem?.shiftType === "day") {
+                return `${formatDateRu(shiftDateIso)} До 13:00`;
+            }
+            const prevDateIso = shiftIsoDate(shiftDateIso, -1) || shiftDateIso;
+            return `${formatDateRu(prevDateIso)} После 13:00`;
+        }
 
         const dueLabel = normalizeKey(detailItem?.dueLabel || detailItem?.due_for_date_label || detailItem?.due_until_label);
         if (!dueLabel) return "-";

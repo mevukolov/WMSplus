@@ -28,6 +28,33 @@
     const refreshBtn = document.getElementById("refresh-btn");
     const fileInput = document.getElementById("file-input");
     const statusLineEl = document.getElementById("status-line");
+    const lastUploadDateEl = document.getElementById("last-upload-date");
+    const openPureTableBtn = document.getElementById("open-pure-table-btn");
+    const pureTableModalEl = document.getElementById("pure-table-modal");
+    const pureTableCloseBtn = document.getElementById("pure-table-close-btn");
+    const pureFilterLrBtn = document.getElementById("pure-filter-lr-btn");
+    const pureFilterLrPanel = document.getElementById("pure-filter-lr-panel");
+    const pureFilterLrList = document.getElementById("pure-filter-lr-list");
+    const pureFilterStatusBtn = document.getElementById("pure-filter-status-btn");
+    const pureFilterStatusPanel = document.getElementById("pure-filter-status-panel");
+    const pureFilterStatusList = document.getElementById("pure-filter-status-list");
+    const pureTableRefreshBtn = document.getElementById("pure-table-refresh-btn");
+    const pureTableInlineStatusEl = document.getElementById("pure-table-inline-status");
+    const pureTableBody = document.getElementById("pure-table-body");
+
+    const tableState = {
+        rows: [],
+        filteredRows: [],
+        activeLrs: new Set(),
+        activeStatuses: new Set(),
+        unsupportedUpdateColumns: new Set(),
+        updateColumnMap: {
+            decision: "opp_deecision",
+            comment: "opp_comment",
+            emp: "opp_emp",
+            solved: "date_solved"
+        }
+    };
 
     if (!refreshBtn || !fileInput) return;
 
@@ -42,6 +69,9 @@
     if (!userWhId) {
         setStatus("Не удалось определить user_wh_id текущего пользователя.", "error");
     }
+
+    refreshLastUploadedDate(userWhId);
+    initPureTableModal();
 
     refreshBtn.addEventListener("click", () => {
         fileInput.value = "";
@@ -98,6 +128,10 @@
             await applySyncPlan(syncPlan);
 
             renderSummary(syncPlan.stats);
+            await refreshLastUploadedDate(currentUserWhId);
+            if (!pureTableModalEl?.classList.contains("hidden")) {
+                await loadPureTableRows(currentUserWhId, { silent: true });
+            }
 
             const updated = syncPlan.stats.insertedNew + syncPlan.stats.replacedByNewer;
             window.MiniUI?.toast?.(`Обновление завершено. Изменено строк: ${updated}`, { type: "success" });
@@ -108,6 +142,509 @@
             window.MiniUI?.toast?.("Ошибка обновления данных", { type: "error" });
         } finally {
             setBusy(false);
+        }
+    }
+
+    function initPureTableModal() {
+        if (!openPureTableBtn || !pureTableModalEl || !pureTableBody) return;
+
+        openPureTableBtn.addEventListener("click", async () => {
+            pureTableModalEl.classList.remove("hidden");
+            closePureTableFilterPanels();
+            await loadPureTableRows(userWhId);
+        });
+
+        pureTableCloseBtn?.addEventListener("click", closePureTableModal);
+        pureTableRefreshBtn?.addEventListener("click", async () => {
+            await loadPureTableRows(userWhId);
+        });
+
+        pureFilterLrBtn?.addEventListener("click", (event) => {
+            event.stopPropagation();
+            togglePureFilterPanel(pureFilterLrPanel);
+        });
+
+        pureFilterStatusBtn?.addEventListener("click", (event) => {
+            event.stopPropagation();
+            togglePureFilterPanel(pureFilterStatusPanel);
+        });
+
+        pureTableModalEl.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.matches("[data-close-pure-table='1']")) {
+                closePureTableModal();
+            }
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            if (pureTableModalEl.classList.contains("hidden")) return;
+            closePureTableModal();
+        });
+
+        document.addEventListener("click", (event) => {
+            if (pureTableModalEl.classList.contains("hidden")) return;
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.closest(".status-dropdown")) return;
+            closePureTableFilterPanels();
+        });
+
+        pureTableBody.addEventListener("blur", (event) => {
+            void handlePureTableInputBlur(event);
+        }, true);
+
+        pureTableBody.addEventListener("keydown", (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement)) return;
+            if (event.key === "Enter") {
+                event.preventDefault();
+                target.blur();
+            }
+        });
+    }
+
+    function closePureTableModal() {
+        pureTableModalEl?.classList.add("hidden");
+        closePureTableFilterPanels();
+    }
+
+    function togglePureFilterPanel(panel) {
+        if (!panel) return;
+        const isHidden = panel.classList.contains("hidden");
+        closePureTableFilterPanels();
+        if (isHidden) panel.classList.remove("hidden");
+    }
+
+    function closePureTableFilterPanels() {
+        pureFilterLrPanel?.classList.add("hidden");
+        pureFilterStatusPanel?.classList.add("hidden");
+    }
+
+    async function loadPureTableRows(currentUserWhId, options = {}) {
+        const { silent = false } = options;
+        if (!pureTableBody) return;
+
+        if (!currentUserWhId) {
+            setPureTableInlineStatus("Не удалось определить wh_id пользователя.", "error");
+            return;
+        }
+        if (typeof supabaseClient === "undefined" || !supabaseClient) {
+            setPureTableInlineStatus("Supabase не инициализирован.", "error");
+            return;
+        }
+
+        setPureTableInlineStatus("Загрузка данных...", "info");
+        renderPureTablePlaceholder("Загрузка...");
+
+        try {
+            const rawRows = await fetchAllPureRowsForWh(currentUserWhId);
+            resolvePureTableUpdateColumns(rawRows);
+
+            tableState.rows = rawRows.map((row) => normalizePureTableRow(row));
+            buildPureTableFilterControls(tableState.rows);
+            applyPureTableFiltersAndRender();
+
+            setPureTableInlineStatus(`Строк загружено: ${formatInt(tableState.rows.length)}`, "success");
+            if (!silent) {
+                window.MiniUI?.toast?.("Таблица чистых списаний загружена", { type: "success" });
+            }
+        } catch (error) {
+            const message = String(error?.message || error || "Не удалось загрузить таблицу.");
+            setPureTableInlineStatus(message, "error");
+            renderPureTablePlaceholder(message);
+            if (!silent) {
+                window.MiniUI?.toast?.("Ошибка загрузки таблицы чистых списаний", { type: "error" });
+            }
+        }
+    }
+
+    async function fetchAllPureRowsForWh(currentUserWhId) {
+        const all = [];
+        const pageSize = 1000;
+
+        for (let from = 0; ; from += pageSize) {
+            const to = from + pageSize - 1;
+            const { data, error } = await supabaseClient
+                .from(TABLE_PURE)
+                .select("*")
+                .eq("wh_id", currentUserWhId)
+                .order("date_lost", { ascending: false })
+                .range(from, to);
+
+            if (error) {
+                throw new Error("Не удалось загрузить данные pure_losses_rep.");
+            }
+
+            const chunk = Array.isArray(data) ? data : [];
+            if (!chunk.length) break;
+            all.push(...chunk);
+            if (chunk.length < pageSize) break;
+        }
+
+        return all;
+    }
+
+    function normalizePureTableRow(row) {
+        return {
+            raw: row || {},
+            shk: normalizeShk(row?.shk),
+            nm: row?.nm ?? "",
+            description: toText(row?.description || row?.decription),
+            brand: toText(row?.brand),
+            shkStateBeforeLost: toText(row?.shk_state_before_lost || row?.shk_state) || "—",
+            dateLost: toText(row?.date_lost),
+            lr: normalizeLossReason(row?.lr) || toText(row?.lr) || "—",
+            price: toNumberOrNull(row?.price),
+            decision: toText(readEditableColumnValue(row, tableState.updateColumnMap.decision)),
+            comment: toText(readEditableColumnValue(row, tableState.updateColumnMap.comment))
+        };
+    }
+
+    function resolvePureTableUpdateColumns(rawRows) {
+        const sample = Array.isArray(rawRows) ? rawRows.find((item) => item && typeof item === "object") : null;
+        const keys = sample ? Object.keys(sample) : [];
+
+        tableState.updateColumnMap.decision = pickFirstExistingColumn(
+            keys,
+            ["opp_deecision", "opp_decision"],
+            "opp_deecision"
+        );
+        tableState.updateColumnMap.comment = pickFirstExistingColumn(
+            keys,
+            ["opp_comment"],
+            "opp_comment"
+        );
+        tableState.updateColumnMap.emp = pickFirstExistingColumn(
+            keys,
+            ["opp_emp", "emp"],
+            "opp_emp"
+        );
+        tableState.updateColumnMap.solved = pickFirstExistingColumn(
+            keys,
+            ["date_solved", "dt_solved"],
+            "date_solved"
+        );
+    }
+
+    function pickFirstExistingColumn(keys, candidates, fallback) {
+        const safeKeys = Array.isArray(keys) ? keys : [];
+        for (const candidate of candidates) {
+            if (safeKeys.includes(candidate)) return candidate;
+        }
+        return fallback;
+    }
+
+    function readEditableColumnValue(row, key) {
+        if (!row || !key) return "";
+        if (!Object.prototype.hasOwnProperty.call(row, key)) return "";
+        return row[key];
+    }
+
+    function buildPureTableFilterControls(rows) {
+        const lrValues = Array.from(new Set(rows.map((row) => row.lr).filter((value) => String(value).trim() !== "")))
+            .sort(sortMixedNumericStrings);
+        const statusValues = Array.from(new Set(rows.map((row) => row.shkStateBeforeLost).filter(Boolean)))
+            .sort((a, b) => String(a).localeCompare(String(b), "ru"));
+
+        syncFilterSet(tableState.activeLrs, lrValues);
+        syncFilterSet(tableState.activeStatuses, statusValues);
+
+        renderFilterCheckboxList(
+            pureFilterLrList,
+            lrValues,
+            tableState.activeLrs,
+            () => {
+                updateFilterButtonCaption(pureFilterLrBtn, tableState.activeLrs.size, lrValues.length);
+                applyPureTableFiltersAndRender();
+            }
+        );
+        renderFilterCheckboxList(
+            pureFilterStatusList,
+            statusValues,
+            tableState.activeStatuses,
+            () => {
+                updateFilterButtonCaption(pureFilterStatusBtn, tableState.activeStatuses.size, statusValues.length);
+                applyPureTableFiltersAndRender();
+            }
+        );
+
+        updateFilterButtonCaption(pureFilterLrBtn, tableState.activeLrs.size, lrValues.length);
+        updateFilterButtonCaption(pureFilterStatusBtn, tableState.activeStatuses.size, statusValues.length);
+    }
+
+    function syncFilterSet(set, values) {
+        if (!set || !(set instanceof Set)) return;
+
+        const safeValues = Array.isArray(values) ? values : [];
+        if (!set.size) {
+            safeValues.forEach((value) => set.add(value));
+            return;
+        }
+
+        Array.from(set).forEach((value) => {
+            if (!safeValues.includes(value)) set.delete(value);
+        });
+
+        if (!set.size && safeValues.length) {
+            safeValues.forEach((value) => set.add(value));
+        }
+    }
+
+    function renderFilterCheckboxList(container, values, selectedSet, onChange) {
+        if (!container) return;
+        container.innerHTML = "";
+
+        const safeValues = Array.isArray(values) ? values : [];
+        if (!safeValues.length) {
+            const empty = document.createElement("div");
+            empty.className = "muted";
+            empty.textContent = "Нет значений";
+            container.appendChild(empty);
+            return;
+        }
+
+        safeValues.forEach((value) => {
+            const label = document.createElement("label");
+            label.className = "status-item";
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = selectedSet.has(value);
+
+            checkbox.addEventListener("change", () => {
+                if (checkbox.checked) selectedSet.add(value);
+                else selectedSet.delete(value);
+                onChange();
+            });
+
+            const span = document.createElement("span");
+            span.textContent = String(value);
+
+            label.append(checkbox, span);
+            container.appendChild(label);
+        });
+    }
+
+    function updateFilterButtonCaption(button, selectedCount, totalCount) {
+        if (!button) return;
+        const text = totalCount <= 0 || selectedCount === totalCount
+            ? "Выбраны все"
+            : `Выбрано ${selectedCount} из ${totalCount}`;
+        button.innerHTML = `${escapeHtml(text)} <span class="caret">▾</span>`;
+    }
+
+    function applyPureTableFiltersAndRender() {
+        tableState.filteredRows = tableState.rows.filter((row) => {
+            const matchLr = tableState.activeLrs.has(row.lr);
+            const matchStatus = tableState.activeStatuses.has(row.shkStateBeforeLost);
+            return matchLr && matchStatus;
+        });
+        renderPureTableBody(tableState.filteredRows);
+    }
+
+    function renderPureTablePlaceholder(message) {
+        if (!pureTableBody) return;
+        pureTableBody.innerHTML = "";
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 10;
+        td.className = "muted";
+        td.textContent = String(message || "");
+        tr.appendChild(td);
+        pureTableBody.appendChild(tr);
+    }
+
+    function renderPureTableBody(rows) {
+        if (!pureTableBody) return;
+        pureTableBody.innerHTML = "";
+
+        const safeRows = Array.isArray(rows) ? rows : [];
+        if (!safeRows.length) {
+            renderPureTablePlaceholder("По выбранным фильтрам строк нет.");
+            return;
+        }
+
+        safeRows.forEach((row) => {
+            const tr = document.createElement("tr");
+
+            tr.appendChild(createPlainCell(row.shk));
+            tr.appendChild(createPlainCell(row.nm));
+            tr.appendChild(createPlainCell(row.description, "pure-wrap-cell"));
+            tr.appendChild(createPlainCell(row.brand));
+            tr.appendChild(createPlainCell(row.shkStateBeforeLost));
+            tr.appendChild(createPlainCell(formatDateForUi(row.dateLost)));
+            tr.appendChild(createPlainCell(row.lr));
+            tr.appendChild(createPlainCell(formatPriceForUi(row.price)));
+
+            const verdictTd = document.createElement("td");
+            const verdictInput = document.createElement("input");
+            verdictInput.className = "input pure-edit-input short";
+            verdictInput.type = "text";
+            verdictInput.value = row.decision;
+            verdictInput.placeholder = "Вердикт";
+            verdictInput.dataset.shk = row.shk;
+            verdictInput.dataset.field = "decision";
+            verdictTd.appendChild(verdictInput);
+            tr.appendChild(verdictTd);
+
+            const commentTd = document.createElement("td");
+            const commentInput = document.createElement("input");
+            commentInput.className = "input pure-edit-input";
+            commentInput.type = "text";
+            commentInput.value = row.comment;
+            commentInput.placeholder = "Комментарий";
+            commentInput.dataset.shk = row.shk;
+            commentInput.dataset.field = "comment";
+            commentTd.appendChild(commentInput);
+            tr.appendChild(commentTd);
+
+            pureTableBody.appendChild(tr);
+        });
+    }
+
+    function createPlainCell(value, className = "") {
+        const td = document.createElement("td");
+        if (className) td.className = className;
+        td.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
+        return td;
+    }
+
+    async function handlePureTableInputBlur(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+        if (!target.classList.contains("pure-edit-input")) return;
+
+        const shk = normalizeShk(target.dataset.shk);
+        const field = target.dataset.field;
+        if (!shk || !field) return;
+
+        const row = tableState.rows.find((item) => item.shk === shk);
+        if (!row) return;
+
+        const previousValue = field === "decision" ? row.decision : row.comment;
+        const nextValue = String(target.value || "").trim();
+        if (nextValue === previousValue) return;
+
+        const patch = {};
+        if (field === "decision") {
+            patch[tableState.updateColumnMap.decision] = nextValue || null;
+            if (nextValue) {
+                patch[tableState.updateColumnMap.emp] = resolveCurrentUserName(user);
+                patch[tableState.updateColumnMap.solved] = resolveCurrentTimestamp();
+            } else {
+                patch[tableState.updateColumnMap.emp] = null;
+                patch[tableState.updateColumnMap.solved] = null;
+            }
+        } else if (field === "comment") {
+            patch[tableState.updateColumnMap.comment] = nextValue || null;
+        } else {
+            return;
+        }
+
+        target.disabled = true;
+        setPureTableInlineStatus("Сохраняем изменения...", "info");
+
+        try {
+            const appliedPatch = await updatePureRowFields(shk, userWhId, patch);
+            Object.assign(row.raw, appliedPatch);
+            row.decision = toText(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
+            row.comment = toText(readEditableColumnValue(row.raw, tableState.updateColumnMap.comment));
+
+            target.value = field === "decision" ? row.decision : row.comment;
+            setPureTableInlineStatus("Изменения сохранены", "success");
+        } catch (error) {
+            target.value = previousValue;
+            const message = String(error?.message || error || "Не удалось сохранить изменения.");
+            setPureTableInlineStatus(message, "error");
+            window.MiniUI?.toast?.("Ошибка сохранения строки", { type: "error" });
+        } finally {
+            target.disabled = false;
+        }
+    }
+
+    async function updatePureRowFields(shk, currentUserWhId, patch) {
+        const sanitized = sanitizeUpdatePatch(patch);
+        if (!Object.keys(sanitized).length) {
+            throw new Error("В таблице отсутствуют поля для сохранения.");
+        }
+
+        const { error } = await supabaseClient
+            .from(TABLE_PURE)
+            .update(sanitized)
+            .eq("shk", shk)
+            .eq("wh_id", currentUserWhId);
+
+        if (!error) return sanitized;
+
+        const missingColumn = extractMissingColumnName(error);
+        if (missingColumn && Object.prototype.hasOwnProperty.call(sanitized, missingColumn)) {
+            tableState.unsupportedUpdateColumns.add(missingColumn);
+            return updatePureRowFields(shk, currentUserWhId, patch);
+        }
+
+        const errorText = String(error?.message || error?.details || error?.code || "unknown");
+        throw new Error(`Ошибка обновления строки ${shk}: ${errorText}`);
+    }
+
+    function sanitizeUpdatePatch(patch) {
+        const out = {};
+        Object.entries(patch || {}).forEach(([key, value]) => {
+            if (!key) return;
+            if (tableState.unsupportedUpdateColumns.has(key)) return;
+            out[key] = value;
+        });
+        return out;
+    }
+
+    function resolveCurrentUserName(currentUser) {
+        return toText(currentUser?.name || currentUser?.fio || currentUser?.id || "Неизвестный пользователь");
+    }
+
+    function resolveCurrentTimestamp() {
+        if (typeof window.MiniUI?.nowIsoPlus3 === "function") {
+            return window.MiniUI.nowIsoPlus3();
+        }
+        return new Date().toISOString();
+    }
+
+    function setPureTableInlineStatus(message, type) {
+        if (!pureTableInlineStatusEl) return;
+        pureTableInlineStatusEl.textContent = String(message || "");
+        pureTableInlineStatusEl.style.color = type === "error"
+            ? "#b91c1c"
+            : type === "success"
+                ? "#15803d"
+                : "#64748b";
+    }
+
+    async function refreshLastUploadedDate(currentUserWhId) {
+        if (!lastUploadDateEl) return;
+
+        if (!currentUserWhId || typeof supabaseClient === "undefined" || !supabaseClient) {
+            lastUploadDateEl.textContent = "Последняя выгруженная дата: —";
+            return;
+        }
+
+        try {
+            const { data, error } = await supabaseClient
+                .from(TABLE_PURE)
+                .select("date_lost")
+                .eq("wh_id", currentUserWhId)
+                .order("date_lost", { ascending: false })
+                .limit(1);
+
+            if (error) {
+                lastUploadDateEl.textContent = "Последняя выгруженная дата: —";
+                return;
+            }
+
+            const rawDate = Array.isArray(data) && data[0] ? data[0].date_lost : "";
+            const formatted = formatDateForUi(rawDate);
+            lastUploadDateEl.textContent = `Последняя выгруженная дата: ${formatted || "—"}`;
+        } catch {
+            lastUploadDateEl.textContent = "Последняя выгруженная дата: —";
         }
     }
 
@@ -658,6 +1195,36 @@
             out.push(items.slice(i, i + size));
         }
         return out;
+    }
+
+    function sortMixedNumericStrings(a, b) {
+        const aNum = Number(a);
+        const bNum = Number(b);
+        const aIsNum = Number.isFinite(aNum);
+        const bIsNum = Number.isFinite(bNum);
+
+        if (aIsNum && bIsNum) return aNum - bNum;
+        if (aIsNum) return -1;
+        if (bIsNum) return 1;
+        return String(a).localeCompare(String(b), "ru");
+    }
+
+    function formatDateForUi(value) {
+        const parsed = parseDateValue(value);
+        if (!parsed) return toText(value);
+        const dd = String(parsed.getDate()).padStart(2, "0");
+        const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+        const yyyy = parsed.getFullYear();
+        return `${dd}.${mm}.${yyyy}`;
+    }
+
+    function formatPriceForUi(value) {
+        const num = toNumberOrNull(value);
+        if (num === null) return "—";
+        return new Intl.NumberFormat("ru-RU", {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        }).format(num);
     }
 
     function formatInt(value) {
