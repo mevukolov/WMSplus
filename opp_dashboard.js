@@ -352,7 +352,7 @@
         const whName = getWarehouseNameForTitle();
         currentWhName = whName;
 
-        const base = "ОПП - Главная";
+        const base = "Динамика ОПП";
         const finalTitle = whName ? `${base} - ${whName}` : base;
 
         if (pageTitleEl) pageTitleEl.textContent = finalTitle;
@@ -441,6 +441,14 @@
         if (key === "WMI_BZ") {
             if (!shiftDateIso) return "-";
             if (shiftItem?.shiftType === "night") {
+                return `${formatDateRu(shiftDateIso)} До 13:00`;
+            }
+            const prevDateIso = shiftIsoDate(shiftDateIso, -1) || shiftDateIso;
+            return `${formatDateRu(prevDateIso)} После 13:00`;
+        }
+        if (key === "ORS") {
+            if (!shiftDateIso) return "-";
+            if (shiftItem?.shiftType === "day") {
                 return `${formatDateRu(shiftDateIso)} До 13:00`;
             }
             const prevDateIso = shiftIsoDate(shiftDateIso, -1) || shiftDateIso;
@@ -899,6 +907,23 @@
             from: `${y}-${m}-01`,
             to: safeTo
         };
+    }
+
+    function getRolling30PeriodByDate(dateIso) {
+        const safeTo = parseIsoDate(dateIso) || toIsoDate(moscowNowDate());
+        const from = shiftIsoDate(safeTo, -29) || safeTo;
+        return { from, to: safeTo };
+    }
+
+    function getPreviousMonthPeriodByDate(dateIso) {
+        const safe = parseIsoDate(dateIso) || toIsoDate(moscowNowDate());
+        const currentMonthStart = parseIsoDate(`${safe.slice(0, 7)}-01`) || safe;
+        const prevMonthEnd = shiftIsoDate(currentMonthStart, -1);
+        if (!prevMonthEnd) {
+            return { from: safe, to: safe };
+        }
+        const prevMonthStart = `${prevMonthEnd.slice(0, 7)}-01`;
+        return { from: prevMonthStart, to: prevMonthEnd };
     }
 
     function chunkArray(items, chunkSize) {
@@ -2280,7 +2305,7 @@
                 <section class="status-box" style="margin-top:0;">
                     <div class="status-header">
                         <div class="status-center" style="grid-column:1 / -1;">
-                            <div class="status-code" style="font-size:28px;">ОПП - Главная</div>
+                            <div class="status-code" style="font-size:28px;">Динамика ОПП</div>
                             <div class="status-desc">Текущая смена не найдена в выгрузке</div>
                         </div>
                     </div>
@@ -2301,7 +2326,7 @@
                 <section class="status-box" style="margin-top:0;">
                     <div class="status-header">
                         <div class="status-center" style="grid-column:1 / -1;">
-                            <div class="status-code" style="font-size:28px;">ОПП - Главная</div>
+                            <div class="status-code" style="font-size:28px;">Динамика ОПП</div>
                             <div class="status-desc">Текущая смена не найдена в выгрузке</div>
                         </div>
                     </div>
@@ -2708,6 +2733,8 @@
     async function loadReport() {
         const todayIso = toIsoDate(moscowNowDate());
         const monthPeriod = getMonthPeriodByDate(todayIso);
+        const previousMonthPeriod = getPreviousMonthPeriodByDate(todayIso);
+        const rolling30Period = getRolling30PeriodByDate(todayIso);
         const shiftPeriod = {
             from: shiftIsoDate(todayIso, -1) || monthPeriod.from,
             to: monthPeriod.to
@@ -2727,6 +2754,12 @@
                 console.warn("Не удалось загрузить месячные итоги:", error instanceof Error ? error.message : error);
                 return null;
             });
+            const previousMonthReportPromise = fetchCachedReportRow(previousMonthPeriod, CACHE_SCOPE_DASHBOARD_MONTH)
+                .then((cacheRow) => parseReportFromCacheRow(cacheRow))
+                .catch((error) => {
+                    console.warn("Не удалось загрузить кэш предыдущего месяца:", error instanceof Error ? error.message : error);
+                    return null;
+                });
             const reportPromise = fetchReportWithCache(shiftPeriod, CACHE_SCOPE_DASHBOARD_SHIFT).catch(async (error) => {
                 console.warn("Не удалось загрузить scope opp_dashboard_shift, пробую fallback через opp_dashboard_month:", error instanceof Error ? error.message : error);
                 const fallbackMonthReport = await monthReportPromise;
@@ -2739,7 +2772,12 @@
                 console.warn("Не удалось загрузить опознания ОПП по сменам:", error instanceof Error ? error.message : error);
                 return {};
             });
-            const [report, monthReport, oppByShift] = await Promise.all([reportPromise, monthReportPromise, oppPromise]);
+            const [report, monthReport, previousMonthReport, oppByShift] = await Promise.all([
+                reportPromise,
+                monthReportPromise,
+                previousMonthReportPromise,
+                oppPromise
+            ]);
             lastRows = report.rows;
             lastSummary = report.summary;
             lastTodayDeadline = report.todayDeadline;
@@ -2751,16 +2789,33 @@
             lastCurrentShift = findCurrentShiftItem(lastShiftDynamics);
             lastPreviousShift = findPreviousShiftItem(lastShiftDynamics, lastCurrentShift);
             selectedShiftId = lastCurrentShift?.shiftId || "";
+            const currentMonthRows = Array.isArray(monthReport?.shiftDynamics) ? monthReport.shiftDynamics : [];
+            const previousMonthRows = Array.isArray(previousMonthReport?.shiftDynamics) ? previousMonthReport.shiftDynamics : [];
             const monthRowsFallback = lastShiftDynamics.filter((item) => {
                 const d = parseIsoDate(item?.date);
-                return d && d >= monthPeriod.from && d <= monthPeriod.to;
+                return d && d >= rolling30Period.from && d <= rolling30Period.to;
             });
-            lastMonthShiftDynamics = Array.isArray(monthReport?.shiftDynamics)
-                ? monthReport.shiftDynamics
-                : monthRowsFallback;
+            const mergedMap = new Map();
+            [...previousMonthRows, ...currentMonthRows].forEach((item) => {
+                const id = normalizeKey(item?.shiftId);
+                if (!id) return;
+                mergedMap.set(id, item);
+            });
+            const mergedRows = Array.from(mergedMap.values())
+                .filter((item) => {
+                    const d = parseIsoDate(item?.date);
+                    return d && d >= rolling30Period.from && d <= rolling30Period.to;
+                })
+                .sort((a, b) => {
+                    const aTs = toNumber(a?.shiftSortTs);
+                    const bTs = toNumber(b?.shiftSortTs);
+                    if (bTs !== aTs) return bTs - aTs;
+                    return normalizeKey(b?.date).localeCompare(normalizeKey(a?.date));
+                });
+            lastMonthShiftDynamics = mergedRows.length ? mergedRows : monthRowsFallback;
             lastMonthSummary = buildMonthSummaryFromShiftDynamics(
                 lastMonthShiftDynamics,
-                monthPeriod
+                rolling30Period
             );
             lastMissingSheets = report.missingSheets;
 
