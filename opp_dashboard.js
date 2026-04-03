@@ -21,6 +21,7 @@
     };
 
     const pageTitleEl = document.getElementById("page-title");
+    const pageTitleActionsEl = document.getElementById("page-title-actions");
     const headerWhEl = document.getElementById("header-wh");
     const dateFromEl = document.getElementById("date-from");
     const dateToEl = document.getElementById("date-to");
@@ -372,6 +373,32 @@
         });
     }
 
+    function renderHeaderShiftButton(targetShift) {
+        if (!pageTitleActionsEl) return;
+        pageTitleActionsEl.innerHTML = "";
+
+        if (!targetShift) return;
+
+        const targetId = normalizeKey(targetShift?.shiftId);
+        if (!targetId) return;
+
+        const btn = document.createElement("button");
+        btn.id = "dashboard-prev-shift-btn";
+        btn.className = "btn btn-rect";
+        btn.type = "button";
+        btn.setAttribute("data-shift-id", targetId);
+        btn.textContent = `${normalizeKey(targetShift?.shiftName)} ${normalizeKey(targetShift?.displayDate)}`.trim();
+
+        btn.addEventListener("click", () => {
+            const clickedId = normalizeKey(btn.getAttribute("data-shift-id"));
+            if (!clickedId) return;
+            selectedShiftId = clickedId;
+            renderSummary();
+        });
+
+        pageTitleActionsEl.appendChild(btn);
+    }
+
     function moscowNowDate() {
         return new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Moscow" }));
     }
@@ -451,8 +478,7 @@
             if (shiftItem?.shiftType === "day") {
                 return `${formatDateRu(shiftDateIso)} До 13:00`;
             }
-            const prevDateIso = shiftIsoDate(shiftDateIso, -1) || shiftDateIso;
-            return `${formatDateRu(prevDateIso)} После 13:00`;
+            return `${formatDateRu(shiftDateIso)} После 13:00`;
         }
 
         const dueLabel = normalizeKey(detailItem?.dueLabel || detailItem?.due_for_date_label || detailItem?.due_until_label);
@@ -2296,6 +2322,7 @@
         const generatedText = normalizeKey(lastReportGeneratedAtText);
 
         if (!lastCurrentShift) {
+            renderHeaderShiftButton(null);
             renderLagPanel();
             renderUnfinishedCompactPanel();
             renderCurrentShiftBreakdownChart(null);
@@ -2318,6 +2345,7 @@
         const selectedShift = lastShiftDynamics.find((item) => item.shiftId === selectedShiftId);
         const shiftItem = selectedShift || lastCurrentShift;
         if (!shiftItem) {
+            renderHeaderShiftButton(null);
             renderLagPanel();
             renderUnfinishedCompactPanel();
             renderCurrentShiftBreakdownChart(null);
@@ -2386,11 +2414,6 @@
         summaryWrap.innerHTML = `
             ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Актуально на: ${escapeHtml(generatedText)}</div>` : ""}
             ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
-            ${showSwitchButton ? `
-                <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
-                    <button id="dashboard-prev-shift-btn" class="btn btn-rect" data-shift-id="${escapeHtml(switchTargetShift.shiftId)}">${escapeHtml(`${switchTargetShift.shiftName} ${switchTargetShift.displayDate}`)}</button>
-                </div>
-            ` : ""}
             <section class="status-box" style="margin-top:0;">
                 <div class="status-header">
                     <div class="status-center" style="grid-column:1 / -1;">
@@ -2428,16 +2451,7 @@
                 </div>
             </section>
         `;
-
-        const switchBtn = document.getElementById("dashboard-prev-shift-btn");
-        if (switchBtn) {
-            switchBtn.addEventListener("click", () => {
-                const targetId = normalizeKey(switchBtn.getAttribute("data-shift-id"));
-                if (!targetId) return;
-                selectedShiftId = targetId;
-                renderSummary();
-            });
-        }
+        renderHeaderShiftButton(showSwitchButton ? switchTargetShift : null);
         renderLagPanel();
         renderUnfinishedCompactPanel();
         renderCurrentShiftBreakdownChart(shiftItem);

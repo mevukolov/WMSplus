@@ -1,8 +1,16 @@
 (function () {
     const TABLE_PURE = "pure_losses_rep";
     const TABLE_LOSSES = "losses_rep";
+    const TABLE_2SHK = "2shk_rep";
+    const TABLE_NM = "nm_rep";
+    const TABLE_WH_DATA = "wh_data_rep";
     const URL_FILTER_CHUNK_SIZE = 80;
     const INSERT_CHUNK_SIZE = 400;
+    const WMS_FILTER_CHUNK_SIZE = 60;
+    const EVENT_TWO_SHK = "Два ШК";
+    const EVENT_EMPTY_PACK = "Пустая упаковка";
+    const DATA_TYPE_OPP_PURE_OPTIONS = "opp_pure_options";
+    const EXTRA_FILTER_VALUES = ["2 ШК", "Пустая упаковка", "Оприход", "Пусто"];
     const unsupportedInsertColumns = new Set();
 
     const COLUMN_VARIANTS = {
@@ -38,15 +46,28 @@
     const pureFilterStatusBtn = document.getElementById("pure-filter-status-btn");
     const pureFilterStatusPanel = document.getElementById("pure-filter-status-panel");
     const pureFilterStatusList = document.getElementById("pure-filter-status-list");
+    const pureFilterExtraBtn = document.getElementById("pure-filter-extra-btn");
+    const pureFilterExtraPanel = document.getElementById("pure-filter-extra-panel");
+    const pureFilterExtraList = document.getElementById("pure-filter-extra-list");
+    const pureUnresolvedOnlyCheckbox = document.getElementById("pure-unresolved-only");
     const pureTableRefreshBtn = document.getElementById("pure-table-refresh-btn");
     const pureTableInlineStatusEl = document.getElementById("pure-table-inline-status");
     const pureTableBody = document.getElementById("pure-table-body");
+    const pureTableHead = document.getElementById("pure-table-head");
 
     const tableState = {
         rows: [],
         filteredRows: [],
         activeLrs: new Set(),
         activeStatuses: new Set(),
+        activeExtraStatuses: new Set(),
+        decisionOptions: [],
+        onlyUnresolved: false,
+        sortKey: "price",
+        sortDir: -1,
+        wmsLoadSeq: 0,
+        activeWmsPopover: null,
+        activeVerdictPanel: null,
         unsupportedUpdateColumns: new Set(),
         updateColumnMap: {
             decision: "opp_deecision",
@@ -159,6 +180,11 @@
             await loadPureTableRows(userWhId);
         });
 
+        pureUnresolvedOnlyCheckbox?.addEventListener("change", () => {
+            tableState.onlyUnresolved = Boolean(pureUnresolvedOnlyCheckbox.checked);
+            applyPureTableFiltersAndRender();
+        });
+
         pureFilterLrBtn?.addEventListener("click", (event) => {
             event.stopPropagation();
             togglePureFilterPanel(pureFilterLrPanel);
@@ -167,6 +193,11 @@
         pureFilterStatusBtn?.addEventListener("click", (event) => {
             event.stopPropagation();
             togglePureFilterPanel(pureFilterStatusPanel);
+        });
+
+        pureFilterExtraBtn?.addEventListener("click", (event) => {
+            event.stopPropagation();
+            togglePureFilterPanel(pureFilterExtraPanel);
         });
 
         pureTableModalEl.addEventListener("click", (event) => {
@@ -180,6 +211,7 @@
         document.addEventListener("keydown", (event) => {
             if (event.key !== "Escape") return;
             if (pureTableModalEl.classList.contains("hidden")) return;
+            closeAllWmsPopovers();
             closePureTableModal();
         });
 
@@ -187,8 +219,23 @@
             if (pureTableModalEl.classList.contains("hidden")) return;
             const target = event.target;
             if (!(target instanceof Element)) return;
-            if (target.closest(".status-dropdown")) return;
+            if (target.closest(".pure-row-verdict-dropdown")) {
+                closePureTableFilterPanels();
+                closeAllWmsPopovers();
+                return;
+            }
+            if (target.closest(".status-dropdown")) {
+                closeActiveVerdictPanel();
+                closeAllWmsPopovers();
+                return;
+            }
+            if (target.closest(".pure-wms-popover-wrap")) {
+                closeActiveVerdictPanel();
+                return;
+            }
             closePureTableFilterPanels();
+            closeActiveVerdictPanel();
+            closeAllWmsPopovers();
         });
 
         pureTableBody.addEventListener("blur", (event) => {
@@ -203,11 +250,35 @@
                 target.blur();
             }
         });
+
+        pureTableBody.addEventListener("click", (event) => {
+            void handlePureTableBodyClick(event);
+        });
+
+        pureTableHead?.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const th = target.closest("th[data-sort-key]");
+            if (!th) return;
+
+            const key = String(th.getAttribute("data-sort-key") || "").trim();
+            if (!key) return;
+
+            if (tableState.sortKey === key) {
+                tableState.sortDir = tableState.sortDir * -1;
+            } else {
+                tableState.sortKey = key;
+                tableState.sortDir = key === "dateLost" || key === "price" ? -1 : 1;
+            }
+            applyPureTableFiltersAndRender();
+        });
     }
 
     function closePureTableModal() {
         pureTableModalEl?.classList.add("hidden");
         closePureTableFilterPanels();
+        closeActiveVerdictPanel();
+        closeAllWmsPopovers();
     }
 
     function togglePureFilterPanel(panel) {
@@ -220,11 +291,13 @@
     function closePureTableFilterPanels() {
         pureFilterLrPanel?.classList.add("hidden");
         pureFilterStatusPanel?.classList.add("hidden");
+        pureFilterExtraPanel?.classList.add("hidden");
     }
 
     async function loadPureTableRows(currentUserWhId, options = {}) {
         const { silent = false } = options;
         if (!pureTableBody) return;
+        const wmsSeq = ++tableState.wmsLoadSeq;
 
         if (!currentUserWhId) {
             setPureTableInlineStatus("Не удалось определить wh_id пользователя.", "error");
@@ -239,17 +312,45 @@
         renderPureTablePlaceholder("Загрузка...");
 
         try {
-            const rawRows = await fetchAllPureRowsForWh(currentUserWhId);
+            const [rawRows, loadedDecisionOptions] = await Promise.all([
+                fetchAllPureRowsForWh(currentUserWhId),
+                loadDecisionOptionsForPureTable(currentUserWhId).catch((error) => {
+                    console.error("pure_losses decision options load failed:", error);
+                    return [];
+                })
+            ]);
             resolvePureTableUpdateColumns(rawRows);
 
             tableState.rows = rawRows.map((row) => normalizePureTableRow(row));
+            tableState.decisionOptions = loadedDecisionOptions.length
+                ? loadedDecisionOptions
+                : buildDecisionOptionsFallback(rawRows);
+            const rowsRef = tableState.rows;
             buildPureTableFilterControls(tableState.rows);
             applyPureTableFiltersAndRender();
 
-            setPureTableInlineStatus(`Строк загружено: ${formatInt(tableState.rows.length)}`, "success");
+            const baseCountText = `Строк загружено: ${formatInt(tableState.rows.length)}`;
+            setPureTableInlineStatus(baseCountText, "success");
             if (!silent) {
                 window.MiniUI?.toast?.("Таблица чистых списаний загружена", { type: "success" });
             }
+
+            if (!rowsRef.length) return;
+
+            setPureTableInlineStatus(`${baseCountText}. Загружаем База WMS+...`, "info");
+            void enrichRowsWithWmsBase(rowsRef)
+                .then(() => {
+                    if (tableState.wmsLoadSeq !== wmsSeq) return;
+                    if (tableState.rows !== rowsRef) return;
+                    applyPureTableFiltersAndRender();
+                    setPureTableInlineStatus(`${baseCountText}. База WMS+ загружена`, "success");
+                })
+                .catch((wmsError) => {
+                    if (tableState.wmsLoadSeq !== wmsSeq) return;
+                    if (tableState.rows !== rowsRef) return;
+                    console.error("pure_losses wms_base lookup failed:", wmsError);
+                    setPureTableInlineStatus(`${baseCountText}. База WMS+ временно недоступна`, "error");
+                });
         } catch (error) {
             const message = String(error?.message || error || "Не удалось загрузить таблицу.");
             setPureTableInlineStatus(message, "error");
@@ -298,8 +399,462 @@
             lr: normalizeLossReason(row?.lr) || toText(row?.lr) || "—",
             price: toNumberOrNull(row?.price),
             decision: toText(readEditableColumnValue(row, tableState.updateColumnMap.decision)),
-            comment: toText(readEditableColumnValue(row, tableState.updateColumnMap.comment))
+            comment: toText(readEditableColumnValue(row, tableState.updateColumnMap.comment)),
+            wmsTwoShk: [],
+            wmsNmRep: []
         };
+    }
+
+    async function loadDecisionOptionsForPureTable(currentUserWhId) {
+        const fetchRows = async (withWhFilter) => {
+            let query = supabaseClient
+                .from(TABLE_WH_DATA)
+                .select("data, wh_id, data_type")
+                .eq("data_type", DATA_TYPE_OPP_PURE_OPTIONS)
+                .limit(500);
+
+            if (withWhFilter && currentUserWhId) {
+                query = query.eq("wh_id", currentUserWhId);
+            }
+
+            const { data, error } = await query;
+            if (error) {
+                const errorText = String(error?.message || error?.details || error?.code || "unknown");
+                throw new Error(`Не удалось загрузить варианты вердикта: ${errorText}`);
+            }
+            return Array.isArray(data) ? data : [];
+        };
+
+        let scopedRows = [];
+        try {
+            scopedRows = await fetchRows(true);
+        } catch (error) {
+            console.error("pure_losses decision options scoped load failed:", error);
+        }
+
+        let options = parseDecisionOptionsRows(scopedRows);
+        if (options.length) return options;
+
+        const fallbackRows = await fetchRows(false);
+        options = parseDecisionOptionsRows(fallbackRows);
+        return options;
+    }
+
+    function parseDecisionOptionsRows(rows) {
+        const out = [];
+        const seen = new Set();
+
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            parseDecisionOptionsPayload(row?.data).forEach((option) => {
+                const key = option.toLowerCase();
+                if (seen.has(key)) return;
+                seen.add(key);
+                out.push(option);
+            });
+        });
+
+        return out;
+    }
+
+    function parseDecisionOptionsPayload(payload) {
+        if (payload === null || payload === undefined) return [];
+        if (Array.isArray(payload)) {
+            return payload
+                .map((item) => sanitizeDecisionOptionText(item))
+                .filter(Boolean);
+        }
+
+        const raw = String(payload).trim();
+        if (!raw) return [];
+
+        if (raw.startsWith("[") && raw.endsWith("]")) {
+            try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    return parsed
+                        .map((item) => sanitizeDecisionOptionText(item))
+                        .filter(Boolean);
+                }
+            } catch (_) {
+                // fallback below
+            }
+        }
+
+        return raw
+            .split(/[\r\n;]+/)
+            .map((item) => sanitizeDecisionOptionText(item))
+            .filter(Boolean);
+    }
+
+    function sanitizeDecisionOptionText(value) {
+        const text = String(value || "")
+            .trim()
+            .replace(/^"+|"+$/g, "")
+            .replace(/^'+|'+$/g, "")
+            .replace(/\s+/g, " ");
+        return text;
+    }
+
+    function buildDecisionOptionsFallback(rawRows) {
+        const seen = new Set();
+        const out = [];
+        (Array.isArray(rawRows) ? rawRows : []).forEach((row) => {
+            const decision = toText(readEditableColumnValue(row, tableState.updateColumnMap.decision));
+            if (!decision) return;
+            const key = decision.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push(decision);
+        });
+        return out;
+    }
+
+    async function enrichRowsWithWmsBase(rows) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        if (!safeRows.length) return;
+
+        const uniqueShks = Array.from(new Set(
+            safeRows.map((row) => normalizeShk(row?.shk)).filter(Boolean)
+        ));
+        const uniqueNms = Array.from(new Set(
+            safeRows.map((row) => normalizeNmKey(row?.nm)).filter(Boolean)
+        ));
+
+        const [twoShkMap, nmRepMap] = await Promise.all([
+            fetchTwoShkRowsForShks(uniqueShks),
+            fetchNmRepRowsForNms(uniqueNms)
+        ]);
+
+        safeRows.forEach((row) => {
+            const shk = normalizeShk(row?.shk);
+            const nm = normalizeNmKey(row?.nm);
+            row.wmsTwoShk = twoShkMap.get(shk) || [];
+            row.wmsNmRep = nmRepMap.get(nm) || [];
+        });
+    }
+
+    async function fetchTwoShkRowsForShks(shks) {
+        const uniqueShks = Array.from(new Set((Array.isArray(shks) ? shks : []).map(normalizeShk).filter(Boolean)));
+        if (!uniqueShks.length) return new Map();
+
+        const chunks = chunkArray(uniqueShks, WMS_FILTER_CHUNK_SIZE);
+        const allRows = [];
+        for (const chunk of chunks) {
+            const [byShk1, byShk2] = await Promise.all([
+                fetchTwoShkRowsByColumnChunk("shk1", chunk),
+                fetchTwoShkRowsByColumnChunk("shk2", chunk)
+            ]);
+            allRows.push(...byShk1, ...byShk2);
+        }
+
+        return mapTwoShkRowsByShk(allRows);
+    }
+
+    async function fetchTwoShkRowsByColumnChunk(columnName, shksChunk) {
+        const chunk = Array.isArray(shksChunk) ? shksChunk.filter(Boolean) : [];
+        if (!chunk.length) return [];
+
+        const { data, error } = await supabaseClient
+            .from(TABLE_2SHK)
+            .select("*")
+            .in(columnName, chunk);
+
+        if (!error) {
+            return Array.isArray(data) ? data : [];
+        }
+
+        const missingColumn = extractMissingColumnName(error);
+        if (missingColumn && missingColumn === columnName) {
+            return [];
+        }
+
+        if (chunk.length > 1) {
+            const mid = Math.ceil(chunk.length / 2);
+            const left = await fetchTwoShkRowsByColumnChunk(columnName, chunk.slice(0, mid));
+            const right = await fetchTwoShkRowsByColumnChunk(columnName, chunk.slice(mid));
+            return left.concat(right);
+        }
+
+        const errorText = String(error?.message || error?.details || error?.code || "unknown");
+        throw new Error(`Не удалось проверить ШК ${chunk[0]} в ${TABLE_2SHK}: ${errorText}`);
+    }
+
+    function mapTwoShkRowsByShk(rows) {
+        const map = new Map();
+        const seen = new Set();
+
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const signature = buildTwoShkRowSignature(row);
+            if (!signature || seen.has(signature)) return;
+            seen.add(signature);
+
+            const shk1 = normalizeShk(row?.shk1);
+            const shk2 = normalizeShk(row?.shk2);
+            if (!shk1 && !shk2) return;
+
+            const eventType = classifyTwoShkEventType(row?.eventtype, shk1, shk2);
+            const dateValue = row?.created_at || row?.date || row?.inserted_at || row?.updated_at || "";
+            const ts = parseTimestampValue(dateValue);
+            const mediaLinks = parseMediaLinksFromTwoShkRow(row);
+
+            const base = {
+                eventType,
+                shk1,
+                shk2,
+                dateValue,
+                ts,
+                mediaLinks
+            };
+
+            if (shk1) {
+                if (!map.has(shk1)) map.set(shk1, []);
+                map.get(shk1).push({
+                    ...base,
+                    otherShk: shk2 && shk2 !== shk1 ? shk2 : ""
+                });
+            }
+
+            if (shk2 && shk2 !== shk1) {
+                if (!map.has(shk2)) map.set(shk2, []);
+                map.get(shk2).push({
+                    ...base,
+                    otherShk: shk1
+                });
+            }
+        });
+
+        map.forEach((items, key) => {
+            const sorted = (items || []).slice().sort((a, b) => compareDateTs(b?.ts, a?.ts));
+            map.set(key, sorted);
+        });
+
+        return map;
+    }
+
+    function classifyTwoShkEventType(value, shk1, shk2) {
+        const normalized = String(value || "")
+            .toLowerCase()
+            .replace(/ё/g, "е")
+            .replace(/[^\wа-я\s]/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        if (normalized.includes("пуст") && normalized.includes("упаков")) {
+            return EVENT_EMPTY_PACK;
+        }
+        if (normalized.includes("2") && normalized.includes("шк")) {
+            return EVENT_TWO_SHK;
+        }
+        if (normalized.includes("два") && normalized.includes("шк")) {
+            return EVENT_TWO_SHK;
+        }
+        if (normalized.includes("пуст")) {
+            return EVENT_EMPTY_PACK;
+        }
+
+        if (shk1 && shk2 && shk1 !== shk2) {
+            return EVENT_TWO_SHK;
+        }
+        return EVENT_EMPTY_PACK;
+    }
+
+    function buildTwoShkRowSignature(row) {
+        if (!row || typeof row !== "object") return "";
+        const id = normalizeToken(row?.id || row?.two_shk_id || row?.row_id);
+        if (id) return `id:${id}`;
+
+        const dateValue = normalizeToken(row?.created_at || row?.date || row?.inserted_at || row?.updated_at);
+        const shk1 = normalizeShk(row?.shk1);
+        const shk2 = normalizeShk(row?.shk2);
+        const eventType = normalizeToken(row?.eventtype);
+        return `${dateValue}|${shk1}|${shk2}|${eventType}`;
+    }
+
+    function parseMediaLinksFromTwoShkRow(row) {
+        const mediaFields = [
+            row?.media,
+            row?.media_links,
+            row?.photos,
+            row?.photo
+        ];
+
+        const links = [];
+        mediaFields.forEach((value) => {
+            if (Array.isArray(value)) {
+                value.forEach((item) => {
+                    const href = normalizeMediaLink(item);
+                    if (href) links.push(href);
+                });
+                return;
+            }
+
+            parseMediaLinks(value).forEach((href) => {
+                if (href) links.push(href);
+            });
+        });
+
+        return Array.from(new Set(links));
+    }
+
+    function parseMediaLinks(value) {
+        if (Array.isArray(value)) {
+            return value.map((item) => normalizeMediaLink(item)).filter(Boolean);
+        }
+
+        const raw = String(value || "").trim();
+        if (!raw) return [];
+
+        if (raw.startsWith("[") && raw.endsWith("]")) {
+            try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    return parsed.map((item) => normalizeMediaLink(item)).filter(Boolean);
+                }
+            } catch (_) {
+                // fallback to plain split below
+            }
+        }
+
+        return raw
+            .split(",")
+            .map((item) => normalizeMediaLink(item))
+            .filter(Boolean);
+    }
+
+    function normalizeMediaLink(url) {
+        const value = String(url || "").trim().replace(/^"+|"+$/g, "");
+        if (!value) return "";
+        if (/^https?:\/\//i.test(value)) return value;
+        if (/^www\./i.test(value)) return `https://${value}`;
+        return value;
+    }
+
+    async function fetchNmRepRowsForNms(nms) {
+        const uniqueNms = Array.from(new Set((Array.isArray(nms) ? nms : []).map(normalizeNmKey).filter(Boolean)));
+        if (!uniqueNms.length) return new Map();
+
+        const chunks = chunkArray(uniqueNms, WMS_FILTER_CHUNK_SIZE);
+        const allRows = [];
+        for (const chunk of chunks) {
+            const rows = await fetchNmRepRowsByNmChunk(chunk);
+            allRows.push(...rows);
+        }
+
+        return mapNmRepRowsByNm(allRows);
+    }
+
+    async function fetchNmRepRowsByNmChunk(nmChunk) {
+        const chunk = Array.isArray(nmChunk) ? nmChunk.filter(Boolean) : [];
+        if (!chunk.length) return [];
+
+        const { data, error } = await supabaseClient
+            .from(TABLE_NM)
+            .select("*")
+            .in("nm", chunk);
+
+        if (!error) {
+            return Array.isArray(data) ? data : [];
+        }
+
+        const missingColumn = extractMissingColumnName(error);
+        if (missingColumn && missingColumn === "nm") {
+            return [];
+        }
+
+        if (chunk.length > 1) {
+            const mid = Math.ceil(chunk.length / 2);
+            const left = await fetchNmRepRowsByNmChunk(chunk.slice(0, mid));
+            const right = await fetchNmRepRowsByNmChunk(chunk.slice(mid));
+            return left.concat(right);
+        }
+
+        const errorText = String(error?.message || error?.details || error?.code || "unknown");
+        throw new Error(`Не удалось проверить НМ ${chunk[0]} в ${TABLE_NM}: ${errorText}`);
+    }
+
+    function mapNmRepRowsByNm(rows) {
+        const map = new Map();
+        const seen = new Set();
+
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const signature = buildNmRepRowSignature(row);
+            if (!signature || seen.has(signature)) return;
+            seen.add(signature);
+
+            const nm = normalizeNmKey(row?.nm);
+            if (!nm) return;
+
+            const dateValue = row?.date || row?.created_at || row?.inserted_at || row?.updated_at || "";
+            const ts = parseTimestampValue(dateValue);
+            const assignedShk = normalizeShk(row?.new_sticker || row?.shk || row?.sticker || row?.barcode);
+            const emp = toText(row?.emp);
+            const empName = toText(row?.emp_name || row?.fio || row?.name);
+
+            if (!map.has(nm)) map.set(nm, []);
+            map.get(nm).push({
+                nm,
+                dateValue,
+                ts,
+                emp,
+                empName,
+                assignedShk
+            });
+        });
+
+        map.forEach((items, key) => {
+            const sorted = (items || []).slice().sort((a, b) => compareDateTs(b?.ts, a?.ts));
+            map.set(key, sorted);
+        });
+
+        return map;
+    }
+
+    function buildNmRepRowSignature(row) {
+        if (!row || typeof row !== "object") return "";
+        const id = normalizeToken(row?.id || row?.nm_rep_id || row?.row_id);
+        if (id) return `id:${id}`;
+
+        const nm = normalizeNmKey(row?.nm);
+        const dateValue = normalizeToken(row?.date || row?.created_at || row?.inserted_at || row?.updated_at);
+        const emp = normalizeToken(row?.emp);
+        const assigned = normalizeShk(row?.new_sticker || row?.shk || row?.sticker || row?.barcode);
+        return `${nm}|${dateValue}|${emp}|${assigned}`;
+    }
+
+    function normalizeNmKey(value) {
+        return normalizeToken(value);
+    }
+
+    function parseTimestampValue(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+
+        const raw = String(value).trim();
+        if (!raw) return null;
+
+        let normalized = raw.replace(" ", "T");
+        normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+        const hasOffset = /([zZ]|[+-]\d{2}:\d{2}|[+-]\d{2})$/.test(normalized);
+        const parsed = hasOffset ? new Date(normalized) : new Date(`${normalized}Z`);
+        if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+
+        const dateOnly = parseDateValue(raw);
+        if (dateOnly && !Number.isNaN(dateOnly.getTime())) return dateOnly.getTime();
+        return null;
+    }
+
+    function formatDateTimeMsk(value) {
+        const ts = parseTimestampValue(value);
+        if (!Number.isFinite(ts)) return "—";
+        return new Intl.DateTimeFormat("ru-RU", {
+            timeZone: "Europe/Moscow",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit"
+        }).format(new Date(ts));
     }
 
     function resolvePureTableUpdateColumns(rawRows) {
@@ -347,9 +902,11 @@
             .sort(sortMixedNumericStrings);
         const statusValues = Array.from(new Set(rows.map((row) => row.shkStateBeforeLost).filter(Boolean)))
             .sort((a, b) => String(a).localeCompare(String(b), "ru"));
+        const extraValues = EXTRA_FILTER_VALUES.slice();
 
         syncFilterSet(tableState.activeLrs, lrValues);
         syncFilterSet(tableState.activeStatuses, statusValues);
+        syncFilterSet(tableState.activeExtraStatuses, extraValues);
 
         renderFilterCheckboxList(
             pureFilterLrList,
@@ -369,9 +926,19 @@
                 applyPureTableFiltersAndRender();
             }
         );
+        renderFilterCheckboxList(
+            pureFilterExtraList,
+            extraValues,
+            tableState.activeExtraStatuses,
+            () => {
+                updateFilterButtonCaption(pureFilterExtraBtn, tableState.activeExtraStatuses.size, extraValues.length);
+                applyPureTableFiltersAndRender();
+            }
+        );
 
         updateFilterButtonCaption(pureFilterLrBtn, tableState.activeLrs.size, lrValues.length);
         updateFilterButtonCaption(pureFilterStatusBtn, tableState.activeStatuses.size, statusValues.length);
+        updateFilterButtonCaption(pureFilterExtraBtn, tableState.activeExtraStatuses.size, extraValues.length);
     }
 
     function syncFilterSet(set, values) {
@@ -405,6 +972,44 @@
             return;
         }
 
+        const allLabel = document.createElement("label");
+        allLabel.className = "status-item";
+
+        const allCheckbox = document.createElement("input");
+        allCheckbox.type = "checkbox";
+
+        const allText = document.createElement("span");
+        allText.textContent = "Выбрать всё";
+        const optionCheckboxes = [];
+
+        function syncAllCheckboxState() {
+            const selectedCount = selectedSet.size;
+            const totalCount = safeValues.length;
+            allCheckbox.checked = totalCount > 0 && selectedCount === totalCount;
+            allCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalCount;
+        }
+
+        function syncOptionCheckboxes() {
+            optionCheckboxes.forEach(({ checkbox, value }) => {
+                checkbox.checked = selectedSet.has(value);
+            });
+        }
+
+        allCheckbox.addEventListener("change", () => {
+            if (allCheckbox.checked) {
+                selectedSet.clear();
+                safeValues.forEach((value) => selectedSet.add(value));
+            } else {
+                selectedSet.clear();
+            }
+            syncOptionCheckboxes();
+            syncAllCheckboxState();
+            onChange();
+        });
+
+        allLabel.append(allCheckbox, allText);
+        container.appendChild(allLabel);
+
         safeValues.forEach((value) => {
             const label = document.createElement("label");
             label.className = "status-item";
@@ -412,10 +1017,12 @@
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
             checkbox.checked = selectedSet.has(value);
+            optionCheckboxes.push({ checkbox, value });
 
             checkbox.addEventListener("change", () => {
                 if (checkbox.checked) selectedSet.add(value);
                 else selectedSet.delete(value);
+                syncAllCheckboxState();
                 onChange();
             });
 
@@ -425,6 +1032,9 @@
             label.append(checkbox, span);
             container.appendChild(label);
         });
+
+        syncOptionCheckboxes();
+        syncAllCheckboxState();
     }
 
     function updateFilterButtonCaption(button, selectedCount, totalCount) {
@@ -436,20 +1046,51 @@
     }
 
     function applyPureTableFiltersAndRender() {
-        tableState.filteredRows = tableState.rows.filter((row) => {
+        const filtered = tableState.rows.filter((row) => {
             const matchLr = tableState.activeLrs.has(row.lr);
             const matchStatus = tableState.activeStatuses.has(row.shkStateBeforeLost);
-            return matchLr && matchStatus;
+            const matchExtra = rowMatchesExtraFilter(row, tableState.activeExtraStatuses);
+            const matchUnresolved = !tableState.onlyUnresolved || !toText(row.decision);
+            return matchLr && matchStatus && matchExtra && matchUnresolved;
         });
+
+        tableState.filteredRows = sortPureRows(filtered);
         renderPureTableBody(tableState.filteredRows);
+        updatePureTableSortIndicators();
+    }
+
+    function rowMatchesExtraFilter(row, activeSet) {
+        if (!(activeSet instanceof Set)) return true;
+        const statuses = getRowExtraStatuses(row);
+        if (!statuses.length) return activeSet.has("Пусто");
+        return statuses.some((status) => activeSet.has(status));
+    }
+
+    function getRowExtraStatuses(row) {
+        const statuses = new Set();
+
+        const twoShkRows = Array.isArray(row?.wmsTwoShk) ? row.wmsTwoShk : [];
+        twoShkRows.forEach((item) => {
+            const eventType = String(item?.eventType || "");
+            if (eventType === EVENT_TWO_SHK) statuses.add("2 ШК");
+            if (eventType === EVENT_EMPTY_PACK) statuses.add("Пустая упаковка");
+        });
+
+        const nmRows = Array.isArray(row?.wmsNmRep) ? row.wmsNmRep : [];
+        if (nmRows.length) statuses.add("Оприход");
+
+        if (!statuses.size) statuses.add("Пусто");
+        return Array.from(statuses);
     }
 
     function renderPureTablePlaceholder(message) {
         if (!pureTableBody) return;
+        closeAllWmsPopovers();
+        closeActiveVerdictPanel();
         pureTableBody.innerHTML = "";
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 10;
+        td.colSpan = 11;
         td.className = "muted";
         td.textContent = String(message || "");
         tr.appendChild(td);
@@ -458,6 +1099,8 @@
 
     function renderPureTableBody(rows) {
         if (!pureTableBody) return;
+        closeAllWmsPopovers();
+        closeActiveVerdictPanel();
         pureTableBody.innerHTML = "";
 
         const safeRows = Array.isArray(rows) ? rows : [];
@@ -468,30 +1111,30 @@
 
         safeRows.forEach((row) => {
             const tr = document.createElement("tr");
+            const extraStatuses = getRowExtraStatuses(row);
+            const hasTwoShkOrEmpty = extraStatuses.includes("2 ШК") || extraStatuses.includes("Пустая упаковка");
+            const hasAcceptance = extraStatuses.includes("Оприход");
+            if (hasAcceptance) {
+                tr.classList.add("pure-row-oprihod");
+            } else if (hasTwoShkOrEmpty) {
+                tr.classList.add("pure-row-blackout");
+            }
 
-            tr.appendChild(createPlainCell(row.shk));
-            tr.appendChild(createPlainCell(row.nm));
-            tr.appendChild(createPlainCell(row.description, "pure-wrap-cell"));
-            tr.appendChild(createPlainCell(row.brand));
-            tr.appendChild(createPlainCell(row.shkStateBeforeLost));
-            tr.appendChild(createPlainCell(formatDateForUi(row.dateLost)));
-            tr.appendChild(createPlainCell(row.lr));
-            tr.appendChild(createPlainCell(formatPriceForUi(row.price)));
+            tr.appendChild(createShkCell(row.shk));
+            tr.appendChild(createSubjectCell(row.nm, row.description, row.brand));
+            tr.appendChild(createPlainCell(row.shkStateBeforeLost, "pure-col-status"));
+            tr.appendChild(createPlainCell(formatDateForUi(row.dateLost), "pure-col-date"));
+            tr.appendChild(createPlainCell(row.lr, "pure-col-lr"));
+            tr.appendChild(createPriceCell(row.price));
+            tr.appendChild(createGapCell());
 
             const verdictTd = document.createElement("td");
-            const verdictInput = document.createElement("input");
-            verdictInput.className = "input pure-edit-input short";
-            verdictInput.type = "text";
-            verdictInput.value = row.decision;
-            verdictInput.placeholder = "Вердикт";
-            verdictInput.dataset.shk = row.shk;
-            verdictInput.dataset.field = "decision";
-            verdictTd.appendChild(verdictInput);
+            verdictTd.appendChild(createVerdictDropdownCell(row));
             tr.appendChild(verdictTd);
 
             const commentTd = document.createElement("td");
             const commentInput = document.createElement("input");
-            commentInput.className = "input pure-edit-input";
+            commentInput.className = "input pure-edit-input comment";
             commentInput.type = "text";
             commentInput.value = row.comment;
             commentInput.placeholder = "Комментарий";
@@ -500,14 +1143,429 @@
             commentTd.appendChild(commentInput);
             tr.appendChild(commentTd);
 
+            tr.appendChild(createEmptyCell("pure-col-extra"));
+            tr.appendChild(createWmsBaseCell(row));
+
             pureTableBody.appendChild(tr);
         });
+    }
+
+    function createShkCell(shkValue) {
+        const td = document.createElement("td");
+        td.className = "pure-col-shk pure-shk-cell";
+
+        const normalized = normalizeShk(shkValue);
+        if (!normalized) {
+            td.textContent = "—";
+            return td;
+        }
+
+        const pill = document.createElement("span");
+        pill.className = "pure-shk-pill";
+
+        const link = document.createElement("a");
+        link.className = "pure-shk-link";
+        link.href = `https://wms.wbwh.tech/shk/status/history?shk=${encodeURIComponent(normalized)}`;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = normalized;
+
+        pill.appendChild(link);
+        td.appendChild(pill);
+        return td;
     }
 
     function createPlainCell(value, className = "") {
         const td = document.createElement("td");
         if (className) td.className = className;
         td.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
+        return td;
+    }
+
+    function createEmptyCell(className = "") {
+        const td = document.createElement("td");
+        if (className) td.className = className;
+        td.textContent = "";
+        return td;
+    }
+
+    function createVerdictDropdownCell(row) {
+        const currentValue = toText(row?.decision);
+        const options = getDecisionOptionsForRow(currentValue);
+
+        const wrap = document.createElement("div");
+        wrap.className = "pure-row-verdict-dropdown";
+        wrap.dataset.shk = row?.shk || "";
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn btn-outline pure-row-verdict-btn";
+        btn.dataset.verdictToggle = "1";
+        btn.dataset.shk = row?.shk || "";
+        btn.setAttribute("aria-expanded", "false");
+        btn.innerHTML = `${escapeHtml(currentValue || "Выбрать")} <span class="caret">▾</span>`;
+
+        const panel = document.createElement("div");
+        panel.className = "pure-row-verdict-panel hidden";
+
+        options.forEach((value) => {
+            const optionBtn = document.createElement("button");
+            optionBtn.type = "button";
+            optionBtn.className = "pure-row-verdict-option";
+            if (value === currentValue) {
+                optionBtn.classList.add("is-selected");
+            }
+            optionBtn.dataset.verdictOption = "1";
+            optionBtn.dataset.shk = row?.shk || "";
+            optionBtn.dataset.value = value;
+            optionBtn.textContent = value || "—";
+            panel.appendChild(optionBtn);
+        });
+
+        wrap.append(btn, panel);
+        return wrap;
+    }
+
+    function getDecisionOptionsForRow(currentValue) {
+        const values = [];
+        const seen = new Set();
+
+        const addValue = (value) => {
+            const normalized = toText(value);
+            const key = normalized.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            values.push(normalized);
+        };
+
+        addValue("");
+        (Array.isArray(tableState.decisionOptions) ? tableState.decisionOptions : []).forEach(addValue);
+        addValue(currentValue);
+
+        return values;
+    }
+
+    function createWmsBaseCell(row) {
+        const td = document.createElement("td");
+        td.className = "pure-col-extra pure-col-wms";
+
+        const entries = buildWmsBaseEntriesForRow(row);
+        if (!entries.length) {
+            td.textContent = "";
+            return td;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "pure-wms-buttons";
+
+        entries.forEach((entry) => {
+            wrap.appendChild(createWmsPopoverControl(entry));
+        });
+
+        td.appendChild(wrap);
+        return td;
+    }
+
+    function buildWmsBaseEntriesForRow(row) {
+        const out = [];
+        const twoShkRows = Array.isArray(row?.wmsTwoShk) ? row.wmsTwoShk : [];
+        if (twoShkRows.length) {
+            const latestByType = new Map();
+            twoShkRows.forEach((item) => {
+                const eventType = String(item?.eventType || EVENT_TWO_SHK);
+                const prev = latestByType.get(eventType);
+                if (!prev || compareDateTs(item?.ts, prev?.ts) > 0) {
+                    latestByType.set(eventType, item);
+                }
+            });
+
+            [EVENT_TWO_SHK, EVENT_EMPTY_PACK].forEach((eventType) => {
+                const match = latestByType.get(eventType);
+                if (!match) return;
+                out.push({
+                    kind: "two_shk",
+                    label: eventType === EVENT_EMPTY_PACK ? EVENT_EMPTY_PACK : "2 ШК",
+                    eventType: eventType,
+                    dateText: formatDateTimeMsk(match.dateValue),
+                    otherShk: match.otherShk,
+                    shk1: match.shk1,
+                    shk2: match.shk2,
+                    mediaLinks: match.mediaLinks
+                });
+            });
+        }
+
+        const nmRows = Array.isArray(row?.wmsNmRep) ? row.wmsNmRep : [];
+        if (nmRows.length) {
+            const latest = nmRows[0];
+            out.push({
+                kind: "nm_rep",
+                label: "Оприход",
+                dateText: formatDateTimeMsk(latest?.dateValue),
+                emp: latest?.emp,
+                empName: latest?.empName,
+                assignedShk: latest?.assignedShk
+            });
+        }
+
+        return out;
+    }
+
+    function createWmsPopoverControl(entry) {
+        const wrap = document.createElement("div");
+        wrap.className = "pure-wms-popover-wrap";
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn btn-outline pure-wms-btn";
+        btn.textContent = String(entry?.label || "Подробнее");
+
+        const popover = document.createElement("div");
+        popover.className = "pure-wms-popover hidden";
+
+        const title = document.createElement("div");
+        title.className = "pure-wms-popover-title";
+        title.textContent = String(entry?.label || "Детали");
+        popover.appendChild(title);
+
+        if (entry?.kind === "two_shk") {
+            if (entry.eventType === EVENT_TWO_SHK) {
+                appendWmsPopoverLine(popover, "Другой ШК", entry.otherShk || "—");
+            } else {
+                appendWmsPopoverLine(popover, "ШК 1", entry.shk1 || "—");
+                appendWmsPopoverLine(popover, "ШК 2", entry.shk2 || "—");
+            }
+
+            appendWmsPopoverLine(popover, "Дата", entry.dateText || "—");
+
+            const mediaWrap = document.createElement("div");
+            mediaWrap.className = "pure-wms-popover-photos";
+
+            const mediaLinks = Array.isArray(entry?.mediaLinks) ? entry.mediaLinks : [];
+            if (!mediaLinks.length) {
+                const empty = document.createElement("div");
+                empty.className = "pure-wms-popover-muted";
+                empty.textContent = "Фото: —";
+                mediaWrap.appendChild(empty);
+            } else {
+                mediaLinks.forEach((href, index) => {
+                    const a = document.createElement("a");
+                    a.className = "btn btn-outline pure-wms-photo-btn";
+                    a.textContent = `Фото ${index + 1}`;
+                    a.href = href;
+                    a.target = "_blank";
+                    a.rel = "noopener noreferrer";
+                    mediaWrap.appendChild(a);
+                });
+            }
+            popover.appendChild(mediaWrap);
+        } else {
+            appendWmsPopoverLine(popover, "Дата", entry?.dateText || "—");
+            appendWmsPopoverLine(popover, "Кто", buildNmWhoText(entry) || "—");
+            appendWmsPopoverLine(popover, "Присвоенный ШК", entry?.assignedShk || "—");
+        }
+
+        btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleWmsPopover(popover);
+        });
+
+        wrap.append(btn, popover);
+        return wrap;
+    }
+
+    function appendWmsPopoverLine(container, label, value) {
+        const line = document.createElement("div");
+        line.className = "pure-wms-popover-line";
+
+        const key = document.createElement("span");
+        key.className = "pure-wms-popover-key";
+        key.textContent = `${String(label || "")}: `;
+
+        const val = document.createElement("span");
+        val.className = "pure-wms-popover-value";
+        val.textContent = String(value || "—");
+
+        line.append(key, val);
+        container.appendChild(line);
+    }
+
+    function buildNmWhoText(entry) {
+        const name = toText(entry?.empName);
+        const emp = toText(entry?.emp);
+        if (name && emp) return `${name} (${emp})`;
+        return name || emp || "";
+    }
+
+    function toggleWmsPopover(popover) {
+        if (!(popover instanceof HTMLElement)) return;
+        const wasOpen = !popover.classList.contains("hidden");
+        closeAllWmsPopovers();
+        if (wasOpen) return;
+        popover.classList.remove("hidden");
+        tableState.activeWmsPopover = popover;
+    }
+
+    function closeAllWmsPopovers() {
+        const active = tableState.activeWmsPopover;
+        if (active instanceof HTMLElement) {
+            active.classList.add("hidden");
+        }
+        tableState.activeWmsPopover = null;
+    }
+
+    async function handlePureTableBodyClick(event) {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+
+        const optionBtn = target.closest("button[data-verdict-option='1']");
+        if (optionBtn instanceof HTMLButtonElement) {
+            event.preventDefault();
+            event.stopPropagation();
+            await handleVerdictOptionClick(optionBtn);
+            return;
+        }
+
+        const toggleBtn = target.closest("button[data-verdict-toggle='1']");
+        if (toggleBtn instanceof HTMLButtonElement) {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleVerdictPanel(toggleBtn);
+        }
+    }
+
+    function toggleVerdictPanel(toggleBtn) {
+        const wrap = toggleBtn.closest(".pure-row-verdict-dropdown");
+        if (!wrap) return;
+        const panel = wrap.querySelector(".pure-row-verdict-panel");
+        if (!(panel instanceof HTMLElement)) return;
+
+        const alreadyOpen = !panel.classList.contains("hidden");
+        closeActiveVerdictPanel();
+        if (alreadyOpen) return;
+
+        panel.classList.remove("hidden");
+        toggleBtn.setAttribute("aria-expanded", "true");
+        tableState.activeVerdictPanel = panel;
+    }
+
+    function closeActiveVerdictPanel() {
+        const panel = tableState.activeVerdictPanel;
+        if (!(panel instanceof HTMLElement)) {
+            tableState.activeVerdictPanel = null;
+            return;
+        }
+
+        panel.classList.add("hidden");
+        const wrap = panel.closest(".pure-row-verdict-dropdown");
+        const btn = wrap?.querySelector("button[data-verdict-toggle='1']");
+        if (btn instanceof HTMLButtonElement) {
+            btn.setAttribute("aria-expanded", "false");
+        }
+        tableState.activeVerdictPanel = null;
+    }
+
+    async function handleVerdictOptionClick(optionBtn) {
+        const shk = normalizeShk(optionBtn.dataset.shk);
+        const nextValue = toText(optionBtn.dataset.value);
+        if (!shk) return;
+
+        const wrap = optionBtn.closest(".pure-row-verdict-dropdown");
+        const row = tableState.rows.find((item) => item.shk === shk);
+        if (!row) return;
+
+        const previousValue = toText(row.decision);
+        if (nextValue === previousValue) {
+            closeActiveVerdictPanel();
+            return;
+        }
+
+        const patch = {};
+        patch[tableState.updateColumnMap.decision] = nextValue || null;
+        if (nextValue) {
+            patch[tableState.updateColumnMap.emp] = resolveCurrentUserId(user);
+            patch[tableState.updateColumnMap.solved] = resolveCurrentTimestamp();
+        } else {
+            patch[tableState.updateColumnMap.emp] = null;
+            patch[tableState.updateColumnMap.solved] = null;
+        }
+
+        setVerdictDropdownBusy(wrap, true);
+        closeActiveVerdictPanel();
+        setPureTableInlineStatus("Сохраняем изменения...", "info");
+
+        try {
+            const appliedPatch = await updatePureRowFields(shk, userWhId, patch);
+            Object.assign(row.raw, appliedPatch);
+            row.decision = toText(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
+            setPureTableInlineStatus("Изменения сохранены", "success");
+            applyPureTableFiltersAndRender();
+        } catch (error) {
+            const message = String(error?.message || error || "Не удалось сохранить изменения.");
+            setPureTableInlineStatus(message, "error");
+            window.MiniUI?.toast?.("Ошибка сохранения строки", { type: "error" });
+        } finally {
+            setVerdictDropdownBusy(wrap, false);
+        }
+    }
+
+    function setVerdictDropdownBusy(wrap, isBusy) {
+        if (!(wrap instanceof Element)) return;
+        wrap.querySelectorAll("button").forEach((btn) => {
+            if (btn instanceof HTMLButtonElement) {
+                btn.disabled = Boolean(isBusy);
+            }
+        });
+        if (isBusy) wrap.classList.add("is-saving");
+        else wrap.classList.remove("is-saving");
+    }
+
+    function createSubjectCell(nm, name, brand) {
+        const td = document.createElement("td");
+        td.className = "pure-wrap-cell pure-col-subject";
+
+        const nmLine = document.createElement("div");
+        nmLine.className = "pure-subject-nm";
+        nmLine.textContent = nm === null || nm === undefined || nm === ""
+            ? "—"
+            : String(nm);
+        td.appendChild(nmLine);
+
+        const main = document.createElement("div");
+        main.className = "pure-name-main";
+        main.textContent = name ? String(name) : "—";
+        td.appendChild(main);
+
+        const sub = document.createElement("div");
+        sub.className = "pure-brand-sub";
+        sub.textContent = brand ? String(brand) : "—";
+        td.appendChild(sub);
+
+        return td;
+    }
+
+    function createPriceCell(priceValue) {
+        const td = document.createElement("td");
+        td.className = "pure-price-cell";
+
+        const num = toNumberOrNull(priceValue);
+        if (num === null) {
+            td.textContent = "—";
+            return td;
+        }
+
+        td.textContent = formatPriceForUi(num);
+        const visual = getPriceVisual(num);
+        td.style.setProperty("background-color", visual.background, "important");
+        td.style.setProperty("color", visual.color, "important");
+        return td;
+    }
+
+    function createGapCell() {
+        const td = document.createElement("td");
+        td.className = "pure-gap-col";
+        td.textContent = "";
         return td;
     }
 
@@ -531,7 +1589,7 @@
         if (field === "decision") {
             patch[tableState.updateColumnMap.decision] = nextValue || null;
             if (nextValue) {
-                patch[tableState.updateColumnMap.emp] = resolveCurrentUserName(user);
+                patch[tableState.updateColumnMap.emp] = resolveCurrentUserId(user);
                 patch[tableState.updateColumnMap.solved] = resolveCurrentTimestamp();
             } else {
                 patch[tableState.updateColumnMap.emp] = null;
@@ -554,6 +1612,7 @@
 
             target.value = field === "decision" ? row.decision : row.comment;
             setPureTableInlineStatus("Изменения сохранены", "success");
+            applyPureTableFiltersAndRender();
         } catch (error) {
             target.value = previousValue;
             const message = String(error?.message || error || "Не удалось сохранить изменения.");
@@ -598,8 +1657,10 @@
         return out;
     }
 
-    function resolveCurrentUserName(currentUser) {
-        return toText(currentUser?.name || currentUser?.fio || currentUser?.id || "Неизвестный пользователь");
+    function resolveCurrentUserId(currentUser) {
+        const userId = currentUser?.id ?? currentUser?.user_id ?? null;
+        if (userId === null || userId === undefined || userId === "") return null;
+        return String(userId);
     }
 
     function resolveCurrentTimestamp() {
@@ -617,6 +1678,159 @@
             : type === "success"
                 ? "#15803d"
                 : "#64748b";
+    }
+
+    function sortPureRows(rows) {
+        const safeRows = Array.isArray(rows) ? rows.slice() : [];
+        const key = tableState.sortKey;
+        const dir = tableState.sortDir === -1 ? -1 : 1;
+
+        safeRows.sort((a, b) => {
+            const cmp = comparePureRowsByKey(a, b, key);
+            if (cmp !== 0) return cmp * dir;
+            return sortMixedNumericStrings(a?.shk, b?.shk);
+        });
+        return safeRows;
+    }
+
+    function comparePureRowsByKey(a, b, key) {
+        switch (key) {
+            case "shk":
+                return sortMixedNumericStrings(a?.shk, b?.shk);
+            case "subject":
+                return compareNullableNumbers(a?.nm, b?.nm, 0)
+                    || compareStrings(a?.description, b?.description)
+                    || compareStrings(a?.brand, b?.brand);
+            case "shkStateBeforeLost":
+                return compareStrings(a?.shkStateBeforeLost, b?.shkStateBeforeLost);
+            case "dateLost":
+                return compareNullableDates(a?.dateLost, b?.dateLost);
+            case "lr":
+                return sortMixedNumericStrings(a?.lr, b?.lr);
+            case "price":
+                return compareNullableNumbers(a?.price, b?.price, 0);
+            case "decision":
+                return compareStrings(a?.decision, b?.decision);
+            case "comment":
+                return compareStrings(a?.comment, b?.comment);
+            default:
+                return 0;
+        }
+    }
+
+    function compareNullableNumbers(left, right, fallback) {
+        const l = toNumberOrNull(left);
+        const r = toNumberOrNull(right);
+        if (l !== null && r !== null) {
+            if (l === r) return 0;
+            return l > r ? 1 : -1;
+        }
+        if (l !== null) return -1;
+        if (r !== null) return 1;
+        return fallback || 0;
+    }
+
+    function compareNullableDates(left, right) {
+        const l = parseDateValue(left);
+        const r = parseDateValue(right);
+        if (l && r) {
+            const lTs = l.getTime();
+            const rTs = r.getTime();
+            if (lTs === rTs) return 0;
+            return lTs > rTs ? 1 : -1;
+        }
+        if (l) return -1;
+        if (r) return 1;
+        return compareStrings(left, right);
+    }
+
+    function compareStrings(left, right) {
+        const l = String(left || "").toLowerCase();
+        const r = String(right || "").toLowerCase();
+        return l.localeCompare(r, "ru");
+    }
+
+    function updatePureTableSortIndicators() {
+        if (!pureTableHead) return;
+        pureTableHead.querySelectorAll("th[data-sort-key]").forEach((th) => {
+            const key = th.getAttribute("data-sort-key");
+            const indicator = th.querySelector(".pure-sort-indicator");
+            if (!indicator) return;
+
+            if (key === tableState.sortKey) {
+                indicator.textContent = tableState.sortDir === -1 ? "▼" : "▲";
+                return;
+            }
+            indicator.textContent = "";
+        });
+    }
+
+    function getPriceVisual(price) {
+        const stops = [
+            { value: 0, color: "#c8f3d3" },
+            { value: 200, color: "#c8f3d3" },
+            { value: 500, color: "#ffe9a3" },
+            { value: 4000, color: "#ffb0a6" },
+            { value: 10000, color: "#d9868d" }
+        ];
+
+        const clamped = Math.max(0, Number(price) || 0);
+        if (clamped >= stops[stops.length - 1].value) {
+            const rgb = hexToRgb(stops[stops.length - 1].color);
+            return {
+                background: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
+                color: pickContrastColor(rgb)
+            };
+        }
+
+        for (let i = 0; i < stops.length - 1; i += 1) {
+            const from = stops[i];
+            const to = stops[i + 1];
+            if (clamped < from.value || clamped > to.value) continue;
+
+            const ratio = to.value === from.value
+                ? 0
+                : (clamped - from.value) / (to.value - from.value);
+
+            const rgbFrom = hexToRgb(from.color);
+            const rgbTo = hexToRgb(to.color);
+            const mixed = {
+                r: Math.round(rgbFrom.r + (rgbTo.r - rgbFrom.r) * ratio),
+                g: Math.round(rgbFrom.g + (rgbTo.g - rgbFrom.g) * ratio),
+                b: Math.round(rgbFrom.b + (rgbTo.b - rgbFrom.b) * ratio)
+            };
+            return {
+                background: `rgb(${mixed.r}, ${mixed.g}, ${mixed.b})`,
+                color: pickContrastColor(mixed)
+            };
+        }
+
+        const rgb = hexToRgb(stops[0].color);
+        return {
+            background: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
+            color: pickContrastColor(rgb)
+        };
+    }
+
+    function hexToRgb(hex) {
+        const clean = String(hex || "").replace("#", "").trim();
+        const normalized = clean.length === 3
+            ? clean.split("").map((part) => part + part).join("")
+            : clean;
+        const num = parseInt(normalized, 16);
+        return {
+            r: (num >> 16) & 255,
+            g: (num >> 8) & 255,
+            b: num & 255
+        };
+    }
+
+    function pickContrastColor(rgb) {
+        const r = Number(rgb?.r || 0);
+        const g = Number(rgb?.g || 0);
+        const b = Number(rgb?.b || 0);
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        return luminance < 0.58 ? "#ffffff" : "#111827";
     }
 
     async function refreshLastUploadedDate(currentUserWhId) {
@@ -898,7 +2112,8 @@
         const text = String(error?.message || error?.details || "");
         if (!text) return "";
 
-        const match = text.match(/column\s+([^\s]+)\s+does not exist/i);
+        const match = text.match(/column\s+([^\s]+)\s+does not exist/i)
+            || text.match(/could not find(?:\s+the)?\s+"?([a-z0-9_.]+)"?\s+column/i);
         if (!match || !match[1]) return "";
 
         const token = String(match[1]).replace(/"/g, "");

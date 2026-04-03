@@ -79,6 +79,12 @@
     }
 
     const RU_TO_EN = buildRuToEnMap();
+    const VISUAL_TO_LATIN = {
+        "А": "A", "В": "B", "С": "C", "Е": "E", "Н": "H", "К": "K", "М": "M",
+        "О": "O", "Р": "P", "Т": "T", "Х": "X", "У": "Y",
+        "а": "a", "в": "b", "с": "c", "е": "e", "н": "h", "к": "k", "м": "m",
+        "о": "o", "р": "p", "т": "t", "х": "x", "у": "y"
+    };
 
     function normalizeStickerLayout(str) {
         let out = String(str || "")
@@ -86,9 +92,61 @@
             .map(ch => RU_TO_EN[ch] || ch)
             .join("");
 
-        // В русской раскладке символ "/" часто приходит как "."
-        out = out.replace(/\./g, "/");
+        // Нормализация похожих символов, которые могут прийти со сканера.
+        out = out
+            .replace(/[＊﹡✱]/g, "*")
+            .replace(/[！]/g, "!")
+            .replace(/[／⁄∕]/g, "/")
+            .replace(/[＋]/g, "+")
+            .replace(/\./g, "/")
+            .replace(/[,?]/g, "/")
+            .replace(/=/g, "+")
+            .replace(/[АВСЕНКМОРТХУавсенкмортху]/g, ch => VISUAL_TO_LATIN[ch] || ch);
+
         return out;
+    }
+
+    function sanitizeScannerText(value) {
+        return String(value || "")
+            .replace(/[\u0000-\u001F\u007F\u200B-\u200F\uFEFF]/g, "")
+            .replace(/\s+/g, "")
+            .trim();
+    }
+
+    function extractStickerCandidate(raw) {
+        let value = sanitizeScannerText(normalizeStickerLayout(raw));
+        if (!value) return "";
+
+        const prefixIndex = value.search(/[*!]/);
+        if (prefixIndex < 0) return "";
+        if (prefixIndex > 0) value = value.slice(prefixIndex);
+
+        let prefix = value.charAt(0);
+        if (prefix === "!") prefix = "*";
+
+        const body = value
+            .slice(1)
+            .replace(/[^A-Za-z0-9+/]/g, "");
+
+        return `${prefix}${body}`;
+    }
+
+    function buildStickerCandidates(raw) {
+        const base = sanitizeScannerText(String(raw || ""));
+        if (!base) return [];
+
+        const candidates = [];
+        const pushCandidate = (candidate) => {
+            const normalized = extractStickerCandidate(candidate);
+            if (!normalized) return;
+            if (!candidates.includes(normalized)) candidates.push(normalized);
+        };
+
+        pushCandidate(base);
+        pushCandidate(normalizeStickerLayout(base));
+        pushCandidate(base.replace(/^!/, "*"));
+
+        return candidates;
     }
 
     function renderUserNameSmall() {
@@ -385,7 +443,7 @@
 
         if (imageUrl) {
             productPhotoEl.src = imageUrl;
-            productPhotoEl.style.display = "";
+            productPhotoEl.style.display = "block";
         } else {
             productPhotoEl.removeAttribute("src");
             productPhotoEl.style.display = "none";
@@ -416,7 +474,7 @@
             return;
         }
 
-        nmQrGroupEl.style.display = "";
+        nmQrGroupEl.style.display = "block";
         nmQrValueEl.textContent = value;
 
         const ctx = nmQrCanvasEl.getContext("2d");
@@ -592,7 +650,7 @@
     }
 
     function parseInputShk(rawInput) {
-        const raw = String(rawInput || "").trim();
+        const raw = sanitizeScannerText(rawInput);
         if (!raw) return { ok: false, message: "Введите ШК" };
 
         if (/^\d+$/.test(raw)) {
@@ -603,25 +661,29 @@
             };
         }
 
-        let normalized = normalizeStickerLayout(raw).trim();
-        if (normalized.startsWith("!")) {
-            normalized = `*${normalized.slice(1)}`;
-        }
-
-        if (!normalized.startsWith("*")) {
+        const candidates = buildStickerCandidates(raw);
+        if (!candidates.length) {
             return { ok: false, message: "Некорректный формат. Введите цифры или скан-код с префиксом * / !" };
         }
 
-        const decoded = decodeStickerBarcode(normalized);
-        if (!decoded.ok) return decoded;
+        let lastDecodeError = null;
+        for (const candidate of candidates) {
+            const decoded = decodeStickerBarcode(candidate);
+            if (!decoded.ok) {
+                lastDecodeError = decoded;
+                continue;
+            }
 
-        return {
-            ok: true,
-            shk: decoded.value,
-            sourceText: decoded.checksumValid
-                ? `Скан: ${normalized}`
-                : `Скан: ${normalized} (контрольная сумма невалидна)`
-        };
+            return {
+                ok: true,
+                shk: decoded.value,
+                sourceText: decoded.checksumValid
+                    ? `Скан: ${candidate}`
+                    : `Скан: ${candidate} (контрольная сумма невалидна)`
+            };
+        }
+
+        return lastDecodeError || { ok: false, message: "Стикер не распознан" };
     }
 
     function resetResult() {
@@ -635,6 +697,43 @@
         photoLookupToken += 1;
         setPhotoPreviewState({ showGroup: false });
         resetNmQr();
+    }
+
+    function runPhotoLookupInBackground(nm, token) {
+        Promise.resolve()
+            .then(() => loadProductPhotoByNm(nm, token))
+            .catch(err => {
+                if (token !== photoLookupToken) return;
+                console.error("Ошибка фоновой загрузки фото:", err);
+                setPhotoPreviewState({
+                    showGroup: true,
+                    status: "Фото не удалось загрузить.",
+                    cardUrl: getWbCardUrl(nm)
+                });
+            });
+    }
+
+    function runWriteBackInBackground(nmRepRow, shk) {
+        Promise.resolve()
+            .then(async () => {
+                const [_, marked] = await Promise.allSettled([
+                    logAwaitingAcceptance(shk),
+                    markNmRepIdentified(nmRepRow, shk)
+                ]);
+
+                if (marked.status === "fulfilled") {
+                    if (!marked.value) {
+                        MiniUI.toast("Товар найден, но статус в nm_rep не обновлен", { type: "error" });
+                    }
+                    return;
+                }
+
+                console.error("Ошибка обновления nm_rep:", marked.reason);
+                MiniUI.toast("Товар найден, но статус в nm_rep не обновлен", { type: "error" });
+            })
+            .catch(err => {
+                console.error("Ошибка фоновой записи:", err);
+            });
     }
 
     async function lookupNmRepByShk(shk) {
@@ -762,18 +861,12 @@
             nmValueEl.textContent = nm || "—";
             descriptionValueEl.textContent = description || "—";
             await renderNmQr(nm);
-            await logAwaitingAcceptance(parsed.shk);
-            const marked = await markNmRepIdentified(row, parsed.shk);
-
-            if (marked) {
-                MiniUI.toast("Товар найден", { type: "success" });
-            } else {
-                MiniUI.toast("Товар найден, но статус в nm_rep не обновлен", { type: "error" });
-            }
+            MiniUI.toast("Товар найден", { type: "success" });
+            runWriteBackInBackground(row, parsed.shk);
 
             const token = ++photoLookupToken;
             if (nm) {
-                await loadProductPhotoByNm(nm, token);
+                runPhotoLookupInBackground(nm, token);
             } else {
                 setPhotoPreviewState({ showGroup: false });
             }
@@ -783,6 +876,7 @@
         } finally {
             lookupInProgress = false;
             findBtnEl.disabled = false;
+            setTimeout(() => shkInputEl.focus(), 0);
         }
     }
 
