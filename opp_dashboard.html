@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <script src="ui.js" defer></script>
-    <script src="opp_dashboard.js?v=20260401_04" defer></script>
+    <script src="opp_dashboard.js?v=20260403_02" defer></script>
 
     <style>
         .opp-toolbar {
@@ -74,6 +74,26 @@
             height: 40px;
             min-width: 110px;
             padding: 8px 12px;
+        }
+
+        .opp-page-title-row {
+            margin: 0 0 14px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .opp-page-title-row #page-title {
+            margin: 0;
+        }
+
+        .opp-page-title-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            margin-left: auto;
         }
 
         .opp-deadline-grid {
@@ -673,7 +693,10 @@
 
     <main class="wrap opp-dashboard-center" style="max-width:1200px;">
         <div class="card">
-            <h1 id="page-title" style="margin:0 0 14px 0;">Динамика ОПП</h1>
+            <div class="opp-page-title-row">
+                <h1 id="page-title">Динамика ОПП</h1>
+                <div id="page-title-actions" class="opp-page-title-actions"></div>
+            </div>
 
             <div id="gsheet-status" class="gsheet-status">Загрузка...</div>
             <div id="gsheet-errors" class="gsheet-error-list"></div>

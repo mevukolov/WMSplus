@@ -161,6 +161,21 @@
             word-break: break-word;
         }
 
+        .pure-unresolved-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #334155;
+            user-select: none;
+        }
+
+        .pure-unresolved-toggle input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
+        }
+
         .pure-table-scroll {
             flex: 1;
             overflow: auto;
@@ -184,13 +199,19 @@
 
         .pure-data-table th {
             position: sticky;
-            top: 0;
-            z-index: 2;
+            top: -2px;
+            z-index: 5;
             background: #f8fafc;
             font-weight: 600;
             color: #0f172a;
             text-align: left;
             white-space: nowrap;
+            cursor: pointer;
+            box-shadow: 0 1px 0 #d1d5db;
+        }
+
+        .pure-data-table th:not([data-sort-key]) {
+            cursor: default;
         }
 
         .pure-data-table td {
@@ -199,8 +220,8 @@
 
         .pure-data-table td.pure-wrap-cell {
             white-space: normal;
-            min-width: 220px;
-            max-width: 320px;
+            min-width: 170px;
+            max-width: 220px;
         }
 
         .pure-edit-input {
@@ -211,6 +232,388 @@
 
         .pure-edit-input.short {
             width: 180px;
+        }
+
+        .pure-edit-input.comment {
+            width: 420px;
+        }
+
+        .pure-subject-nm {
+            white-space: normal;
+            line-height: 1.2;
+            font-size: 12px;
+            color: #475569;
+            margin-bottom: 3px;
+            font-weight: 600;
+        }
+
+        .pure-name-main {
+            white-space: normal;
+            line-height: 1.25;
+        }
+
+        .pure-brand-sub {
+            margin-top: 3px;
+            font-style: italic;
+            color: #64748b;
+            white-space: normal;
+            line-height: 1.2;
+        }
+
+        .pure-sort-indicator {
+            margin-left: 6px;
+            font-size: 11px;
+            opacity: 0.7;
+        }
+
+        .pure-col-subject {
+            width: 220px;
+            min-width: 220px;
+            max-width: 260px;
+        }
+
+        .pure-col-shk {
+            width: 126px;
+            min-width: 126px;
+            max-width: 136px;
+        }
+
+        .pure-col-status {
+            width: 102px;
+            min-width: 102px;
+            max-width: 112px;
+            white-space: normal !important;
+            line-height: 1.2;
+            word-break: break-word;
+        }
+
+        .pure-col-date {
+            width: 108px;
+            min-width: 108px;
+            max-width: 118px;
+        }
+
+        .pure-col-lr {
+            width: 88px;
+            min-width: 88px;
+            max-width: 96px;
+        }
+
+        .pure-gap-col {
+            width: 14px;
+            min-width: 14px;
+            max-width: 14px;
+            padding: 0 !important;
+            background: #ffffff !important;
+            border-left: none !important;
+            border-right: none !important;
+        }
+
+        .pure-col-extra {
+            width: 118px;
+            min-width: 118px;
+            max-width: 130px;
+        }
+
+        .pure-col-wms {
+            width: 240px;
+            min-width: 240px;
+            max-width: 280px;
+        }
+
+        .pure-shk-cell {
+            text-align: center;
+            vertical-align: middle !important;
+        }
+
+        .pure-shk-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(100, 116, 139, 0.26);
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.28);
+            color: #0f172a;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+            padding: 6px 10px;
+            min-height: 24px;
+            box-sizing: border-box;
+        }
+
+        .pure-shk-link {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .pure-shk-link:visited {
+            color: inherit;
+        }
+
+        .pure-shk-link:hover,
+        .pure-shk-link:focus-visible {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .pure-price-cell {
+            font-weight: 600;
+        }
+
+        .pure-row-verdict-dropdown {
+            position: relative;
+            min-width: 190px;
+            max-width: 220px;
+        }
+
+        .pure-row-verdict-btn {
+            width: 100%;
+            justify-content: space-between;
+            min-height: 34px;
+            padding: 7px 10px;
+            border-radius: 10px;
+            font-size: 13px;
+        }
+
+        .pure-row-verdict-panel {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            z-index: 32;
+            width: 100%;
+            max-height: 260px;
+            overflow: auto;
+            border-radius: 10px;
+            border: 1px solid rgba(15, 23, 42, 0.15);
+            background: #ffffff;
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+            padding: 4px;
+        }
+
+        .pure-row-verdict-panel.hidden {
+            display: none;
+        }
+
+        .pure-row-verdict-option {
+            display: block;
+            width: 100%;
+            border: 0;
+            background: transparent;
+            border-radius: 8px;
+            padding: 8px 9px;
+            text-align: left;
+            font-size: 13px;
+            color: #0f172a;
+            cursor: pointer;
+        }
+
+        .pure-row-verdict-option:hover {
+            background: #f3f4f6;
+        }
+
+        .pure-row-verdict-option.is-selected {
+            background: #ede9fe;
+            color: #4c1d95;
+            font-weight: 600;
+        }
+
+        .pure-row-verdict-dropdown.is-saving {
+            opacity: 0.75;
+            pointer-events: none;
+        }
+
+        .pure-wms-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .pure-wms-popover-wrap {
+            position: relative;
+            display: inline-flex;
+        }
+
+        .pure-wms-btn {
+            min-height: 28px;
+            padding: 4px 8px;
+            font-size: 12px;
+            line-height: 1.2;
+            border-radius: 8px;
+            white-space: nowrap;
+        }
+
+        .pure-wms-popover {
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            z-index: 30;
+            min-width: 260px;
+            max-width: 340px;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(15, 23, 42, 0.15);
+            background: #ffffff;
+            color: #111827;
+            box-shadow: 0 12px 26px rgba(15, 23, 42, 0.18);
+        }
+
+        .pure-wms-popover.hidden {
+            display: none;
+        }
+
+        .pure-wms-popover-title {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #0f172a;
+        }
+
+        .pure-wms-popover-line {
+            font-size: 12px;
+            line-height: 1.3;
+            margin-bottom: 4px;
+            word-break: break-word;
+        }
+
+        .pure-wms-popover-key {
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .pure-wms-popover-value {
+            color: #111827;
+        }
+
+        .pure-wms-popover-photos {
+            margin-top: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .pure-wms-photo-btn {
+            font-size: 12px;
+            padding: 5px 8px;
+            border-radius: 8px;
+            text-decoration: none;
+        }
+
+        .pure-wms-popover-muted {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .pure-data-table tr.pure-row-blackout td {
+            background: #0f172a !important;
+            color: #f8fafc;
+            border-color: #1e293b;
+        }
+
+        .pure-data-table tr.pure-row-oprihod td {
+            background: #5b21b6 !important;
+            color: #f8fafc;
+            border-color: #6d28d9;
+        }
+
+        .pure-data-table tr.pure-row-blackout .pure-subject-nm,
+        .pure-data-table tr.pure-row-blackout .pure-brand-sub {
+            color: #cbd5e1;
+        }
+
+        .pure-data-table tr.pure-row-oprihod .pure-subject-nm,
+        .pure-data-table tr.pure-row-oprihod .pure-brand-sub {
+            color: #e9d5ff;
+        }
+
+        .pure-data-table tr.pure-row-blackout .pure-shk-pill {
+            border-color: rgba(226, 232, 240, 0.35);
+            background: rgba(148, 163, 184, 0.35);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-oprihod .pure-shk-pill {
+            border-color: rgba(243, 232, 255, 0.4);
+            background: rgba(216, 180, 254, 0.35);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-blackout .pure-shk-link,
+        .pure-data-table tr.pure-row-blackout .pure-shk-link:visited,
+        .pure-data-table tr.pure-row-blackout .pure-shk-link:hover,
+        .pure-data-table tr.pure-row-blackout .pure-shk-link:focus-visible {
+            color: inherit;
+        }
+
+        .pure-data-table tr.pure-row-oprihod .pure-shk-link,
+        .pure-data-table tr.pure-row-oprihod .pure-shk-link:visited,
+        .pure-data-table tr.pure-row-oprihod .pure-shk-link:hover,
+        .pure-data-table tr.pure-row-oprihod .pure-shk-link:focus-visible {
+            color: inherit;
+        }
+
+        .pure-data-table tr.pure-row-blackout .pure-wms-btn {
+            background: rgba(255, 255, 255, 0.16);
+            border-color: rgba(255, 255, 255, 0.34);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-oprihod .pure-wms-btn {
+            background: rgba(255, 255, 255, 0.18);
+            border-color: rgba(255, 255, 255, 0.38);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-blackout .pure-wms-btn:hover,
+        .pure-data-table tr.pure-row-blackout .pure-wms-btn:focus-visible {
+            background: rgba(255, 255, 255, 0.24);
+            border-color: rgba(255, 255, 255, 0.5);
+            color: #ffffff;
+        }
+
+        .pure-data-table tr.pure-row-blackout .pure-row-verdict-btn {
+            background: rgba(255, 255, 255, 0.16);
+            border-color: rgba(255, 255, 255, 0.34);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-blackout .pure-row-verdict-btn:hover,
+        .pure-data-table tr.pure-row-blackout .pure-row-verdict-btn:focus-visible {
+            background: rgba(255, 255, 255, 0.24);
+            border-color: rgba(255, 255, 255, 0.5);
+            color: #ffffff;
+        }
+
+        .pure-data-table tr.pure-row-oprihod .pure-wms-btn:hover,
+        .pure-data-table tr.pure-row-oprihod .pure-wms-btn:focus-visible {
+            background: rgba(255, 255, 255, 0.28);
+            border-color: rgba(255, 255, 255, 0.56);
+            color: #ffffff;
+        }
+
+        .pure-data-table tr.pure-row-oprihod .pure-row-verdict-btn {
+            background: rgba(255, 255, 255, 0.18);
+            border-color: rgba(255, 255, 255, 0.38);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-oprihod .pure-row-verdict-btn:hover,
+        .pure-data-table tr.pure-row-oprihod .pure-row-verdict-btn:focus-visible {
+            background: rgba(255, 255, 255, 0.28);
+            border-color: rgba(255, 255, 255, 0.56);
+            color: #ffffff;
+        }
+
+        .pure-data-table tr.pure-row-blackout .input {
+            background: rgba(248, 250, 252, 0.98);
+            color: #0f172a;
+            border-color: #cbd5e1;
+        }
+
+        .pure-data-table tr.pure-row-oprihod .input {
+            background: rgba(250, 245, 255, 0.98);
+            color: #2e1065;
+            border-color: #d8b4fe;
         }
 
         @media (max-width: 1500px) {
@@ -342,29 +745,48 @@
                 </div>
             </div>
 
+            <div class="pure-filter-field">
+                <label>Дополнительно*</label>
+                <div class="status-dropdown">
+                    <button class="btn btn-rect status-btn pure-filter-btn" id="pure-filter-extra-btn" type="button">
+                        Выбраны все
+                        <span class="caret">▾</span>
+                    </button>
+                    <div class="status-panel hidden" id="pure-filter-extra-panel">
+                        <div class="status-title">База WMS+</div>
+                        <div class="status-list" id="pure-filter-extra-list"></div>
+                    </div>
+                </div>
+            </div>
+
             <button id="pure-table-refresh-btn" class="btn btn-rect" type="button">Обновить</button>
+            <label class="pure-unresolved-toggle" for="pure-unresolved-only">
+                <input id="pure-unresolved-only" type="checkbox">
+                Только неразобранные ШК
+            </label>
             <div id="pure-table-inline-status" class="pure-table-inline-status"></div>
         </div>
 
         <div class="pure-table-scroll">
             <table class="pure-data-table">
-                <thead>
+                <thead id="pure-table-head">
                 <tr>
-                    <th>ШК</th>
-                    <th>Номенклатура</th>
-                    <th>Название</th>
-                    <th>Бренд</th>
-                    <th>Статус ШК до списания</th>
-                    <th>Дата списания</th>
-                    <th>Лостризон</th>
-                    <th>Цена</th>
-                    <th>Вердикт</th>
-                    <th>Комментарий</th>
+                    <th data-sort-key="shk" class="pure-col-shk">ШК<span class="pure-sort-indicator"></span></th>
+                    <th data-sort-key="subject" class="pure-col-subject">Предмет<span class="pure-sort-indicator"></span></th>
+                    <th data-sort-key="shkStateBeforeLost" class="pure-col-status">Статус ШК<span class="pure-sort-indicator"></span></th>
+                    <th data-sort-key="dateLost" class="pure-col-date">Дата списания<span class="pure-sort-indicator"></span></th>
+                    <th data-sort-key="lr" class="pure-col-lr">Лостризон<span class="pure-sort-indicator"></span></th>
+                    <th data-sort-key="price">Цена<span class="pure-sort-indicator"></span></th>
+                    <th class="pure-gap-col" aria-hidden="true"></th>
+                    <th data-sort-key="decision">Вердикт<span class="pure-sort-indicator"></span></th>
+                    <th data-sort-key="comment">Комментарий<span class="pure-sort-indicator"></span></th>
+                    <th class="pure-col-extra">Таблица ОПП</th>
+                    <th class="pure-col-extra pure-col-wms">База WMS+</th>
                 </tr>
                 </thead>
                 <tbody id="pure-table-body">
                 <tr>
-                    <td colspan="10" class="muted">Нажмите «Открыть таблицу чистых списаний».</td>
+                    <td colspan="11" class="muted">Нажмите «Открыть таблицу чистых списаний».</td>
                 </tr>
                 </tbody>
             </table>
