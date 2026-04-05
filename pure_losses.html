@@ -59,14 +59,125 @@
             word-break: break-word;
         }
 
+        .pure-upload-calendar {
+            margin-top: 12px;
+            border: 1px solid #dbe3ec;
+            border-radius: 12px;
+            padding: 10px;
+            background: #f8fafc;
+        }
+
+        .pure-upload-calendar-caption {
+            font-size: 12px;
+            color: #475569;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .pure-upload-calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            gap: 6px;
+        }
+
+        .pure-upload-day-head {
+            text-align: center;
+            font-size: 11px;
+            color: #64748b;
+            font-weight: 600;
+            padding-bottom: 2px;
+        }
+
+        .pure-upload-month-split {
+            grid-column: 1 / -1;
+            font-size: 11px;
+            line-height: 1.2;
+            color: #475569;
+            font-weight: 700;
+            text-transform: capitalize;
+            padding-top: 4px;
+            margin-top: 2px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .pure-upload-day-gap {
+            min-height: 24px;
+        }
+
+        .pure-upload-day {
+            text-align: center;
+            font-size: 12px;
+            color: #0f172a;
+            border-radius: 999px;
+            min-height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            margin: 0 auto;
+            border: 1px solid transparent;
+            background: transparent;
+        }
+
+        .pure-upload-day.is-missing {
+            background: #fee2e2;
+            color: #b91c1c;
+            border-color: #fca5a5;
+        }
+
+        .pure-upload-day.is-today {
+            border-color: #94a3b8;
+            font-weight: 700;
+        }
+
         .pure-center-toolbar {
             display: flex;
-            justify-content: flex-start;
+            justify-content: stretch;
             margin-bottom: 12px;
+            width: 100%;
         }
 
         .pure-open-table-btn {
             min-height: 40px;
+            width: 100%;
+            display: block;
+        }
+
+        .pure-main-stats-title {
+            margin: 0 0 14px 0;
+        }
+
+        .pure-main-kpis {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .pure-main-kpi {
+            border: 1px solid #dbe3ec;
+            border-radius: 12px;
+            background: #f8fafc;
+            padding: 10px 12px;
+        }
+
+        .pure-main-kpi-label {
+            font-size: 12px;
+            color: #64748b;
+            margin-bottom: 6px;
+            line-height: 1.25;
+        }
+
+        .pure-main-kpi-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: #0f172a;
+            line-height: 1.1;
+        }
+
+        .pure-right-note {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #64748b;
         }
 
         .pure-full-modal {
@@ -78,6 +189,62 @@
 
         .pure-full-modal.hidden {
             display: none;
+        }
+
+        .pure-mini-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 1350;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        .pure-mini-modal.hidden {
+            display: none;
+        }
+
+        .pure-mini-modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.34);
+        }
+
+        .pure-mini-modal-content {
+            position: relative;
+            width: min(460px, calc(100vw - 32px));
+            border-radius: 14px;
+            border: 1px solid #dbe3ec;
+            background: #ffffff;
+            box-shadow: 0 22px 44px rgba(15, 23, 42, 0.2);
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .pure-mini-modal-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .pure-mini-modal-hint {
+            font-size: 12px;
+            color: #64748b;
+            min-height: 16px;
+        }
+
+        .pure-mini-modal-input {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .pure-mini-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
         }
 
         .pure-full-modal-backdrop {
@@ -159,6 +326,49 @@
             max-width: 360px;
             text-align: right;
             word-break: break-word;
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            white-space: normal;
+        }
+
+        .pure-inline-status-text {
+            line-height: 1.25;
+        }
+
+        .pure-inline-loader {
+            position: relative;
+            width: 132px;
+            min-width: 132px;
+            height: 7px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: rgba(148, 163, 184, 0.35);
+        }
+
+        .pure-inline-loader-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 46%;
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #64748b 0%, #94a3b8 100%);
+            animation: pureInlineLoaderMove 1.2s ease-in-out infinite;
+            transform: translateX(-120%);
+        }
+
+        @keyframes pureInlineLoaderMove {
+            0% {
+                transform: translateX(-120%);
+            }
+            50% {
+                transform: translateX(165%);
+            }
+            100% {
+                transform: translateX(-120%);
+            }
         }
 
         .pure-unresolved-toggle {
@@ -299,6 +509,20 @@
             max-width: 96px;
         }
 
+        .pure-col-verdict {
+            width: 220px;
+            min-width: 220px;
+            max-width: 220px;
+            text-align: center;
+            vertical-align: top !important;
+        }
+
+        .pure-data-table th[data-sort-key="decision"] {
+            width: 220px;
+            min-width: 220px;
+            max-width: 220px;
+        }
+
         .pure-gap-col {
             width: 14px;
             min-width: 14px;
@@ -363,8 +587,9 @@
 
         .pure-row-verdict-dropdown {
             position: relative;
-            min-width: 190px;
-            max-width: 220px;
+            width: 100%;
+            min-width: 0;
+            max-width: 100%;
         }
 
         .pure-row-verdict-btn {
@@ -374,6 +599,22 @@
             padding: 7px 10px;
             border-radius: 10px;
             font-size: 13px;
+            overflow: hidden;
+            text-align: left;
+        }
+
+        .pure-row-verdict-label {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: left;
+        }
+
+        .pure-row-verdict-btn .caret {
+            flex: 0 0 auto;
+            margin-left: 8px;
         }
 
         .pure-row-verdict-panel {
@@ -441,6 +682,61 @@
             line-height: 1.2;
             border-radius: 8px;
             white-space: nowrap;
+        }
+
+        .pure-wms-request-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 2px;
+        }
+
+        .pure-wms-request-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .pure-wms-request-link {
+            flex: 1 1 auto;
+            min-width: 0;
+            color: #0f172a;
+            text-decoration: none;
+            font-size: 12px;
+            line-height: 1.3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .pure-wms-request-link:hover,
+        .pure-wms-request-link:focus-visible {
+            color: #0f172a;
+            text-decoration: underline;
+        }
+
+        .pure-wms-request-delete-btn {
+            flex: 0 0 auto;
+            width: 20px;
+            height: 20px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.55);
+            background: rgba(255, 255, 255, 0.95);
+            color: #475569;
+            font-size: 12px;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .pure-wms-request-delete-btn:hover,
+        .pure-wms-request-delete-btn:focus-visible {
+            color: #dc2626;
+            border-color: rgba(220, 38, 38, 0.34);
         }
 
         .pure-wms-popover {
@@ -516,6 +812,12 @@
             border-color: #6d28d9;
         }
 
+        .pure-data-table tr.pure-row-decision td {
+            background: var(--pure-row-decision-bg, #e2e8f0) !important;
+            color: var(--pure-row-decision-fg, #0f172a);
+            border-color: rgba(51, 65, 85, 0.26);
+        }
+
         .pure-data-table tr.pure-row-blackout .pure-subject-nm,
         .pure-data-table tr.pure-row-blackout .pure-brand-sub {
             color: #cbd5e1;
@@ -524,6 +826,11 @@
         .pure-data-table tr.pure-row-oprihod .pure-subject-nm,
         .pure-data-table tr.pure-row-oprihod .pure-brand-sub {
             color: #e9d5ff;
+        }
+
+        .pure-data-table tr.pure-row-decision .pure-subject-nm,
+        .pure-data-table tr.pure-row-decision .pure-brand-sub {
+            color: rgba(15, 23, 42, 0.7);
         }
 
         .pure-data-table tr.pure-row-blackout .pure-shk-pill {
@@ -536,6 +843,12 @@
             border-color: rgba(243, 232, 255, 0.4);
             background: rgba(216, 180, 254, 0.35);
             color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-decision .pure-shk-pill {
+            border-color: rgba(100, 116, 139, 0.26);
+            background: rgba(148, 163, 184, 0.24);
+            color: #0f172a;
         }
 
         .pure-data-table tr.pure-row-blackout .pure-shk-link,
@@ -552,6 +865,13 @@
             color: inherit;
         }
 
+        .pure-data-table tr.pure-row-decision .pure-shk-link,
+        .pure-data-table tr.pure-row-decision .pure-shk-link:visited,
+        .pure-data-table tr.pure-row-decision .pure-shk-link:hover,
+        .pure-data-table tr.pure-row-decision .pure-shk-link:focus-visible {
+            color: inherit;
+        }
+
         .pure-data-table tr.pure-row-blackout .pure-wms-btn {
             background: rgba(255, 255, 255, 0.16);
             border-color: rgba(255, 255, 255, 0.34);
@@ -562,6 +882,12 @@
             background: rgba(255, 255, 255, 0.18);
             border-color: rgba(255, 255, 255, 0.38);
             color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-decision .pure-wms-btn {
+            background: rgba(255, 255, 255, 0.52);
+            border-color: rgba(100, 116, 139, 0.28);
+            color: #0f172a;
         }
 
         .pure-data-table tr.pure-row-blackout .pure-wms-btn:hover,
@@ -597,11 +923,22 @@
             color: #f8fafc;
         }
 
+        .pure-data-table tr.pure-row-decision .pure-row-verdict-btn {
+            border-color: rgba(100, 116, 139, 0.28);
+            color: #0f172a;
+        }
+
         .pure-data-table tr.pure-row-oprihod .pure-row-verdict-btn:hover,
         .pure-data-table tr.pure-row-oprihod .pure-row-verdict-btn:focus-visible {
             background: rgba(255, 255, 255, 0.28);
             border-color: rgba(255, 255, 255, 0.56);
             color: #ffffff;
+        }
+
+        .pure-data-table tr.pure-row-decision .pure-row-verdict-btn:hover,
+        .pure-data-table tr.pure-row-decision .pure-row-verdict-btn:focus-visible {
+            border-color: rgba(71, 85, 105, 0.44);
+            color: #0f172a;
         }
 
         .pure-data-table tr.pure-row-blackout .input {
@@ -616,6 +953,35 @@
             border-color: #d8b4fe;
         }
 
+        .pure-data-table tr.pure-row-decision .input {
+            background: rgba(255, 255, 255, 0.94);
+            color: #0f172a;
+            border-color: rgba(100, 116, 139, 0.32);
+        }
+
+        .pure-data-table tr.pure-row-fill-anim td:not(.pure-price-cell) {
+            background-image: linear-gradient(
+                90deg,
+                var(--pure-row-fill-color, transparent) 0,
+                var(--pure-row-fill-color, transparent) var(--pure-row-fill-x, 0px),
+                transparent var(--pure-row-fill-x, 0px),
+                transparent 100%
+            ) !important;
+            background-size: var(--pure-row-total-width, 100%) 100% !important;
+            background-position: calc(-1 * var(--pure-row-cell-left, 0px)) 0 !important;
+            background-repeat: no-repeat !important;
+        }
+
+        .pure-data-table tr.pure-row-fill-no-base td:not(.pure-price-cell) {
+            background-color: transparent !important;
+        }
+
+        .pure-col-verdict .pure-row-verdict-dropdown {
+            display: inline-block;
+            text-align: left;
+            width: 100%;
+        }
+
         @media (max-width: 1500px) {
             .pure-layout {
                 grid-template-columns: 280px minmax(0, 1fr) 280px;
@@ -628,6 +994,10 @@
 
         @media (max-width: 1200px) {
             .pure-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .pure-main-kpis {
                 grid-template-columns: 1fr;
             }
 
@@ -647,6 +1017,7 @@
                 margin-left: 0;
                 text-align: left;
                 width: 100%;
+                justify-content: flex-start;
             }
         }
     </style>
@@ -679,6 +1050,11 @@
                 </div>
             </div>
 
+            <div class="pure-upload-calendar">
+                <div class="pure-upload-calendar-caption">Календарь выгрузок</div>
+                <div id="upload-calendar-grid" class="pure-upload-calendar-grid"></div>
+            </div>
+
             <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
                 <button id="refresh-btn" class="btn btn-rect">Загрузить .xlsx</button>
                 <input type="file" id="file-input" accept=".xlsx,.xls" hidden>
@@ -693,7 +1069,29 @@
             <div class="pure-center-toolbar">
                 <button id="open-pure-table-btn" class="btn btn-rect pure-open-table-btn">Открыть таблицу чистых списаний</button>
             </div>
-            <h1 style="margin:0 0 14px 0;">Статистика</h1>
+            <h1 class="pure-main-stats-title">Статистика</h1>
+            <div class="pure-main-kpis">
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Всего ШК в таблице</div>
+                    <div id="stat-total-shk" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Разобрано ШК в таблице</div>
+                    <div id="stat-resolved-shk" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Всего дорогостоя (кол-во)</div>
+                    <div id="stat-expensive-total" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Разобрано дорогостоя</div>
+                    <div id="stat-expensive-resolved" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Отставание «Чистых списаний»</div>
+                    <div id="stat-pure-backlog" class="pure-main-kpi-value">—</div>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -701,9 +1099,10 @@
         <div class="card pure-side-card">
             <div class="status-header">
                 <div class="status-center" style="grid-column:1 / -1;">
-                    <div class="status-code" style="font-size:22px;">Правая секция</div>
+                    <div class="status-code" style="font-size:22px;">Таблица лидеров</div>
                 </div>
             </div>
+            <div class="pure-right-note">В разработке</div>
         </div>
     </aside>
 </div>
@@ -780,16 +1179,28 @@
                     <th class="pure-gap-col" aria-hidden="true"></th>
                     <th data-sort-key="decision">Вердикт<span class="pure-sort-indicator"></span></th>
                     <th data-sort-key="comment">Комментарий<span class="pure-sort-indicator"></span></th>
-                    <th class="pure-col-extra">Таблица ОПП</th>
                     <th class="pure-col-extra pure-col-wms">База WMS+</th>
                 </tr>
                 </thead>
                 <tbody id="pure-table-body">
                 <tr>
-                    <td colspan="11" class="muted">Нажмите «Открыть таблицу чистых списаний».</td>
+                    <td colspan="10" class="muted">Нажмите «Открыть таблицу чистых списаний».</td>
                 </tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<div id="pure-request-link-modal" class="pure-mini-modal hidden" aria-hidden="true">
+    <div class="pure-mini-modal-backdrop" data-close-request-link-modal="1"></div>
+    <div class="pure-mini-modal-content" role="dialog" aria-modal="true" aria-labelledby="pure-request-link-title">
+        <div id="pure-request-link-title" class="pure-mini-modal-title">Добавить ссылку запроса</div>
+        <div id="pure-request-link-hint" class="pure-mini-modal-hint"></div>
+        <input id="pure-request-link-input" class="input pure-mini-modal-input" type="url" placeholder="https://...">
+        <div class="pure-mini-modal-actions">
+            <button id="pure-request-link-cancel-btn" class="btn btn-outline" type="button">Отмена</button>
+            <button id="pure-request-link-save-btn" class="btn btn-rect" type="button">Сохранить</button>
         </div>
     </div>
 </div>
