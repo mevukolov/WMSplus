@@ -8,15 +8,29 @@
     const INSERT_CHUNK_SIZE = 400;
     const WMS_FILTER_CHUNK_SIZE = 60;
     const ROW_FILL_ANIMATION_TOTAL_MS = 1000;
-    const EXPENSIVE_PRICE_THRESHOLD = 3000;
+    const EXPENSIVE_PRICE_THRESHOLD = 1000;
     const VERDICT_REQUEST_REQUIRED = "отправлен запрос";
     const EVENT_TWO_SHK = "Два ШК";
     const EVENT_EMPTY_PACK = "Пустая упаковка";
     const DATA_TYPE_OPP_PURE_OPTIONS = "opp_pure_options";
     const DATA_TYPE_OPP_PURE_DEADLINES = "opp_pure_deadlines";
+    const DATA_TYPE_OPP_TABLE_EMPLOYEES = "opp_table_employees";
     const EXTRA_FILTER_VALUES = ["2 ШК", "Пустая упаковка", "Оприход", "Пусто"];
+    const DYNAMICS_LR_COLORS = [
+        "#2563eb",
+        "#f59e0b",
+        "#10b981",
+        "#ef4444",
+        "#8b5cf6",
+        "#06b6d4",
+        "#f97316",
+        "#84cc16",
+        "#ec4899",
+        "#64748b"
+    ];
     const unsupportedInsertColumns = new Set();
     const rowFillRafMap = new WeakMap();
+    let pureDynamicsChart = null;
 
     const COLUMN_VARIANTS = {
         shk: ["ШК", "shk", "Шк", "Штрихкод"],
@@ -48,6 +62,11 @@
     const statExpensiveTotalEl = document.getElementById("stat-expensive-total");
     const statExpensiveResolvedEl = document.getElementById("stat-expensive-resolved");
     const statPureBacklogEl = document.getElementById("stat-pure-backlog");
+    const pureDynamicsChartCanvasEl = document.getElementById("pure-dynamics-chart");
+    const pureDynamicsChartEmptyEl = document.getElementById("pure-dynamics-empty");
+    const pureLeadersPeriodEl = document.getElementById("pure-leaders-period");
+    const pureLeadersBodyEl = document.getElementById("pure-leaders-body");
+    const pureLeadersEmptyEl = document.getElementById("pure-leaders-empty");
     const openPureTableBtn = document.getElementById("open-pure-table-btn");
     const pureTableModalEl = document.getElementById("pure-table-modal");
     const pureTableCloseBtn = document.getElementById("pure-table-close-btn");
@@ -70,6 +89,9 @@
     const pureRequestLinkHintEl = document.getElementById("pure-request-link-hint");
     const pureRequestLinkSaveBtn = document.getElementById("pure-request-link-save-btn");
     const pureRequestLinkCancelBtn = document.getElementById("pure-request-link-cancel-btn");
+    const pureUpdateHelpModalEl = document.getElementById("pure-update-help-modal");
+    const pureUpdateHelpCloseBtn = document.getElementById("pure-update-help-close-btn");
+    const pureUpdateFileBtn = document.getElementById("pure-update-file-btn");
 
     const tableState = {
         rows: [],
@@ -120,16 +142,17 @@
 
     refreshLastUploadedDate(userWhId);
     initPureTableModal();
+    initUpdateHelpModal();
     void refreshMainDashboard(userWhId);
 
     refreshBtn.addEventListener("click", () => {
-        fileInput.value = "";
-        fileInput.click();
+        openUpdateHelpModal();
     });
 
     fileInput.addEventListener("change", async (event) => {
         const file = event.target.files && event.target.files[0];
         if (!file) return;
+        closeUpdateHelpModal();
         await processImport(file, userWhId);
         fileInput.value = "";
     });
@@ -194,6 +217,53 @@
         } finally {
             setBusy(false);
         }
+    }
+
+    function initUpdateHelpModal() {
+        if (!pureUpdateHelpModalEl) return;
+
+        pureUpdateHelpModalEl.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.matches("[data-close-update-help-modal='1']")) {
+                closeUpdateHelpModal();
+            }
+        });
+
+        pureUpdateHelpCloseBtn?.addEventListener("click", () => {
+            closeUpdateHelpModal();
+        });
+
+        pureUpdateFileBtn?.addEventListener("click", () => {
+            fileInput.value = "";
+            fileInput.click();
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            if (!isUpdateHelpModalOpen()) return;
+            closeUpdateHelpModal();
+        });
+    }
+
+    function isUpdateHelpModalOpen() {
+        return Boolean(pureUpdateHelpModalEl && !pureUpdateHelpModalEl.classList.contains("hidden"));
+    }
+
+    function openUpdateHelpModal() {
+        if (!pureUpdateHelpModalEl) {
+            fileInput.value = "";
+            fileInput.click();
+            return;
+        }
+        pureUpdateHelpModalEl.classList.remove("hidden");
+        pureUpdateHelpModalEl.setAttribute("aria-hidden", "false");
+    }
+
+    function closeUpdateHelpModal() {
+        if (!pureUpdateHelpModalEl) return;
+        pureUpdateHelpModalEl.classList.add("hidden");
+        pureUpdateHelpModalEl.setAttribute("aria-hidden", "true");
     }
 
     function initPureTableModal() {
@@ -754,7 +824,7 @@
             const shk = normalizeShk(row?.shk);
             const nm = normalizeNmKey(row?.nm);
             row.wmsTwoShk = twoShkMap.get(shk) || [];
-            row.wmsNmRep = nmRepMap.get(nm) || [];
+            row.wmsNmRep = filterNmRepRowsByLossDateWindow(row, nmRepMap.get(nm) || []);
         });
     }
 
@@ -1011,6 +1081,8 @@
 
             const dateValue = row?.date || row?.created_at || row?.inserted_at || row?.updated_at || "";
             const ts = parseTimestampValue(dateValue);
+            const dateOnly = parseDateValue(dateValue)
+                || (Number.isFinite(ts) ? new Date(new Date(ts).getFullYear(), new Date(ts).getMonth(), new Date(ts).getDate()) : null);
             const assignedShk = normalizeShk(row?.new_sticker || row?.shk || row?.sticker || row?.barcode);
             const emp = toText(row?.emp);
             const empName = toText(row?.emp_name || row?.fio || row?.name);
@@ -1020,6 +1092,7 @@
                 nm,
                 dateValue,
                 ts,
+                dateOnly,
                 emp,
                 empName,
                 assignedShk
@@ -1032,6 +1105,24 @@
         });
 
         return map;
+    }
+
+    function filterNmRepRowsByLossDateWindow(row, nmRows) {
+        const items = Array.isArray(nmRows) ? nmRows : [];
+        if (!items.length) return [];
+
+        const lossDate = parseDateValue(row?.dateLost || row?.date_lost || row?.raw?.date_lost);
+        if (!lossDate) return [];
+
+        const minDate = addMonths(lossDate, -1);
+        const maxDate = addMonths(lossDate, 1);
+
+        return items.filter((item) => {
+            const itemDate = item?.dateOnly || parseDateValue(item?.dateValue);
+            if (!(itemDate instanceof Date) || Number.isNaN(itemDate.getTime())) return false;
+            return compareDateTs(itemDate.getTime(), minDate.getTime()) >= 0
+                && compareDateTs(itemDate.getTime(), maxDate.getTime()) <= 0;
+        });
     }
 
     function buildNmRepRowSignature(row) {
@@ -2737,21 +2828,31 @@
         if (!currentUserWhId || typeof supabaseClient === "undefined" || !supabaseClient) {
             renderMainStats([]);
             renderUploadCalendar([], createPureDeadlineConfig(null));
+            renderMainDynamics([]);
+            renderLeaders([], new Map());
             return;
         }
 
         try {
-            const [rows, pureDeadlineConfig] = await Promise.all([
+            const [rows, pureDeadlineConfig, employeeNameMap] = await Promise.all([
                 fetchAllPureRowsForWh(currentUserWhId),
-                loadPureDeadlineConfig(currentUserWhId).catch(() => createPureDeadlineConfig(null))
+                loadPureDeadlineConfig(currentUserWhId).catch(() => createPureDeadlineConfig(null)),
+                loadEmployeeNameMap(currentUserWhId).catch((error) => {
+                    console.error("pure_losses employees load failed:", error);
+                    return new Map();
+                })
             ]);
             resolvePureTableUpdateColumns(rows);
             renderMainStats(rows);
             renderUploadCalendar(rows, pureDeadlineConfig);
+            renderMainDynamics(rows);
+            renderLeaders(rows, employeeNameMap);
         } catch (error) {
             console.error("pure_losses main dashboard load failed:", error);
             renderMainStats([]);
             renderUploadCalendar([], createPureDeadlineConfig(null));
+            renderMainDynamics([]);
+            renderLeaders([], new Map());
         }
     }
 
@@ -2793,6 +2894,171 @@
         }
 
         return createPureDeadlineConfig(offsetDays);
+    }
+
+    async function loadEmployeeNameMap(currentUserWhId) {
+        if (typeof supabaseClient === "undefined" || !supabaseClient) {
+            return new Map();
+        }
+
+        const fetchRows = async (withWhFilter) => {
+            let query = supabaseClient
+                .from(TABLE_WH_DATA)
+                .select("data, wh_id, data_type")
+                .eq("data_type", DATA_TYPE_OPP_TABLE_EMPLOYEES)
+                .limit(300);
+
+            if (withWhFilter && currentUserWhId) {
+                query = query.eq("wh_id", currentUserWhId);
+            }
+
+            const { data, error } = await query;
+            if (error) {
+                const errorText = String(error?.message || error?.details || error?.code || "unknown");
+                throw new Error(`Не удалось загрузить справочник сотрудников: ${errorText}`);
+            }
+            return Array.isArray(data) ? data : [];
+        };
+
+        let scopedRows = [];
+        try {
+            scopedRows = await fetchRows(true);
+        } catch (error) {
+            console.error("pure_losses employees scoped load failed:", error);
+        }
+
+        const scopedMap = extractEmployeeNameMapFromRows(scopedRows);
+        if (scopedMap.size) {
+            await enrichEmployeeMapWithUsers(scopedMap);
+            return scopedMap;
+        }
+
+        let fallbackRows = [];
+        try {
+            fallbackRows = await fetchRows(false);
+        } catch (error) {
+            console.error("pure_losses employees fallback load failed:", error);
+        }
+
+        const fallbackMap = extractEmployeeNameMapFromRows(fallbackRows);
+        if (fallbackMap.size) {
+            await enrichEmployeeMapWithUsers(fallbackMap);
+        }
+        return fallbackMap;
+    }
+
+    function extractEmployeeNameMapFromRows(rows) {
+        const map = new Map();
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const parsed = extractEmployeesFromData(row?.data);
+            parsed.forEach((name, id) => {
+                const idNorm = normalizeToken(id);
+                const nameText = toText(name);
+                if (!idNorm || !nameText) return;
+                map.set(idNorm, nameText);
+            });
+        });
+        return map;
+    }
+
+    function parseMaybeJson(value) {
+        if (value === null || value === undefined) return null;
+        if (typeof value === "object") return value;
+
+        const raw = toText(value);
+        if (!raw) return null;
+
+        try {
+            return JSON.parse(raw);
+        } catch {
+            return raw;
+        }
+    }
+
+    function extractEmployeesFromData(rawData) {
+        const result = new Map();
+        const parsed = parseMaybeJson(rawData);
+
+        const put = (idRaw, aliasRaw) => {
+            const id = normalizeToken(idRaw);
+            const alias = toText(aliasRaw);
+            if (!id || !alias) return;
+            result.set(id, alias);
+        };
+
+        const parsePairsObject = (obj) => {
+            if (!obj || typeof obj !== "object") return;
+            Object.keys(obj).forEach((idKey) => {
+                const value = obj[idKey];
+                if (value === null || value === undefined) return;
+                if (typeof value === "string" || typeof value === "number") {
+                    put(idKey, value);
+                }
+            });
+        };
+
+        if (parsed && typeof parsed === "object") {
+            if (Array.isArray(parsed)) {
+                parsed.forEach((item) => {
+                    if (!item || typeof item !== "object") return;
+                    put(
+                        item.id ?? item.user_id ?? item.key,
+                        item.alias ?? item.name ?? item.value ?? item.display_name
+                    );
+                });
+            } else {
+                if (Array.isArray(parsed.employees)) {
+                    parsed.employees.forEach((item) => {
+                        if (!item || typeof item !== "object") return;
+                        put(
+                            item.id ?? item.user_id ?? item.key,
+                            item.alias ?? item.name ?? item.value ?? item.display_name
+                        );
+                    });
+                }
+
+                if (parsed.values && typeof parsed.values === "object") {
+                    parsePairsObject(parsed.values);
+                }
+
+                parsePairsObject(parsed);
+            }
+        }
+
+        const sourceText = typeof rawData === "string" ? rawData : "";
+        const pairRegex = /["']?([A-Za-z0-9_-]+)["']?\s*:\s*["']([^"']+)["']/g;
+        let match = null;
+        while ((match = pairRegex.exec(sourceText)) !== null) {
+            put(match[1], match[2]);
+        }
+
+        return result;
+    }
+
+    async function enrichEmployeeMapWithUsers(employeeMap) {
+        if (!(employeeMap instanceof Map) || !employeeMap.size) return;
+        if (typeof supabaseClient === "undefined" || !supabaseClient) return;
+
+        const numericIds = Array.from(employeeMap.keys())
+            .map((id) => normalizeToken(id))
+            .filter((id) => /^-?\d+$/.test(id))
+            .map((id) => Number(id));
+        if (!numericIds.length) return;
+
+        const { data, error } = await supabaseClient
+            .from("users")
+            .select("id, fio, name")
+            .in("id", numericIds);
+
+        if (error || !Array.isArray(data)) return;
+
+        data.forEach((row) => {
+            const id = normalizeToken(row?.id);
+            if (!id) return;
+            const displayName = toText(row?.fio || row?.name);
+            if (!displayName) return;
+            employeeMap.set(id, displayName);
+        });
     }
 
     function extractPureDeadlineOffsetFromRows(rows) {
@@ -2955,11 +3221,15 @@
 
     function renderMainStats(rows) {
         const uniqueRows = dedupeRowsByShk(rows);
+        const today = getDashboardTodayDate();
+        const periodStart = addDays(today, -29);
         const totalShk = uniqueRows.length;
 
         let resolvedShk = 0;
         let expensiveTotal = 0;
         let expensiveResolved = 0;
+        let recentTotal = 0;
+        let recentResolved = 0;
 
         uniqueRows.forEach((row) => {
             const decision = extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision));
@@ -2972,15 +3242,272 @@
                 expensiveTotal += 1;
                 if (isResolved) expensiveResolved += 1;
             }
+
+            const dateLost = parseDateValue(row?.date_lost);
+            const isInRecentWindow = Boolean(dateLost)
+                && compareDateTs(dateLost.getTime(), periodStart.getTime()) >= 0
+                && compareDateTs(dateLost.getTime(), today.getTime()) <= 0;
+            if (isInRecentWindow) {
+                recentTotal += 1;
+                if (isResolved) recentResolved += 1;
+            }
         });
 
-        const backlog = Math.max(0, totalShk - resolvedShk);
+        const solvedRecentPercent = recentTotal > 0
+            ? (recentResolved / recentTotal) * 100
+            : 0;
+        const backlogPercent = recentTotal > 0
+            ? Math.max(0, 100 - solvedRecentPercent)
+            : 0;
 
         setText(statTotalShkEl, formatInt(totalShk));
         setText(statResolvedShkEl, formatInt(resolvedShk));
         setText(statExpensiveTotalEl, formatInt(expensiveTotal));
         setText(statExpensiveResolvedEl, formatInt(expensiveResolved));
-        setText(statPureBacklogEl, formatInt(backlog));
+        setText(statPureBacklogEl, formatPercent(backlogPercent));
+    }
+
+    function renderLeaders(rows, employeeNameMap) {
+        if (!pureLeadersPeriodEl || !pureLeadersBodyEl || !pureLeadersEmptyEl) return;
+
+        const today = getDashboardTodayDate();
+        const period = getLeadersPeriod(today);
+        pureLeadersPeriodEl.textContent = `Текущий период: ${formatDateForUi(period.start)} — ${formatDateForUi(period.end)}`;
+        const displayMap = normalizeEmployeeDisplayMap(employeeNameMap);
+
+        const counters = new Map();
+        const sourceRows = Array.isArray(rows) ? rows : [];
+        sourceRows.forEach((row) => {
+            const decision = extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision));
+            if (!decision) return;
+
+            const empId = normalizeToken(readEditableColumnValue(row, tableState.updateColumnMap.emp));
+            if (!empId) return;
+
+            const solvedDate = parseDateValue(readEditableColumnValue(row, tableState.updateColumnMap.solved));
+            if (!solvedDate) return;
+            if (compareDateTs(solvedDate.getTime(), period.start.getTime()) < 0) return;
+            if (compareDateTs(solvedDate.getTime(), period.end.getTime()) > 0) return;
+
+            counters.set(empId, (counters.get(empId) || 0) + 1);
+        });
+
+        const leaderboard = Array.from(counters.entries())
+            .map(([empId, count]) => ({ empId, count }))
+            .sort((left, right) => {
+                if (right.count !== left.count) return right.count - left.count;
+                return sortMixedNumericStrings(left.empId, right.empId);
+            });
+
+        pureLeadersBodyEl.innerHTML = "";
+        if (!leaderboard.length) {
+            pureLeadersEmptyEl.hidden = false;
+            return;
+        }
+
+        pureLeadersEmptyEl.hidden = true;
+        const fragment = document.createDocumentFragment();
+
+        leaderboard.forEach((item, index) => {
+            const employeeName = resolveEmployeeDisplayName(item.empId, displayMap);
+            const tr = document.createElement("tr");
+            if (index === 0) tr.classList.add("pure-leaders-row-top1");
+            tr.innerHTML = `
+                <td class="pure-leaders-rank">${index + 1}</td>
+                <td class="pure-leaders-emp">${escapeHtml(employeeName)}</td>
+                <td class="pure-leaders-count">${formatInt(item.count)}</td>
+            `;
+            fragment.appendChild(tr);
+        });
+
+        pureLeadersBodyEl.appendChild(fragment);
+    }
+
+    function getLeadersPeriod(todayValue) {
+        const today = todayValue instanceof Date ? todayValue : getDashboardTodayDate();
+        const baseYear = today.getFullYear();
+        const baseMonth = today.getMonth();
+        const start = today.getDate() >= 20
+            ? new Date(baseYear, baseMonth, 20)
+            : new Date(baseYear, baseMonth - 1, 20);
+        const end = new Date(start.getFullYear(), start.getMonth() + 1, 20);
+        return { start, end };
+    }
+
+    function normalizeEmployeeDisplayMap(employeeNameMap) {
+        const map = new Map();
+        if (!(employeeNameMap instanceof Map)) return map;
+
+        employeeNameMap.forEach((name, id) => {
+            const idNorm = normalizeToken(id);
+            const nameText = toText(name);
+            if (!idNorm || !nameText) return;
+            map.set(idNorm, nameText);
+            const intId = toIntegerOrNull(idNorm);
+            if (intId !== null) map.set(String(intId), nameText);
+        });
+
+        return map;
+    }
+
+    function resolveEmployeeDisplayName(empId, employeeDisplayMap) {
+        const id = normalizeToken(empId);
+        if (!id) return "—";
+        if (employeeDisplayMap instanceof Map && employeeDisplayMap.has(id)) {
+            return toText(employeeDisplayMap.get(id)) || id;
+        }
+        const intId = toIntegerOrNull(id);
+        if (intId !== null && employeeDisplayMap instanceof Map) {
+            const intKey = String(intId);
+            if (employeeDisplayMap.has(intKey)) {
+                return toText(employeeDisplayMap.get(intKey)) || intKey;
+            }
+        }
+        return id;
+    }
+
+    function renderMainDynamics(rows) {
+        if (!pureDynamicsChartCanvasEl) return;
+
+        if (pureDynamicsChart) {
+            pureDynamicsChart.destroy();
+            pureDynamicsChart = null;
+        }
+
+        if (typeof window.Chart === "undefined") {
+            showMainDynamicsEmpty("Не удалось загрузить модуль графика");
+            return;
+        }
+
+        const today = getDashboardTodayDate();
+        const startDate = addDays(today, -29);
+        const dateKeys = [];
+        for (let i = 0; i < 30; i += 1) {
+            dateKeys.push(formatIsoDate(addDays(startDate, i)));
+        }
+
+        const byDate = new Map();
+        dateKeys.forEach((iso) => {
+            byDate.set(iso, {
+                total: 0,
+                byLr: new Map()
+            });
+        });
+
+        const sourceRows = Array.isArray(rows) ? rows : [];
+        const lrSet = new Set();
+
+        sourceRows.forEach((row) => {
+            const date = parseDateValue(row?.date_lost);
+            if (!date) return;
+
+            const iso = formatIsoDate(date);
+            if (!byDate.has(iso)) return;
+            const bucket = byDate.get(iso);
+
+            bucket.total += 1;
+            const lr = toText(row?.lr);
+            if (!lr) return;
+            lrSet.add(lr);
+            bucket.byLr.set(lr, (bucket.byLr.get(lr) || 0) + 1);
+        });
+
+        hideMainDynamicsEmpty();
+
+        const labels = dateKeys.map((iso) => formatDateForUi(iso));
+        const lrKeys = Array.from(lrSet).sort(sortMixedNumericStrings);
+
+        const datasets = [{
+            label: "Общее кол-во списаний",
+            data: dateKeys.map((iso) => byDate.get(iso)?.total || 0),
+            borderColor: "#0f172a",
+            backgroundColor: "#0f172a",
+            borderWidth: 1.6,
+            borderDash: [8, 6],
+            pointRadius: 1.8,
+            pointHoverRadius: 3.2,
+            pointHitRadius: 12,
+            tension: 0.24
+        }];
+
+        lrKeys.forEach((lr, index) => {
+            const color = DYNAMICS_LR_COLORS[index % DYNAMICS_LR_COLORS.length];
+            datasets.push({
+                label: `LR ${lr}`,
+                data: dateKeys.map((iso) => byDate.get(iso)?.byLr?.get(lr) || 0),
+                borderColor: color,
+                backgroundColor: color,
+                borderWidth: 1.9,
+                pointRadius: 1.9,
+                pointHoverRadius: 3.6,
+                tension: 0.3
+            });
+        });
+
+        pureDynamicsChart = new window.Chart(pureDynamicsChartCanvasEl, {
+            type: "line",
+            data: {
+                labels,
+                datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: "index",
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: "top"
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const index = Number(items?.[0]?.dataIndex);
+                                if (!Number.isFinite(index)) return "";
+                                const key = dateKeys[index];
+                                return formatDateForUi(key);
+                            },
+                            label: (ctx) => {
+                                return `${ctx.dataset.label}: ${formatInt(ctx.parsed?.y || 0)}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        },
+                        title: {
+                            display: true,
+                            text: "Кол-во ШК"
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            autoSkip: true,
+                            maxRotation: 0,
+                            maxTicksLimit: 14
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function showMainDynamicsEmpty(message) {
+        if (!pureDynamicsChartEmptyEl) return;
+        pureDynamicsChartEmptyEl.textContent = message || "Нет данных для отображения графика";
+        pureDynamicsChartEmptyEl.hidden = false;
+    }
+
+    function hideMainDynamicsEmpty() {
+        if (!pureDynamicsChartEmptyEl) return;
+        pureDynamicsChartEmptyEl.hidden = true;
     }
 
     function renderUploadCalendar(rows, pureDeadlineConfig) {
@@ -3034,6 +3561,7 @@
             day.className = "pure-upload-day";
             if (!hasUpload && shouldBeUploaded) day.classList.add("is-missing");
             if (iso === todayIso) day.classList.add("is-today");
+            if (date.getDate() === 20) day.classList.add("is-twentieth");
             day.textContent = String(date.getDate());
             if (hasUpload) {
                 day.title = `${formatDateForUi(iso)} — есть выгрузка`;
@@ -3081,6 +3609,21 @@
             : getDashboardTodayDate();
         base.setDate(base.getDate() + Number(days || 0));
         return base;
+    }
+
+    function addMonths(dateValue, months) {
+        const base = dateValue instanceof Date
+            ? new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+            : getDashboardTodayDate();
+        const shift = Number(months || 0);
+        const targetMonthStart = new Date(base.getFullYear(), base.getMonth() + shift, 1);
+        const targetMonthLastDay = new Date(
+            targetMonthStart.getFullYear(),
+            targetMonthStart.getMonth() + 1,
+            0
+        ).getDate();
+        const targetDay = Math.min(base.getDate(), targetMonthLastDay);
+        return new Date(targetMonthStart.getFullYear(), targetMonthStart.getMonth(), targetDay);
     }
 
     function setText(element, value) {
@@ -3677,6 +4220,14 @@
     function formatInt(value) {
         const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
         return Math.trunc(safe).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    }
+
+    function formatPercent(value) {
+        const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
+        return `${new Intl.NumberFormat("ru-RU", {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 1
+        }).format(Math.max(0, safe))}%`;
     }
 
     function escapeHtml(value) {
