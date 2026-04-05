@@ -7,11 +7,16 @@
     const URL_FILTER_CHUNK_SIZE = 80;
     const INSERT_CHUNK_SIZE = 400;
     const WMS_FILTER_CHUNK_SIZE = 60;
+    const ROW_FILL_ANIMATION_TOTAL_MS = 1000;
+    const EXPENSIVE_PRICE_THRESHOLD = 3000;
+    const VERDICT_REQUEST_REQUIRED = "отправлен запрос";
     const EVENT_TWO_SHK = "Два ШК";
     const EVENT_EMPTY_PACK = "Пустая упаковка";
     const DATA_TYPE_OPP_PURE_OPTIONS = "opp_pure_options";
+    const DATA_TYPE_OPP_PURE_DEADLINES = "opp_pure_deadlines";
     const EXTRA_FILTER_VALUES = ["2 ШК", "Пустая упаковка", "Оприход", "Пусто"];
     const unsupportedInsertColumns = new Set();
+    const rowFillRafMap = new WeakMap();
 
     const COLUMN_VARIANTS = {
         shk: ["ШК", "shk", "Шк", "Штрихкод"],
@@ -37,6 +42,12 @@
     const fileInput = document.getElementById("file-input");
     const statusLineEl = document.getElementById("status-line");
     const lastUploadDateEl = document.getElementById("last-upload-date");
+    const uploadCalendarGridEl = document.getElementById("upload-calendar-grid");
+    const statTotalShkEl = document.getElementById("stat-total-shk");
+    const statResolvedShkEl = document.getElementById("stat-resolved-shk");
+    const statExpensiveTotalEl = document.getElementById("stat-expensive-total");
+    const statExpensiveResolvedEl = document.getElementById("stat-expensive-resolved");
+    const statPureBacklogEl = document.getElementById("stat-pure-backlog");
     const openPureTableBtn = document.getElementById("open-pure-table-btn");
     const pureTableModalEl = document.getElementById("pure-table-modal");
     const pureTableCloseBtn = document.getElementById("pure-table-close-btn");
@@ -54,6 +65,11 @@
     const pureTableInlineStatusEl = document.getElementById("pure-table-inline-status");
     const pureTableBody = document.getElementById("pure-table-body");
     const pureTableHead = document.getElementById("pure-table-head");
+    const pureRequestLinkModalEl = document.getElementById("pure-request-link-modal");
+    const pureRequestLinkInputEl = document.getElementById("pure-request-link-input");
+    const pureRequestLinkHintEl = document.getElementById("pure-request-link-hint");
+    const pureRequestLinkSaveBtn = document.getElementById("pure-request-link-save-btn");
+    const pureRequestLinkCancelBtn = document.getElementById("pure-request-link-cancel-btn");
 
     const tableState = {
         rows: [],
@@ -62,18 +78,29 @@
         activeStatuses: new Set(),
         activeExtraStatuses: new Set(),
         decisionOptions: [],
+        decisionOptionMap: new Map(),
         onlyUnresolved: false,
         sortKey: "price",
         sortDir: -1,
         wmsLoadSeq: 0,
         activeWmsPopover: null,
         activeVerdictPanel: null,
+        verdictSaveSeq: 0,
+        pendingVerdictSaveByShk: new Map(),
+        requestLinkSaveSeq: 0,
+        pendingRequestLinkSaveByShk: new Map(),
         unsupportedUpdateColumns: new Set(),
+        requestModalState: {
+            shk: "",
+            decision: "",
+            rowColor: ""
+        },
         updateColumnMap: {
             decision: "opp_deecision",
             comment: "opp_comment",
             emp: "opp_emp",
-            solved: "date_solved"
+            solved: "date_solved",
+            requestLink: "opp_request_link"
         }
     };
 
@@ -93,6 +120,7 @@
 
     refreshLastUploadedDate(userWhId);
     initPureTableModal();
+    void refreshMainDashboard(userWhId);
 
     refreshBtn.addEventListener("click", () => {
         fileInput.value = "";
@@ -131,8 +159,9 @@
                 return;
             }
 
+            const pureDeadlineConfig = await loadPureDeadlineConfig(currentUserWhId);
             const autoLrSet = await loadAutoLossReasonIds();
-            const prepared = prepareIncomingRows(excelRows, currentUserWhId, autoLrSet);
+            const prepared = prepareIncomingRows(excelRows, currentUserWhId, autoLrSet, pureDeadlineConfig);
 
             if (!prepared.rowsByShk.size) {
                 renderSummary({
@@ -150,6 +179,7 @@
 
             renderSummary(syncPlan.stats);
             await refreshLastUploadedDate(currentUserWhId);
+            await refreshMainDashboard(currentUserWhId);
             if (!pureTableModalEl?.classList.contains("hidden")) {
                 await loadPureTableRows(currentUserWhId, { silent: true });
             }
@@ -211,6 +241,10 @@
         document.addEventListener("keydown", (event) => {
             if (event.key !== "Escape") return;
             if (pureTableModalEl.classList.contains("hidden")) return;
+            if (isRequestLinkModalOpen()) {
+                closeRequestLinkModal();
+                return;
+            }
             closeAllWmsPopovers();
             closePureTableModal();
         });
@@ -272,10 +306,37 @@
             }
             applyPureTableFiltersAndRender();
         });
+
+        pureRequestLinkModalEl?.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.matches("[data-close-request-link-modal='1']")) {
+                closeRequestLinkModal();
+            }
+        });
+
+        pureRequestLinkCancelBtn?.addEventListener("click", () => {
+            closeRequestLinkModal();
+        });
+
+        pureRequestLinkSaveBtn?.addEventListener("click", () => {
+            void submitRequestLinkModal();
+        });
+
+        pureRequestLinkInputEl?.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                void submitRequestLinkModal();
+            } else if (event.key === "Escape") {
+                event.preventDefault();
+                closeRequestLinkModal();
+            }
+        });
     }
 
     function closePureTableModal() {
         pureTableModalEl?.classList.add("hidden");
+        closeRequestLinkModal();
         closePureTableFilterPanels();
         closeActiveVerdictPanel();
         closeAllWmsPopovers();
@@ -308,7 +369,7 @@
             return;
         }
 
-        setPureTableInlineStatus("Загрузка данных...", "info");
+        setPureTableInlineStatus("", "loading");
         renderPureTablePlaceholder("Загрузка...");
 
         try {
@@ -325,6 +386,7 @@
             tableState.decisionOptions = loadedDecisionOptions.length
                 ? loadedDecisionOptions
                 : buildDecisionOptionsFallback(rawRows);
+            tableState.decisionOptionMap = buildDecisionOptionMap(tableState.decisionOptions);
             const rowsRef = tableState.rows;
             buildPureTableFilterControls(tableState.rows);
             applyPureTableFiltersAndRender();
@@ -337,13 +399,13 @@
 
             if (!rowsRef.length) return;
 
-            setPureTableInlineStatus(`${baseCountText}. Загружаем База WMS+...`, "info");
+            setPureTableInlineStatus(baseCountText, "loading");
             void enrichRowsWithWmsBase(rowsRef)
                 .then(() => {
                     if (tableState.wmsLoadSeq !== wmsSeq) return;
                     if (tableState.rows !== rowsRef) return;
                     applyPureTableFiltersAndRender();
-                    setPureTableInlineStatus(`${baseCountText}. База WMS+ загружена`, "success");
+                    setPureTableInlineStatus(baseCountText, "success");
                 })
                 .catch((wmsError) => {
                     if (tableState.wmsLoadSeq !== wmsSeq) return;
@@ -388,6 +450,7 @@
     }
 
     function normalizePureTableRow(row) {
+        const requestLinks = parseRequestLinks(readEditableColumnValue(row, tableState.updateColumnMap.requestLink));
         return {
             raw: row || {},
             shk: normalizeShk(row?.shk),
@@ -398,10 +461,15 @@
             dateLost: toText(row?.date_lost),
             lr: normalizeLossReason(row?.lr) || toText(row?.lr) || "—",
             price: toNumberOrNull(row?.price),
-            decision: toText(readEditableColumnValue(row, tableState.updateColumnMap.decision)),
+            decision: extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision)),
             comment: toText(readEditableColumnValue(row, tableState.updateColumnMap.comment)),
+            requestLinks,
+            requestLink: requestLinks[0] || "",
             wmsTwoShk: [],
-            wmsNmRep: []
+            wmsNmRep: [],
+            animateDecisionFill: false,
+            animateDecisionFillColor: "",
+            forceVisibleUntilTs: 0
         };
     }
 
@@ -441,27 +509,38 @@
     }
 
     function parseDecisionOptionsRows(rows) {
-        const out = [];
-        const seen = new Set();
+        const map = new Map();
 
         (Array.isArray(rows) ? rows : []).forEach((row) => {
             parseDecisionOptionsPayload(row?.data).forEach((option) => {
-                const key = option.toLowerCase();
-                if (seen.has(key)) return;
-                seen.add(key);
-                out.push(option);
+                const normalized = normalizeDecisionOption(option);
+                if (!normalized) return;
+                const key = decisionOptionKey(normalized.value);
+                const existing = map.get(key);
+                if (!existing) {
+                    map.set(key, normalized);
+                    return;
+                }
+                if (!existing.pillColor && normalized.pillColor) {
+                    existing.pillColor = normalized.pillColor;
+                }
+                if (!existing.rowColor && normalized.rowColor) {
+                    existing.rowColor = normalized.rowColor;
+                }
             });
         });
 
-        return out;
+        return Array.from(map.values());
     }
 
     function parseDecisionOptionsPayload(payload) {
         if (payload === null || payload === undefined) return [];
         if (Array.isArray(payload)) {
-            return payload
-                .map((item) => sanitizeDecisionOptionText(item))
-                .filter(Boolean);
+            return payload.flatMap((item) => parseDecisionOptionItem(item));
+        }
+        if (typeof payload === "object") {
+            const normalized = normalizeDecisionOption(payload);
+            return normalized ? [normalized] : [];
         }
 
         const raw = String(payload).trim();
@@ -470,11 +549,7 @@
         if (raw.startsWith("[") && raw.endsWith("]")) {
             try {
                 const parsed = JSON.parse(raw);
-                if (Array.isArray(parsed)) {
-                    return parsed
-                        .map((item) => sanitizeDecisionOptionText(item))
-                        .filter(Boolean);
-                }
+                return parseDecisionOptionsPayload(parsed);
             } catch (_) {
                 // fallback below
             }
@@ -482,8 +557,78 @@
 
         return raw
             .split(/[\r\n;]+/)
-            .map((item) => sanitizeDecisionOptionText(item))
-            .filter(Boolean);
+            .flatMap((item) => parseDecisionOptionItem(item));
+    }
+
+    function parseDecisionOptionItem(item) {
+        if (item === null || item === undefined) return [];
+        if (Array.isArray(item)) {
+            const normalized = normalizeDecisionOption({
+                value: item[0],
+                pillColor: item[1],
+                rowColor: item[2]
+            });
+            return normalized ? [normalized] : [];
+        }
+        if (typeof item === "object") {
+            const normalized = normalizeDecisionOption(item);
+            return normalized ? [normalized] : [];
+        }
+
+        const raw = String(item).trim();
+        if (!raw) return [];
+        if (raw.includes("\n") || raw.includes(";")) {
+            return raw
+                .split(/[\r\n;]+/)
+                .flatMap((line) => parseDecisionOptionItem(line));
+        }
+
+        const normalized = parseDecisionOptionLine(raw);
+        return normalized ? [normalized] : [];
+    }
+
+    function parseDecisionOptionLine(rawLine) {
+        const tokens = splitDecisionOptionTokens(rawLine);
+        if (!tokens.length) return null;
+        return normalizeDecisionOption({
+            value: tokens[0],
+            pillColor: tokens[1],
+            rowColor: tokens[2]
+        });
+    }
+
+    function splitDecisionOptionTokens(rawLine) {
+        const source = String(rawLine || "").trim().replace(/;+$/g, "");
+        if (!source) return [];
+
+        const tokens = [];
+        let token = "";
+        let quoteChar = "";
+
+        for (let i = 0; i < source.length; i += 1) {
+            const ch = source[i];
+            if (quoteChar) {
+                if (ch === quoteChar) {
+                    quoteChar = "";
+                } else {
+                    token += ch;
+                }
+                continue;
+            }
+            if (ch === "\"" || ch === "'") {
+                quoteChar = ch;
+                continue;
+            }
+            if (ch === ",") {
+                tokens.push(token);
+                token = "";
+                continue;
+            }
+            token += ch;
+        }
+        tokens.push(token);
+
+        return tokens.map((part) => sanitizeDecisionOptionText(part));
     }
 
     function sanitizeDecisionOptionText(value) {
@@ -495,16 +640,96 @@
         return text;
     }
 
+    function extractDecisionValue(value) {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            return sanitizeDecisionOptionText(value);
+        }
+
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                const normalized = extractDecisionValue(item);
+                if (normalized) return normalized;
+            }
+            return "";
+        }
+
+        if (typeof value === "object") {
+            const candidate = value.value
+                ?? value.text
+                ?? value.label
+                ?? value.option
+                ?? value.name
+                ?? "";
+            return extractDecisionValue(candidate);
+        }
+
+        return "";
+    }
+
+    function normalizeDecisionOption(option) {
+        if (option === null || option === undefined) return null;
+
+        const value = extractDecisionValue(
+            typeof option === "string" || typeof option === "number"
+                ? option
+                : option.value ?? option.text ?? option.option ?? option.label ?? option.name
+        );
+        if (!value) return null;
+
+        const pillColor = normalizeDecisionColor(option.pillColor ?? option.pill_color ?? option.color ?? option.pill ?? "");
+        const rowColor = normalizeDecisionColor(option.rowColor ?? option.row_color ?? option.fillColor ?? option.fill_color ?? option.fill ?? "");
+        return { value, pillColor, rowColor };
+    }
+
+    function normalizeDecisionColor(value) {
+        const clean = sanitizeDecisionOptionText(value).replace(/^#/, "");
+        if (!clean) return "";
+        if (!/^(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(clean)) return "";
+        return `#${clean.toLowerCase()}`;
+    }
+
+    function decisionOptionKey(value) {
+        const normalized = extractDecisionValue(value);
+        if (!normalized) return "__empty__";
+        return normalized.toLowerCase();
+    }
+
+    function buildDecisionOptionMap(options) {
+        const map = new Map();
+        (Array.isArray(options) ? options : []).forEach((option) => {
+            const normalized = normalizeDecisionOption(option);
+            if (!normalized) return;
+            map.set(decisionOptionKey(normalized.value), normalized);
+        });
+        return map;
+    }
+
+    function getDecisionOptionByValue(value) {
+        const key = decisionOptionKey(value);
+        const fromMap = tableState.decisionOptionMap.get(key);
+        if (fromMap) return fromMap;
+
+        const normalizedValue = extractDecisionValue(value);
+        return {
+            value: normalizedValue,
+            pillColor: "",
+            rowColor: ""
+        };
+    }
+
     function buildDecisionOptionsFallback(rawRows) {
-        const seen = new Set();
+        const map = new Map();
         const out = [];
         (Array.isArray(rawRows) ? rawRows : []).forEach((row) => {
-            const decision = toText(readEditableColumnValue(row, tableState.updateColumnMap.decision));
+            const decision = extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision));
             if (!decision) return;
-            const key = decision.toLowerCase();
-            if (seen.has(key)) return;
-            seen.add(key);
-            out.push(decision);
+            const normalized = normalizeDecisionOption({ value: decision });
+            if (!normalized) return;
+            const key = decisionOptionKey(normalized.value);
+            if (map.has(key)) return;
+            map.set(key, normalized);
+            out.push(normalized);
         });
         return out;
     }
@@ -881,6 +1106,11 @@
             ["date_solved", "dt_solved"],
             "date_solved"
         );
+        tableState.updateColumnMap.requestLink = pickFirstExistingColumn(
+            keys,
+            ["opp_request_link", "request_link", "opp_link"],
+            "opp_request_link"
+        );
     }
 
     function pickFirstExistingColumn(keys, candidates, fallback) {
@@ -1046,11 +1276,15 @@
     }
 
     function applyPureTableFiltersAndRender() {
+        const nowTs = Date.now();
         const filtered = tableState.rows.filter((row) => {
             const matchLr = tableState.activeLrs.has(row.lr);
             const matchStatus = tableState.activeStatuses.has(row.shkStateBeforeLost);
             const matchExtra = rowMatchesExtraFilter(row, tableState.activeExtraStatuses);
-            const matchUnresolved = !tableState.onlyUnresolved || !toText(row.decision);
+            const isTemporarilyVisible = Number(row?.forceVisibleUntilTs || 0) > nowTs;
+            const matchUnresolved = !tableState.onlyUnresolved
+                || !extractDecisionValue(row.decision)
+                || isTemporarilyVisible;
             return matchLr && matchStatus && matchExtra && matchUnresolved;
         });
 
@@ -1090,7 +1324,7 @@
         pureTableBody.innerHTML = "";
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 11;
+        td.colSpan = 10;
         td.className = "muted";
         td.textContent = String(message || "");
         tr.appendChild(td);
@@ -1114,23 +1348,44 @@
             const extraStatuses = getRowExtraStatuses(row);
             const hasTwoShkOrEmpty = extraStatuses.includes("2 ШК") || extraStatuses.includes("Пустая упаковка");
             const hasAcceptance = extraStatuses.includes("Оприход");
+            const decisionOption = getDecisionOptionByValue(row.decision);
+            const isDecisionVisualRow = !hasAcceptance && !hasTwoShkOrEmpty && Boolean(decisionOption?.rowColor);
+            let rowFillColor = "";
             if (hasAcceptance) {
                 tr.classList.add("pure-row-oprihod");
+                rowFillColor = "#5b21b6";
             } else if (hasTwoShkOrEmpty) {
                 tr.classList.add("pure-row-blackout");
+                rowFillColor = "#0f172a";
+            } else if (decisionOption?.rowColor) {
+                tr.classList.add("pure-row-decision");
+                tr.style.setProperty("--pure-row-decision-bg", decisionOption.rowColor);
+                tr.style.setProperty("--pure-row-decision-fg", pickContrastColor(hexToRgb(decisionOption.rowColor)));
+                rowFillColor = decisionOption.rowColor;
             }
 
-            tr.appendChild(createShkCell(row.shk));
-            tr.appendChild(createSubjectCell(row.nm, row.description, row.brand));
-            tr.appendChild(createPlainCell(row.shkStateBeforeLost, "pure-col-status"));
-            tr.appendChild(createPlainCell(formatDateForUi(row.dateLost), "pure-col-date"));
-            tr.appendChild(createPlainCell(row.lr, "pure-col-lr"));
-            tr.appendChild(createPriceCell(row.price));
-            tr.appendChild(createGapCell());
+            const animatedFillColor = normalizeDecisionColor(row.animateDecisionFillColor) || rowFillColor;
+            if (row.animateDecisionFill && animatedFillColor) {
+                tr.classList.add("pure-row-fill-anim");
+                if (isDecisionVisualRow) {
+                    tr.classList.add("pure-row-fill-no-base");
+                }
+                tr.style.setProperty("--pure-row-fill-color", animatedFillColor);
+            }
+
+            const cells = [];
+            cells.push(createShkCell(row.shk));
+            cells.push(createSubjectCell(row.nm, row.description, row.brand));
+            cells.push(createPlainCell(row.shkStateBeforeLost, "pure-col-status"));
+            cells.push(createPlainCell(formatDateForUi(row.dateLost), "pure-col-date"));
+            cells.push(createPlainCell(row.lr, "pure-col-lr"));
+            cells.push(createPriceCell(row.price));
+            cells.push(createGapCell());
 
             const verdictTd = document.createElement("td");
-            verdictTd.appendChild(createVerdictDropdownCell(row));
-            tr.appendChild(verdictTd);
+            verdictTd.className = "pure-col-verdict";
+            verdictTd.appendChild(createVerdictDropdownCell(row, decisionOption));
+            cells.push(verdictTd);
 
             const commentTd = document.createElement("td");
             const commentInput = document.createElement("input");
@@ -1141,13 +1396,87 @@
             commentInput.dataset.shk = row.shk;
             commentInput.dataset.field = "comment";
             commentTd.appendChild(commentInput);
-            tr.appendChild(commentTd);
+            cells.push(commentTd);
+            cells.push(createWmsBaseCell(row));
 
-            tr.appendChild(createEmptyCell("pure-col-extra"));
-            tr.appendChild(createWmsBaseCell(row));
+            cells.forEach((cell) => tr.appendChild(cell));
 
             pureTableBody.appendChild(tr);
+            if (row.animateDecisionFill) {
+                runRowFillAnimation(tr, ROW_FILL_ANIMATION_TOTAL_MS);
+                window.setTimeout(() => {
+                    if (!tr.isConnected) return;
+                    const rafId = rowFillRafMap.get(tr);
+                    if (rafId) {
+                        window.cancelAnimationFrame(rafId);
+                        rowFillRafMap.delete(tr);
+                    }
+                    tr.classList.remove("pure-row-fill-anim");
+                    tr.classList.remove("pure-row-fill-no-base");
+                    tr.style.removeProperty("--pure-row-fill-color");
+                    tr.style.removeProperty("--pure-row-fill-x");
+                    tr.querySelectorAll("td").forEach((cell) => {
+                        cell.style.removeProperty("--pure-row-total-width");
+                        cell.style.removeProperty("--pure-row-cell-left");
+                    });
+                }, ROW_FILL_ANIMATION_TOTAL_MS);
+            }
+            row.animateDecisionFill = false;
+            row.animateDecisionFillColor = "";
         });
+    }
+
+    function runRowFillAnimation(tr, durationMs) {
+        if (!(tr instanceof HTMLTableRowElement)) return;
+        const cells = Array.from(tr.querySelectorAll("td:not(.pure-price-cell)"));
+        if (!cells.length) return;
+
+        const existingRaf = rowFillRafMap.get(tr);
+        if (existingRaf) {
+            window.cancelAnimationFrame(existingRaf);
+            rowFillRafMap.delete(tr);
+        }
+
+        const rowRect = tr.getBoundingClientRect();
+        const totalWidth = Math.max(1, Number(rowRect.width || tr.scrollWidth || 1));
+        cells.forEach((cell) => {
+            const left = Math.max(0, Number(cell.offsetLeft || 0));
+            cell.style.setProperty("--pure-row-total-width", `${totalWidth}px`);
+            cell.style.setProperty("--pure-row-cell-left", `${left}px`);
+        });
+
+        const safeDuration = Math.max(1, Number(durationMs) || ROW_FILL_ANIMATION_TOTAL_MS);
+        let startTs = null;
+
+        const easeOutCubic = (t) => {
+            const x = Math.min(1, Math.max(0, t));
+            return 1 - Math.pow(1 - x, 3);
+        };
+
+        const tick = (now) => {
+            if (!tr.isConnected || !tr.classList.contains("pure-row-fill-anim")) {
+                rowFillRafMap.delete(tr);
+                return;
+            }
+
+            if (startTs === null) startTs = now;
+            const linear = Math.min(1, Math.max(0, (now - startTs) / safeDuration));
+            const eased = easeOutCubic(linear);
+            const fillPx = Math.max(1, totalWidth * eased);
+            tr.style.setProperty("--pure-row-fill-x", `${fillPx.toFixed(3)}px`);
+
+            if (linear >= 1) {
+                rowFillRafMap.delete(tr);
+                return;
+            }
+
+            const rafId = window.requestAnimationFrame(tick);
+            rowFillRafMap.set(tr, rafId);
+        };
+
+        tr.style.setProperty("--pure-row-fill-x", "1px");
+        const rafId = window.requestAnimationFrame(tick);
+        rowFillRafMap.set(tr, rafId);
     }
 
     function createShkCell(shkValue) {
@@ -1182,15 +1511,9 @@
         return td;
     }
 
-    function createEmptyCell(className = "") {
-        const td = document.createElement("td");
-        if (className) td.className = className;
-        td.textContent = "";
-        return td;
-    }
-
-    function createVerdictDropdownCell(row) {
-        const currentValue = toText(row?.decision);
+    function createVerdictDropdownCell(row, currentOptionOverride) {
+        const currentValue = extractDecisionValue(row?.decision);
+        const currentOption = normalizeDecisionOption(currentOptionOverride) || getDecisionOptionByValue(currentValue);
         const options = getDecisionOptionsForRow(currentValue);
 
         const wrap = document.createElement("div");
@@ -1203,12 +1526,14 @@
         btn.dataset.verdictToggle = "1";
         btn.dataset.shk = row?.shk || "";
         btn.setAttribute("aria-expanded", "false");
-        btn.innerHTML = `${escapeHtml(currentValue || "Выбрать")} <span class="caret">▾</span>`;
+        setVerdictButtonContent(btn, currentValue || "Выбрать");
+        applyVerdictButtonColors(btn, currentOption?.pillColor);
 
         const panel = document.createElement("div");
         panel.className = "pure-row-verdict-panel hidden";
 
-        options.forEach((value) => {
+        options.forEach((option) => {
+            const value = extractDecisionValue(option?.value);
             const optionBtn = document.createElement("button");
             optionBtn.type = "button";
             optionBtn.className = "pure-row-verdict-option";
@@ -1218,7 +1543,13 @@
             optionBtn.dataset.verdictOption = "1";
             optionBtn.dataset.shk = row?.shk || "";
             optionBtn.dataset.value = value;
+            optionBtn.dataset.pillColor = option?.pillColor || "";
+            optionBtn.dataset.rowColor = option?.rowColor || "";
             optionBtn.textContent = value || "—";
+            if (option?.pillColor) {
+                optionBtn.style.setProperty("border-left", `3px solid ${option.pillColor}`);
+                optionBtn.style.setProperty("padding-left", "6px");
+            }
             panel.appendChild(optionBtn);
         });
 
@@ -1227,22 +1558,131 @@
     }
 
     function getDecisionOptionsForRow(currentValue) {
-        const values = [];
+        const normalizedCurrentValue = extractDecisionValue(currentValue);
+        const options = [];
         const seen = new Set();
+        options.push({ value: "", pillColor: "", rowColor: "" });
+        seen.add("__empty__");
 
-        const addValue = (value) => {
-            const normalized = toText(value);
-            const key = normalized.toLowerCase();
+        const addOption = (option) => {
+            const normalized = normalizeDecisionOption(option) || normalizeDecisionOption({ value: option });
+            if (!normalized) return;
+            const key = decisionOptionKey(normalized.value);
             if (seen.has(key)) return;
             seen.add(key);
-            values.push(normalized);
+            options.push(normalized);
         };
 
-        addValue("");
-        (Array.isArray(tableState.decisionOptions) ? tableState.decisionOptions : []).forEach(addValue);
-        addValue(currentValue);
+        (Array.isArray(tableState.decisionOptions) ? tableState.decisionOptions : []).forEach(addOption);
+        addOption(getDecisionOptionByValue(normalizedCurrentValue));
 
-        return values;
+        return options;
+    }
+
+    function applyVerdictButtonColors(button, pillColor) {
+        if (!(button instanceof HTMLButtonElement)) return;
+        const color = normalizeDecisionColor(pillColor);
+        if (!color) {
+            button.style.removeProperty("background-color");
+            button.style.removeProperty("border-color");
+            button.style.removeProperty("color");
+            return;
+        }
+        button.style.backgroundColor = color;
+        button.style.borderColor = color;
+        button.style.color = pickContrastColor(hexToRgb(color));
+    }
+
+    function setVerdictButtonContent(button, text) {
+        if (!(button instanceof HTMLButtonElement)) return;
+        button.innerHTML = "";
+
+        const label = document.createElement("span");
+        label.className = "pure-row-verdict-label";
+        label.textContent = String(text || "Выбрать");
+
+        const caret = document.createElement("span");
+        caret.className = "caret";
+        caret.textContent = "▾";
+
+        button.append(label, caret);
+    }
+
+    function isRequestLinkRequiredDecision(value) {
+        return extractDecisionValue(value).toLowerCase() === VERDICT_REQUEST_REQUIRED;
+    }
+
+    function parseRequestLinks(value) {
+        if (value === null || value === undefined) return [];
+
+        if (Array.isArray(value)) {
+            return dedupeRequestLinks(value.map((item) => toText(item)).filter(Boolean));
+        }
+
+        if (typeof value === "object") {
+            const nested = value.links
+                ?? value.items
+                ?? value.value
+                ?? value.urls
+                ?? value.requests
+                ?? value.href
+                ?? value.url
+                ?? value.link;
+            return nested === undefined ? [] : parseRequestLinks(nested);
+        }
+
+        const raw = toText(value);
+        if (!raw) return [];
+
+        if ((raw.startsWith("[") && raw.endsWith("]")) || (raw.startsWith("{") && raw.endsWith("}"))) {
+            try {
+                const parsed = JSON.parse(raw);
+                return parseRequestLinks(parsed);
+            } catch (_) {
+                // fallback to plain text parsing below
+            }
+        }
+
+        const parts = (raw.includes("\n") || raw.includes(";"))
+            ? raw.split(/[\r\n;]+/)
+            : [raw];
+
+        return dedupeRequestLinks(parts.map((item) => toText(item)).filter(Boolean));
+    }
+
+    function dedupeRequestLinks(values) {
+        const out = [];
+        const seen = new Set();
+        (Array.isArray(values) ? values : []).forEach((item) => {
+            const clean = toText(item);
+            if (!clean) return;
+            const key = clean.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push(clean);
+        });
+        return out;
+    }
+
+    function serializeRequestLinks(values) {
+        const unique = dedupeRequestLinks(values);
+        if (!unique.length) return null;
+        if (unique.length === 1) return unique[0];
+        return JSON.stringify(unique);
+    }
+
+    function getRowRequestLinks(row) {
+        if (Array.isArray(row?.requestLinks)) {
+            return dedupeRequestLinks(row.requestLinks);
+        }
+        return parseRequestLinks(row?.requestLink ?? row?.raw?.[tableState.updateColumnMap.requestLink]);
+    }
+
+    function compactLinkForUi(value) {
+        const link = toText(value);
+        if (!link) return "";
+        if (link.length <= 30) return link;
+        return `${link.slice(0, 27)}...`;
     }
 
     function createWmsBaseCell(row) {
@@ -1308,6 +1748,22 @@
             });
         }
 
+        const requestLinks = getRowRequestLinks(row);
+        if (requestLinks.length) {
+            const shk = normalizeShk(row?.shk);
+            out.push({
+                kind: "request_links",
+                label: "Запросы",
+                shk,
+                requests: requestLinks.map((href, index) => ({
+                    href,
+                    label: compactLinkForUi(href),
+                    tooltip: href,
+                    requestIndex: index
+                }))
+            });
+        }
+
         return out;
     }
 
@@ -1330,7 +1786,7 @@
 
         if (entry?.kind === "two_shk") {
             if (entry.eventType === EVENT_TWO_SHK) {
-                appendWmsPopoverLine(popover, "Другой ШК", entry.otherShk || "—");
+                appendWmsPopoverLinkLine(popover, "Второй ШК", entry.otherShk || "");
             } else {
                 appendWmsPopoverLine(popover, "ШК 1", entry.shk1 || "—");
                 appendWmsPopoverLine(popover, "ШК 2", entry.shk2 || "—");
@@ -1359,6 +1815,46 @@
                 });
             }
             popover.appendChild(mediaWrap);
+        } else if (entry?.kind === "request_links") {
+            const list = document.createElement("div");
+            list.className = "pure-wms-request-list";
+
+            const requests = Array.isArray(entry?.requests) ? entry.requests : [];
+            if (!requests.length) {
+                const empty = document.createElement("div");
+                empty.className = "pure-wms-popover-muted";
+                empty.textContent = "Ссылки: —";
+                list.appendChild(empty);
+            } else {
+                requests.forEach((item) => {
+                    const row = document.createElement("div");
+                    row.className = "pure-wms-request-item";
+
+                    const link = document.createElement("a");
+                    link.className = "pure-wms-request-link";
+                    link.href = String(item?.href || "");
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                    link.textContent = String(item?.label || "Ссылка");
+                    link.title = String(item?.tooltip || item?.href || "");
+
+                    const deleteBtn = document.createElement("button");
+                    deleteBtn.type = "button";
+                    deleteBtn.className = "pure-wms-request-delete-btn";
+                    deleteBtn.dataset.requestLinkDelete = "1";
+                    deleteBtn.dataset.shk = normalizeShk(entry?.shk);
+                    deleteBtn.dataset.requestIndex = Number.isFinite(Number(item?.requestIndex))
+                        ? String(Number(item.requestIndex))
+                        : "";
+                    deleteBtn.setAttribute("aria-label", "Удалить ссылку запроса");
+                    deleteBtn.title = "Удалить ссылку";
+                    deleteBtn.textContent = "×";
+
+                    row.append(link, deleteBtn);
+                    list.appendChild(row);
+                });
+            }
+            popover.appendChild(list);
         } else {
             appendWmsPopoverLine(popover, "Дата", entry?.dateText || "—");
             appendWmsPopoverLine(popover, "Кто", buildNmWhoText(entry) || "—");
@@ -1391,6 +1887,33 @@
         container.appendChild(line);
     }
 
+    function appendWmsPopoverLinkLine(container, label, shkValue) {
+        const shk = normalizeShk(shkValue);
+        if (!shk) {
+            appendWmsPopoverLine(container, label, "—");
+            return;
+        }
+
+        const line = document.createElement("div");
+        line.className = "pure-wms-popover-line";
+
+        const key = document.createElement("span");
+        key.className = "pure-wms-popover-key";
+        key.textContent = `${String(label || "")}: `;
+
+        const link = document.createElement("a");
+        link.className = "pure-wms-popover-value";
+        link.href = `https://wms.wbwh.tech/shk/status/history?shk=${encodeURIComponent(shk)}`;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = shk;
+        link.style.textDecoration = "none";
+        link.style.color = "inherit";
+
+        line.append(key, link);
+        container.appendChild(line);
+    }
+
     function buildNmWhoText(entry) {
         const name = toText(entry?.empName);
         const emp = toText(entry?.emp);
@@ -1419,6 +1942,14 @@
         const target = event.target;
         if (!(target instanceof Element)) return;
 
+        const requestDeleteBtn = target.closest("button[data-request-link-delete='1']");
+        if (requestDeleteBtn instanceof HTMLButtonElement) {
+            event.preventDefault();
+            event.stopPropagation();
+            await handleRequestLinkDeleteClick(requestDeleteBtn);
+            return;
+        }
+
         const optionBtn = target.closest("button[data-verdict-option='1']");
         if (optionBtn instanceof HTMLButtonElement) {
             event.preventDefault();
@@ -1433,6 +1964,141 @@
             event.stopPropagation();
             toggleVerdictPanel(toggleBtn);
         }
+    }
+
+    function isRequestLinkModalOpen() {
+        return Boolean(pureRequestLinkModalEl && !pureRequestLinkModalEl.classList.contains("hidden"));
+    }
+
+    function setRequestLinkModalBusy(isBusy) {
+        const next = Boolean(isBusy);
+        if (pureRequestLinkInputEl) pureRequestLinkInputEl.disabled = next;
+        if (pureRequestLinkSaveBtn) pureRequestLinkSaveBtn.disabled = next;
+        if (pureRequestLinkCancelBtn) pureRequestLinkCancelBtn.disabled = next;
+    }
+
+    function openRequestLinkModalForRow(row, decisionValue, rowColorHint = "") {
+        if (!pureRequestLinkModalEl || !pureRequestLinkInputEl) return;
+        const shk = normalizeShk(row?.shk);
+        if (!shk) return;
+        closePureTableFilterPanels();
+        closeAllWmsPopovers();
+
+        const decision = extractDecisionValue(decisionValue) || VERDICT_REQUEST_REQUIRED;
+        const rowColor = normalizeDecisionColor(rowColorHint)
+            || normalizeDecisionColor(getDecisionOptionByValue(decision)?.rowColor)
+            || "";
+        const links = getRowRequestLinks(row);
+
+        tableState.requestModalState = {
+            shk,
+            decision,
+            rowColor
+        };
+
+        pureRequestLinkInputEl.value = "";
+        if (pureRequestLinkHintEl) {
+            pureRequestLinkHintEl.textContent = links.length
+                ? `Уже добавлено ссылок: ${links.length}`
+                : "Добавьте ссылку запроса";
+        }
+
+        setRequestLinkModalBusy(false);
+        pureRequestLinkModalEl.classList.remove("hidden");
+        pureRequestLinkModalEl.setAttribute("aria-hidden", "false");
+
+        window.setTimeout(() => {
+            if (!pureRequestLinkInputEl) return;
+            pureRequestLinkInputEl.focus();
+            pureRequestLinkInputEl.select();
+        }, 0);
+    }
+
+    function closeRequestLinkModal() {
+        if (!pureRequestLinkModalEl) return;
+        pureRequestLinkModalEl.classList.add("hidden");
+        pureRequestLinkModalEl.setAttribute("aria-hidden", "true");
+        if (pureRequestLinkInputEl) pureRequestLinkInputEl.value = "";
+        if (pureRequestLinkHintEl) pureRequestLinkHintEl.textContent = "";
+        tableState.requestModalState = {
+            shk: "",
+            decision: "",
+            rowColor: ""
+        };
+        setRequestLinkModalBusy(false);
+    }
+
+    function findVerdictDropdownByShk(shkValue) {
+        const shk = normalizeShk(shkValue);
+        if (!shk || !pureTableBody) return null;
+        const wraps = pureTableBody.querySelectorAll(".pure-row-verdict-dropdown");
+        for (const wrap of wraps) {
+            if (!(wrap instanceof HTMLElement)) continue;
+            if (normalizeShk(wrap.dataset.shk) === shk) return wrap;
+        }
+        return null;
+    }
+
+    async function submitRequestLinkModal() {
+        if (!isRequestLinkModalOpen()) return;
+        const modalState = tableState.requestModalState || {};
+        const shk = normalizeShk(modalState.shk);
+        const decision = extractDecisionValue(modalState.decision || VERDICT_REQUEST_REQUIRED);
+        if (!shk || !decision) return;
+
+        const row = tableState.rows.find((item) => item.shk === shk);
+        if (!row) {
+            closeRequestLinkModal();
+            return;
+        }
+
+        const link = toText(pureRequestLinkInputEl?.value);
+        if (!link) {
+            setPureTableInlineStatus("Введите ссылку запроса", "error");
+            window.MiniUI?.toast?.("Введите ссылку запроса", { type: "error" });
+            pureRequestLinkInputEl?.focus();
+            return;
+        }
+
+        const nextRequestLinks = dedupeRequestLinks(getRowRequestLinks(row).concat([link]));
+        const wrap = findVerdictDropdownByShk(shk);
+
+        setRequestLinkModalBusy(true);
+        const saved = await applyVerdictSelection(row, decision, {
+            wrap,
+            rowColorHint: modalState.rowColor || "",
+            updateRequestLinks: true,
+            nextRequestLinks
+        });
+        if (saved) {
+            closeRequestLinkModal();
+            return;
+        }
+        setRequestLinkModalBusy(false);
+    }
+
+    async function handleRequestLinkDeleteClick(deleteBtn) {
+        const shk = normalizeShk(deleteBtn.dataset.shk);
+        const requestIndex = toIntegerOrNull(deleteBtn.dataset.requestIndex);
+        if (!shk || requestIndex === null || requestIndex < 0) return;
+
+        const row = tableState.rows.find((item) => item.shk === shk);
+        if (!row) return;
+
+        const currentLinks = getRowRequestLinks(row);
+        if (requestIndex >= currentLinks.length) return;
+
+        const targetLink = currentLinks[requestIndex];
+        if (!targetLink) return;
+
+        const confirmMessage = `Удалить ссылку запроса?\n${targetLink}`;
+        const isApproved = typeof window.MiniUI?.confirm === "function"
+            ? await window.MiniUI.confirm(confirmMessage, { okText: "Удалить", cancelText: "Отмена" })
+            : window.confirm(confirmMessage);
+        if (!isApproved) return;
+
+        const nextLinks = currentLinks.filter((_, index) => index !== requestIndex);
+        await updateRequestLinksForRow(row, nextLinks, { clearRequestDecisionWhenEmpty: true });
     }
 
     function toggleVerdictPanel(toggleBtn) {
@@ -1468,21 +2134,55 @@
 
     async function handleVerdictOptionClick(optionBtn) {
         const shk = normalizeShk(optionBtn.dataset.shk);
-        const nextValue = toText(optionBtn.dataset.value);
+        const nextValue = extractDecisionValue(optionBtn.dataset.value);
         if (!shk) return;
 
         const wrap = optionBtn.closest(".pure-row-verdict-dropdown");
         const row = tableState.rows.find((item) => item.shk === shk);
         if (!row) return;
 
-        const previousValue = toText(row.decision);
+        if (isRequestLinkRequiredDecision(nextValue)) {
+            closeActiveVerdictPanel();
+            openRequestLinkModalForRow(row, nextValue, optionBtn.dataset.rowColor || "");
+            setPureTableInlineStatus("Введите ссылку запроса", "info");
+            return;
+        }
+
+        const previousValue = extractDecisionValue(row.decision);
         if (nextValue === previousValue) {
             closeActiveVerdictPanel();
             return;
         }
 
-        const patch = {};
-        patch[tableState.updateColumnMap.decision] = nextValue || null;
+        await applyVerdictSelection(row, nextValue, {
+            wrap,
+            rowColorHint: optionBtn.dataset.rowColor || ""
+        });
+    }
+
+    async function applyVerdictSelection(row, nextValue, options = {}) {
+        const shk = normalizeShk(row?.shk);
+        if (!shk) return false;
+        const {
+            wrap = null,
+            rowColorHint = "",
+            updateRequestLinks = false,
+            nextRequestLinks = null
+        } = options;
+
+        const requiresRequestLink = isRequestLinkRequiredDecision(nextValue);
+        const normalizedRequestLinks = updateRequestLinks
+            ? dedupeRequestLinks(nextRequestLinks)
+            : getRowRequestLinks(row);
+        if (requiresRequestLink && !normalizedRequestLinks.length) {
+            setPureTableInlineStatus("Введите ссылку запроса", "error");
+            window.MiniUI?.toast?.("Введите ссылку запроса", { type: "error" });
+            return false;
+        }
+
+        const patch = {
+            [tableState.updateColumnMap.decision]: nextValue || null
+        };
         if (nextValue) {
             patch[tableState.updateColumnMap.emp] = resolveCurrentUserId(user);
             patch[tableState.updateColumnMap.solved] = resolveCurrentTimestamp();
@@ -1490,31 +2190,175 @@
             patch[tableState.updateColumnMap.emp] = null;
             patch[tableState.updateColumnMap.solved] = null;
         }
+        if (updateRequestLinks) {
+            patch[tableState.updateColumnMap.requestLink] = serializeRequestLinks(normalizedRequestLinks);
+        }
+
+        const prevDecisionRaw = row.raw?.[tableState.updateColumnMap.decision];
+        const prevEmpRaw = row.raw?.[tableState.updateColumnMap.emp];
+        const prevSolvedRaw = row.raw?.[tableState.updateColumnMap.solved];
+        const prevRequestLinkRaw = row.raw?.[tableState.updateColumnMap.requestLink];
+        const prevDecision = row.decision;
+        const prevRequestLinks = getRowRequestLinks(row);
+        const prevRequestLink = row.requestLink;
+        const prevAnimateFlag = Boolean(row.animateDecisionFill);
+        const prevAnimateColor = row.animateDecisionFillColor;
+        const prevForceVisibleUntilTs = Number(row.forceVisibleUntilTs || 0);
+
+        const saveToken = ++tableState.verdictSaveSeq;
+        tableState.pendingVerdictSaveByShk.set(shk, saveToken);
 
         setVerdictDropdownBusy(wrap, true);
         closeActiveVerdictPanel();
-        setPureTableInlineStatus("Сохраняем изменения...", "info");
+        setPureTableInlineStatus("Сохраняем изменения", "loading");
+
+        row.raw[tableState.updateColumnMap.decision] = patch[tableState.updateColumnMap.decision];
+        row.raw[tableState.updateColumnMap.emp] = patch[tableState.updateColumnMap.emp];
+        row.raw[tableState.updateColumnMap.solved] = patch[tableState.updateColumnMap.solved];
+        if (updateRequestLinks) {
+            row.raw[tableState.updateColumnMap.requestLink] = patch[tableState.updateColumnMap.requestLink];
+            row.requestLinks = normalizedRequestLinks;
+            row.requestLink = normalizedRequestLinks[0] || "";
+        }
+        row.decision = nextValue;
+        row.animateDecisionFill = true;
+        row.animateDecisionFillColor = normalizeDecisionColor(rowColorHint)
+            || getDecisionOptionByValue(nextValue)?.rowColor
+            || "";
+        const shouldKeepVisible = tableState.onlyUnresolved && Boolean(nextValue);
+        row.forceVisibleUntilTs = shouldKeepVisible
+            ? Date.now() + ROW_FILL_ANIMATION_TOTAL_MS
+            : 0;
+        applyPureTableFiltersAndRender();
+        if (shouldKeepVisible) {
+            window.setTimeout(() => {
+                if (tableState.pendingVerdictSaveByShk.get(shk) && tableState.pendingVerdictSaveByShk.get(shk) !== saveToken) return;
+                const rowRef = tableState.rows.find((item) => item.shk === shk);
+                if (!rowRef) return;
+                rowRef.forceVisibleUntilTs = 0;
+                applyPureTableFiltersAndRender();
+            }, ROW_FILL_ANIMATION_TOTAL_MS + 20);
+        }
 
         try {
             const appliedPatch = await updatePureRowFields(shk, userWhId, patch);
+            if (tableState.pendingVerdictSaveByShk.get(shk) !== saveToken) return false;
             Object.assign(row.raw, appliedPatch);
-            row.decision = toText(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
+            row.decision = extractDecisionValue(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
+            row.requestLinks = parseRequestLinks(readEditableColumnValue(row.raw, tableState.updateColumnMap.requestLink));
+            row.requestLink = row.requestLinks[0] || "";
             setPureTableInlineStatus("Изменения сохранены", "success");
             applyPureTableFiltersAndRender();
+            return true;
         } catch (error) {
+            if (tableState.pendingVerdictSaveByShk.get(shk) !== saveToken) return false;
+            row.raw[tableState.updateColumnMap.decision] = prevDecisionRaw ?? null;
+            row.raw[tableState.updateColumnMap.emp] = prevEmpRaw ?? null;
+            row.raw[tableState.updateColumnMap.solved] = prevSolvedRaw ?? null;
+            if (updateRequestLinks) {
+                row.raw[tableState.updateColumnMap.requestLink] = prevRequestLinkRaw ?? null;
+                row.requestLinks = prevRequestLinks;
+                row.requestLink = prevRequestLink;
+            }
+            row.decision = prevDecision;
+            row.animateDecisionFill = prevAnimateFlag;
+            row.animateDecisionFillColor = prevAnimateColor;
+            row.forceVisibleUntilTs = prevForceVisibleUntilTs;
+            applyPureTableFiltersAndRender();
             const message = String(error?.message || error || "Не удалось сохранить изменения.");
             setPureTableInlineStatus(message, "error");
             window.MiniUI?.toast?.("Ошибка сохранения строки", { type: "error" });
+            return false;
         } finally {
+            if (tableState.pendingVerdictSaveByShk.get(shk) === saveToken) {
+                tableState.pendingVerdictSaveByShk.delete(shk);
+            }
+            setVerdictDropdownBusy(wrap, false);
+        }
+    }
+
+    async function updateRequestLinksForRow(row, nextRequestLinks, options = {}) {
+        const shk = normalizeShk(row?.shk);
+        if (!shk) return false;
+
+        const clearRequestDecisionWhenEmpty = options.clearRequestDecisionWhenEmpty !== false;
+        const wrap = options.wrap || findVerdictDropdownByShk(shk);
+        const normalizedLinks = dedupeRequestLinks(nextRequestLinks);
+        const serializedLinks = serializeRequestLinks(normalizedLinks);
+        const shouldClearDecision = clearRequestDecisionWhenEmpty
+            && !normalizedLinks.length
+            && isRequestLinkRequiredDecision(row?.decision);
+        const patch = {
+            [tableState.updateColumnMap.requestLink]: serializedLinks
+        };
+        if (shouldClearDecision) {
+            patch[tableState.updateColumnMap.decision] = null;
+            patch[tableState.updateColumnMap.emp] = null;
+            patch[tableState.updateColumnMap.solved] = null;
+        }
+
+        const prevRaw = row.raw?.[tableState.updateColumnMap.requestLink];
+        const prevLinks = getRowRequestLinks(row);
+        const prevRequestLink = row.requestLink;
+        const prevDecisionRaw = row.raw?.[tableState.updateColumnMap.decision];
+        const prevEmpRaw = row.raw?.[tableState.updateColumnMap.emp];
+        const prevSolvedRaw = row.raw?.[tableState.updateColumnMap.solved];
+        const prevDecision = row.decision;
+
+        const saveToken = ++tableState.requestLinkSaveSeq;
+        tableState.pendingRequestLinkSaveByShk.set(shk, saveToken);
+
+        setVerdictDropdownBusy(wrap, true);
+        setPureTableInlineStatus("Сохраняем изменения", "loading");
+
+        row.raw[tableState.updateColumnMap.requestLink] = serializedLinks;
+        row.requestLinks = normalizedLinks;
+        row.requestLink = normalizedLinks[0] || "";
+        if (shouldClearDecision) {
+            row.raw[tableState.updateColumnMap.decision] = null;
+            row.raw[tableState.updateColumnMap.emp] = null;
+            row.raw[tableState.updateColumnMap.solved] = null;
+            row.decision = "";
+        }
+        applyPureTableFiltersAndRender();
+
+        try {
+            const appliedPatch = await updatePureRowFields(shk, userWhId, patch);
+            if (tableState.pendingRequestLinkSaveByShk.get(shk) !== saveToken) return false;
+            Object.assign(row.raw, appliedPatch);
+            row.requestLinks = parseRequestLinks(readEditableColumnValue(row.raw, tableState.updateColumnMap.requestLink));
+            row.requestLink = row.requestLinks[0] || "";
+            row.decision = extractDecisionValue(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
+            setPureTableInlineStatus("Изменения сохранены", "success");
+            applyPureTableFiltersAndRender();
+            return true;
+        } catch (error) {
+            if (tableState.pendingRequestLinkSaveByShk.get(shk) !== saveToken) return false;
+            row.raw[tableState.updateColumnMap.requestLink] = prevRaw ?? null;
+            row.requestLinks = prevLinks;
+            row.requestLink = prevRequestLink;
+            row.raw[tableState.updateColumnMap.decision] = prevDecisionRaw ?? null;
+            row.raw[tableState.updateColumnMap.emp] = prevEmpRaw ?? null;
+            row.raw[tableState.updateColumnMap.solved] = prevSolvedRaw ?? null;
+            row.decision = prevDecision;
+            applyPureTableFiltersAndRender();
+            const message = String(error?.message || error || "Не удалось сохранить ссылку.");
+            setPureTableInlineStatus(message, "error");
+            window.MiniUI?.toast?.("Ошибка сохранения ссылки", { type: "error" });
+            return false;
+        } finally {
+            if (tableState.pendingRequestLinkSaveByShk.get(shk) === saveToken) {
+                tableState.pendingRequestLinkSaveByShk.delete(shk);
+            }
             setVerdictDropdownBusy(wrap, false);
         }
     }
 
     function setVerdictDropdownBusy(wrap, isBusy) {
         if (!(wrap instanceof Element)) return;
-        wrap.querySelectorAll("button").forEach((btn) => {
-            if (btn instanceof HTMLButtonElement) {
-                btn.disabled = Boolean(isBusy);
+        wrap.querySelectorAll("button, input").forEach((node) => {
+            if (node instanceof HTMLButtonElement || node instanceof HTMLInputElement) {
+                node.disabled = Boolean(isBusy);
             }
         });
         if (isBusy) wrap.classList.add("is-saving");
@@ -1581,7 +2425,7 @@
         const row = tableState.rows.find((item) => item.shk === shk);
         if (!row) return;
 
-        const previousValue = field === "decision" ? row.decision : row.comment;
+        const previousValue = field === "decision" ? extractDecisionValue(row.decision) : row.comment;
         const nextValue = String(target.value || "").trim();
         if (nextValue === previousValue) return;
 
@@ -1602,12 +2446,12 @@
         }
 
         target.disabled = true;
-        setPureTableInlineStatus("Сохраняем изменения...", "info");
+        setPureTableInlineStatus("Сохраняем изменения", "loading");
 
         try {
             const appliedPatch = await updatePureRowFields(shk, userWhId, patch);
             Object.assign(row.raw, appliedPatch);
-            row.decision = toText(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
+            row.decision = extractDecisionValue(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
             row.comment = toText(readEditableColumnValue(row.raw, tableState.updateColumnMap.comment));
 
             target.value = field === "decision" ? row.decision : row.comment;
@@ -1672,10 +2516,37 @@
 
     function setPureTableInlineStatus(message, type) {
         if (!pureTableInlineStatusEl) return;
-        pureTableInlineStatusEl.textContent = String(message || "");
-        pureTableInlineStatusEl.style.color = type === "error"
+        const text = String(message || "").trim();
+        const statusType = String(type || "").toLowerCase();
+        pureTableInlineStatusEl.innerHTML = "";
+
+        if (statusType === "loading") {
+            if (text) {
+                const textEl = document.createElement("span");
+                textEl.className = "pure-inline-status-text";
+                textEl.textContent = text;
+                pureTableInlineStatusEl.appendChild(textEl);
+            }
+            const loader = document.createElement("span");
+            loader.className = "pure-inline-loader";
+            const bar = document.createElement("span");
+            bar.className = "pure-inline-loader-bar";
+            loader.appendChild(bar);
+            pureTableInlineStatusEl.appendChild(loader);
+            pureTableInlineStatusEl.style.color = "#64748b";
+            return;
+        }
+
+        if (text) {
+            const textEl = document.createElement("span");
+            textEl.className = "pure-inline-status-text";
+            textEl.textContent = text;
+            pureTableInlineStatusEl.appendChild(textEl);
+        }
+
+        pureTableInlineStatusEl.style.color = statusType === "error"
             ? "#b91c1c"
-            : type === "success"
+            : statusType === "success"
                 ? "#15803d"
                 : "#64748b";
     }
@@ -1710,7 +2581,7 @@
             case "price":
                 return compareNullableNumbers(a?.price, b?.price, 0);
             case "decision":
-                return compareStrings(a?.decision, b?.decision);
+                return compareStrings(extractDecisionValue(a?.decision), extractDecisionValue(b?.decision));
             case "comment":
                 return compareStrings(a?.comment, b?.comment);
             default:
@@ -1862,6 +2733,361 @@
         }
     }
 
+    async function refreshMainDashboard(currentUserWhId) {
+        if (!currentUserWhId || typeof supabaseClient === "undefined" || !supabaseClient) {
+            renderMainStats([]);
+            renderUploadCalendar([], createPureDeadlineConfig(null));
+            return;
+        }
+
+        try {
+            const [rows, pureDeadlineConfig] = await Promise.all([
+                fetchAllPureRowsForWh(currentUserWhId),
+                loadPureDeadlineConfig(currentUserWhId).catch(() => createPureDeadlineConfig(null))
+            ]);
+            resolvePureTableUpdateColumns(rows);
+            renderMainStats(rows);
+            renderUploadCalendar(rows, pureDeadlineConfig);
+        } catch (error) {
+            console.error("pure_losses main dashboard load failed:", error);
+            renderMainStats([]);
+            renderUploadCalendar([], createPureDeadlineConfig(null));
+        }
+    }
+
+    async function loadPureDeadlineConfig(currentUserWhId) {
+        const fetchRows = async (withWhFilter) => {
+            let query = supabaseClient
+                .from(TABLE_WH_DATA)
+                .select("data, wh_id, data_type")
+                .eq("data_type", DATA_TYPE_OPP_PURE_DEADLINES)
+                .limit(300);
+
+            if (withWhFilter && currentUserWhId) {
+                query = query.eq("wh_id", currentUserWhId);
+            }
+
+            const { data, error } = await query;
+            if (error) {
+                const errorText = String(error?.message || error?.details || error?.code || "unknown");
+                throw new Error(`Не удалось загрузить дедлайны pure: ${errorText}`);
+            }
+            return Array.isArray(data) ? data : [];
+        };
+
+        let scopedRows = [];
+        try {
+            scopedRows = await fetchRows(true);
+        } catch (error) {
+            console.error("pure_losses deadline scoped load failed:", error);
+        }
+
+        let offsetDays = extractPureDeadlineOffsetFromRows(scopedRows);
+        if (offsetDays !== null) return createPureDeadlineConfig(offsetDays);
+
+        try {
+            const fallbackRows = await fetchRows(false);
+            offsetDays = extractPureDeadlineOffsetFromRows(fallbackRows);
+        } catch (error) {
+            console.error("pure_losses deadline fallback load failed:", error);
+        }
+
+        return createPureDeadlineConfig(offsetDays);
+    }
+
+    function extractPureDeadlineOffsetFromRows(rows) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        for (const row of safeRows) {
+            const offset = extractPureDeadlineOffset(row?.data);
+            if (offset !== null) return offset;
+        }
+        return null;
+    }
+
+    function extractPureDeadlineOffset(rawData) {
+        if (rawData === null || rawData === undefined) return null;
+
+        if (Array.isArray(rawData)) {
+            for (const item of rawData) {
+                const nested = extractPureDeadlineOffset(item);
+                if (nested !== null) return nested;
+            }
+            return null;
+        }
+
+        if (typeof rawData === "object") {
+            const obj = rawData;
+
+            if (Array.isArray(obj.deadlines)) {
+                for (const item of obj.deadlines) {
+                    if (!item || typeof item !== "object") continue;
+                    const key = normalizePureDeadlineKey(item.key ?? item.name ?? item.status ?? "");
+                    if (key !== "pure") continue;
+                    const value = parsePureDeadlineNumber(item.offset_days ?? item.offset ?? item.value);
+                    if (value !== null) return value;
+                }
+            }
+
+            const directPure = obj.pure ?? obj.Pure ?? obj.PURE;
+            const directValue = parsePureDeadlineNumber(directPure);
+            if (directValue !== null) return directValue;
+
+            for (const [key, value] of Object.entries(obj)) {
+                const normalizedKey = normalizePureDeadlineKey(key);
+                if (normalizedKey === "pure") {
+                    const parsed = parsePureDeadlineNumber(value);
+                    if (parsed !== null) return parsed;
+                    continue;
+                }
+
+                if (normalizedKey === "deadlines" || normalizedKey === "values" || normalizedKey === "config") {
+                    const nested = extractPureDeadlineOffset(value);
+                    if (nested !== null) return nested;
+                }
+            }
+            return null;
+        }
+
+        const text = toText(rawData);
+        if (!text) return null;
+
+        if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+            try {
+                const parsed = JSON.parse(text);
+                const nested = extractPureDeadlineOffset(parsed);
+                if (nested !== null) return nested;
+            } catch (_) {
+                // ignore JSON parsing error, fallback to regex
+            }
+        }
+
+        const pairRegex = /["']?pure["']?\s*:\s*["']?(-?\d+(?:[.,]\d+)?)["']?/i;
+        const match = text.match(pairRegex);
+        if (match && match[1] !== undefined) {
+            const parsed = parsePureDeadlineNumber(match[1]);
+            if (parsed !== null) return parsed;
+        }
+
+        const lines = text.split(/[\r\n;]+/);
+        for (const line of lines) {
+            const normalizedLine = toText(line);
+            if (!normalizedLine) continue;
+            const lineMatch = normalizedLine.match(/^["']?pure["']?\s*[:=,]\s*["']?(-?\d+(?:[.,]\d+)?)["']?$/i);
+            if (!lineMatch) continue;
+            const parsed = parsePureDeadlineNumber(lineMatch[1]);
+            if (parsed !== null) return parsed;
+        }
+
+        return null;
+    }
+
+    function parsePureDeadlineNumber(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+
+        const text = String(value)
+            .trim()
+            .replace(/['"]/g, "")
+            .replace(",", ".");
+        if (!text) return null;
+
+        const parsed = Number(text);
+        if (!Number.isFinite(parsed)) return null;
+        return Math.trunc(parsed);
+    }
+
+    function normalizePureDeadlineKey(value) {
+        return String(value || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "")
+            .replace(/['"]/g, "");
+    }
+
+    function createPureDeadlineConfig(offsetDays) {
+        const parsedOffset = parsePureDeadlineNumber(offsetDays);
+        if (parsedOffset === null) {
+            return {
+                offsetDays: null,
+                cutoffDate: null,
+                cutoffIso: ""
+            };
+        }
+
+        const today = getDashboardTodayDate();
+        const cutoffDate = addDays(today, parsedOffset);
+        return {
+            offsetDays: parsedOffset,
+            cutoffDate,
+            cutoffIso: formatIsoDate(cutoffDate)
+        };
+    }
+
+    function normalizePureDeadlineConfig(config) {
+        if (!config || typeof config !== "object") {
+            return createPureDeadlineConfig(null);
+        }
+        return createPureDeadlineConfig(config.offsetDays);
+    }
+
+    function isDateAllowedByDeadline(dateValue, pureDeadlineConfig) {
+        if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return false;
+        const config = normalizePureDeadlineConfig(pureDeadlineConfig);
+        if (!(config.cutoffDate instanceof Date)) return true;
+        return compareDateTs(dateValue.getTime(), config.cutoffDate.getTime()) <= 0;
+    }
+
+    function isCalendarDateInDeadlineRange(dateValue, todayValue, pureDeadlineConfig) {
+        if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return false;
+        const today = todayValue instanceof Date ? todayValue : getDashboardTodayDate();
+        if (compareDateTs(dateValue.getTime(), today.getTime()) > 0) return false;
+        return isDateAllowedByDeadline(dateValue, pureDeadlineConfig);
+    }
+
+    function formatMonthForCalendar(dateValue) {
+        const date = dateValue instanceof Date ? dateValue : getDashboardTodayDate();
+        const text = new Intl.DateTimeFormat("ru-RU", {
+            month: "long",
+            year: "numeric"
+        }).format(date);
+        return text.replace(/\s*г\.?$/i, "").replace(/^./, (ch) => ch.toUpperCase());
+    }
+
+    function renderMainStats(rows) {
+        const uniqueRows = dedupeRowsByShk(rows);
+        const totalShk = uniqueRows.length;
+
+        let resolvedShk = 0;
+        let expensiveTotal = 0;
+        let expensiveResolved = 0;
+
+        uniqueRows.forEach((row) => {
+            const decision = extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision));
+            const isResolved = Boolean(decision);
+            if (isResolved) resolvedShk += 1;
+
+            const price = toNumberOrNull(row?.price);
+            const isExpensive = price !== null && price >= EXPENSIVE_PRICE_THRESHOLD;
+            if (isExpensive) {
+                expensiveTotal += 1;
+                if (isResolved) expensiveResolved += 1;
+            }
+        });
+
+        const backlog = Math.max(0, totalShk - resolvedShk);
+
+        setText(statTotalShkEl, formatInt(totalShk));
+        setText(statResolvedShkEl, formatInt(resolvedShk));
+        setText(statExpensiveTotalEl, formatInt(expensiveTotal));
+        setText(statExpensiveResolvedEl, formatInt(expensiveResolved));
+        setText(statPureBacklogEl, formatInt(backlog));
+    }
+
+    function renderUploadCalendar(rows, pureDeadlineConfig) {
+        if (!uploadCalendarGridEl) return;
+        uploadCalendarGridEl.innerHTML = "";
+
+        const today = getDashboardTodayDate();
+        const monday = getWeekStartMonday(today);
+        const start = addDays(monday, -21);
+        const uploadDates = new Set();
+        const deadlineConfig = normalizePureDeadlineConfig(pureDeadlineConfig);
+
+        dedupeRowsByShk(rows).forEach((row) => {
+            const date = parseDateValue(row?.date_lost);
+            if (!date) return;
+            uploadDates.add(formatIsoDate(date));
+        });
+
+        const dayNames = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+        dayNames.forEach((dayName) => {
+            const head = document.createElement("div");
+            head.className = "pure-upload-day-head";
+            head.textContent = dayName;
+            uploadCalendarGridEl.appendChild(head);
+        });
+
+        const todayIso = formatIsoDate(today);
+        for (let i = 0; i < 35; i += 1) {
+            const date = addDays(start, i);
+            const iso = formatIsoDate(date);
+            const hasUpload = uploadDates.has(iso);
+            const shouldBeUploaded = isCalendarDateInDeadlineRange(date, today, deadlineConfig);
+            const prevDate = i > 0 ? addDays(start, i - 1) : null;
+            const isMonthSwitch = !prevDate || prevDate.getMonth() !== date.getMonth() || prevDate.getFullYear() !== date.getFullYear();
+
+            if (isMonthSwitch) {
+                const split = document.createElement("div");
+                split.className = "pure-upload-month-split";
+                split.textContent = formatMonthForCalendar(date);
+                uploadCalendarGridEl.appendChild(split);
+
+                const mondayWeekday = (date.getDay() + 6) % 7;
+                for (let gapIndex = 0; gapIndex < mondayWeekday; gapIndex += 1) {
+                    const gap = document.createElement("div");
+                    gap.className = "pure-upload-day-gap";
+                    uploadCalendarGridEl.appendChild(gap);
+                }
+            }
+
+            const day = document.createElement("div");
+            day.className = "pure-upload-day";
+            if (!hasUpload && shouldBeUploaded) day.classList.add("is-missing");
+            if (iso === todayIso) day.classList.add("is-today");
+            day.textContent = String(date.getDate());
+            if (hasUpload) {
+                day.title = `${formatDateForUi(iso)} — есть выгрузка`;
+            } else if (shouldBeUploaded) {
+                day.title = `${formatDateForUi(iso)} — нет выгрузки`;
+            } else {
+                day.title = `${formatDateForUi(iso)} — вне срока выгрузки`;
+            }
+            uploadCalendarGridEl.appendChild(day);
+        }
+    }
+
+    function dedupeRowsByShk(rows) {
+        const out = [];
+        const seen = new Set();
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const shk = normalizeShk(row?.shk);
+            if (!shk || seen.has(shk)) return;
+            seen.add(shk);
+            out.push(row);
+        });
+        return out;
+    }
+
+    function getDashboardTodayDate() {
+        const todayIso = toText(window.MiniUI?.todayIsoDatePlus3?.());
+        const parsed = parseDateValue(todayIso);
+        if (parsed) return parsed;
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+
+    function getWeekStartMonday(dateValue) {
+        const base = dateValue instanceof Date
+            ? new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+            : getDashboardTodayDate();
+        const day = base.getDay();
+        const diffToMonday = day === 0 ? -6 : 1 - day;
+        return addDays(base, diffToMonday);
+    }
+
+    function addDays(dateValue, days) {
+        const base = dateValue instanceof Date
+            ? new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+            : getDashboardTodayDate();
+        base.setDate(base.getDate() + Number(days || 0));
+        return base;
+    }
+
+    function setText(element, value) {
+        if (!(element instanceof HTMLElement)) return;
+        element.textContent = String(value ?? "—");
+    }
+
     async function readExcelRows(file) {
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: "array" });
@@ -1891,12 +3117,13 @@
         return autoIds;
     }
 
-    function prepareIncomingRows(rows, currentUserWhId, autoLrSet) {
+    function prepareIncomingRows(rows, currentUserWhId, autoLrSet, pureDeadlineConfig) {
         const rowsByShk = new Map();
         const stats = {
             skippedByWh: 0,
             skippedPostedFlag: 0,
             skippedByIsAuto: 0,
+            skippedByDeadline: 0,
             skippedInvalid: 0,
             duplicateInFileIgnored: 0,
             duplicateInFileReplaced: 0
@@ -1929,6 +3156,11 @@
 
             if (!shk || !dateObj) {
                 stats.skippedInvalid += 1;
+                continue;
+            }
+
+            if (!isDateAllowedByDeadline(dateObj, pureDeadlineConfig)) {
+                stats.skippedByDeadline += 1;
                 continue;
             }
 
