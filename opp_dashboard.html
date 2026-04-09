@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <script src="ui.js" defer></script>
-    <script src="opp_dashboard.js?v=20260403_02" defer></script>
+    <script src="opp_dashboard.js?v=20260408_09" defer></script>
 
     <style>
         .opp-toolbar {
@@ -441,7 +441,7 @@
         }
 
         .opp-month-grid.opp-month-grid-main {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             margin-top: 0;
         }
 
@@ -465,6 +465,11 @@
         .opp-month-card.opp-month-card-bad {
             border-color: rgba(239, 68, 68, 0.45);
             background: rgba(239, 68, 68, 0.14);
+        }
+
+        .opp-month-card.opp-month-card-warn {
+            border-color: rgba(245, 158, 11, 0.5);
+            background: rgba(245, 158, 11, 0.16);
         }
 
         .opp-month-label {
@@ -534,6 +539,28 @@
             font-weight: 700;
             color: #0f172a;
             flex: 0 0 auto;
+        }
+
+        .opp-pure-missing-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .opp-pure-missing-badge {
+            width: 24px;
+            min-height: 24px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #b91c1c;
+            background: #fee2e2;
+            border: 1px solid #fca5a5;
+            line-height: 1;
         }
 
         .opp-unfinished-mini-panel {
@@ -667,6 +694,10 @@
                 </div>
             </div>
             <div id="dashboard-lag-panel-content" class="opp-lag-panel" style="margin-bottom:12px;">
+                <div class="muted">Нет данных для отображения.</div>
+            </div>
+
+            <div id="dashboard-pure-backlog-panel" class="opp-lag-panel" style="margin-bottom:12px;">
                 <div class="muted">Нет данных для отображения.</div>
             </div>
 
