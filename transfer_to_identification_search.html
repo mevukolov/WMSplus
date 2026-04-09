@@ -38,7 +38,7 @@
                 id="search-input"
                 class="input"
                 type="text"
-                placeholder="Введите номенклатуру или наименование"
+                placeholder="Введите номенклатуру, наименование или бренд"
                 style="flex:1;min-width:260px;max-width:760px;"
             />
             <button id="search-btn" class="btn btn-rect" type="button">Найти</button>
@@ -49,17 +49,18 @@
         <div id="table-wrap"
              style="display:none;width:100%;min-width:0;padding:0;overflow:auto;border:1px solid rgba(15,23,42,0.06);border-radius:10px;background:#f8fafc;">
             <div id="history-head"
-                 style="display:grid;grid-template-columns:170px 130px 360px 150px 200px 220px 110px 240px;gap:0;padding:9px 10px;background:#f3f4f6;border-bottom:1px solid rgba(15,23,42,0.08);font-weight:700;font-size:14px;color:#1f2937;min-width:1580px;">
+                 style="display:grid;grid-template-columns:170px 130px 300px 180px 150px 180px 220px 110px 240px;gap:0;padding:9px 10px;background:#f3f4f6;border-bottom:1px solid rgba(15,23,42,0.08);font-weight:700;font-size:14px;color:#1f2937;min-width:1700px;">
                 <div>Дата</div>
                 <div>Номенклатура</div>
                 <div>Наименование</div>
+                <div>Бренд</div>
                 <div>ВБ стикер</div>
                 <div>Блок</div>
                 <div>МХ</div>
                 <div>ID</div>
                 <div>ФИО</div>
             </div>
-            <div id="result-body" style="min-width:1580px;"></div>
+            <div id="result-body" style="min-width:1700px;"></div>
         </div>
     </div>
 </main>

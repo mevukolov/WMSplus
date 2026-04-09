@@ -103,11 +103,22 @@
             date: row?.date || "",
             nm: String(row?.nm || "").trim(),
             description: String(row?.description || "").trim(),
+            brand: String(row?.brand || row?.brand_name || row?.brandName || "").trim(),
             shk: String(row?.shk || row?.sticker || row?.new_sticker || row?.barcode || "").trim(),
             place: String(row?.place || "").trim(),
             place_new: String(row?.place_new || "").trim(),
             emp: String(row?.emp || "").trim()
         };
+    }
+
+    function isUnknownColumnError(error) {
+        const code = String(error?.code || "");
+        const message = String(error?.message || "").toLowerCase();
+        return (
+            code === "42703" ||
+            code === "PGRST204" ||
+            (message.includes("column") && (message.includes("does not exist") || message.includes("could not find")))
+        );
     }
 
     function buildVisualVariants(sourceText, maxVariants = MAX_VISUAL_VARIANTS) {
@@ -160,7 +171,7 @@
             const idKey = row && (row.id || row.nm_rep_id);
             const signature = idKey
                 ? `id:${idKey}`
-                : `sig:${String(row?.date || "")}|${String(row?.nm || "")}|${String(row?.description || "")}|${String(row?.shk || row?.sticker || row?.new_sticker || row?.barcode || "")}|${String(row?.emp || "")}|${String(row?.place || "")}`;
+                : `sig:${String(row?.date || "")}|${String(row?.nm || "")}|${String(row?.description || "")}|${String(row?.brand || "")}|${String(row?.shk || row?.sticker || row?.new_sticker || row?.barcode || "")}|${String(row?.emp || "")}|${String(row?.place || "")}`;
             if (seen.has(signature)) return;
             seen.add(signature);
             mergedRows.push(row);
@@ -189,33 +200,53 @@
         }
 
         const variants = buildVisualVariants(query, MAX_VISUAL_VARIANTS);
-        const requests = variants.map(variant =>
-            supabaseClient
-                .from("nm_rep")
-                .select("*")
-                .ilike("description", `%${variant}%`)
-                .order("date", { ascending: false })
-        );
+        const requestDefs = [];
+        variants.forEach(variant => {
+            requestDefs.push({
+                type: "description",
+                promise: supabaseClient
+                    .from("nm_rep")
+                    .select("*")
+                    .ilike("description", `%${variant}%`)
+                    .order("date", { ascending: false })
+            });
+            requestDefs.push({
+                type: "brand",
+                promise: supabaseClient
+                    .from("nm_rep")
+                    .select("*")
+                    .ilike("brand", `%${variant}%`)
+                    .order("date", { ascending: false })
+            });
+        });
 
-        const responses = await Promise.all(requests);
+        const responses = await Promise.all(requestDefs.map(item => item.promise));
         const dataParts = [];
         const errors = [];
+        let descriptionError = null;
+        let brandError = null;
 
-        responses.forEach(res => {
+        responses.forEach((res, index) => {
+            const requestType = requestDefs[index]?.type || "description";
             if (res.error) {
+                if (requestType === "brand" && isUnknownColumnError(res.error)) {
+                    return;
+                }
                 errors.push(res.error);
+                if (requestType === "description" && !descriptionError) descriptionError = res.error;
+                if (requestType === "brand" && !brandError) brandError = res.error;
                 return;
             }
             dataParts.push(...(res.data || []));
         });
 
         const mergedRows = uniqueRowsBySignature(dataParts);
-        const fatalError = mergedRows.length ? null : (errors[0] || null);
+        const fatalError = mergedRows.length ? null : (descriptionError || brandError || errors[0] || null);
 
         return {
             rows: mergedRows,
             error: fatalError,
-            mode: "description",
+            mode: "description_brand",
             query: query,
             variantsUsed: variants
         };
@@ -315,12 +346,12 @@
 
             const rowEl = document.createElement("div");
             rowEl.style.display = "grid";
-            rowEl.style.gridTemplateColumns = "170px 130px 360px 150px 200px 220px 110px 240px";
+            rowEl.style.gridTemplateColumns = "170px 130px 300px 180px 150px 180px 220px 110px 240px";
             rowEl.style.gap = "0";
             rowEl.style.padding = "7px 10px";
             rowEl.style.borderBottom = "1px solid rgba(15,23,42,0.08)";
             rowEl.style.background = "#f8fafc";
-            rowEl.style.minWidth = "1580px";
+            rowEl.style.minWidth = "1700px";
             rowEl.style.alignItems = "start";
             rowEl.style.color = "#1f2937";
             rowEl.style.fontSize = "14px";
@@ -338,6 +369,14 @@
             descriptionEl.style.overflowWrap = "anywhere";
             descriptionEl.style.wordBreak = "break-word";
             descriptionEl.style.lineHeight = "1.2";
+
+            const brandEl = document.createElement("div");
+            brandEl.textContent = String(r.brand || "");
+            brandEl.style.minWidth = "0";
+            brandEl.style.whiteSpace = "normal";
+            brandEl.style.overflowWrap = "anywhere";
+            brandEl.style.wordBreak = "break-word";
+            brandEl.style.lineHeight = "1.2";
 
             const shkEl = document.createElement("div");
             shkEl.textContent = String(r.shk || "");
@@ -359,7 +398,7 @@
             fioEl.style.wordBreak = "break-word";
             fioEl.style.lineHeight = "1.2";
 
-            rowEl.append(dateEl, nmEl, descriptionEl, shkEl, blockEl, mhEl, idEl, fioEl);
+            rowEl.append(dateEl, nmEl, descriptionEl, brandEl, shkEl, blockEl, mhEl, idEl, fioEl);
             resultBodyEl.appendChild(rowEl);
         });
 
@@ -371,7 +410,7 @@
 
         const query = String(searchInputEl.value || "").trim();
         if (!query) {
-            MiniUI.toast("Введите номенклатуру или наименование", { type: "error" });
+            MiniUI.toast("Введите номенклатуру, наименование или бренд", { type: "error" });
             return;
         }
 

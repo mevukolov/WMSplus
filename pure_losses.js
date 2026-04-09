@@ -92,6 +92,35 @@
     const pureUpdateHelpModalEl = document.getElementById("pure-update-help-modal");
     const pureUpdateHelpCloseBtn = document.getElementById("pure-update-help-close-btn");
     const pureUpdateFileBtn = document.getElementById("pure-update-file-btn");
+    const transferBtn = document.getElementById("transfer-btn");
+    const pureTransferModalEl = document.getElementById("pure-transfer-modal");
+    const pureTransferCloseBtn = document.getElementById("pure-transfer-close-btn");
+    const pureTransferStatusEl = document.getElementById("pure-transfer-status");
+    const transferStep1El = document.getElementById("transfer-step-1");
+    const transferStep2El = document.getElementById("transfer-step-2");
+    const transferStep3El = document.getElementById("transfer-step-3");
+    const transferStep4El = document.getElementById("transfer-step-4");
+    const transferStep5El = document.getElementById("transfer-step-5");
+    const transferUploadFileBtn = document.getElementById("transfer-upload-file-btn");
+    const transferFileInputEl = document.getElementById("transfer-file-input");
+    const transferFileNameEl = document.getElementById("transfer-file-name");
+    const transferBarcodeAutoEl = document.getElementById("transfer-barcode-auto");
+    const transferBarcodeManualWrapEl = document.getElementById("transfer-barcode-manual-wrap");
+    const transferBarcodeSelectEl = document.getElementById("transfer-barcode-select");
+    const transferFieldEmpEl = document.getElementById("transfer-field-emp");
+    const transferFieldVerdictEl = document.getElementById("transfer-field-verdict");
+    const transferFieldCommentEl = document.getElementById("transfer-field-comment");
+    const transferSettingsEmpEl = document.getElementById("transfer-settings-emp");
+    const transferSettingsVerdictEl = document.getElementById("transfer-settings-verdict");
+    const transferSettingsCommentEl = document.getElementById("transfer-settings-comment");
+    const transferTargetEmpEl = document.getElementById("transfer-target-emp");
+    const transferTargetVerdictEl = document.getElementById("transfer-target-verdict");
+    const transferTargetCommentEl = document.getElementById("transfer-target-comment");
+    const transferVerdictRemapEnabledEl = document.getElementById("transfer-verdict-remap-enabled");
+    const transferVerdictRemapWrapEl = document.getElementById("transfer-verdict-remap-wrap");
+    const transferVerdictRemapListEl = document.getElementById("transfer-verdict-remap-list");
+    const transferStartBtn = document.getElementById("transfer-start-btn");
+    const transferDownloadBtn = document.getElementById("transfer-download-btn");
 
     const tableState = {
         rows: [],
@@ -126,6 +155,25 @@
         }
     };
 
+    const transferState = {
+        workbook: null,
+        worksheet: null,
+        sheetName: "",
+        fileName: "",
+        headers: [],
+        targetHeaders: [],
+        emptyColumnIndexes: [],
+        preferredTargetIndexes: [],
+        barcodeHeaderIndex: null,
+        sourceRowsLoaded: false,
+        sourceByShk: new Map(),
+        verdictValues: [],
+        verdictReplaceMap: new Map(),
+        completed: false,
+        matchedRows: 0,
+        writtenCells: 0
+    };
+
     if (!refreshBtn || !fileInput) return;
 
     const user = getCurrentUser();
@@ -143,6 +191,7 @@
     refreshLastUploadedDate(userWhId);
     initPureTableModal();
     initUpdateHelpModal();
+    initTransferModal(userWhId);
     void refreshMainDashboard(userWhId);
 
     refreshBtn.addEventListener("click", () => {
@@ -264,6 +313,764 @@
         if (!pureUpdateHelpModalEl) return;
         pureUpdateHelpModalEl.classList.add("hidden");
         pureUpdateHelpModalEl.setAttribute("aria-hidden", "true");
+    }
+
+    function initTransferModal(currentUserWhId) {
+        if (!transferBtn || !pureTransferModalEl) return;
+
+        transferBtn.addEventListener("click", () => {
+            openTransferModal();
+        });
+
+        pureTransferModalEl.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.matches("[data-close-transfer-modal='1']")) {
+                closeTransferModal();
+            }
+        });
+
+        pureTransferCloseBtn?.addEventListener("click", () => {
+            closeTransferModal();
+        });
+
+        transferUploadFileBtn?.addEventListener("click", () => {
+            transferFileInputEl.value = "";
+            transferFileInputEl.click();
+        });
+
+        transferFileInputEl?.addEventListener("change", async (event) => {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            await loadTransferWorkbookFile(file);
+            transferFileInputEl.value = "";
+        });
+
+        transferBarcodeSelectEl?.addEventListener("change", () => {
+            const value = Number(transferBarcodeSelectEl.value);
+            transferState.barcodeHeaderIndex = Number.isFinite(value) ? value : null;
+            applyTransferDefaultFieldSelectionAndTargets({ keepCurrentValues: true, forceSelectFields: false });
+            refreshTransferStepVisibility();
+            refreshTransferStartButtonState();
+        });
+
+        transferFieldEmpEl?.addEventListener("change", () => {
+            syncTransferFieldSettingsVisibility();
+            refreshTransferStartButtonState();
+        });
+
+        transferFieldVerdictEl?.addEventListener("change", async () => {
+            syncTransferFieldSettingsVisibility();
+            if (transferFieldVerdictEl.checked && transferVerdictRemapEnabledEl?.checked) {
+                await ensureTransferSourceRowsLoaded(currentUserWhId);
+                renderTransferVerdictRemapList();
+            }
+            refreshTransferStartButtonState();
+        });
+
+        transferFieldCommentEl?.addEventListener("change", () => {
+            syncTransferFieldSettingsVisibility();
+            refreshTransferStartButtonState();
+        });
+
+        transferTargetEmpEl?.addEventListener("change", refreshTransferStartButtonState);
+        transferTargetVerdictEl?.addEventListener("change", refreshTransferStartButtonState);
+        transferTargetCommentEl?.addEventListener("change", refreshTransferStartButtonState);
+
+        transferVerdictRemapEnabledEl?.addEventListener("change", async () => {
+            if (transferVerdictRemapEnabledEl.checked) {
+                transferVerdictRemapWrapEl?.classList.remove("hidden");
+                await ensureTransferSourceRowsLoaded(currentUserWhId);
+                renderTransferVerdictRemapList();
+            } else {
+                transferVerdictRemapWrapEl?.classList.add("hidden");
+            }
+            syncTransferFieldSettingsVisibility();
+            refreshTransferStartButtonState();
+        });
+
+        transferStartBtn?.addEventListener("click", async () => {
+            await runTransferToExcel(currentUserWhId);
+        });
+
+        transferDownloadBtn?.addEventListener("click", () => {
+            downloadTransferredWorkbook();
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            if (!isTransferModalOpen()) return;
+            closeTransferModal();
+        });
+    }
+
+    function isTransferModalOpen() {
+        return Boolean(pureTransferModalEl && !pureTransferModalEl.classList.contains("hidden"));
+    }
+
+    function openTransferModal() {
+        if (!pureTransferModalEl) return;
+        resetTransferState();
+        pureTransferModalEl.classList.remove("hidden");
+        pureTransferModalEl.setAttribute("aria-hidden", "false");
+    }
+
+    function closeTransferModal() {
+        if (!pureTransferModalEl) return;
+        pureTransferModalEl.classList.add("hidden");
+        pureTransferModalEl.setAttribute("aria-hidden", "true");
+    }
+
+    function resetTransferState() {
+        transferState.workbook = null;
+        transferState.worksheet = null;
+        transferState.sheetName = "";
+        transferState.fileName = "";
+        transferState.headers = [];
+        transferState.targetHeaders = [];
+        transferState.emptyColumnIndexes = [];
+        transferState.preferredTargetIndexes = [];
+        transferState.barcodeHeaderIndex = null;
+        transferState.sourceRowsLoaded = false;
+        transferState.sourceByShk = new Map();
+        transferState.verdictValues = [];
+        transferState.verdictReplaceMap = new Map();
+        transferState.completed = false;
+        transferState.matchedRows = 0;
+        transferState.writtenCells = 0;
+
+        if (transferFileNameEl) transferFileNameEl.textContent = "";
+        if (transferBarcodeAutoEl) transferBarcodeAutoEl.textContent = "";
+        transferBarcodeManualWrapEl?.classList.add("hidden");
+        if (transferBarcodeSelectEl) transferBarcodeSelectEl.innerHTML = "";
+
+        if (transferFieldEmpEl) transferFieldEmpEl.checked = true;
+        if (transferFieldVerdictEl) transferFieldVerdictEl.checked = true;
+        if (transferFieldCommentEl) transferFieldCommentEl.checked = true;
+        if (transferVerdictRemapEnabledEl) transferVerdictRemapEnabledEl.checked = false;
+
+        transferSettingsEmpEl?.classList.remove("hidden");
+        transferSettingsVerdictEl?.classList.remove("hidden");
+        transferSettingsCommentEl?.classList.remove("hidden");
+        transferVerdictRemapWrapEl?.classList.add("hidden");
+        if (transferVerdictRemapListEl) transferVerdictRemapListEl.innerHTML = "";
+
+        fillTransferTargetSelectOptions([]);
+        syncTransferFieldSettingsVisibility();
+        setTransferStatus("", "info");
+        refreshTransferStepVisibility();
+        refreshTransferStartButtonState();
+    }
+
+    function syncTransferFieldSettingsVisibility() {
+        transferSettingsEmpEl?.classList.toggle("hidden", !transferFieldEmpEl?.checked);
+        transferSettingsVerdictEl?.classList.toggle("hidden", !transferFieldVerdictEl?.checked);
+        transferSettingsCommentEl?.classList.toggle("hidden", !transferFieldCommentEl?.checked);
+        if (!transferFieldVerdictEl?.checked || !transferVerdictRemapEnabledEl?.checked) {
+            transferVerdictRemapWrapEl?.classList.add("hidden");
+        }
+    }
+
+    function setTransferStatus(message, type) {
+        if (!pureTransferStatusEl) return;
+        const text = toText(message);
+        const statusType = String(type || "").toLowerCase();
+        pureTransferStatusEl.innerHTML = "";
+
+        if (statusType === "loading") {
+            if (text) {
+                const textEl = document.createElement("span");
+                textEl.className = "pure-inline-status-text";
+                textEl.textContent = text;
+                pureTransferStatusEl.appendChild(textEl);
+            }
+            const loader = document.createElement("span");
+            loader.className = "pure-inline-loader";
+            const bar = document.createElement("span");
+            bar.className = "pure-inline-loader-bar";
+            loader.appendChild(bar);
+            pureTransferStatusEl.appendChild(loader);
+            pureTransferStatusEl.style.color = "#64748b";
+            return;
+        }
+
+        if (text) {
+            const textEl = document.createElement("span");
+            textEl.className = "pure-inline-status-text";
+            textEl.textContent = text;
+            pureTransferStatusEl.appendChild(textEl);
+        }
+
+        pureTransferStatusEl.style.color = statusType === "error"
+            ? "#dc2626"
+            : statusType === "success"
+                ? "#15803d"
+                : "#64748b";
+    }
+
+    function refreshTransferStepVisibility() {
+        const hasFile = Boolean(transferState.workbook && transferState.headers.length);
+        const hasBarcode = Number.isInteger(transferState.barcodeHeaderIndex);
+
+        transferStep2El?.classList.toggle("hidden", !hasFile);
+        transferStep3El?.classList.toggle("hidden", !(hasFile && hasBarcode));
+        transferStep4El?.classList.toggle("hidden", !(hasFile && hasBarcode));
+        transferStep5El?.classList.toggle("hidden", !transferState.completed);
+        refreshTransferStepCompletion();
+    }
+
+    function refreshTransferStartButtonState() {
+        if (!transferStartBtn) return;
+
+        const hasFile = Boolean(transferState.workbook && transferState.headers.length);
+        const hasBarcode = Number.isInteger(transferState.barcodeHeaderIndex);
+        const selectedFields = getSelectedTransferFields();
+        const hasFields = selectedFields.length > 0;
+
+        const hasTargets = selectedFields.every((field) => {
+            const selectEl = getTransferTargetSelect(field);
+            const idx = toIntegerOrNull(selectEl?.value);
+            return idx !== null && idx >= 0;
+        });
+
+        transferStartBtn.disabled = !(hasFile && hasBarcode && hasFields && hasTargets);
+        refreshTransferStepCompletion();
+    }
+
+    function refreshTransferStepCompletion() {
+        const hasFile = Boolean(transferState.workbook && transferState.headers.length);
+        const hasBarcode = Number.isInteger(transferState.barcodeHeaderIndex);
+        const selectedFields = getSelectedTransferFields();
+        const hasFields = selectedFields.length > 0;
+        const hasTargets = hasFields && selectedFields.every((field) => {
+            const selectEl = getTransferTargetSelect(field);
+            const idx = toIntegerOrNull(selectEl?.value);
+            return idx !== null && idx >= 0;
+        });
+
+        setTransferStepDone(transferStep1El, 1, hasFile);
+        setTransferStepDone(transferStep2El, 2, hasFile && hasBarcode);
+        setTransferStepDone(transferStep3El, 3, hasFile && hasBarcode && hasFields && hasTargets);
+        setTransferStepDone(transferStep4El, 4, transferState.completed);
+        setTransferStepDone(transferStep5El, 5, transferState.completed);
+    }
+
+    function setTransferStepDone(stepEl, number, isDone) {
+        if (!(stepEl instanceof HTMLElement)) return;
+        stepEl.classList.toggle("is-done", Boolean(isDone));
+        const indexEl = stepEl.querySelector(".pure-transfer-step-index");
+        if (indexEl instanceof HTMLElement) {
+            indexEl.textContent = isDone ? "✓" : String(number);
+        }
+    }
+
+    function getSelectedTransferFields() {
+        const out = [];
+        if (transferFieldEmpEl?.checked) out.push("emp");
+        if (transferFieldVerdictEl?.checked) out.push("verdict");
+        if (transferFieldCommentEl?.checked) out.push("comment");
+        return out;
+    }
+
+    function getTransferTargetSelect(field) {
+        if (field === "emp") return transferTargetEmpEl;
+        if (field === "verdict") return transferTargetVerdictEl;
+        if (field === "comment") return transferTargetCommentEl;
+        return null;
+    }
+
+    async function loadTransferWorkbookFile(file) {
+        if (typeof window.XLSX === "undefined") {
+            setTransferStatus("Не загрузилась библиотека XLSX.", "error");
+            return;
+        }
+
+        try {
+            setTransferStatus("Читаем файл...", "loading");
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(buffer, { type: "array" });
+            const firstSheetName = workbook.SheetNames && workbook.SheetNames[0];
+            if (!firstSheetName) {
+                throw new Error("В файле не найдено листов.");
+            }
+
+            const worksheet = workbook.Sheets[firstSheetName];
+            const aoa = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+            const headerRow = Array.isArray(aoa[0]) ? aoa[0] : [];
+            const headers = normalizeTransferHeaders(headerRow);
+            if (!headers.length) {
+                throw new Error("Не удалось прочитать заголовки таблицы.");
+            }
+            const targetHeaders = headers.concat(buildTransferVirtualHeaders(worksheet, 12));
+
+            transferState.workbook = workbook;
+            transferState.worksheet = worksheet;
+            transferState.sheetName = firstSheetName;
+            transferState.fileName = file.name || "";
+            transferState.headers = headers;
+            transferState.targetHeaders = targetHeaders;
+            transferState.barcodeHeaderIndex = detectTransferBarcodeHeaderIndex(headers);
+            transferState.emptyColumnIndexes = detectTransferEmptyColumnIndexes(worksheet, targetHeaders);
+            transferState.preferredTargetIndexes = detectPreferredTransferTargetIndexes(
+                targetHeaders,
+                transferState.emptyColumnIndexes,
+                transferState.barcodeHeaderIndex
+            );
+            transferState.completed = false;
+
+            if (transferFileNameEl) {
+                const displayName = transferState.fileName || firstSheetName;
+                transferFileNameEl.textContent = `Файл: ${displayName}`;
+            }
+
+            fillTransferTargetSelectOptions(targetHeaders);
+            fillTransferBarcodeSelectOptions(headers);
+
+            if (Number.isInteger(transferState.barcodeHeaderIndex)) {
+                const index = transferState.barcodeHeaderIndex;
+                const headerName = headers[index]?.label || `Колонка ${index + 1}`;
+                transferBarcodeAutoEl.textContent = `Найден столбец: «${headerName}».`;
+                transferBarcodeManualWrapEl?.classList.add("hidden");
+                if (transferBarcodeSelectEl) transferBarcodeSelectEl.value = String(index);
+            } else {
+                transferBarcodeAutoEl.textContent = "Не удалось определить столбец ШК автоматически. Выберите его вручную.";
+                transferBarcodeManualWrapEl?.classList.remove("hidden");
+            }
+
+            applyTransferDefaultFieldSelectionAndTargets();
+
+            const preferredCount = transferState.preferredTargetIndexes.length;
+            if (preferredCount >= 3) {
+                setTransferStatus("Файл загружен. Пустые столбцы определены автоматически.", "success");
+            } else {
+                setTransferStatus(
+                    `Файл загружен. Найдено свободных отдельных столбцов: ${formatInt(preferredCount)}. Выберите недостающие вручную.`,
+                    "info"
+                );
+            }
+            refreshTransferStepVisibility();
+            refreshTransferStartButtonState();
+        } catch (error) {
+            setTransferStatus(String(error?.message || error || "Не удалось загрузить файл"), "error");
+        }
+    }
+
+    function normalizeTransferHeaders(headerRow) {
+        const out = [];
+        (Array.isArray(headerRow) ? headerRow : []).forEach((value, index) => {
+            const labelRaw = toText(value);
+            const hasHeader = Boolean(labelRaw);
+            const label = hasHeader ? labelRaw : `Колонка ${index + 1} (без заголовка)`;
+            out.push({
+                index,
+                label,
+                norm: hasHeader ? normalizeTransferHeaderKey(labelRaw) : "",
+                hasHeader,
+                isVirtual: false
+            });
+        });
+        return out;
+    }
+
+    function buildTransferVirtualHeaders(worksheet, count = 12) {
+        const safeCount = Number.isFinite(count) && count > 0 ? Math.trunc(count) : 12;
+        const range = XLSX.utils.decode_range(worksheet?.["!ref"] || "A1:A1");
+        const startIndex = Number.isFinite(range?.e?.c) ? range.e.c + 1 : 1;
+        const out = [];
+
+        for (let i = 0; i < safeCount; i += 1) {
+            const index = startIndex + i;
+            out.push({
+                index,
+                label: `Новая колонка ${index + 1} (без заголовка)`,
+                norm: "",
+                hasHeader: false,
+                isVirtual: true
+            });
+        }
+
+        return out;
+    }
+
+    function normalizeTransferHeaderKey(value) {
+        return toText(value)
+            .toLowerCase()
+            .replace(/ё/g, "е")
+            .replace(/[^a-zа-я0-9]+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    function detectTransferBarcodeHeaderIndex(headers) {
+        const candidates = Array.isArray(headers) ? headers : [];
+        let best = { index: null, score: -1 };
+
+        candidates.forEach((item) => {
+            const norm = toText(item?.norm);
+            if (!norm) return;
+
+            let score = -1;
+            if (norm === "шк" || norm === "штрихкод") score = 120;
+            else if (norm === "идентификатор товара" || norm === "ид товара" || norm === "товар") score = 100;
+            else if (norm.includes("шк") || norm.includes("штрихкод")) score = 90;
+            else if (norm.includes("идентификатор") && norm.includes("товар")) score = 80;
+            else if (norm.includes("ид") && norm.includes("товар")) score = 70;
+
+            if (score > best.score) {
+                best = { index: item.index, score };
+            }
+        });
+
+        return Number.isInteger(best.index) ? best.index : null;
+    }
+
+    function fillTransferBarcodeSelectOptions(headers) {
+        if (!transferBarcodeSelectEl) return;
+        transferBarcodeSelectEl.innerHTML = "";
+
+        (Array.isArray(headers) ? headers : []).forEach((item) => {
+            const option = document.createElement("option");
+            option.value = String(item.index);
+            option.textContent = item.label;
+            transferBarcodeSelectEl.appendChild(option);
+        });
+    }
+
+    function fillTransferTargetSelectOptions(headers) {
+        [transferTargetEmpEl, transferTargetVerdictEl, transferTargetCommentEl].forEach((selectEl) => {
+            if (!selectEl) return;
+            const prev = selectEl.value;
+            selectEl.innerHTML = "";
+
+            const empty = document.createElement("option");
+            empty.value = "";
+            empty.textContent = "Выберите столбец";
+            selectEl.appendChild(empty);
+
+            (Array.isArray(headers) ? headers : []).forEach((item) => {
+                const option = document.createElement("option");
+                option.value = String(item.index);
+                option.textContent = item.label;
+                selectEl.appendChild(option);
+            });
+
+            const hasPrev = Array.from(selectEl.options).some((opt) => opt.value === prev);
+            if (prev && hasPrev) {
+                selectEl.value = prev;
+            } else {
+                selectEl.value = "";
+            }
+        });
+    }
+
+    function detectTransferEmptyColumnIndexes(worksheet, headers) {
+        if (!worksheet || !Array.isArray(headers) || !headers.length) return [];
+
+        const range = XLSX.utils.decode_range(worksheet["!ref"] || "A1:A1");
+        const out = [];
+
+        headers.forEach((item) => {
+            const columnIndex = toIntegerOrNull(item?.index);
+            if (columnIndex === null || columnIndex < 0) return;
+
+            let hasData = false;
+            for (let r = 1; r <= range.e.r; r += 1) {
+                const cellRef = XLSX.utils.encode_cell({ r, c: columnIndex });
+                const cell = worksheet[cellRef];
+                const raw = cell ? (cell.v ?? cell.w ?? "") : "";
+                if (toText(raw) !== "") {
+                    hasData = true;
+                    break;
+                }
+            }
+
+            if (!hasData) {
+                out.push(columnIndex);
+            }
+        });
+
+        return out;
+    }
+
+    function detectPreferredTransferTargetIndexes(headers, emptyIndexes, barcodeIdx) {
+        const headerByIndex = new Map();
+        (Array.isArray(headers) ? headers : []).forEach((item) => {
+            const idx = toIntegerOrNull(item?.index);
+            if (idx === null || idx < 0) return;
+            headerByIndex.set(idx, item);
+        });
+
+        const preferred = [];
+        (Array.isArray(emptyIndexes) ? emptyIndexes : []).forEach((idxRaw) => {
+            const idx = toIntegerOrNull(idxRaw);
+            if (idx === null || idx < 0 || idx === barcodeIdx) return;
+            const info = headerByIndex.get(idx);
+            if (!info) return;
+            if (info.isVirtual || !info.hasHeader) {
+                preferred.push(idx);
+            }
+        });
+
+        return preferred;
+    }
+
+    function applyTransferDefaultFieldSelectionAndTargets(options = {}) {
+        const { keepCurrentValues = false, forceSelectFields = true } = options;
+        if (!transferState.targetHeaders.length) return;
+
+        if (forceSelectFields) {
+            if (transferFieldEmpEl) transferFieldEmpEl.checked = true;
+            if (transferFieldVerdictEl) transferFieldVerdictEl.checked = true;
+            if (transferFieldCommentEl) transferFieldCommentEl.checked = true;
+        }
+        syncTransferFieldSettingsVisibility();
+
+        const barcodeIdx = transferState.barcodeHeaderIndex;
+        const emptyCandidates = (Array.isArray(transferState.preferredTargetIndexes) ? transferState.preferredTargetIndexes : [])
+            .filter((idx) => idx !== barcodeIdx);
+
+        const assigned = new Set();
+        const fieldOrder = ["emp", "verdict", "comment"];
+
+        fieldOrder.forEach((field) => {
+            const selectEl = getTransferTargetSelect(field);
+            if (!selectEl) return;
+
+            let targetIdx = null;
+            const currentIdx = toIntegerOrNull(selectEl.value);
+            if (keepCurrentValues && currentIdx !== null && currentIdx >= 0 && currentIdx !== barcodeIdx && !assigned.has(currentIdx)) {
+                targetIdx = currentIdx;
+            }
+
+            if (targetIdx === null) {
+                const nextEmpty = emptyCandidates.find((idx) => !assigned.has(idx));
+                if (nextEmpty !== undefined) {
+                    targetIdx = nextEmpty;
+                }
+            }
+
+            if (targetIdx !== null && targetIdx >= 0) {
+                selectEl.value = String(targetIdx);
+                assigned.add(targetIdx);
+            } else {
+                selectEl.value = "";
+            }
+        });
+    }
+
+    function guessTransferTargetColumnIndex(headers, selectId) {
+        const candidates = Array.isArray(headers) ? headers : [];
+        const matchers = selectId === "transfer-target-emp"
+            ? ["сотрудник опп", "сотрудник", "opp_emp", "опп"]
+            : selectId === "transfer-target-verdict"
+                ? ["вердикт", "решение", "opp_deecision", "opp_decision"]
+                : ["комментарий", "opp_comment", "comment"];
+
+        for (const item of candidates) {
+            const norm = toText(item?.norm);
+            if (!norm) continue;
+            if (matchers.some((part) => norm.includes(part))) {
+                return item.index;
+            }
+        }
+        return null;
+    }
+
+    async function ensureTransferSourceRowsLoaded(currentUserWhId) {
+        if (transferState.sourceRowsLoaded) return;
+        setTransferStatus("Загружаем данные чистых списаний...", "loading");
+
+        const [rows, decisionOptions] = await Promise.all([
+            fetchAllPureRowsForWh(currentUserWhId),
+            loadDecisionOptionsForPureTable(currentUserWhId).catch((error) => {
+                console.error("pure_losses transfer decision options load failed:", error);
+                return [];
+            })
+        ]);
+        resolvePureTableUpdateColumns(rows);
+
+        const sourceMap = new Map();
+        const verdictSet = new Set();
+
+        (Array.isArray(decisionOptions) ? decisionOptions : []).forEach((option) => {
+            const verdict = extractDecisionValue(option?.value ?? option);
+            if (isTransferVerdictValueUsable(verdict)) verdictSet.add(verdict);
+        });
+
+        rows.forEach((row) => {
+            const shk = normalizeShk(row?.shk);
+            if (shk && !sourceMap.has(shk)) {
+                sourceMap.set(shk, row);
+            }
+            const verdict = extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision));
+            if (isTransferVerdictValueUsable(verdict)) verdictSet.add(verdict);
+        });
+
+        transferState.sourceByShk = sourceMap;
+        transferState.verdictValues = Array.from(verdictSet).sort((a, b) => String(a).localeCompare(String(b), "ru"));
+        transferState.sourceRowsLoaded = true;
+        setTransferStatus("Данные для переноса готовы.", "success");
+    }
+
+    function isTransferVerdictValueUsable(value) {
+        const normalized = extractDecisionValue(value);
+        if (!normalized) return false;
+        return normalized.toLowerCase() !== "[object object]";
+    }
+
+    function renderTransferVerdictRemapList() {
+        if (!transferVerdictRemapListEl) return;
+        transferVerdictRemapListEl.innerHTML = "";
+
+        if (!transferState.verdictValues.length) {
+            const empty = document.createElement("div");
+            empty.className = "pure-transfer-muted";
+            empty.textContent = "В базе пока нет вердиктов для подмены.";
+            transferVerdictRemapListEl.appendChild(empty);
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        transferState.verdictValues.forEach((value) => {
+            const key = decisionOptionKey(value);
+            const row = document.createElement("div");
+            row.className = "pure-transfer-remap-row";
+
+            const from = document.createElement("div");
+            from.className = "pure-transfer-remap-from";
+            from.textContent = value;
+
+            const arrow = document.createElement("div");
+            arrow.className = "pure-transfer-arrow";
+            arrow.textContent = "→";
+
+            const input = document.createElement("input");
+            input.type = "text";
+            input.className = "input";
+            input.placeholder = "Новое значение";
+            input.value = transferState.verdictReplaceMap.get(key) || "";
+            input.addEventListener("input", () => {
+                const next = toText(input.value);
+                if (next) transferState.verdictReplaceMap.set(key, next);
+                else transferState.verdictReplaceMap.delete(key);
+            });
+
+            row.append(from, arrow, input);
+            fragment.appendChild(row);
+        });
+
+        transferVerdictRemapListEl.appendChild(fragment);
+    }
+
+    async function runTransferToExcel(currentUserWhId) {
+        if (!transferState.workbook || !transferState.worksheet) {
+            setTransferStatus("Сначала загрузите файл таблицы.", "error");
+            return;
+        }
+
+        const barcodeIdx = toIntegerOrNull(transferBarcodeSelectEl?.value);
+        if (barcodeIdx === null || barcodeIdx < 0) {
+            setTransferStatus("Выберите столбец ШК.", "error");
+            return;
+        }
+
+        const selectedFields = getSelectedTransferFields();
+        if (!selectedFields.length) {
+            setTransferStatus("Выберите хотя бы одно поле для переноса.", "error");
+            return;
+        }
+
+        const targets = {};
+        for (const field of selectedFields) {
+            const selectEl = getTransferTargetSelect(field);
+            const targetIdx = toIntegerOrNull(selectEl?.value);
+            if (targetIdx === null || targetIdx < 0) {
+                setTransferStatus("Заполните настройки столбцов для выбранных полей.", "error");
+                return;
+            }
+            targets[field] = targetIdx;
+        }
+
+        try {
+            transferStartBtn.disabled = true;
+            setTransferStatus("Переносим данные...", "loading");
+            await ensureTransferSourceRowsLoaded(currentUserWhId);
+
+            const ws = transferState.worksheet;
+            const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+            let matchedRows = 0;
+            let writtenCells = 0;
+
+            for (let r = 1; r <= range.e.r; r += 1) {
+                const sourceRef = XLSX.utils.encode_cell({ r, c: barcodeIdx });
+                const sourceCell = ws[sourceRef];
+                const sourceValue = sourceCell ? (sourceCell.v ?? sourceCell.w ?? "") : "";
+                const shk = normalizeShk(sourceValue);
+                if (!shk) continue;
+
+                const pureRow = transferState.sourceByShk.get(shk);
+                if (!pureRow) continue;
+                matchedRows += 1;
+
+                if (targets.emp !== undefined) {
+                    const empValue = toText(readEditableColumnValue(pureRow, tableState.updateColumnMap.emp));
+                    setWorksheetCellValue(ws, r, targets.emp, empValue);
+                    writtenCells += 1;
+                }
+
+                if (targets.verdict !== undefined) {
+                    const rawVerdict = extractDecisionValue(readEditableColumnValue(pureRow, tableState.updateColumnMap.decision));
+                    const verdictKey = decisionOptionKey(rawVerdict);
+                    const replaceEnabled = Boolean(transferVerdictRemapEnabledEl?.checked);
+                    const replaced = replaceEnabled
+                        ? toText(transferState.verdictReplaceMap.get(verdictKey))
+                        : "";
+                    const finalVerdict = replaced || rawVerdict;
+                    setWorksheetCellValue(ws, r, targets.verdict, finalVerdict);
+                    writtenCells += 1;
+                }
+
+                if (targets.comment !== undefined) {
+                    const commentValue = toText(readEditableColumnValue(pureRow, tableState.updateColumnMap.comment));
+                    setWorksheetCellValue(ws, r, targets.comment, commentValue);
+                    writtenCells += 1;
+                }
+            }
+
+            transferState.completed = true;
+            transferState.matchedRows = matchedRows;
+            transferState.writtenCells = writtenCells;
+            refreshTransferStepVisibility();
+            refreshTransferStartButtonState();
+            setTransferStatus(`Готово. Совпало ШК: ${formatInt(matchedRows)}. Записано ячеек: ${formatInt(writtenCells)}.`, "success");
+        } catch (error) {
+            setTransferStatus(String(error?.message || error || "Ошибка переноса"), "error");
+        } finally {
+            if (transferStartBtn) transferStartBtn.disabled = false;
+            refreshTransferStartButtonState();
+        }
+    }
+
+    function setWorksheetCellValue(worksheet, rowIndex, columnIndex, value) {
+        if (!worksheet) return;
+        const ref = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+        const text = value === null || value === undefined ? "" : String(value);
+        worksheet[ref] = { t: "s", v: text };
+
+        const existingRange = XLSX.utils.decode_range(worksheet["!ref"] || "A1:A1");
+        if (rowIndex > existingRange.e.r) existingRange.e.r = rowIndex;
+        if (columnIndex > existingRange.e.c) existingRange.e.c = columnIndex;
+        worksheet["!ref"] = XLSX.utils.encode_range(existingRange);
+    }
+
+    function downloadTransferredWorkbook() {
+        if (!transferState.workbook) {
+            setTransferStatus("Нет файла для скачивания.", "error");
+            return;
+        }
+        const base = toText(transferState.fileName).replace(/\.(xlsx|xls)$/i, "") || "transfer";
+        const fileName = `${base}_updated.xlsx`;
+        XLSX.writeFile(transferState.workbook, fileName);
     }
 
     function initPureTableModal() {
@@ -1408,6 +2215,17 @@
         return Array.from(statuses);
     }
 
+    function getLatestNmRepEntry(row) {
+        const nmRows = Array.isArray(row?.wmsNmRep) ? row.wmsNmRep : [];
+        return nmRows.length ? nmRows[0] : null;
+    }
+
+    function isSameShkAcceptance(row, nmEntry) {
+        const rowShk = normalizeShk(row?.shk);
+        const assignedShk = normalizeShk(nmEntry?.assignedShk);
+        return Boolean(rowShk && assignedShk && rowShk === assignedShk);
+    }
+
     function renderPureTablePlaceholder(message) {
         if (!pureTableBody) return;
         closeAllWmsPopovers();
@@ -1439,12 +2257,19 @@
             const extraStatuses = getRowExtraStatuses(row);
             const hasTwoShkOrEmpty = extraStatuses.includes("2 ШК") || extraStatuses.includes("Пустая упаковка");
             const hasAcceptance = extraStatuses.includes("Оприход");
+            const latestNmRep = getLatestNmRepEntry(row);
+            const hasSameShkAcceptance = hasAcceptance && isSameShkAcceptance(row, latestNmRep);
             const decisionOption = getDecisionOptionByValue(row.decision);
             const isDecisionVisualRow = !hasAcceptance && !hasTwoShkOrEmpty && Boolean(decisionOption?.rowColor);
             let rowFillColor = "";
             if (hasAcceptance) {
-                tr.classList.add("pure-row-oprihod");
-                rowFillColor = "#5b21b6";
+                if (hasSameShkAcceptance) {
+                    tr.classList.add("pure-row-oprihod-same-shk");
+                    rowFillColor = "#15803d";
+                } else {
+                    tr.classList.add("pure-row-oprihod");
+                    rowFillColor = "#5b21b6";
+                }
             } else if (hasTwoShkOrEmpty) {
                 tr.classList.add("pure-row-blackout");
                 rowFillColor = "#0f172a";
@@ -1829,13 +2654,15 @@
         const nmRows = Array.isArray(row?.wmsNmRep) ? row.wmsNmRep : [];
         if (nmRows.length) {
             const latest = nmRows[0];
+            const sameShk = isSameShkAcceptance(row, latest);
             out.push({
                 kind: "nm_rep",
-                label: "Оприход",
+                label: sameShk ? "Обнаружен без ШК" : "Оприход",
                 dateText: formatDateTimeMsk(latest?.dateValue),
                 emp: latest?.emp,
                 empName: latest?.empName,
-                assignedShk: latest?.assignedShk
+                assignedShk: latest?.assignedShk,
+                sameShk
             });
         }
 

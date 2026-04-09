@@ -217,8 +217,9 @@
         } catch (e) {}
     }
 
-    function setIdentifierLine(shk) {
+    function setIdentifierLine(shk, nm) {
         const value = String(shk || "").trim();
+        const nmValue = String(nm || "").trim();
         if (!value) {
             identifierLineEl.style.display = "none";
             identifierLineEl.textContent = "";
@@ -226,7 +227,14 @@
         }
 
         identifierLineEl.style.display = "";
-        identifierLineEl.textContent = `Идентификатор товара ${value}`;
+        identifierLineEl.textContent = nmValue
+            ? `Идентификатор товара ${value} • НМ ${nmValue}`
+            : `Идентификатор товара ${value}`;
+    }
+
+    function getMatchedNmFromNmRepRows(rows) {
+        const matched = (rows || []).find(row => String(row?.nm || "").trim());
+        return String(matched?.nm || "").trim();
     }
 
     function resetTable() {
@@ -641,6 +649,9 @@
             if (twoShkResult.error) {
                 console.error("Ошибка поиска по 2shk_rep:", twoShkResult.error);
             }
+
+            const matchedNm = getMatchedNmFromNmRepRows(nmRepResult.rows);
+            setIdentifierLine(shk, matchedNm);
 
             const twoShkWhIds = Array.from(new Set(
                 (twoShkResult.rows || [])

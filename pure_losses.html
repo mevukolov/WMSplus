@@ -142,6 +142,26 @@
             border-color: #eab308;
         }
 
+        .pure-upload-actions {
+            margin-top: 16px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .pure-upload-actions .btn {
+            width: 100%;
+            justify-content: center;
+        }
+
+        .pure-upload-divider {
+            width: 100%;
+            height: 1px;
+            background: #e2e8f0;
+            border-radius: 999px;
+        }
+
         .pure-center-toolbar {
             display: flex;
             justify-content: stretch;
@@ -413,6 +433,196 @@
             display: flex;
             justify-content: center;
             margin-top: 4px;
+        }
+
+        .pure-transfer-modal-content {
+            width: min(900px, calc(100vw - 32px));
+            max-height: calc(100vh - 40px);
+            overflow: auto;
+            gap: 12px;
+            transition: width 0.24s ease, max-height 0.24s ease;
+        }
+
+        .pure-transfer-status {
+            min-height: 18px;
+            font-size: 13px;
+            color: #64748b;
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 10px;
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        .pure-transfer-step {
+            border: 1px solid #dbe3ec;
+            border-radius: 12px;
+            background: #f8fafc;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow: hidden;
+            max-height: 1200px;
+            opacity: 1;
+            transform: translateY(0);
+            transition: max-height 0.34s ease, opacity 0.26s ease, transform 0.26s ease, margin 0.26s ease, padding 0.26s ease, border-color 0.26s ease;
+        }
+
+        .pure-transfer-step.hidden {
+            display: flex !important;
+            max-height: 0;
+            opacity: 0;
+            transform: translateY(-4px);
+            margin: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            border-color: transparent;
+            pointer-events: none;
+        }
+
+        .pure-transfer-step-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #0f172a;
+            line-height: 1.35;
+        }
+
+        .pure-transfer-step-index {
+            width: 22px;
+            min-width: 22px;
+            height: 22px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #475569;
+            font-size: 12px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+
+        .pure-transfer-step-title-text {
+            min-width: 0;
+        }
+
+        .pure-transfer-step.is-done {
+            border-color: #bbf7d0;
+            background: #f6fdf8;
+        }
+
+        .pure-transfer-step.is-done .pure-transfer-step-index {
+            border-color: #22c55e;
+            background: #dcfce7;
+            color: #15803d;
+        }
+
+        .pure-transfer-step.is-done .pure-transfer-step-title-text {
+            color: #15803d;
+        }
+
+        .pure-transfer-muted {
+            font-size: 12px;
+            color: #64748b;
+            line-height: 1.35;
+        }
+
+        .pure-transfer-select {
+            width: 100%;
+        }
+
+        .pure-transfer-field {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 8px;
+            background: #ffffff;
+        }
+
+        .pure-transfer-check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #0f172a;
+            cursor: pointer;
+        }
+
+        .pure-transfer-settings {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px dashed #dbe3ec;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow: hidden;
+            max-height: 520px;
+            opacity: 1;
+            transform: translateY(0);
+            transition: max-height 0.26s ease, opacity 0.22s ease, transform 0.22s ease, margin 0.22s ease, padding 0.22s ease;
+        }
+
+        .pure-transfer-settings.hidden {
+            display: flex !important;
+            max-height: 0;
+            opacity: 0;
+            transform: translateY(-3px);
+            margin-top: 0;
+            padding-top: 0;
+            border-top-color: transparent;
+            pointer-events: none;
+        }
+
+        #transfer-barcode-manual-wrap.hidden {
+            display: none;
+        }
+
+        .pure-transfer-settings-label {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .pure-transfer-remap-list {
+            display: grid;
+            gap: 6px;
+            max-height: 200px;
+            overflow: auto;
+            padding-right: 2px;
+        }
+
+        .pure-transfer-remap-row {
+            display: grid;
+            grid-template-columns: minmax(120px, 1fr) 18px minmax(120px, 1fr);
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pure-transfer-remap-from {
+            font-size: 12px;
+            color: #334155;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: #f8fafc;
+            padding: 5px 7px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .pure-transfer-arrow {
+            text-align: center;
+            color: #64748b;
+            font-size: 12px;
+        }
+
+        .pure-transfer-actions {
+            display: flex;
+            justify-content: center;
         }
 
         .pure-full-modal-backdrop {
@@ -980,6 +1190,12 @@
             border-color: #6d28d9;
         }
 
+        .pure-data-table tr.pure-row-oprihod-same-shk td {
+            background: #166534 !important;
+            color: #f8fafc;
+            border-color: #15803d;
+        }
+
         .pure-data-table tr.pure-row-decision td {
             background: var(--pure-row-decision-bg, #e2e8f0) !important;
             color: var(--pure-row-decision-fg, #0f172a);
@@ -996,6 +1212,11 @@
             color: #e9d5ff;
         }
 
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-subject-nm,
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-brand-sub {
+            color: #bbf7d0;
+        }
+
         .pure-data-table tr.pure-row-decision .pure-subject-nm,
         .pure-data-table tr.pure-row-decision .pure-brand-sub {
             color: rgba(15, 23, 42, 0.7);
@@ -1010,6 +1231,12 @@
         .pure-data-table tr.pure-row-oprihod .pure-shk-pill {
             border-color: rgba(243, 232, 255, 0.4);
             background: rgba(216, 180, 254, 0.35);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-shk-pill {
+            border-color: rgba(187, 247, 208, 0.4);
+            background: rgba(34, 197, 94, 0.34);
             color: #f8fafc;
         }
 
@@ -1033,6 +1260,13 @@
             color: inherit;
         }
 
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-shk-link,
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-shk-link:visited,
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-shk-link:hover,
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-shk-link:focus-visible {
+            color: inherit;
+        }
+
         .pure-data-table tr.pure-row-decision .pure-shk-link,
         .pure-data-table tr.pure-row-decision .pure-shk-link:visited,
         .pure-data-table tr.pure-row-decision .pure-shk-link:hover,
@@ -1049,6 +1283,12 @@
         .pure-data-table tr.pure-row-oprihod .pure-wms-btn {
             background: rgba(255, 255, 255, 0.18);
             border-color: rgba(255, 255, 255, 0.38);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-wms-btn {
+            background: rgba(255, 255, 255, 0.18);
+            border-color: rgba(255, 255, 255, 0.4);
             color: #f8fafc;
         }
 
@@ -1085,9 +1325,22 @@
             color: #ffffff;
         }
 
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-wms-btn:hover,
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-wms-btn:focus-visible {
+            background: rgba(255, 255, 255, 0.28);
+            border-color: rgba(255, 255, 255, 0.56);
+            color: #ffffff;
+        }
+
         .pure-data-table tr.pure-row-oprihod .pure-row-verdict-btn {
             background: rgba(255, 255, 255, 0.18);
             border-color: rgba(255, 255, 255, 0.38);
+            color: #f8fafc;
+        }
+
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-row-verdict-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.42);
             color: #f8fafc;
         }
 
@@ -1100,6 +1353,13 @@
         .pure-data-table tr.pure-row-oprihod .pure-row-verdict-btn:focus-visible {
             background: rgba(255, 255, 255, 0.28);
             border-color: rgba(255, 255, 255, 0.56);
+            color: #ffffff;
+        }
+
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-row-verdict-btn:hover,
+        .pure-data-table tr.pure-row-oprihod-same-shk .pure-row-verdict-btn:focus-visible {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.58);
             color: #ffffff;
         }
 
@@ -1119,6 +1379,12 @@
             background: rgba(250, 245, 255, 0.98);
             color: #2e1065;
             border-color: #d8b4fe;
+        }
+
+        .pure-data-table tr.pure-row-oprihod-same-shk .input {
+            background: rgba(240, 253, 244, 0.98);
+            color: #14532d;
+            border-color: #86efac;
         }
 
         .pure-data-table tr.pure-row-decision .input {
@@ -1229,8 +1495,10 @@
                 <div id="upload-calendar-grid" class="pure-upload-calendar-grid"></div>
             </div>
 
-            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-                <button id="refresh-btn" class="btn btn-rect">Обновить данные</button>
+            <div class="pure-upload-actions">
+                <button id="refresh-btn" class="btn btn-rect" type="button">Обновить данные</button>
+                <div class="pure-upload-divider" aria-hidden="true"></div>
+                <button id="transfer-btn" class="btn btn-rect" type="button">Перенести данные</button>
                 <input type="file" id="file-input" accept=".xlsx,.xls" hidden>
             </div>
 
@@ -1423,6 +1691,109 @@
         <div class="pure-update-help-actions">
             <button id="pure-update-file-btn" class="btn btn-rect" type="button">Загрузить файл</button>
         </div>
+    </div>
+</div>
+
+<div id="pure-transfer-modal" class="pure-mini-modal hidden" aria-hidden="true">
+    <div class="pure-mini-modal-backdrop" data-close-transfer-modal="1"></div>
+    <div class="pure-mini-modal-content pure-transfer-modal-content" role="dialog" aria-modal="true" aria-labelledby="pure-transfer-title">
+        <div class="pure-update-help-header">
+            <div id="pure-transfer-title" class="pure-mini-modal-title">Перенос данных в таблицу Excel</div>
+            <button id="pure-transfer-close-btn" class="pure-update-help-close" type="button" aria-label="Закрыть">✕</button>
+        </div>
+        <div id="pure-transfer-status" class="pure-mini-modal-hint pure-transfer-status"></div>
+
+        <section id="transfer-step-1" class="pure-transfer-step">
+            <div class="pure-transfer-step-title">
+                <span class="pure-transfer-step-index">1</span>
+                <span class="pure-transfer-step-title-text">Выберите файл таблицы, куда необходимо перенести данные</span>
+            </div>
+            <div class="pure-transfer-actions">
+                <button id="transfer-upload-file-btn" class="btn btn-rect" type="button">Загрузить файл</button>
+                <input type="file" id="transfer-file-input" accept=".xlsx,.xls" hidden>
+            </div>
+            <div id="transfer-file-name" class="pure-transfer-muted"></div>
+        </section>
+
+        <section id="transfer-step-2" class="pure-transfer-step hidden">
+            <div class="pure-transfer-step-title">
+                <span class="pure-transfer-step-index">2</span>
+                <span class="pure-transfer-step-title-text">Выберите столбец, где указано значение «ШК»</span>
+            </div>
+            <div id="transfer-barcode-auto" class="pure-transfer-muted"></div>
+            <div id="transfer-barcode-manual-wrap" class="hidden">
+                <div class="pure-transfer-settings-label">Столбец с ШК (выбор вручную)</div>
+                <select id="transfer-barcode-select" class="input pure-transfer-select"></select>
+            </div>
+        </section>
+
+        <section id="transfer-step-3" class="pure-transfer-step hidden">
+            <div class="pure-transfer-step-title">
+                <span class="pure-transfer-step-index">3</span>
+                <span class="pure-transfer-step-title-text">Выберите необходимые для переноса данные:</span>
+            </div>
+
+            <div class="pure-transfer-field">
+                <label class="pure-transfer-check">
+                    <input id="transfer-field-emp" type="checkbox">
+                    Сотрудник ОПП
+                </label>
+                <div id="transfer-settings-emp" class="pure-transfer-settings hidden">
+                    <div class="pure-transfer-settings-label">Столбец, куда нужно перенести значения</div>
+                    <select id="transfer-target-emp" class="input pure-transfer-select"></select>
+                </div>
+            </div>
+
+            <div class="pure-transfer-field">
+                <label class="pure-transfer-check">
+                    <input id="transfer-field-verdict" type="checkbox">
+                    Вердикт
+                </label>
+                <div id="transfer-settings-verdict" class="pure-transfer-settings hidden">
+                    <div class="pure-transfer-settings-label">Столбец, куда нужно перенести значения</div>
+                    <select id="transfer-target-verdict" class="input pure-transfer-select"></select>
+                    <label class="pure-transfer-check">
+                        <input id="transfer-verdict-remap-enabled" type="checkbox">
+                        Подмена значений
+                    </label>
+                    <div id="transfer-verdict-remap-wrap" class="pure-transfer-settings hidden">
+                        <div class="pure-transfer-settings-label">Настройте замену вердиктов</div>
+                        <div id="transfer-verdict-remap-list" class="pure-transfer-remap-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pure-transfer-field">
+                <label class="pure-transfer-check">
+                    <input id="transfer-field-comment" type="checkbox">
+                    Комментарий
+                </label>
+                <div id="transfer-settings-comment" class="pure-transfer-settings hidden">
+                    <div class="pure-transfer-settings-label">Столбец, куда нужно перенести значения</div>
+                    <select id="transfer-target-comment" class="input pure-transfer-select"></select>
+                </div>
+            </div>
+        </section>
+
+        <section id="transfer-step-4" class="pure-transfer-step hidden">
+            <div class="pure-transfer-step-title">
+                <span class="pure-transfer-step-index">4</span>
+                <span class="pure-transfer-step-title-text">Начните перенос данных</span>
+            </div>
+            <div class="pure-transfer-actions">
+                <button id="transfer-start-btn" class="btn btn-rect" type="button" disabled>Начать перенос</button>
+            </div>
+        </section>
+
+        <section id="transfer-step-5" class="pure-transfer-step hidden">
+            <div class="pure-transfer-step-title">
+                <span class="pure-transfer-step-index">5</span>
+                <span class="pure-transfer-step-title-text">Перенос завершен</span>
+            </div>
+            <div class="pure-transfer-actions">
+                <button id="transfer-download-btn" class="btn btn-rect" type="button">Скачать таблицу</button>
+            </div>
+        </section>
     </div>
 </div>
 

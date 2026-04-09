@@ -4,9 +4,14 @@
     const API_DATA_TYPE = "opp_table_analisys_script";
     const DEADLINES_DATA_TYPE = "opp_table_deadlines";
     const EMPLOYEES_DATA_TYPE = "opp_table_employees";
+    const DATA_TYPE_PURE_DEADLINES = "opp_pure_deadlines";
     const REPORT_CACHE_TABLE = "opp_reports_cache";
     const CACHE_SCOPE_DASHBOARD_SHIFT = "opp_dashboard_shift";
     const CACHE_SCOPE_DASHBOARD_MONTH = "opp_dashboard_month";
+    const CACHE_SCOPE_DASHBOARD_ROLLING30 = "opp_dashboard_rolling30";
+    const TABLE_PURE = "pure_losses_rep";
+    const PURE_DECISION_COLUMNS = ["opp_deecision", "opp_decision"];
+    const PURE_SOLVED_COLUMNS = ["date_solved", "dt_solved"];
     const SUPPORTED_DEADLINE_KEYS = ["SPS_WMI", "SMC", "SMS", "WMI_BZ", "RWP", "24", "ORS", "REPACK"];
     const MAIN_EMPLOYEE_KEYS_FOR_CARD = new Set(["REPACK", "SPS_WMI", "WMI_BZ", "SMC", "SMS", "RWP"]);
     const DEADLINE_LABELS = {
@@ -88,6 +93,10 @@
     let selectedShiftId = "";
     let lastReportGeneratedAtText = "";
     let shiftBreakdownChart = null;
+    let lastPureBacklogPercent = null;
+    let lastPureResolvedByShift = new Map();
+    let lastPureMissingDates = [];
+    let currentPureDeadlineConfig = null;
 
     let pageTitleObserver = null;
 
@@ -514,6 +523,475 @@
             if (n !== null) return n;
         }
         return null;
+    }
+
+    function extractMissingColumnName(error) {
+        const text = String(error?.message || error?.details || "");
+        if (!text) return "";
+        const match = text.match(/column\s+([^\s]+)\s+does not exist/i)
+            || text.match(/could not find(?:\s+the)?\s+"?([a-z0-9_.]+)"?\s+column/i);
+        if (!match || !match[1]) return "";
+        const token = String(match[1]).replace(/"/g, "");
+        const parts = token.split(".");
+        return parts[parts.length - 1] || "";
+    }
+
+    function parseDateValue(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (value instanceof Date && !Number.isNaN(value.getTime())) {
+            return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+        }
+        if (typeof value === "number" && Number.isFinite(value)) {
+            const excelEpochOffset = 25569;
+            const dayMs = 86400 * 1000;
+            const ts = (Math.floor(value) - excelEpochOffset) * dayMs;
+            const d = new Date(ts);
+            if (!Number.isNaN(d.getTime())) {
+                return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+            }
+        }
+        const raw = String(value).trim();
+        if (!raw) return null;
+        const datePart = raw.replace("T", " ").split(" ")[0];
+        let match = datePart.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+        if (match) {
+            let year = Number(match[3]);
+            if (year < 100) year += 2000;
+            const date = new Date(year, Number(match[2]) - 1, Number(match[1]));
+            if (!Number.isNaN(date.getTime())) return date;
+        }
+        match = datePart.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+        if (match) {
+            const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+            if (!Number.isNaN(date.getTime())) return date;
+        }
+        const parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) {
+            return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+        }
+        return null;
+    }
+
+    function parseTimestampValue(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        const raw = String(value).trim();
+        if (!raw) return null;
+        let normalized = raw.replace(" ", "T");
+        normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+        const hasOffset = /([zZ]|[+-]\d{2}:\d{2}|[+-]\d{2})$/.test(normalized);
+        const parsed = hasOffset ? new Date(normalized) : new Date(`${normalized}Z`);
+        if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+        const dateOnly = parseDateValue(raw);
+        if (dateOnly && !Number.isNaN(dateOnly.getTime())) return dateOnly.getTime();
+        return null;
+    }
+
+    function sanitizeDecisionOptionText(value) {
+        return String(value || "")
+            .trim()
+            .replace(/^"+|"+$/g, "")
+            .replace(/^'+|'+$/g, "")
+            .replace(/\s+/g, " ");
+    }
+
+    function extractDecisionValue(value) {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            return sanitizeDecisionOptionText(value);
+        }
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                const normalized = extractDecisionValue(item);
+                if (normalized) return normalized;
+            }
+            return "";
+        }
+        if (typeof value === "object") {
+            const candidate = value.value
+                ?? value.text
+                ?? value.label
+                ?? value.option
+                ?? value.name
+                ?? "";
+            return extractDecisionValue(candidate);
+        }
+        return "";
+    }
+
+    async function fetchPureRowsWithColumns(currentUserWhId, columns, buildQuery) {
+        if (!window.supabaseClient || !currentUserWhId) return [];
+        let cols = Array.isArray(columns) ? columns.slice() : [];
+        const pageSize = 1000;
+
+        while (cols.length) {
+            try {
+                const all = [];
+                for (let from = 0; ; from += pageSize) {
+                    const to = from + pageSize - 1;
+                    let query = window.supabaseClient
+                        .from(TABLE_PURE)
+                        .select(cols.join(","))
+                        .eq("wh_id", currentUserWhId);
+                    if (typeof buildQuery === "function") {
+                        query = buildQuery(query);
+                    }
+                    const { data, error } = await query.range(from, to);
+                    if (error) throw error;
+                    const chunk = Array.isArray(data) ? data : [];
+                    if (!chunk.length) break;
+                    all.push(...chunk);
+                    if (chunk.length < pageSize) break;
+                }
+                return all;
+            } catch (error) {
+                const missing = extractMissingColumnName(error);
+                if (missing && cols.includes(missing)) {
+                    cols = cols.filter((col) => col !== missing);
+                    continue;
+                }
+                console.warn("Не удалось загрузить pure_losses_rep:", error instanceof Error ? error.message : error);
+                return [];
+            }
+        }
+        return [];
+    }
+
+    function resolvePureDecision(row) {
+        if (!row) return "";
+        for (const col of PURE_DECISION_COLUMNS) {
+            if (Object.prototype.hasOwnProperty.call(row, col)) {
+                const value = extractDecisionValue(row[col]);
+                if (value) return value;
+            }
+        }
+        return "";
+    }
+
+    function dedupePureRowsByShk(rows) {
+        const out = [];
+        const seen = new Set();
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const shk = normalizeKey(row?.shk);
+            if (!shk || seen.has(shk)) return;
+            seen.add(shk);
+            out.push(row);
+        });
+        return out;
+    }
+
+    function getPureTodayDate() {
+        const now = moscowNowDate();
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+
+    function addDays(dateValue, days) {
+        const base = dateValue instanceof Date
+            ? new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+            : getPureTodayDate();
+        base.setDate(base.getDate() + Number(days || 0));
+        return base;
+    }
+
+    function getWeekStartMonday(dateValue) {
+        const base = dateValue instanceof Date
+            ? new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+            : getPureTodayDate();
+        const day = base.getDay();
+        const diffToMonday = day === 0 ? -6 : 1 - day;
+        return addDays(base, diffToMonday);
+    }
+
+    function compareDateTs(leftTs, rightTs) {
+        const left = Number.isFinite(leftTs) ? leftTs : null;
+        const right = Number.isFinite(rightTs) ? rightTs : null;
+        if (left === null && right === null) return 0;
+        if (left !== null && right === null) return 1;
+        if (left === null && right !== null) return -1;
+        if (left === right) return 0;
+        return left > right ? 1 : -1;
+    }
+
+    function parsePureDeadlineNumber(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+        const text = String(value).trim().replace(/['"]/g, "").replace(",", ".");
+        if (!text) return null;
+        const parsed = Number(text);
+        if (!Number.isFinite(parsed)) return null;
+        return Math.trunc(parsed);
+    }
+
+    function normalizePureDeadlineKey(value) {
+        return String(value || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "")
+            .replace(/['"]/g, "");
+    }
+
+    function extractPureDeadlineOffset(rawData) {
+        if (rawData === null || rawData === undefined) return null;
+
+        if (Array.isArray(rawData)) {
+            for (const item of rawData) {
+                const nested = extractPureDeadlineOffset(item);
+                if (nested !== null) return nested;
+            }
+            return null;
+        }
+
+        if (typeof rawData === "object") {
+            const obj = rawData;
+
+            if (Array.isArray(obj.deadlines)) {
+                for (const item of obj.deadlines) {
+                    if (!item || typeof item !== "object") continue;
+                    const key = normalizePureDeadlineKey(item.key ?? item.name ?? item.status ?? "");
+                    if (key !== "pure") continue;
+                    const value = parsePureDeadlineNumber(item.offset_days ?? item.offset ?? item.value);
+                    if (value !== null) return value;
+                }
+            }
+
+            const directPure = obj.pure ?? obj.Pure ?? obj.PURE;
+            const directValue = parsePureDeadlineNumber(directPure);
+            if (directValue !== null) return directValue;
+
+            for (const [key, value] of Object.entries(obj)) {
+                const normalizedKey = normalizePureDeadlineKey(key);
+                if (normalizedKey === "pure") {
+                    const parsed = parsePureDeadlineNumber(value);
+                    if (parsed !== null) return parsed;
+                    continue;
+                }
+
+                if (normalizedKey === "deadlines" || normalizedKey === "values" || normalizedKey === "config") {
+                    const nested = extractPureDeadlineOffset(value);
+                    if (nested !== null) return nested;
+                }
+            }
+            return null;
+        }
+
+        const text = normalizeKey(rawData);
+        if (!text) return null;
+
+        if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+            try {
+                const parsed = JSON.parse(text);
+                const nested = extractPureDeadlineOffset(parsed);
+                if (nested !== null) return nested;
+            } catch (_) {
+                // ignore JSON parsing error
+            }
+        }
+
+        const pairRegex = /["']?pure["']?\s*:\s*["']?(-?\d+(?:[.,]\d+)?)["']?/i;
+        const match = text.match(pairRegex);
+        if (match && match[1] !== undefined) {
+            const parsed = parsePureDeadlineNumber(match[1]);
+            if (parsed !== null) return parsed;
+        }
+
+        const lines = text.split(/[\r\n;]+/);
+        for (const line of lines) {
+            const normalizedLine = normalizeKey(line);
+            if (!normalizedLine) continue;
+            const lineMatch = normalizedLine.match(/^["']?pure["']?\s*[:=,]\s*["']?(-?\d+(?:[.,]\d+)?)["']?$/i);
+            if (!lineMatch) continue;
+            const parsed = parsePureDeadlineNumber(lineMatch[1]);
+            if (parsed !== null) return parsed;
+        }
+
+        return null;
+    }
+
+    function extractPureDeadlineOffsetFromRows(rows) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        for (const row of safeRows) {
+            const offset = extractPureDeadlineOffset(row?.data);
+            if (offset !== null) return offset;
+        }
+        return null;
+    }
+
+    function createPureDeadlineConfig(offsetDays) {
+        const parsedOffset = parsePureDeadlineNumber(offsetDays);
+        if (parsedOffset === null) {
+            return {
+                offsetDays: null,
+                cutoffDate: null,
+                cutoffIso: ""
+            };
+        }
+
+        const today = getPureTodayDate();
+        const cutoffDate = addDays(today, parsedOffset);
+        return {
+            offsetDays: parsedOffset,
+            cutoffDate,
+            cutoffIso: toIsoDate(cutoffDate)
+        };
+    }
+
+    function normalizePureDeadlineConfig(config) {
+        if (!config || typeof config !== "object") {
+            return createPureDeadlineConfig(null);
+        }
+        return createPureDeadlineConfig(config.offsetDays);
+    }
+
+    function isDateAllowedByDeadline(dateValue, pureDeadlineConfig) {
+        if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return false;
+        const config = normalizePureDeadlineConfig(pureDeadlineConfig);
+        if (!(config.cutoffDate instanceof Date)) return true;
+        return compareDateTs(dateValue.getTime(), config.cutoffDate.getTime()) <= 0;
+    }
+
+    function isCalendarDateInDeadlineRange(dateValue, todayValue, pureDeadlineConfig) {
+        if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return false;
+        const today = todayValue instanceof Date ? todayValue : getPureTodayDate();
+        if (compareDateTs(dateValue.getTime(), today.getTime()) > 0) return false;
+        return isDateAllowedByDeadline(dateValue, pureDeadlineConfig);
+    }
+
+    async function loadPureDeadlineConfig(currentUserWhId) {
+        if (currentPureDeadlineConfig) return currentPureDeadlineConfig;
+        if (!window.supabaseClient) {
+            currentPureDeadlineConfig = createPureDeadlineConfig(null);
+            return currentPureDeadlineConfig;
+        }
+
+        const fetchRows = async (withWhFilter) => {
+            let query = window.supabaseClient
+                .from("wh_data_rep")
+                .select("data, wh_id, data_type")
+                .eq("data_type", DATA_TYPE_PURE_DEADLINES)
+                .limit(300);
+
+            if (withWhFilter && currentUserWhId) {
+                query = query.eq("wh_id", normalizeWhId(currentUserWhId));
+            }
+
+            const { data, error } = await query;
+            if (error) {
+                const errorText = String(error?.message || error?.details || error?.code || "unknown");
+                throw new Error(`Не удалось загрузить дедлайны pure: ${errorText}`);
+            }
+            return Array.isArray(data) ? data : [];
+        };
+
+        let scopedRows = [];
+        try {
+            scopedRows = await fetchRows(true);
+        } catch (error) {
+            console.warn("Pure deadline scoped load failed:", error instanceof Error ? error.message : error);
+        }
+
+        let offsetDays = extractPureDeadlineOffsetFromRows(scopedRows);
+        if (offsetDays === null) {
+            try {
+                const fallbackRows = await fetchRows(false);
+                offsetDays = extractPureDeadlineOffsetFromRows(fallbackRows);
+            } catch (error) {
+                console.warn("Pure deadline fallback load failed:", error instanceof Error ? error.message : error);
+            }
+        }
+
+        currentPureDeadlineConfig = createPureDeadlineConfig(offsetDays);
+        return currentPureDeadlineConfig;
+    }
+
+    async function fetchPureBacklogRows(currentUserWhId, periodFromIso, periodToIso) {
+        if (!currentUserWhId) return [];
+        const columns = ["shk", "date_lost", ...PURE_DECISION_COLUMNS];
+        return fetchPureRowsWithColumns(currentUserWhId, columns, (query) => {
+            return query
+                .gte("date_lost", periodFromIso)
+                .lte("date_lost", periodToIso)
+                .order("date_lost", { ascending: false });
+        });
+    }
+
+    function computePureBacklogPercentFromRows(rows, periodFromIso, periodToIso) {
+        const uniqueRows = dedupePureRowsByShk(rows);
+        let recentTotal = 0;
+        let recentResolved = 0;
+        uniqueRows.forEach((row) => {
+            const dateLost = parseDateValue(row?.date_lost);
+            if (!dateLost) return;
+            const dateIso = toIsoDate(dateLost);
+            if (dateIso < periodFromIso || dateIso > periodToIso) return;
+            recentTotal += 1;
+            if (resolvePureDecision(row)) recentResolved += 1;
+        });
+        if (recentTotal <= 0) return null;
+        const solvedPercent = (recentResolved / recentTotal) * 100;
+        return Math.max(0, 100 - solvedPercent);
+    }
+
+    function computePureMissingDates(rows, pureDeadlineConfig) {
+        const today = getPureTodayDate();
+        const monday = getWeekStartMonday(today);
+        const start = addDays(monday, -21);
+        const uploadDates = new Set();
+        const deadlineConfig = normalizePureDeadlineConfig(pureDeadlineConfig);
+
+        dedupePureRowsByShk(rows).forEach((row) => {
+            const date = parseDateValue(row?.date_lost);
+            if (!date) return;
+            uploadDates.add(toIsoDate(date));
+        });
+
+        const missing = [];
+        for (let i = 0; i < 35; i += 1) {
+            const date = addDays(start, i);
+            const iso = toIsoDate(date);
+            const hasUpload = uploadDates.has(iso);
+            const shouldBeUploaded = isCalendarDateInDeadlineRange(date, today, deadlineConfig);
+            if (!hasUpload && shouldBeUploaded) {
+                missing.push({ iso, day: date.getDate() });
+            }
+        }
+
+        return missing;
+    }
+
+    async function computePureResolvedByShift(currentUserWhId, rangeFromIso, rangeToIso) {
+        const resultMap = new Map();
+        if (!currentUserWhId) return resultMap;
+        const setsByShift = new Map();
+        const endIso = shiftIsoDate(rangeToIso, 1) || rangeToIso;
+
+        for (const solvedCol of PURE_SOLVED_COLUMNS) {
+            const columns = ["shk", solvedCol, ...PURE_DECISION_COLUMNS];
+            const rows = await fetchPureRowsWithColumns(currentUserWhId, columns, (query) => {
+                return query
+                    .gte(solvedCol, `${rangeFromIso}T00:00:00+03:00`)
+                    .lte(solvedCol, `${endIso}T23:59:59+03:00`)
+                    .order(solvedCol, { ascending: false });
+            });
+
+            rows.forEach((row) => {
+                const decision = resolvePureDecision(row);
+                if (!decision) return;
+                const solvedAt = parseTimestampValue(row?.[solvedCol]);
+                if (!Number.isFinite(solvedAt)) return;
+                const shiftId = buildShiftIdByMoscowDate(new Date(solvedAt));
+                if (!shiftId) return;
+                const shk = normalizeKey(row?.shk);
+                if (!shk) return;
+                if (!setsByShift.has(shiftId)) setsByShift.set(shiftId, new Set());
+                setsByShift.get(shiftId).add(shk);
+            });
+        }
+
+        setsByShift.forEach((set, key) => {
+            resultMap.set(key, set.size);
+        });
+        return resultMap;
     }
 
     function computeRemainingExpensiveCount(item, options) {
@@ -1951,7 +2429,13 @@
         return data || null;
     }
 
-    async function fetchReportWithCache(period, cacheScope) {
+    async function fetchReportWithCache(period, cacheScope, options) {
+        const opts = options && typeof options === "object" ? options : {};
+        const preferFreshOnStale = Boolean(opts.preferFreshOnStale);
+        const discardStaleCache = Boolean(opts.discardStaleCache);
+        const onBackgroundFresh = typeof opts.onBackgroundFresh === "function"
+            ? opts.onBackgroundFresh
+            : null;
         const cacheRow = await fetchCachedReportRow(period, cacheScope).catch(() => null);
         const cachedReport = parseReportFromCacheRow(cacheRow);
         if (cachedReport && isCacheFresh(cacheRow)) {
@@ -1959,14 +2443,28 @@
         }
 
         if (cachedReport) {
+            if (preferFreshOnStale) {
+                try {
+                    return await fetchReport(period);
+                } catch (error) {
+                    console.warn("Не удалось принудительно обновить устаревший кэш OPP, использую старые данные:", error instanceof Error ? error.message : error);
+                    return cachedReport;
+                }
+            }
+
             // Возвращаем устаревший кэш сразу, чтобы не блокировать UI медленным API.
             fetchReport(period)
-                .then(() => {
-                    // no-op: новые данные подтянутся при следующем обновлении страницы
+                .then((freshReport) => {
+                    if (onBackgroundFresh) {
+                        onBackgroundFresh(freshReport);
+                    }
                 })
                 .catch((error) => {
                     console.warn("Не удалось обновить устаревший кэш OPP в фоне:", error instanceof Error ? error.message : error);
                 });
+            if (discardStaleCache) {
+                return null;
+            }
             return cachedReport;
         }
 
@@ -2311,6 +2809,39 @@
         `;
     }
 
+    function renderPureBacklogPanel() {
+        const panel = document.getElementById("dashboard-pure-backlog-panel");
+        if (!panel) return;
+
+        const missingDates = Array.isArray(lastPureMissingDates) ? lastPureMissingDates : [];
+        const hasPercent = lastPureBacklogPercent !== null && lastPureBacklogPercent !== undefined;
+
+        if (!hasPercent && !missingDates.length) {
+            panel.innerHTML = `<div class="muted" style="font-size:11px;">Нет данных для отображения.</div>`;
+            return;
+        }
+
+        const missingHtml = missingDates.length
+            ? `
+                <div class="opp-pure-missing-list">
+                    ${missingDates.map((item) => {
+                const iso = normalizeKey(item?.iso);
+                const day = Number(item?.day);
+                if (!iso || !Number.isFinite(day)) return "";
+                const title = formatDateRu(iso);
+                return `<span class="opp-pure-missing-badge" title="${escapeHtml(title)}">${escapeHtml(day)}</span>`;
+            }).join("")}
+                </div>
+            `
+            : "";
+
+        panel.innerHTML = `
+            <div class="opp-lag-main-title">Отставание (Чистые списания)</div>
+            <div class="opp-lag-main-value">${escapeHtml(hasPercent ? formatPercent(lastPureBacklogPercent) : "—")}</div>
+            ${missingHtml}
+        `;
+    }
+
     function renderSummary() {
         if (!summaryWrap) return;
 
@@ -2324,6 +2855,7 @@
         if (!lastCurrentShift) {
             renderHeaderShiftButton(null);
             renderLagPanel();
+            renderPureBacklogPanel();
             renderUnfinishedCompactPanel();
             renderCurrentShiftBreakdownChart(null);
             summaryWrap.innerHTML = `
@@ -2347,6 +2879,7 @@
         if (!shiftItem) {
             renderHeaderShiftButton(null);
             renderLagPanel();
+            renderPureBacklogPanel();
             renderUnfinishedCompactPanel();
             renderCurrentShiftBreakdownChart(null);
             summaryWrap.innerHTML = `
@@ -2371,6 +2904,12 @@
         const isViewingPrevious = Boolean(lastPreviousShift && shiftItem.shiftId === lastPreviousShift.shiftId);
         const switchTargetShift = isViewingPrevious ? lastCurrentShift : lastPreviousShift;
         const showSwitchButton = canShowPreviousButton && Boolean(switchTargetShift);
+        const pureResolvedCount = toNumber(lastPureResolvedByShift.get(shiftItem.shiftId) || 0);
+        const pureResolvedClass = pureResolvedCount <= 0
+            ? "opp-month-card-bad"
+            : pureResolvedCount <= 10
+                ? "opp-month-card-warn"
+                : "opp-month-card-good";
 
         const statusCardsHtml = (shiftItem.details || []).map((item) => {
             const statusInfo = computeStatusCardLevel(item);
@@ -2438,6 +2977,10 @@
                         <div class="opp-month-label">Опознано</div>
                         <div class="opp-month-value">${formatNumber(shiftItem.oppRecognizedCount)}</div>
                     </div>
+                    <div class="opp-month-card ${pureResolvedClass}">
+                        <div class="opp-month-label">Разобрано чистых списаний</div>
+                        <div class="opp-month-value">${formatNumber(pureResolvedCount)}</div>
+                    </div>
                 </div>
             </section>
             <section class="status-box" style="margin-top:12px;">
@@ -2453,6 +2996,7 @@
         `;
         renderHeaderShiftButton(showSwitchButton ? switchTargetShift : null);
         renderLagPanel();
+        renderPureBacklogPanel();
         renderUnfinishedCompactPanel();
         renderCurrentShiftBreakdownChart(shiftItem);
 
@@ -2764,16 +3308,29 @@
                 await loadWarehouseConfig();
             }
 
-            const monthReportPromise = fetchReportWithCache(monthPeriod, CACHE_SCOPE_DASHBOARD_MONTH).catch((error) => {
+            const monthReportPromise = fetchReportWithCache(
+                monthPeriod,
+                CACHE_SCOPE_DASHBOARD_MONTH
+            ).catch((error) => {
                 console.warn("Не удалось загрузить месячные итоги:", error instanceof Error ? error.message : error);
                 return null;
             });
-            const previousMonthReportPromise = fetchCachedReportRow(previousMonthPeriod, CACHE_SCOPE_DASHBOARD_MONTH)
-                .then((cacheRow) => parseReportFromCacheRow(cacheRow))
+            const previousMonthReportPromise = fetchReportWithCache(
+                previousMonthPeriod,
+                CACHE_SCOPE_DASHBOARD_MONTH,
+                { discardStaleCache: true }
+            )
                 .catch((error) => {
-                    console.warn("Не удалось загрузить кэш предыдущего месяца:", error instanceof Error ? error.message : error);
+                    console.warn("Не удалось загрузить итоги предыдущего месяца:", error instanceof Error ? error.message : error);
                     return null;
                 });
+            const rolling30ReportPromise = fetchReportWithCache(
+                rolling30Period,
+                CACHE_SCOPE_DASHBOARD_ROLLING30
+            ).catch((error) => {
+                console.warn("Не удалось загрузить rolling30 итоги:", error instanceof Error ? error.message : error);
+                return null;
+            });
             const reportPromise = fetchReportWithCache(shiftPeriod, CACHE_SCOPE_DASHBOARD_SHIFT).catch(async (error) => {
                 console.warn("Не удалось загрузить scope opp_dashboard_shift, пробую fallback через opp_dashboard_month:", error instanceof Error ? error.message : error);
                 const fallbackMonthReport = await monthReportPromise;
@@ -2782,15 +3339,30 @@
                 }
                 throw error;
             });
+            const purePromise = (async () => {
+                const [deadlineConfig, backlogRows, resolvedByShift] = await Promise.all([
+                    loadPureDeadlineConfig(currentWhId),
+                    fetchPureBacklogRows(currentWhId, rolling30Period.from, rolling30Period.to),
+                    computePureResolvedByShift(currentWhId, shiftPeriod.from, shiftPeriod.to)
+                ]);
+                const backlog = computePureBacklogPercentFromRows(backlogRows, rolling30Period.from, rolling30Period.to);
+                const missingDates = computePureMissingDates(backlogRows, deadlineConfig);
+                return { backlog, resolvedByShift, missingDates };
+            })().catch((error) => {
+                console.warn("Не удалось загрузить статистику чистых списаний:", error instanceof Error ? error.message : error);
+                return { backlog: null, resolvedByShift: new Map(), missingDates: [] };
+            });
             const oppPromise = fetchOppRecognizedCountsByShift(shiftPeriod).catch((error) => {
                 console.warn("Не удалось загрузить опознания ОПП по сменам:", error instanceof Error ? error.message : error);
                 return {};
             });
-            const [report, monthReport, previousMonthReport, oppByShift] = await Promise.all([
+            const [report, monthReport, previousMonthReport, rolling30Report, oppByShift, pureStats] = await Promise.all([
                 reportPromise,
                 monthReportPromise,
                 previousMonthReportPromise,
-                oppPromise
+                rolling30ReportPromise,
+                oppPromise,
+                purePromise
             ]);
             lastRows = report.rows;
             lastSummary = report.summary;
@@ -2803,35 +3375,47 @@
             lastCurrentShift = findCurrentShiftItem(lastShiftDynamics);
             lastPreviousShift = findPreviousShiftItem(lastShiftDynamics, lastCurrentShift);
             selectedShiftId = lastCurrentShift?.shiftId || "";
-            const currentMonthRows = Array.isArray(monthReport?.shiftDynamics) ? monthReport.shiftDynamics : [];
-            const previousMonthRows = Array.isArray(previousMonthReport?.shiftDynamics) ? previousMonthReport.shiftDynamics : [];
-            const monthRowsFallback = lastShiftDynamics.filter((item) => {
-                const d = parseIsoDate(item?.date);
-                return d && d >= rolling30Period.from && d <= rolling30Period.to;
-            });
-            const mergedMap = new Map();
-            [...previousMonthRows, ...currentMonthRows].forEach((item) => {
-                const id = normalizeKey(item?.shiftId);
-                if (!id) return;
-                mergedMap.set(id, item);
-            });
-            const mergedRows = Array.from(mergedMap.values())
-                .filter((item) => {
+            const rollingRows = Array.isArray(rolling30Report?.shiftDynamics) ? rolling30Report.shiftDynamics : [];
+            if (rollingRows.length) {
+                lastMonthShiftDynamics = rollingRows;
+            } else {
+                const currentMonthRows = Array.isArray(monthReport?.shiftDynamics) ? monthReport.shiftDynamics : [];
+                const previousMonthRows = Array.isArray(previousMonthReport?.shiftDynamics) ? previousMonthReport.shiftDynamics : [];
+                const monthRowsFallback = lastShiftDynamics.filter((item) => {
                     const d = parseIsoDate(item?.date);
                     return d && d >= rolling30Period.from && d <= rolling30Period.to;
-                })
-                .sort((a, b) => {
-                    const aTs = toNumber(a?.shiftSortTs);
-                    const bTs = toNumber(b?.shiftSortTs);
-                    if (bTs !== aTs) return bTs - aTs;
-                    return normalizeKey(b?.date).localeCompare(normalizeKey(a?.date));
                 });
-            lastMonthShiftDynamics = mergedRows.length ? mergedRows : monthRowsFallback;
+                const mergedMap = new Map();
+                [...previousMonthRows, ...currentMonthRows].forEach((item) => {
+                    const id = normalizeKey(item?.shiftId);
+                    if (!id) return;
+                    mergedMap.set(id, item);
+                });
+                const mergedRows = Array.from(mergedMap.values())
+                    .filter((item) => {
+                        const d = parseIsoDate(item?.date);
+                        return d && d >= rolling30Period.from && d <= rolling30Period.to;
+                    })
+                    .sort((a, b) => {
+                        const aTs = toNumber(a?.shiftSortTs);
+                        const bTs = toNumber(b?.shiftSortTs);
+                        if (bTs !== aTs) return bTs - aTs;
+                        return normalizeKey(b?.date).localeCompare(normalizeKey(a?.date));
+                    });
+                lastMonthShiftDynamics = mergedRows.length ? mergedRows : monthRowsFallback;
+            }
             lastMonthSummary = buildMonthSummaryFromShiftDynamics(
                 lastMonthShiftDynamics,
                 rolling30Period
             );
             lastMissingSheets = report.missingSheets;
+            lastPureBacklogPercent = pureStats?.backlog ?? null;
+            lastPureResolvedByShift = pureStats?.resolvedByShift instanceof Map
+                ? pureStats.resolvedByShift
+                : new Map();
+            lastPureMissingDates = Array.isArray(pureStats?.missingDates)
+                ? pureStats.missingDates
+                : [];
 
             renderSummary();
             setStatus("", "");
@@ -2865,6 +3449,9 @@
             lastTodayDeadline = null;
             lastShiftDynamics = [];
             lastMonthShiftDynamics = [];
+            lastPureBacklogPercent = null;
+            lastPureResolvedByShift = new Map();
+            lastPureMissingDates = [];
             lastCurrentShift = null;
             lastPreviousShift = null;
             selectedShiftId = "";
