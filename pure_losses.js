@@ -10,6 +10,9 @@
     const ROW_FILL_ANIMATION_TOTAL_MS = 1000;
     const EXPENSIVE_PRICE_THRESHOLD = 1000;
     const VERDICT_REQUEST_REQUIRED = "отправлен запрос";
+    const AUTO_FOUND_DECISION = "Найден";
+    const AUTO_FOUND_EMP_ID = "2405";
+    const AUTO_FOUND_COMMENT = "У товара есть движение";
     const EVENT_TWO_SHK = "Два ШК";
     const EVENT_EMPTY_PACK = "Пустая упаковка";
     const DATA_TYPE_OPP_PURE_OPTIONS = "opp_pure_options";
@@ -30,7 +33,11 @@
     ];
     const unsupportedInsertColumns = new Set();
     const rowFillRafMap = new WeakMap();
-    let pureDynamicsChart = null;
+    const pureDynamicsCharts = {
+        overall: null,
+        month: null,
+        previousMonth: null
+    };
 
     const COLUMN_VARIANTS = {
         shk: ["ШК", "shk", "Шк", "Штрихкод"],
@@ -62,8 +69,29 @@
     const statExpensiveTotalEl = document.getElementById("stat-expensive-total");
     const statExpensiveResolvedEl = document.getElementById("stat-expensive-resolved");
     const statPureBacklogEl = document.getElementById("stat-pure-backlog");
+    const statBalanceEl = document.getElementById("stat-balance");
+    const statMonthTitleEl = document.getElementById("stat-month-title");
+    const statMonthTotalShkEl = document.getElementById("stat-month-total-shk");
+    const statMonthResolvedShkEl = document.getElementById("stat-month-resolved-shk");
+    const statMonthExpensiveTotalEl = document.getElementById("stat-month-expensive-total");
+    const statMonthExpensiveResolvedEl = document.getElementById("stat-month-expensive-resolved");
+    const statMonthPureBacklogEl = document.getElementById("stat-month-pure-backlog");
+    const statMonthBalanceEl = document.getElementById("stat-month-balance");
+    const statMonthDynamicsTitleEl = document.getElementById("stat-month-dynamics-title");
+    const statPrevMonthTitleEl = document.getElementById("stat-prev-month-title");
+    const statPrevMonthTotalShkEl = document.getElementById("stat-prev-month-total-shk");
+    const statPrevMonthResolvedShkEl = document.getElementById("stat-prev-month-resolved-shk");
+    const statPrevMonthExpensiveTotalEl = document.getElementById("stat-prev-month-expensive-total");
+    const statPrevMonthExpensiveResolvedEl = document.getElementById("stat-prev-month-expensive-resolved");
+    const statPrevMonthPureBacklogEl = document.getElementById("stat-prev-month-pure-backlog");
+    const statPrevMonthBalanceEl = document.getElementById("stat-prev-month-balance");
+    const statPrevMonthDynamicsTitleEl = document.getElementById("stat-prev-month-dynamics-title");
     const pureDynamicsChartCanvasEl = document.getElementById("pure-dynamics-chart");
     const pureDynamicsChartEmptyEl = document.getElementById("pure-dynamics-empty");
+    const pureMonthDynamicsChartCanvasEl = document.getElementById("pure-month-dynamics-chart");
+    const pureMonthDynamicsChartEmptyEl = document.getElementById("pure-month-dynamics-empty");
+    const purePrevMonthDynamicsChartCanvasEl = document.getElementById("pure-prev-month-dynamics-chart");
+    const purePrevMonthDynamicsChartEmptyEl = document.getElementById("pure-prev-month-dynamics-empty");
     const pureLeadersPeriodEl = document.getElementById("pure-leaders-period");
     const pureLeadersBodyEl = document.getElementById("pure-leaders-body");
     const pureLeadersEmptyEl = document.getElementById("pure-leaders-empty");
@@ -143,6 +171,7 @@
         unsupportedUpdateColumns: new Set(),
         requestModalState: {
             shk: "",
+            dateLost: "",
             decision: "",
             rowColor: ""
         },
@@ -235,7 +264,7 @@
             const autoLrSet = await loadAutoLossReasonIds();
             const prepared = prepareIncomingRows(excelRows, currentUserWhId, autoLrSet, pureDeadlineConfig);
 
-            if (!prepared.rowsByShk.size) {
+            if (!prepared.rowsByKey.size && !prepared.postedRowsByKey.size) {
                 renderSummary({
                     insertedNew: 0
                 });
@@ -243,9 +272,10 @@
                 return;
             }
 
-            const incomingShks = Array.from(prepared.rowsByShk.keys());
+            const incomingShks = collectIncomingShks(prepared);
             const existingByShk = await loadExistingRowsByShk(incomingShks);
-            const syncPlan = buildSyncPlan(prepared.rowsByShk, existingByShk);
+            resolvePureTableUpdateColumns(flattenRowsFromMap(existingByShk));
+            const syncPlan = buildSyncPlan(prepared.rowsByKey, prepared.postedRowsByKey, existingByShk, currentUserWhId);
 
             await applySyncPlan(syncPlan);
 
@@ -256,7 +286,7 @@
                 await loadPureTableRows(currentUserWhId, { silent: true });
             }
 
-            const updated = syncPlan.stats.insertedNew + syncPlan.stats.replacedByNewer;
+            const updated = syncPlan.stats.insertedNew + syncPlan.stats.autoMarkedFound;
             window.MiniUI?.toast?.(`Обновление завершено. Изменено строк: ${updated}`, { type: "success" });
         } catch (error) {
             const message = String(error?.message || error || "Неизвестная ошибка");
@@ -2310,7 +2340,12 @@
             commentInput.value = row.comment;
             commentInput.placeholder = "Комментарий";
             commentInput.dataset.shk = row.shk;
+            commentInput.dataset.dateLost = normalizeDateIsoValue(row?.dateLost);
             commentInput.dataset.field = "comment";
+            if (isAutoFoundLockedRow(row)) {
+                commentInput.disabled = true;
+                commentInput.title = "Комментарий недоступен для редактирования";
+            }
             commentTd.appendChild(commentInput);
             cells.push(commentTd);
             cells.push(createWmsBaseCell(row));
@@ -2431,45 +2466,57 @@
         const currentValue = extractDecisionValue(row?.decision);
         const currentOption = normalizeDecisionOption(currentOptionOverride) || getDecisionOptionByValue(currentValue);
         const options = getDecisionOptionsForRow(currentValue);
+        const isLocked = isAutoFoundLockedRow(row);
+        const dateLost = normalizeDateIsoValue(row?.dateLost || row?.date_lost || row?.raw?.date_lost);
 
         const wrap = document.createElement("div");
         wrap.className = "pure-row-verdict-dropdown";
         wrap.dataset.shk = row?.shk || "";
+        wrap.dataset.dateLost = dateLost;
 
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "btn btn-outline pure-row-verdict-btn";
         btn.dataset.verdictToggle = "1";
         btn.dataset.shk = row?.shk || "";
+        btn.dataset.dateLost = dateLost;
         btn.setAttribute("aria-expanded", "false");
         setVerdictButtonContent(btn, currentValue || "Выбрать");
         applyVerdictButtonColors(btn, currentOption?.pillColor);
+        if (isLocked) {
+            btn.disabled = true;
+            btn.title = "Автоматически разобрано по движению товара";
+        }
 
         const panel = document.createElement("div");
         panel.className = "pure-row-verdict-panel hidden";
 
-        options.forEach((option) => {
-            const value = extractDecisionValue(option?.value);
-            const optionBtn = document.createElement("button");
-            optionBtn.type = "button";
-            optionBtn.className = "pure-row-verdict-option";
-            if (value === currentValue) {
-                optionBtn.classList.add("is-selected");
-            }
-            optionBtn.dataset.verdictOption = "1";
-            optionBtn.dataset.shk = row?.shk || "";
-            optionBtn.dataset.value = value;
-            optionBtn.dataset.pillColor = option?.pillColor || "";
-            optionBtn.dataset.rowColor = option?.rowColor || "";
-            optionBtn.textContent = value || "—";
-            if (option?.pillColor) {
-                optionBtn.style.setProperty("border-left", `3px solid ${option.pillColor}`);
-                optionBtn.style.setProperty("padding-left", "6px");
-            }
-            panel.appendChild(optionBtn);
-        });
-
-        wrap.append(btn, panel);
+        if (!isLocked) {
+            options.forEach((option) => {
+                const value = extractDecisionValue(option?.value);
+                const optionBtn = document.createElement("button");
+                optionBtn.type = "button";
+                optionBtn.className = "pure-row-verdict-option";
+                if (value === currentValue) {
+                    optionBtn.classList.add("is-selected");
+                }
+                optionBtn.dataset.verdictOption = "1";
+                optionBtn.dataset.shk = row?.shk || "";
+                optionBtn.dataset.dateLost = dateLost;
+                optionBtn.dataset.value = value;
+                optionBtn.dataset.pillColor = option?.pillColor || "";
+                optionBtn.dataset.rowColor = option?.rowColor || "";
+                optionBtn.textContent = value || "—";
+                if (option?.pillColor) {
+                    optionBtn.style.setProperty("border-left", `3px solid ${option.pillColor}`);
+                    optionBtn.style.setProperty("padding-left", "6px");
+                }
+                panel.appendChild(optionBtn);
+            });
+            wrap.append(btn, panel);
+        } else {
+            wrap.append(btn);
+        }
         return wrap;
     }
 
@@ -2669,10 +2716,12 @@
         const requestLinks = getRowRequestLinks(row);
         if (requestLinks.length) {
             const shk = normalizeShk(row?.shk);
+            const dateLost = normalizeDateIsoValue(row?.dateLost || row?.date_lost || row?.raw?.date_lost);
             out.push({
                 kind: "request_links",
                 label: "Запросы",
                 shk,
+                dateLost,
                 requests: requestLinks.map((href, index) => ({
                     href,
                     label: compactLinkForUi(href),
@@ -2761,6 +2810,7 @@
                     deleteBtn.className = "pure-wms-request-delete-btn";
                     deleteBtn.dataset.requestLinkDelete = "1";
                     deleteBtn.dataset.shk = normalizeShk(entry?.shk);
+                    deleteBtn.dataset.dateLost = normalizeDateIsoValue(entry?.dateLost);
                     deleteBtn.dataset.requestIndex = Number.isFinite(Number(item?.requestIndex))
                         ? String(Number(item.requestIndex))
                         : "";
@@ -2907,9 +2957,11 @@
             || normalizeDecisionColor(getDecisionOptionByValue(decision)?.rowColor)
             || "";
         const links = getRowRequestLinks(row);
+        const dateLost = normalizeDateIsoValue(row?.dateLost || row?.date_lost || row?.raw?.date_lost);
 
         tableState.requestModalState = {
             shk,
+            dateLost,
             decision,
             rowColor
         };
@@ -2940,19 +2992,35 @@
         if (pureRequestLinkHintEl) pureRequestLinkHintEl.textContent = "";
         tableState.requestModalState = {
             shk: "",
+            dateLost: "",
             decision: "",
             rowColor: ""
         };
         setRequestLinkModalBusy(false);
     }
 
-    function findVerdictDropdownByShk(shkValue) {
+    function findPureTableRow(shkValue, dateLostValue = "") {
+        const shk = normalizeShk(shkValue);
+        if (!shk) return null;
+        const dateLost = normalizeDateIsoValue(dateLostValue);
+        return tableState.rows.find((item) => {
+            const itemShk = normalizeShk(item?.shk);
+            if (itemShk !== shk) return false;
+            if (!dateLost) return true;
+            return normalizeDateIsoValue(item?.dateLost || item?.date_lost || item?.raw?.date_lost) === dateLost;
+        }) || null;
+    }
+
+    function findVerdictDropdownByShk(shkValue, dateLostValue = "") {
         const shk = normalizeShk(shkValue);
         if (!shk || !pureTableBody) return null;
+        const dateLost = normalizeDateIsoValue(dateLostValue);
         const wraps = pureTableBody.querySelectorAll(".pure-row-verdict-dropdown");
         for (const wrap of wraps) {
             if (!(wrap instanceof HTMLElement)) continue;
-            if (normalizeShk(wrap.dataset.shk) === shk) return wrap;
+            if (normalizeShk(wrap.dataset.shk) !== shk) continue;
+            if (dateLost && normalizeDateIsoValue(wrap.dataset.dateLost) !== dateLost) continue;
+            return wrap;
         }
         return null;
     }
@@ -2961,10 +3029,11 @@
         if (!isRequestLinkModalOpen()) return;
         const modalState = tableState.requestModalState || {};
         const shk = normalizeShk(modalState.shk);
+        const dateLost = normalizeDateIsoValue(modalState.dateLost);
         const decision = extractDecisionValue(modalState.decision || VERDICT_REQUEST_REQUIRED);
         if (!shk || !decision) return;
 
-        const row = tableState.rows.find((item) => item.shk === shk);
+        const row = findPureTableRow(shk, dateLost);
         if (!row) {
             closeRequestLinkModal();
             return;
@@ -2979,7 +3048,7 @@
         }
 
         const nextRequestLinks = dedupeRequestLinks(getRowRequestLinks(row).concat([link]));
-        const wrap = findVerdictDropdownByShk(shk);
+        const wrap = findVerdictDropdownByShk(shk, dateLost);
 
         setRequestLinkModalBusy(true);
         const saved = await applyVerdictSelection(row, decision, {
@@ -2997,10 +3066,11 @@
 
     async function handleRequestLinkDeleteClick(deleteBtn) {
         const shk = normalizeShk(deleteBtn.dataset.shk);
+        const dateLost = normalizeDateIsoValue(deleteBtn.dataset.dateLost);
         const requestIndex = toIntegerOrNull(deleteBtn.dataset.requestIndex);
         if (!shk || requestIndex === null || requestIndex < 0) return;
 
-        const row = tableState.rows.find((item) => item.shk === shk);
+        const row = findPureTableRow(shk, dateLost);
         if (!row) return;
 
         const currentLinks = getRowRequestLinks(row);
@@ -3052,11 +3122,12 @@
 
     async function handleVerdictOptionClick(optionBtn) {
         const shk = normalizeShk(optionBtn.dataset.shk);
+        const dateLost = normalizeDateIsoValue(optionBtn.dataset.dateLost);
         const nextValue = extractDecisionValue(optionBtn.dataset.value);
         if (!shk) return;
 
         const wrap = optionBtn.closest(".pure-row-verdict-dropdown");
-        const row = tableState.rows.find((item) => item.shk === shk);
+        const row = findPureTableRow(shk, dateLost);
         if (!row) return;
 
         if (isRequestLinkRequiredDecision(nextValue)) {
@@ -3080,7 +3151,13 @@
 
     async function applyVerdictSelection(row, nextValue, options = {}) {
         const shk = normalizeShk(row?.shk);
+        const dateLost = normalizeDateIsoValue(row?.dateLost || row?.date_lost || row?.raw?.date_lost);
+        const rowIdentityKey = buildShkDateKey(shk, dateLost);
         if (!shk) return false;
+        if (isAutoFoundLockedRow(row)) {
+            setPureTableInlineStatus("Вердикт этой строки недоступен для редактирования", "info");
+            return false;
+        }
         const {
             wrap = null,
             rowColorHint = "",
@@ -3124,7 +3201,7 @@
         const prevForceVisibleUntilTs = Number(row.forceVisibleUntilTs || 0);
 
         const saveToken = ++tableState.verdictSaveSeq;
-        tableState.pendingVerdictSaveByShk.set(shk, saveToken);
+        tableState.pendingVerdictSaveByShk.set(rowIdentityKey, saveToken);
 
         setVerdictDropdownBusy(wrap, true);
         closeActiveVerdictPanel();
@@ -3150,8 +3227,9 @@
         applyPureTableFiltersAndRender();
         if (shouldKeepVisible) {
             window.setTimeout(() => {
-                if (tableState.pendingVerdictSaveByShk.get(shk) && tableState.pendingVerdictSaveByShk.get(shk) !== saveToken) return;
-                const rowRef = tableState.rows.find((item) => item.shk === shk);
+                const pendingToken = tableState.pendingVerdictSaveByShk.get(rowIdentityKey);
+                if (pendingToken && pendingToken !== saveToken) return;
+                const rowRef = findPureTableRow(shk, dateLost);
                 if (!rowRef) return;
                 rowRef.forceVisibleUntilTs = 0;
                 applyPureTableFiltersAndRender();
@@ -3159,8 +3237,8 @@
         }
 
         try {
-            const appliedPatch = await updatePureRowFields(shk, userWhId, patch);
-            if (tableState.pendingVerdictSaveByShk.get(shk) !== saveToken) return false;
+            const appliedPatch = await updatePureRowFields(shk, userWhId, patch, dateLost);
+            if (tableState.pendingVerdictSaveByShk.get(rowIdentityKey) !== saveToken) return false;
             Object.assign(row.raw, appliedPatch);
             row.decision = extractDecisionValue(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
             row.requestLinks = parseRequestLinks(readEditableColumnValue(row.raw, tableState.updateColumnMap.requestLink));
@@ -3169,7 +3247,7 @@
             applyPureTableFiltersAndRender();
             return true;
         } catch (error) {
-            if (tableState.pendingVerdictSaveByShk.get(shk) !== saveToken) return false;
+            if (tableState.pendingVerdictSaveByShk.get(rowIdentityKey) !== saveToken) return false;
             row.raw[tableState.updateColumnMap.decision] = prevDecisionRaw ?? null;
             row.raw[tableState.updateColumnMap.emp] = prevEmpRaw ?? null;
             row.raw[tableState.updateColumnMap.solved] = prevSolvedRaw ?? null;
@@ -3188,8 +3266,8 @@
             window.MiniUI?.toast?.("Ошибка сохранения строки", { type: "error" });
             return false;
         } finally {
-            if (tableState.pendingVerdictSaveByShk.get(shk) === saveToken) {
-                tableState.pendingVerdictSaveByShk.delete(shk);
+            if (tableState.pendingVerdictSaveByShk.get(rowIdentityKey) === saveToken) {
+                tableState.pendingVerdictSaveByShk.delete(rowIdentityKey);
             }
             setVerdictDropdownBusy(wrap, false);
         }
@@ -3197,10 +3275,12 @@
 
     async function updateRequestLinksForRow(row, nextRequestLinks, options = {}) {
         const shk = normalizeShk(row?.shk);
+        const dateLost = normalizeDateIsoValue(row?.dateLost || row?.date_lost || row?.raw?.date_lost);
+        const rowIdentityKey = buildShkDateKey(shk, dateLost);
         if (!shk) return false;
 
         const clearRequestDecisionWhenEmpty = options.clearRequestDecisionWhenEmpty !== false;
-        const wrap = options.wrap || findVerdictDropdownByShk(shk);
+        const wrap = options.wrap || findVerdictDropdownByShk(shk, dateLost);
         const normalizedLinks = dedupeRequestLinks(nextRequestLinks);
         const serializedLinks = serializeRequestLinks(normalizedLinks);
         const shouldClearDecision = clearRequestDecisionWhenEmpty
@@ -3224,7 +3304,7 @@
         const prevDecision = row.decision;
 
         const saveToken = ++tableState.requestLinkSaveSeq;
-        tableState.pendingRequestLinkSaveByShk.set(shk, saveToken);
+        tableState.pendingRequestLinkSaveByShk.set(rowIdentityKey, saveToken);
 
         setVerdictDropdownBusy(wrap, true);
         setPureTableInlineStatus("Сохраняем изменения", "loading");
@@ -3241,8 +3321,8 @@
         applyPureTableFiltersAndRender();
 
         try {
-            const appliedPatch = await updatePureRowFields(shk, userWhId, patch);
-            if (tableState.pendingRequestLinkSaveByShk.get(shk) !== saveToken) return false;
+            const appliedPatch = await updatePureRowFields(shk, userWhId, patch, dateLost);
+            if (tableState.pendingRequestLinkSaveByShk.get(rowIdentityKey) !== saveToken) return false;
             Object.assign(row.raw, appliedPatch);
             row.requestLinks = parseRequestLinks(readEditableColumnValue(row.raw, tableState.updateColumnMap.requestLink));
             row.requestLink = row.requestLinks[0] || "";
@@ -3251,7 +3331,7 @@
             applyPureTableFiltersAndRender();
             return true;
         } catch (error) {
-            if (tableState.pendingRequestLinkSaveByShk.get(shk) !== saveToken) return false;
+            if (tableState.pendingRequestLinkSaveByShk.get(rowIdentityKey) !== saveToken) return false;
             row.raw[tableState.updateColumnMap.requestLink] = prevRaw ?? null;
             row.requestLinks = prevLinks;
             row.requestLink = prevRequestLink;
@@ -3265,8 +3345,8 @@
             window.MiniUI?.toast?.("Ошибка сохранения ссылки", { type: "error" });
             return false;
         } finally {
-            if (tableState.pendingRequestLinkSaveByShk.get(shk) === saveToken) {
-                tableState.pendingRequestLinkSaveByShk.delete(shk);
+            if (tableState.pendingRequestLinkSaveByShk.get(rowIdentityKey) === saveToken) {
+                tableState.pendingRequestLinkSaveByShk.delete(rowIdentityKey);
             }
             setVerdictDropdownBusy(wrap, false);
         }
@@ -3337,11 +3417,17 @@
         if (!target.classList.contains("pure-edit-input")) return;
 
         const shk = normalizeShk(target.dataset.shk);
+        const dateLost = normalizeDateIsoValue(target.dataset.dateLost);
         const field = target.dataset.field;
         if (!shk || !field) return;
 
-        const row = tableState.rows.find((item) => item.shk === shk);
+        const row = findPureTableRow(shk, dateLost);
         if (!row) return;
+        if (isAutoFoundLockedRow(row)) {
+            target.value = row.comment;
+            target.disabled = true;
+            return;
+        }
 
         const previousValue = field === "decision" ? extractDecisionValue(row.decision) : row.comment;
         const nextValue = String(target.value || "").trim();
@@ -3367,7 +3453,7 @@
         setPureTableInlineStatus("Сохраняем изменения", "loading");
 
         try {
-            const appliedPatch = await updatePureRowFields(shk, userWhId, patch);
+            const appliedPatch = await updatePureRowFields(shk, userWhId, patch, normalizeDateIsoValue(row?.dateLost));
             Object.assign(row.raw, appliedPatch);
             row.decision = extractDecisionValue(readEditableColumnValue(row.raw, tableState.updateColumnMap.decision));
             row.comment = toText(readEditableColumnValue(row.raw, tableState.updateColumnMap.comment));
@@ -3385,24 +3471,31 @@
         }
     }
 
-    async function updatePureRowFields(shk, currentUserWhId, patch) {
+    async function updatePureRowFields(shk, currentUserWhId, patch, dateLostValue = "") {
         const sanitized = sanitizeUpdatePatch(patch);
         if (!Object.keys(sanitized).length) {
             throw new Error("В таблице отсутствуют поля для сохранения.");
         }
 
-        const { error } = await supabaseClient
+        let query = supabaseClient
             .from(TABLE_PURE)
             .update(sanitized)
             .eq("shk", shk)
             .eq("wh_id", currentUserWhId);
+
+        const dateLost = normalizeDateIsoValue(dateLostValue);
+        if (dateLost) {
+            query = query.eq("date_lost", dateLost);
+        }
+
+        const { error } = await query;
 
         if (!error) return sanitized;
 
         const missingColumn = extractMissingColumnName(error);
         if (missingColumn && Object.prototype.hasOwnProperty.call(sanitized, missingColumn)) {
             tableState.unsupportedUpdateColumns.add(missingColumn);
-            return updatePureRowFields(shk, currentUserWhId, patch);
+            return updatePureRowFields(shk, currentUserWhId, patch, dateLostValue);
         }
 
         const errorText = String(error?.message || error?.details || error?.code || "unknown");
@@ -3417,6 +3510,12 @@
             out[key] = value;
         });
         return out;
+    }
+
+    function isAutoFoundLockedRow(row) {
+        const empRaw = readEditableColumnValue(row?.raw, tableState.updateColumnMap.emp);
+        const emp = normalizeToken(empRaw);
+        return emp === AUTO_FOUND_EMP_ID;
     }
 
     function resolveCurrentUserId(currentUser) {
@@ -4049,49 +4148,130 @@
     function renderMainStats(rows) {
         const uniqueRows = dedupeRowsByShk(rows);
         const today = getDashboardTodayDate();
-        const periodStart = addDays(today, -29);
-        const totalShk = uniqueRows.length;
+        const overallMetrics = calculateMainStatsMetrics(uniqueRows, today, "recent_30_days");
+        setText(statTotalShkEl, formatInt(overallMetrics.totalShk));
+        setText(statResolvedShkEl, formatInt(overallMetrics.resolvedShk));
+        setText(statExpensiveTotalEl, formatInt(overallMetrics.expensiveTotal));
+        setText(statExpensiveResolvedEl, formatInt(overallMetrics.expensiveResolved));
+        setText(statPureBacklogEl, formatPercent(overallMetrics.backlogPercent));
+        setText(statBalanceEl, formatLossBalance(overallMetrics.balanceAmount));
 
+        const monthStats = resolveDashboardMonthStats(today);
+        const monthRows = filterRowsByMonth(uniqueRows, monthStats);
+        const monthMetrics = calculateMainStatsMetrics(monthRows, today, "subset");
+        setText(statMonthTitleEl, `Статистика за ${monthStats.label}`);
+        setText(statMonthTotalShkEl, formatInt(monthMetrics.totalShk));
+        setText(statMonthResolvedShkEl, formatInt(monthMetrics.resolvedShk));
+        setText(statMonthExpensiveTotalEl, formatInt(monthMetrics.expensiveTotal));
+        setText(statMonthExpensiveResolvedEl, formatInt(monthMetrics.expensiveResolved));
+        setText(statMonthPureBacklogEl, formatPercent(monthMetrics.backlogPercent));
+        setText(statMonthBalanceEl, formatLossBalance(monthMetrics.balanceAmount));
+        setText(statMonthDynamicsTitleEl, `Динамика списаний за ${monthStats.label}`);
+
+        const previousMonthStats = shiftDashboardMonthStats(monthStats, -1);
+        const previousMonthRows = filterRowsByMonth(uniqueRows, previousMonthStats);
+        const previousMonthMetrics = calculateMainStatsMetrics(previousMonthRows, today, "subset");
+        setText(statPrevMonthTitleEl, `Статистика за ${previousMonthStats.label}`);
+        setText(statPrevMonthTotalShkEl, formatInt(previousMonthMetrics.totalShk));
+        setText(statPrevMonthResolvedShkEl, formatInt(previousMonthMetrics.resolvedShk));
+        setText(statPrevMonthExpensiveTotalEl, formatInt(previousMonthMetrics.expensiveTotal));
+        setText(statPrevMonthExpensiveResolvedEl, formatInt(previousMonthMetrics.expensiveResolved));
+        setText(statPrevMonthPureBacklogEl, formatPercent(previousMonthMetrics.backlogPercent));
+        setText(statPrevMonthBalanceEl, formatLossBalance(previousMonthMetrics.balanceAmount));
+        setText(statPrevMonthDynamicsTitleEl, `Динамика списаний за ${previousMonthStats.label}`);
+    }
+
+    function calculateMainStatsMetrics(rows, todayValue, backlogMode) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        const today = todayValue instanceof Date ? todayValue : getDashboardTodayDate();
+        const periodStart = addDays(today, -29);
+
+        let totalShk = 0;
         let resolvedShk = 0;
         let expensiveTotal = 0;
         let expensiveResolved = 0;
         let recentTotal = 0;
         let recentResolved = 0;
+        let balanceAmount = 0;
 
-        uniqueRows.forEach((row) => {
+        safeRows.forEach((row) => {
+            totalShk += 1;
             const decision = extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision));
             const isResolved = Boolean(decision);
             if (isResolved) resolvedShk += 1;
 
             const price = toNumberOrNull(row?.price);
+            if (price !== null) {
+                balanceAmount += Math.abs(price);
+            }
             const isExpensive = price !== null && price >= EXPENSIVE_PRICE_THRESHOLD;
             if (isExpensive) {
                 expensiveTotal += 1;
                 if (isResolved) expensiveResolved += 1;
             }
 
-            const dateLost = parseDateValue(row?.date_lost);
-            const isInRecentWindow = Boolean(dateLost)
-                && compareDateTs(dateLost.getTime(), periodStart.getTime()) >= 0
-                && compareDateTs(dateLost.getTime(), today.getTime()) <= 0;
-            if (isInRecentWindow) {
-                recentTotal += 1;
-                if (isResolved) recentResolved += 1;
+            if (backlogMode === "recent_30_days") {
+                const dateLost = parseDateValue(row?.date_lost);
+                const isInRecentWindow = Boolean(dateLost)
+                    && compareDateTs(dateLost.getTime(), periodStart.getTime()) >= 0
+                    && compareDateTs(dateLost.getTime(), today.getTime()) <= 0;
+                if (isInRecentWindow) {
+                    recentTotal += 1;
+                    if (isResolved) recentResolved += 1;
+                }
             }
         });
 
-        const solvedRecentPercent = recentTotal > 0
-            ? (recentResolved / recentTotal) * 100
-            : 0;
-        const backlogPercent = recentTotal > 0
-            ? Math.max(0, 100 - solvedRecentPercent)
-            : 0;
+        const backlogSourceTotal = backlogMode === "recent_30_days" ? recentTotal : totalShk;
+        const backlogSourceResolved = backlogMode === "recent_30_days" ? recentResolved : resolvedShk;
+        const solvedPercent = backlogSourceTotal > 0 ? (backlogSourceResolved / backlogSourceTotal) * 100 : 0;
+        const backlogPercent = backlogSourceTotal > 0 ? Math.max(0, 100 - solvedPercent) : 0;
 
-        setText(statTotalShkEl, formatInt(totalShk));
-        setText(statResolvedShkEl, formatInt(resolvedShk));
-        setText(statExpensiveTotalEl, formatInt(expensiveTotal));
-        setText(statExpensiveResolvedEl, formatInt(expensiveResolved));
-        setText(statPureBacklogEl, formatPercent(backlogPercent));
+        return {
+            totalShk,
+            resolvedShk,
+            expensiveTotal,
+            expensiveResolved,
+            backlogPercent,
+            balanceAmount
+        };
+    }
+
+    function resolveDashboardMonthStats(todayValue) {
+        const today = todayValue instanceof Date ? todayValue : getDashboardTodayDate();
+        const isCurrentMonthWindow = today.getDate() >= 21;
+        return createDashboardMonthStats(isCurrentMonthWindow
+            ? new Date(today.getFullYear(), today.getMonth(), 1)
+            : new Date(today.getFullYear(), today.getMonth() - 1, 1));
+    }
+
+    function createDashboardMonthStats(targetDate) {
+        const target = targetDate instanceof Date
+            ? new Date(targetDate.getFullYear(), targetDate.getMonth(), 1)
+            : new Date();
+        const monthLabelRaw = new Intl.DateTimeFormat("ru-RU", { month: "long" }).format(target);
+        const label = monthLabelRaw ? monthLabelRaw[0].toUpperCase() + monthLabelRaw.slice(1) : "—";
+        return {
+            year: target.getFullYear(),
+            monthIndex: target.getMonth(),
+            label
+        };
+    }
+
+    function shiftDashboardMonthStats(monthStats, offsetMonths) {
+        const shift = Number.isFinite(Number(offsetMonths)) ? Number(offsetMonths) : 0;
+        const target = new Date(Number(monthStats?.year || 0), Number(monthStats?.monthIndex || 0) + shift, 1);
+        return createDashboardMonthStats(target);
+    }
+
+    function filterRowsByMonth(rows, monthStats) {
+        const sourceRows = Array.isArray(rows) ? rows : [];
+        return sourceRows.filter((row) => {
+            const dateLost = parseDateValue(row?.date_lost);
+            if (!dateLost) return false;
+            return dateLost.getFullYear() === monthStats.year
+                && dateLost.getMonth() === monthStats.monthIndex;
+        });
     }
 
     function renderLeaders(rows, employeeNameMap) {
@@ -4194,27 +4374,66 @@
     }
 
     function renderMainDynamics(rows) {
-        if (!pureDynamicsChartCanvasEl) return;
+        const sourceRows = dedupeRowsByShk(rows);
+        const today = getDashboardTodayDate();
+        const monthStats = resolveDashboardMonthStats(today);
+        const previousMonthStats = shiftDashboardMonthStats(monthStats, -1);
 
-        if (pureDynamicsChart) {
-            pureDynamicsChart.destroy();
-            pureDynamicsChart = null;
-        }
+        const charts = [
+            {
+                chartKey: "overall",
+                canvasEl: pureDynamicsChartCanvasEl,
+                emptyEl: pureDynamicsChartEmptyEl,
+                rows: sourceRows,
+                dateKeys: buildDateRangeKeys(addDays(today, -29), today)
+            },
+            {
+                chartKey: "month",
+                canvasEl: pureMonthDynamicsChartCanvasEl,
+                emptyEl: pureMonthDynamicsChartEmptyEl,
+                rows: filterRowsByMonth(sourceRows, monthStats),
+                dateKeys: buildDateRangeKeys(
+                    new Date(monthStats.year, monthStats.monthIndex, 1),
+                    getMonthChartRangeEnd(monthStats, today)
+                )
+            },
+            {
+                chartKey: "previousMonth",
+                canvasEl: purePrevMonthDynamicsChartCanvasEl,
+                emptyEl: purePrevMonthDynamicsChartEmptyEl,
+                rows: filterRowsByMonth(sourceRows, previousMonthStats),
+                dateKeys: buildDateRangeKeys(
+                    new Date(previousMonthStats.year, previousMonthStats.monthIndex, 1),
+                    getMonthChartRangeEnd(previousMonthStats, today)
+                )
+            }
+        ];
 
         if (typeof window.Chart === "undefined") {
-            showMainDynamicsEmpty("Не удалось загрузить модуль графика");
+            charts.forEach((item) => {
+                destroyDynamicsChart(item.chartKey);
+                showDynamicsEmpty(item.emptyEl, "Не удалось загрузить модуль графика");
+            });
             return;
         }
 
-        const today = getDashboardTodayDate();
-        const startDate = addDays(today, -29);
-        const dateKeys = [];
-        for (let i = 0; i < 30; i += 1) {
-            dateKeys.push(formatIsoDate(addDays(startDate, i)));
+        charts.forEach((item) => {
+            renderMainDynamicsChart(item);
+        });
+    }
+
+    function renderMainDynamicsChart({ chartKey, canvasEl, emptyEl, rows, dateKeys }) {
+        destroyDynamicsChart(chartKey);
+        if (!(canvasEl instanceof HTMLCanvasElement)) return;
+
+        const keys = Array.isArray(dateKeys) ? dateKeys : [];
+        if (!keys.length) {
+            showDynamicsEmpty(emptyEl, "Нет данных для отображения графика");
+            return;
         }
 
         const byDate = new Map();
-        dateKeys.forEach((iso) => {
+        keys.forEach((iso) => {
             byDate.set(iso, {
                 total: 0,
                 byLr: new Map()
@@ -4239,14 +4458,14 @@
             bucket.byLr.set(lr, (bucket.byLr.get(lr) || 0) + 1);
         });
 
-        hideMainDynamicsEmpty();
+        hideDynamicsEmpty(emptyEl);
 
-        const labels = dateKeys.map((iso) => formatDateForUi(iso));
+        const labels = keys.map((iso) => formatDateForUi(iso));
         const lrKeys = Array.from(lrSet).sort(sortMixedNumericStrings);
 
         const datasets = [{
             label: "Общее кол-во списаний",
-            data: dateKeys.map((iso) => byDate.get(iso)?.total || 0),
+            data: keys.map((iso) => byDate.get(iso)?.total || 0),
             borderColor: "#0f172a",
             backgroundColor: "#0f172a",
             borderWidth: 1.6,
@@ -4261,7 +4480,7 @@
             const color = DYNAMICS_LR_COLORS[index % DYNAMICS_LR_COLORS.length];
             datasets.push({
                 label: `LR ${lr}`,
-                data: dateKeys.map((iso) => byDate.get(iso)?.byLr?.get(lr) || 0),
+                data: keys.map((iso) => byDate.get(iso)?.byLr?.get(lr) || 0),
                 borderColor: color,
                 backgroundColor: color,
                 borderWidth: 1.9,
@@ -4271,7 +4490,7 @@
             });
         });
 
-        pureDynamicsChart = new window.Chart(pureDynamicsChartCanvasEl, {
+        pureDynamicsCharts[chartKey] = new window.Chart(canvasEl, {
             type: "line",
             data: {
                 labels,
@@ -4294,7 +4513,7 @@
                             title: (items) => {
                                 const index = Number(items?.[0]?.dataIndex);
                                 if (!Number.isFinite(index)) return "";
-                                const key = dateKeys[index];
+                                const key = keys[index];
                                 return formatDateForUi(key);
                             },
                             label: (ctx) => {
@@ -4326,15 +4545,53 @@
         });
     }
 
-    function showMainDynamicsEmpty(message) {
-        if (!pureDynamicsChartEmptyEl) return;
-        pureDynamicsChartEmptyEl.textContent = message || "Нет данных для отображения графика";
-        pureDynamicsChartEmptyEl.hidden = false;
+    function destroyDynamicsChart(chartKey) {
+        const key = toText(chartKey);
+        if (!key || !(key in pureDynamicsCharts)) return;
+        const chart = pureDynamicsCharts[key];
+        if (!chart) return;
+        chart.destroy();
+        pureDynamicsCharts[key] = null;
     }
 
-    function hideMainDynamicsEmpty() {
-        if (!pureDynamicsChartEmptyEl) return;
-        pureDynamicsChartEmptyEl.hidden = true;
+    function showDynamicsEmpty(emptyElement, message) {
+        if (!(emptyElement instanceof HTMLElement)) return;
+        emptyElement.textContent = message || "Нет данных для отображения графика";
+        emptyElement.hidden = false;
+    }
+
+    function hideDynamicsEmpty(emptyElement) {
+        if (!(emptyElement instanceof HTMLElement)) return;
+        emptyElement.hidden = true;
+    }
+
+    function buildDateRangeKeys(startDateValue, endDateValue) {
+        const startDate = startDateValue instanceof Date ? startDateValue : getDashboardTodayDate();
+        const endDate = endDateValue instanceof Date ? endDateValue : startDate;
+        const startTs = startDate.getTime();
+        const endTs = endDate.getTime();
+
+        if (compareDateTs(startTs, endTs) > 0) return [];
+
+        const keys = [];
+        let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+        const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+
+        while (compareDateTs(cursor.getTime(), end.getTime()) <= 0) {
+            keys.push(formatIsoDate(cursor));
+            cursor = addDays(cursor, 1);
+        }
+
+        return keys;
+    }
+
+    function getMonthChartRangeEnd(monthStats, todayValue) {
+        const today = todayValue instanceof Date ? todayValue : getDashboardTodayDate();
+        const monthLastDate = new Date(monthStats.year, monthStats.monthIndex + 1, 0);
+        if (monthStats.year === today.getFullYear() && monthStats.monthIndex === today.getMonth()) {
+            return new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        }
+        return monthLastDate;
     }
 
     function renderUploadCalendar(rows, pureDeadlineConfig) {
@@ -4347,7 +4604,7 @@
         const uploadDates = new Set();
         const deadlineConfig = normalizePureDeadlineConfig(pureDeadlineConfig);
 
-        dedupeRowsByShk(rows).forEach((row) => {
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
             const date = parseDateValue(row?.date_lost);
             if (!date) return;
             uploadDates.add(formatIsoDate(date));
@@ -4406,8 +4663,10 @@
         const seen = new Set();
         (Array.isArray(rows) ? rows : []).forEach((row) => {
             const shk = normalizeShk(row?.shk);
-            if (!shk || seen.has(shk)) return;
-            seen.add(shk);
+            const dateLost = normalizeDateIsoValue(row?.date_lost);
+            const key = dateLost ? buildShkDateKey(shk, dateLost) : shk;
+            if (!shk || seen.has(key)) return;
+            seen.add(key);
             out.push(row);
         });
         return out;
@@ -4488,15 +4747,15 @@
     }
 
     function prepareIncomingRows(rows, currentUserWhId, autoLrSet, pureDeadlineConfig) {
-        const rowsByShk = new Map();
+        const rowsByKey = new Map();
+        const postedRowsByKey = new Map();
         const stats = {
             skippedByWh: 0,
             skippedPostedFlag: 0,
             skippedByIsAuto: 0,
             skippedByDeadline: 0,
             skippedInvalid: 0,
-            duplicateInFileIgnored: 0,
-            duplicateInFileReplaced: 0
+            duplicateInFileIgnored: 0
         };
 
         for (const row of rows) {
@@ -4505,12 +4764,6 @@
             const whId = normalizeToken(getCellValue(row, normalizedRow, "wh_id"));
             if (!whId || whId !== currentUserWhId) {
                 stats.skippedByWh += 1;
-                continue;
-            }
-
-            const postedFlag = getCellValue(row, normalizedRow, "posted_flag");
-            if (isTrueLike(postedFlag)) {
-                stats.skippedPostedFlag += 1;
                 continue;
             }
 
@@ -4529,8 +4782,31 @@
                 continue;
             }
 
+            const dateLost = formatIsoDate(dateObj);
+            const rowKey = buildShkDateKey(shk, dateLost);
+            const postedFlag = getCellValue(row, normalizedRow, "posted_flag");
+            if (isTrueLike(postedFlag)) {
+                stats.skippedPostedFlag += 1;
+                rowsByKey.delete(rowKey);
+                if (postedRowsByKey.has(rowKey)) {
+                    stats.duplicateInFileIgnored += 1;
+                    continue;
+                }
+                postedRowsByKey.set(rowKey, {
+                    shk,
+                    wh_id: whId,
+                    date_lost: dateLost
+                });
+                continue;
+            }
+
             if (!isDateAllowedByDeadline(dateObj, pureDeadlineConfig)) {
                 stats.skippedByDeadline += 1;
+                continue;
+            }
+
+            if (postedRowsByKey.has(rowKey)) {
+                stats.duplicateInFileIgnored += 1;
                 continue;
             }
 
@@ -4541,28 +4817,19 @@
                 brand: toText(getCellValue(row, normalizedRow, "brand")),
                 shk_state_before_lost: toText(getCellValue(row, normalizedRow, "shk_state_before_lost")),
                 wh_id: whId,
-                date_lost: formatIsoDate(dateObj),
+                date_lost: dateLost,
                 lr: toIntegerOrNull(lrRaw) ?? toIntegerOrNull(lr) ?? lr,
-                price: toNumberOrNull(getCellValue(row, normalizedRow, "price")) ?? 0,
-                __dateTs: dateObj.getTime()
+                price: toNumberOrNull(getCellValue(row, normalizedRow, "price")) ?? 0
             };
 
-            const prev = rowsByShk.get(shk);
-            if (!prev) {
-                rowsByShk.set(shk, incoming);
+            if (rowsByKey.has(rowKey)) {
+                stats.duplicateInFileIgnored += 1;
                 continue;
             }
-
-            const compare = compareDateTs(incoming.__dateTs, prev.__dateTs);
-            if (compare > 0) {
-                rowsByShk.set(shk, incoming);
-                stats.duplicateInFileReplaced += 1;
-            } else {
-                stats.duplicateInFileIgnored += 1;
-            }
+            rowsByKey.set(rowKey, incoming);
         }
 
-        return { rowsByShk, stats };
+        return { rowsByKey, postedRowsByKey, stats };
     }
 
     async function loadExistingRowsByShk(shks) {
@@ -4605,72 +4872,193 @@
         throw new Error(`Не удалось проверить ШК ${oneShk} в pure_losses_rep: ${errorText}`);
     }
 
-    function buildSyncPlan(rowsByShk, existingByShk) {
+    function buildSyncPlan(rowsByKey, postedRowsByKey, existingByShk, currentUserWhId) {
         const rowsToInsert = [];
-        const deleteShks = new Set();
+        const autoFoundUpdates = [];
         const stats = {
             insertedNew: 0,
-            replacedByNewer: 0,
             skippedSameDate: 0,
-            skippedOlderDate: 0,
-            dedupedExistingRows: 0
+            autoMarkedFound: 0
         };
 
-        for (const [shk, incoming] of rowsByShk.entries()) {
+        for (const incoming of rowsByKey.values()) {
+            const shk = incoming.shk;
             const existingRows = existingByShk.get(shk) || [];
-
-            if (!existingRows.length) {
-                rowsToInsert.push(toInsertPayload(incoming));
-                stats.insertedNew += 1;
+            const hasSameDate = existingRows.some((row) => isSameShkAndDate(row, incoming.shk, incoming.date_lost, currentUserWhId));
+            if (hasSameDate) {
+                stats.skippedSameDate += 1;
                 continue;
             }
-
-            const existingNewest = getNewestExistingRow(existingRows);
-            const compare = compareDateTs(incoming.__dateTs, existingNewest.ts);
-
-            if (compare > 0) {
-                deleteShks.add(shk);
-                rowsToInsert.push(toInsertPayload(incoming));
-                stats.replacedByNewer += 1;
-            } else {
-                if (existingRows.length > 1) {
-                    deleteShks.add(shk);
-                    rowsToInsert.push(toInsertPayloadFromExisting(existingNewest.row, shk));
-                    stats.dedupedExistingRows += (existingRows.length - 1);
-                }
-
-                if (compare === 0) {
-                    stats.skippedSameDate += 1;
-                } else {
-                    stats.skippedOlderDate += 1;
-                }
-            }
+            rowsToInsert.push(toInsertPayload(incoming));
+            stats.insertedNew += 1;
         }
 
+        for (const postedSignal of postedRowsByKey.values()) {
+            const existingRows = existingByShk.get(postedSignal.shk) || [];
+            existingRows.forEach((row) => {
+                if (!isSameShkAndDate(row, postedSignal.shk, postedSignal.date_lost, currentUserWhId)) return;
+                if (!isRowPendingForAutoFound(row)) return;
+                autoFoundUpdates.push(buildAutoFoundUpdateTarget(row, postedSignal));
+                stats.autoMarkedFound += 1;
+            });
+        }
+
+        const uniqueAutoFoundUpdates = dedupeAutoFoundUpdateTargets(autoFoundUpdates);
+
         return {
-            deleteShks: Array.from(deleteShks),
             rowsToInsert,
-            stats
+            autoFoundUpdates: uniqueAutoFoundUpdates,
+            stats: {
+                ...stats,
+                autoMarkedFound: uniqueAutoFoundUpdates.length
+            }
         };
     }
 
+    function buildShkDateKey(shkValue, dateLostValue) {
+        return `${normalizeShk(shkValue)}|${normalizeToken(dateLostValue)}`;
+    }
+
+    function collectIncomingShks(prepared) {
+        const shks = new Set();
+        const rowsByKey = prepared?.rowsByKey instanceof Map ? prepared.rowsByKey : new Map();
+        const postedRowsByKey = prepared?.postedRowsByKey instanceof Map ? prepared.postedRowsByKey : new Map();
+
+        rowsByKey.forEach((row) => {
+            const shk = normalizeShk(row?.shk);
+            if (shk) shks.add(shk);
+        });
+        postedRowsByKey.forEach((row) => {
+            const shk = normalizeShk(row?.shk);
+            if (shk) shks.add(shk);
+        });
+
+        return Array.from(shks);
+    }
+
+    function flattenRowsFromMap(mapByKey) {
+        const out = [];
+        if (!(mapByKey instanceof Map)) return out;
+        mapByKey.forEach((rows) => {
+            if (!Array.isArray(rows)) return;
+            out.push(...rows);
+        });
+        return out;
+    }
+
+    function normalizeDateIsoValue(value) {
+        const parsed = parseDateValue(value);
+        if (parsed) return formatIsoDate(parsed);
+        const text = toText(value);
+        return text || "";
+    }
+
+    function isSameShkAndDate(row, shkValue, dateLostValue, whIdValue) {
+        const rowShk = normalizeShk(row?.shk);
+        const rowDate = normalizeDateIsoValue(row?.date_lost);
+        const rowWh = normalizeToken(row?.wh_id);
+        const shk = normalizeShk(shkValue);
+        const dateLost = normalizeDateIsoValue(dateLostValue);
+        const whId = normalizeToken(whIdValue);
+        return Boolean(rowShk && rowDate && shk && dateLost)
+            && rowShk === shk
+            && rowDate === dateLost
+            && (!whId || rowWh === whId);
+    }
+
+    function isRowPendingForAutoFound(row) {
+        const decision = extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision));
+        const comment = toText(readEditableColumnValue(row, tableState.updateColumnMap.comment));
+        return !decision && !comment;
+    }
+
+    function getPureRowIdTarget(row) {
+        const idCandidates = ["id", "pure_losses_id", "row_id"];
+        for (const column of idCandidates) {
+            if (!Object.prototype.hasOwnProperty.call(row || {}, column)) continue;
+            const value = normalizeToken(row?.[column]);
+            if (!value) continue;
+            return { column, value };
+        };
+        return null;
+    }
+
+    function buildAutoFoundUpdateTarget(row, postedSignal) {
+        return {
+            idTarget: getPureRowIdTarget(row),
+            shk: normalizeShk(postedSignal?.shk),
+            wh_id: normalizeToken(postedSignal?.wh_id),
+            date_lost: normalizeDateIsoValue(postedSignal?.date_lost)
+        };
+    }
+
+    function dedupeAutoFoundUpdateTargets(targets) {
+        const out = [];
+        const seen = new Set();
+        (Array.isArray(targets) ? targets : []).forEach((item) => {
+            const idColumn = toText(item?.idTarget?.column);
+            const idValue = normalizeToken(item?.idTarget?.value);
+            const key = idColumn && idValue
+                ? `id:${idColumn}:${idValue}`
+                : `key:${buildShkDateKey(item?.shk, item?.date_lost)}|${normalizeToken(item?.wh_id)}`;
+            if (!key || seen.has(key)) return;
+            seen.add(key);
+            out.push(item);
+        });
+        return out;
+    }
+
     async function applySyncPlan(syncPlan) {
-        const deleteChunks = chunkArray(syncPlan.deleteShks, URL_FILTER_CHUNK_SIZE);
-        for (const idsChunk of deleteChunks) {
-            const { error } = await supabaseClient
-                .from(TABLE_PURE)
-                .delete()
-                .in("shk", idsChunk);
-
-            if (error) {
-                throw new Error("Не удалось удалить старые строки по ШК перед обновлением.");
-            }
-        }
-
         const insertChunks = chunkArray(syncPlan.rowsToInsert, INSERT_CHUNK_SIZE);
         for (const rowsChunk of insertChunks) {
             await insertRowsAdaptive(rowsChunk);
         }
+
+        const autoFoundUpdates = Array.isArray(syncPlan.autoFoundUpdates) ? syncPlan.autoFoundUpdates : [];
+        for (const target of autoFoundUpdates) {
+            await applyAutoFoundUpdate(target);
+        }
+    }
+
+    async function applyAutoFoundUpdate(target) {
+        if (!target || typeof target !== "object") return;
+
+        const patch = sanitizeUpdatePatch({
+            [tableState.updateColumnMap.decision]: AUTO_FOUND_DECISION,
+            [tableState.updateColumnMap.emp]: AUTO_FOUND_EMP_ID,
+            [tableState.updateColumnMap.comment]: AUTO_FOUND_COMMENT
+        });
+        if (!Object.keys(patch).length) return;
+
+        let query = supabaseClient.from(TABLE_PURE).update(patch);
+        if (target.idTarget?.column && target.idTarget?.value) {
+            query = query.eq(target.idTarget.column, target.idTarget.value);
+        } else {
+            query = query
+                .eq("shk", target.shk)
+                .eq("wh_id", target.wh_id)
+                .eq("date_lost", target.date_lost);
+
+            if (Object.prototype.hasOwnProperty.call(patch, tableState.updateColumnMap.decision)) {
+                query = query.is(tableState.updateColumnMap.decision, null);
+            }
+            if (Object.prototype.hasOwnProperty.call(patch, tableState.updateColumnMap.comment)) {
+                query = query.is(tableState.updateColumnMap.comment, null);
+            }
+        }
+
+        const { error } = await query;
+        if (!error) return;
+
+        const missingColumn = extractMissingColumnName(error);
+        if (missingColumn && Object.prototype.hasOwnProperty.call(patch, missingColumn)) {
+            tableState.unsupportedUpdateColumns.add(missingColumn);
+            await applyAutoFoundUpdate(target);
+            return;
+        }
+
+        const errorText = String(error?.message || error?.details || error?.code || "unknown");
+        throw new Error(`Не удалось обновить строку с движением товара: ${errorText}`);
     }
 
     async function insertRowsAdaptive(rowsChunk) {
@@ -5055,6 +5443,12 @@
             minimumFractionDigits: 0,
             maximumFractionDigits: 1
         }).format(Math.max(0, safe))}%`;
+    }
+
+    function formatLossBalance(value) {
+        const safe = toNumberOrNull(value);
+        if (safe === null || Math.abs(safe) < 0.005) return "0 ₽";
+        return `-${formatPriceForUi(Math.abs(safe))} ₽`;
     }
 
     function escapeHtml(value) {

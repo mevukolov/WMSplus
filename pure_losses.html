@@ -42,6 +42,10 @@
 
         .pure-center-card {
             min-height: 520px;
+            max-height: calc(95vh - 96px);
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
         }
 
         .pure-last-upload-date {
@@ -179,9 +183,17 @@
             margin: 0 0 14px 0;
         }
 
+        .pure-main-stats-subtitle {
+            margin: 14px 0 14px 0;
+            font-size: 22px;
+            font-weight: 700;
+            color: #0f172a;
+            line-height: 1.2;
+        }
+
         .pure-main-kpis {
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(6, minmax(0, 1fr));
             gap: 10px;
         }
 
@@ -1424,6 +1436,10 @@
             .pure-filter-field {
                 min-width: 220px;
             }
+
+            .pure-main-kpis {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
         }
 
         @media (max-width: 1200px) {
@@ -1452,6 +1468,11 @@
                 text-align: left;
                 width: 100%;
                 justify-content: flex-start;
+            }
+
+            .pure-center-card {
+                max-height: none;
+                overflow: visible;
             }
         }
 
@@ -1511,7 +1532,7 @@
             <div class="pure-center-toolbar">
                 <button id="open-pure-table-btn" class="btn btn-rect pure-open-table-btn">Открыть таблицу чистых списаний</button>
             </div>
-            <h1 class="pure-main-stats-title">Статистика</h1>
+            <h1 class="pure-main-stats-title">Общая статистика</h1>
             <div class="pure-main-kpis">
                 <div class="pure-main-kpi">
                     <div class="pure-main-kpi-label">Всего ШК в таблице</div>
@@ -1533,6 +1554,10 @@
                     <div class="pure-main-kpi-label">Отставание «Чистых списаний»</div>
                     <div id="stat-pure-backlog" class="pure-main-kpi-value">—</div>
                 </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Баланс</div>
+                    <div id="stat-balance" class="pure-main-kpi-value">—</div>
+                </div>
             </div>
 
             <section class="pure-main-chart-block">
@@ -1540,6 +1565,78 @@
                 <div class="pure-main-chart-wrap">
                     <canvas id="pure-dynamics-chart"></canvas>
                     <div id="pure-dynamics-empty" class="pure-main-chart-empty" hidden>Нет данных для отображения графика</div>
+                </div>
+            </section>
+
+            <h2 id="stat-month-title" class="pure-main-stats-subtitle">Статистика за —</h2>
+            <div class="pure-main-kpis">
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Всего ШК в таблице</div>
+                    <div id="stat-month-total-shk" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Разобрано ШК в таблице</div>
+                    <div id="stat-month-resolved-shk" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Всего дорогостоя (кол-во)</div>
+                    <div id="stat-month-expensive-total" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Разобрано дорогостоя</div>
+                    <div id="stat-month-expensive-resolved" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Отставание «Чистых списаний»</div>
+                    <div id="stat-month-pure-backlog" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Баланс</div>
+                    <div id="stat-month-balance" class="pure-main-kpi-value">—</div>
+                </div>
+            </div>
+
+            <section class="pure-main-chart-block">
+                <h2 id="stat-month-dynamics-title" class="pure-main-chart-title">Динамика списаний за —</h2>
+                <div class="pure-main-chart-wrap">
+                    <canvas id="pure-month-dynamics-chart"></canvas>
+                    <div id="pure-month-dynamics-empty" class="pure-main-chart-empty" hidden>Нет данных для отображения графика</div>
+                </div>
+            </section>
+
+            <h2 id="stat-prev-month-title" class="pure-main-stats-subtitle">Статистика за —</h2>
+            <div class="pure-main-kpis">
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Всего ШК в таблице</div>
+                    <div id="stat-prev-month-total-shk" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Разобрано ШК в таблице</div>
+                    <div id="stat-prev-month-resolved-shk" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Всего дорогостоя (кол-во)</div>
+                    <div id="stat-prev-month-expensive-total" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Разобрано дорогостоя</div>
+                    <div id="stat-prev-month-expensive-resolved" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Отставание «Чистых списаний»</div>
+                    <div id="stat-prev-month-pure-backlog" class="pure-main-kpi-value">—</div>
+                </div>
+                <div class="pure-main-kpi">
+                    <div class="pure-main-kpi-label">Баланс</div>
+                    <div id="stat-prev-month-balance" class="pure-main-kpi-value">—</div>
+                </div>
+            </div>
+
+            <section class="pure-main-chart-block">
+                <h2 id="stat-prev-month-dynamics-title" class="pure-main-chart-title">Динамика списаний за —</h2>
+                <div class="pure-main-chart-wrap">
+                    <canvas id="pure-prev-month-dynamics-chart"></canvas>
+                    <div id="pure-prev-month-dynamics-empty" class="pure-main-chart-empty" hidden>Нет данных для отображения графика</div>
                 </div>
             </section>
         </div>
