@@ -383,6 +383,126 @@
             gap: 8px;
         }
 
+        .pure-month-picker-content {
+            width: min(940px, calc(100vw - 32px));
+            max-height: calc(100vh - 46px);
+            overflow: hidden;
+            gap: 12px;
+        }
+
+        .pure-month-picker-scroller {
+            overflow: auto;
+            max-height: min(60vh, 640px);
+            padding-right: 4px;
+        }
+
+        .pure-month-picker-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+        }
+
+        .pure-month-picker-card {
+            appearance: none;
+            -webkit-appearance: none;
+            font: inherit;
+            text-align: left;
+            width: 100%;
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            border-radius: 12px;
+            background: #f8fafc;
+            padding: 10px;
+            cursor: pointer;
+            display: grid;
+            gap: 6px;
+            transition: border-color 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
+        }
+
+        .pure-month-picker-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .pure-month-picker-card:hover {
+            border-color: rgba(37, 99, 235, 0.38);
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+            transform: translateY(-1px);
+        }
+
+        .pure-month-picker-card.is-selected {
+            border-color: rgba(37, 99, 235, 0.6);
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.13);
+        }
+
+        .pure-month-picker-card.is-good {
+            border-color: rgba(22, 163, 74, 0.38);
+            background: rgba(22, 163, 74, 0.12);
+        }
+
+        .pure-month-picker-card.is-warn {
+            border-color: rgba(245, 158, 11, 0.42);
+            background: rgba(245, 158, 11, 0.14);
+        }
+
+        .pure-month-picker-card.is-bad {
+            border-color: rgba(239, 68, 68, 0.4);
+            background: rgba(239, 68, 68, 0.13);
+        }
+
+        .pure-month-picker-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #0f172a;
+            line-height: 1.2;
+        }
+
+        .pure-month-picker-meta {
+            font-size: 13px;
+            color: #334155;
+            line-height: 1.25;
+        }
+
+        .pure-month-picker-percent {
+            margin-left: auto;
+            text-align: right;
+            white-space: nowrap;
+            font-size: 22px;
+            line-height: 1;
+            font-weight: 800;
+            color: #0f172a;
+        }
+
+        .pure-month-picker-loss {
+            font-size: 13px;
+            color: #334155;
+            line-height: 1.25;
+            font-weight: 600;
+        }
+
+        .pure-month-picker-footer {
+            border: 1px solid #dbe3ec;
+            border-radius: 12px;
+            background: #f8fafc;
+            padding: 10px 12px;
+            display: grid;
+            gap: 5px;
+        }
+
+        .pure-month-picker-footer-label {
+            font-size: 12px;
+            color: #64748b;
+            line-height: 1.2;
+        }
+
+        .pure-month-picker-footer-value {
+            font-size: 20px;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.1;
+        }
+
         .pure-update-help-content {
             width: min(760px, calc(100vw - 32px));
             max-height: calc(100vh - 48px);
@@ -693,6 +813,10 @@
 
         .pure-filter-field {
             min-width: 250px;
+        }
+
+        .pure-filter-field.pure-month-filter-field {
+            min-width: 220px;
         }
 
         .pure-filter-field > label {
@@ -1674,6 +1798,14 @@
         </div>
 
         <div class="pure-table-toolbar">
+            <div class="pure-filter-field pure-month-filter-field">
+                <label>Месяц*</label>
+                <button class="btn btn-rect status-btn pure-filter-btn" id="pure-month-picker-btn" type="button">
+                    Все месяцы
+                    <span class="caret">▾</span>
+                </button>
+            </div>
+
             <div class="pure-filter-field">
                 <label>Лостризон*</label>
                 <div class="status-dropdown">
@@ -1747,6 +1879,20 @@
                 </tbody>
             </table>
         </div>
+</div>
+</div>
+
+<div id="pure-month-picker-modal" class="pure-mini-modal hidden" aria-hidden="true">
+    <div class="pure-mini-modal-backdrop" data-close-month-picker-modal="1"></div>
+    <div class="pure-mini-modal-content pure-month-picker-content" role="dialog" aria-modal="true" aria-labelledby="pure-month-picker-title">
+        <div class="pure-update-help-header">
+            <div id="pure-month-picker-title" class="pure-mini-modal-title">Выбор месяца</div>
+            <button id="pure-month-picker-close-btn" class="pure-update-help-close" type="button" aria-label="Закрыть">✕</button>
+        </div>
+        <div class="pure-month-picker-scroller">
+            <div id="pure-month-picker-list" class="pure-month-picker-grid"></div>
+        </div>
+        <div id="pure-month-picker-footer" class="pure-month-picker-footer"></div>
     </div>
 </div>
 

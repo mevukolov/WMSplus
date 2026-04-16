@@ -4,9 +4,31 @@
     const API_DATA_TYPE = "opp_table_analisys_script";
     const DEADLINES_DATA_TYPE = "opp_table_deadlines";
     const EMPLOYEES_DATA_TYPE = "opp_table_employees";
+    const DATA_TYPE_PURE_DEADLINES = "opp_pure_deadlines";
     const REPORT_CACHE_TABLE = "opp_reports_cache";
-    const CACHE_SCOPE_ADMIN = "opp_admin";
+    const CACHE_SCOPE_DASHBOARD_SHIFT = "opp_dashboard_shift";
     const CACHE_SCOPE_DASHBOARD_MONTH = "opp_dashboard_month";
+    const CACHE_SCOPE_DASHBOARD_ROLLING30 = "opp_dashboard_rolling30";
+    const TABLE_PURE = "pure_losses_rep";
+    const TABLE_NM_REP = "nm_rep";
+    const TABLE_TWO_SHK = "2shk_rep";
+    const TWO_SHK_EVENT_TWO = "Два ШК";
+    const TWO_SHK_EVENT_EMPTY = "Пустая упаковка";
+    const TWO_SHK_DATE_COLUMN_CANDIDATES = ["date", "created_at"];
+    const PURE_DYNAMICS_LR_COLORS = [
+        "#2563eb",
+        "#f59e0b",
+        "#10b981",
+        "#ef4444",
+        "#8b5cf6",
+        "#06b6d4",
+        "#f97316",
+        "#84cc16",
+        "#ec4899",
+        "#64748b"
+    ];
+    const PURE_DECISION_COLUMNS = ["opp_deecision", "opp_decision"];
+    const PURE_SOLVED_COLUMNS = ["date_solved", "dt_solved"];
     const SUPPORTED_DEADLINE_KEYS = ["SPS_WMI", "SMC", "SMS", "WMI_BZ", "RWP", "24", "ORS", "REPACK"];
     const MAIN_EMPLOYEE_KEYS_FOR_CARD = new Set(["REPACK", "SPS_WMI", "WMI_BZ", "SMC", "SMS", "RWP"]);
     const DEADLINE_LABELS = {
@@ -21,6 +43,7 @@
     };
 
     const pageTitleEl = document.getElementById("page-title");
+    const pageTitleActionsEl = document.getElementById("page-title-actions");
     const headerWhEl = document.getElementById("header-wh");
     const dateFromEl = document.getElementById("date-from");
     const dateToEl = document.getElementById("date-to");
@@ -55,6 +78,13 @@
     const calendarModalContent = document.getElementById("calendar-modal-content");
     const calendarModalCloseBtn = document.getElementById("calendar-modal-close");
 
+    const pureHelpModal = document.getElementById("pure-help-modal");
+    const pureHelpModalTitle = document.getElementById("pure-help-modal-title");
+    const pureHelpModalTableWrap = document.getElementById("pure-help-modal-table-wrap");
+    const pureHelpModalBody = document.getElementById("pure-help-modal-body");
+    const pureHelpModalEmpty = document.getElementById("pure-help-modal-empty");
+    const pureHelpModalCloseBtn = document.getElementById("pure-help-modal-close");
+
     let currentWhId = "";
     let currentWhName = "";
     let currentApiUrl = "";
@@ -81,8 +111,27 @@
     let lastTodayDeadline = null;
     let lastMissingSheets = [];
     let lastShiftDynamics = [];
+    let lastMonthShiftDynamics = [];
+    let lastCurrentShift = null;
+    let lastPreviousShift = null;
+    let selectedShiftId = "";
     let lastReportGeneratedAtText = "";
     let shiftBreakdownChart = null;
+    let shiftModalBreakdownChart = null;
+    let lastPureBacklogPercent = null;
+    let lastPureResolvedByShift = new Map();
+    let lastPureMissingDates = [];
+    let currentPureDeadlineConfig = null;
+    let lastOppRecognitionRows = [];
+    let lastTwoShkRows = [];
+    let lastPureLossRows = [];
+    let lastPureHelpRows = [];
+    let lastPureBalance60 = 0;
+    let oppPeriodChart = null;
+    let oppEmpDonutChart = null;
+    let twoShkChart = null;
+    let pureLossesChart = null;
+    let pureLossesEmpDonut = null;
 
     let pageTitleObserver = null;
 
@@ -253,6 +302,8 @@
         const expensiveAnalyzed = toNumber(item?.expensiveAnalyzed);
         const dueSum = toNumber(item?.dueSumPrice);
         const analyzedSum = toNumber(item?.analyzedSumPrice);
+        const uploadStatus = normalizeKey(item?.uploadStatus || item?.upload_status);
+        const hasUpload = !uploadStatus || /есть/i.test(uploadStatus);
 
         const expensivePct = expensiveDue > 0 ? (expensiveAnalyzed / expensiveDue) * 100 : null;
         const sumPct = dueSum > 0 ? (analyzedSum / dueSum) * 100 : null;
@@ -267,7 +318,60 @@
             else if (sumPct < 85 && level !== "red") level = "yellow";
         }
 
-        return { level, expensivePct, sumPct };
+        if (!hasUpload) {
+            level = "red";
+        }
+
+        return { level, expensivePct, sumPct, hasUpload };
+    }
+
+    function calcLagPercent(analyzed, total) {
+        const totalNum = toNumber(total);
+        const analyzedNum = toNumber(analyzed);
+        if (totalNum <= 0) return null;
+        const pct = (analyzedNum / totalNum) * 100;
+        return Math.max(0, 100 - pct);
+    }
+
+    function buildMonthLagByStatus(monthShiftDynamics) {
+        const rows = Array.isArray(monthShiftDynamics) ? monthShiftDynamics : [];
+        const keysBase = getConfiguredDeadlineKeys();
+        const keys = keysBase.length ? keysBase : SUPPORTED_DEADLINE_KEYS.slice();
+        const map = new Map();
+
+        keys.forEach((key) => {
+            map.set(key, {
+                key,
+                label: DEADLINE_LABELS[key] || key,
+                dueSumPrice: 0,
+                analyzedSumPrice: 0
+            });
+        });
+
+        rows.forEach((shift) => {
+            const details = Array.isArray(shift?.details) ? shift.details : [];
+            details.forEach((item) => {
+                const key = normalizeDeadlineKey(item?.key);
+                if (!key || !map.has(key)) return;
+                const target = map.get(key);
+                target.dueSumPrice += toNumber(item?.dueSumPrice);
+                target.analyzedSumPrice += toNumber(item?.analyzedSumPrice);
+            });
+        });
+
+        return keys.map((key) => {
+            const item = map.get(key) || {
+                key,
+                label: DEADLINE_LABELS[key] || key,
+                dueSumPrice: 0,
+                analyzedSumPrice: 0
+            };
+            return {
+                key: item.key,
+                label: item.label,
+                lagPercent: calcLagPercent(item.analyzedSumPrice, item.dueSumPrice)
+            };
+        });
     }
 
     function getUserFromLocalStorage() {
@@ -293,7 +397,7 @@
         const whName = getWarehouseNameForTitle();
         currentWhName = whName;
 
-        const base = "Анализ таблицы ОПП";
+        const base = "Динамика ОПП";
         const finalTitle = whName ? `${base} - ${whName}` : base;
 
         if (pageTitleEl) pageTitleEl.textContent = finalTitle;
@@ -311,6 +415,33 @@
             characterData: true,
             subtree: true
         });
+    }
+
+    function renderHeaderShiftButton(targetShift) {
+        if (!pageTitleActionsEl) return;
+        const existingPrev = pageTitleActionsEl.querySelector("#dashboard-prev-shift-btn");
+        if (existingPrev) existingPrev.remove();
+
+        if (!targetShift) return;
+
+        const targetId = normalizeKey(targetShift?.shiftId);
+        if (!targetId) return;
+
+        const btn = document.createElement("button");
+        btn.id = "dashboard-prev-shift-btn";
+        btn.className = "btn btn-rect";
+        btn.type = "button";
+        btn.setAttribute("data-shift-id", targetId);
+        btn.textContent = `${normalizeKey(targetShift?.shiftName)} ${normalizeKey(targetShift?.displayDate)}`.trim();
+
+        btn.addEventListener("click", () => {
+            const clickedId = normalizeKey(btn.getAttribute("data-shift-id"));
+            if (!clickedId) return;
+            selectedShiftId = clickedId;
+            renderSummary();
+        });
+
+        pageTitleActionsEl.appendChild(btn);
     }
 
     function moscowNowDate() {
@@ -405,6 +536,1860 @@
         return `${tokens[0]} - ${tokens[tokens.length - 1]}`;
     }
 
+    function hasOwn(obj, key) {
+        return Boolean(obj && Object.prototype.hasOwnProperty.call(obj, key));
+    }
+
+    function parseLooseNumber(value) {
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        const raw = normalizeKey(value);
+        if (!raw) return null;
+        const cleaned = raw.replace(/\s+/g, "").replace(",", ".");
+        if (!/^-?\d+(?:\.\d+)?$/.test(cleaned)) return null;
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function getNumberByKeys(obj, keys) {
+        const row = obj || {};
+        const list = Array.isArray(keys) ? keys : [];
+        for (const key of list) {
+            if (!hasOwn(row, key)) continue;
+            const n = parseLooseNumber(row[key]);
+            if (n !== null) return n;
+        }
+        return null;
+    }
+
+    function extractMissingColumnName(error) {
+        const text = String(error?.message || error?.details || "");
+        if (!text) return "";
+        const match = text.match(/column\s+([^\s]+)\s+does not exist/i)
+            || text.match(/could not find(?:\s+the)?\s+"?([a-z0-9_.]+)"?\s+column/i);
+        if (!match || !match[1]) return "";
+        const token = String(match[1]).replace(/"/g, "");
+        const parts = token.split(".");
+        return parts[parts.length - 1] || "";
+    }
+
+    function parseDateValue(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (value instanceof Date && !Number.isNaN(value.getTime())) {
+            return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+        }
+        if (typeof value === "number" && Number.isFinite(value)) {
+            const excelEpochOffset = 25569;
+            const dayMs = 86400 * 1000;
+            const ts = (Math.floor(value) - excelEpochOffset) * dayMs;
+            const d = new Date(ts);
+            if (!Number.isNaN(d.getTime())) {
+                return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+            }
+        }
+        const raw = String(value).trim();
+        if (!raw) return null;
+        const datePart = raw.replace("T", " ").split(" ")[0];
+        let match = datePart.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+        if (match) {
+            let year = Number(match[3]);
+            if (year < 100) year += 2000;
+            const date = new Date(year, Number(match[2]) - 1, Number(match[1]));
+            if (!Number.isNaN(date.getTime())) return date;
+        }
+        match = datePart.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+        if (match) {
+            const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+            if (!Number.isNaN(date.getTime())) return date;
+        }
+        const parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) {
+            return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+        }
+        return null;
+    }
+
+    function parseTimestampValue(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        const raw = String(value).trim();
+        if (!raw) return null;
+        let normalized = raw.replace(" ", "T");
+        normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+        const hasOffset = /([zZ]|[+-]\d{2}:\d{2}|[+-]\d{2})$/.test(normalized);
+        const parsed = hasOffset ? new Date(normalized) : new Date(`${normalized}Z`);
+        if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+        const dateOnly = parseDateValue(raw);
+        if (dateOnly && !Number.isNaN(dateOnly.getTime())) return dateOnly.getTime();
+        return null;
+    }
+
+    function sanitizeDecisionOptionText(value) {
+        return String(value || "")
+            .trim()
+            .replace(/^"+|"+$/g, "")
+            .replace(/^'+|'+$/g, "")
+            .replace(/\s+/g, " ");
+    }
+
+    function extractDecisionValue(value) {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            return sanitizeDecisionOptionText(value);
+        }
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                const normalized = extractDecisionValue(item);
+                if (normalized) return normalized;
+            }
+            return "";
+        }
+        if (typeof value === "object") {
+            const candidate = value.value
+                ?? value.text
+                ?? value.label
+                ?? value.option
+                ?? value.name
+                ?? "";
+            return extractDecisionValue(candidate);
+        }
+        return "";
+    }
+
+    async function fetchPureRowsWithColumns(currentUserWhId, columns, buildQuery) {
+        if (!window.supabaseClient || !currentUserWhId) return [];
+        let cols = Array.isArray(columns) ? columns.slice() : [];
+        const pageSize = 1000;
+
+        while (cols.length) {
+            try {
+                const all = [];
+                for (let from = 0; ; from += pageSize) {
+                    const to = from + pageSize - 1;
+                    let query = window.supabaseClient
+                        .from(TABLE_PURE)
+                        .select(cols.join(","))
+                        .eq("wh_id", currentUserWhId);
+                    if (typeof buildQuery === "function") {
+                        query = buildQuery(query);
+                    }
+                    const { data, error } = await query.range(from, to);
+                    if (error) throw error;
+                    const chunk = Array.isArray(data) ? data : [];
+                    if (!chunk.length) break;
+                    all.push(...chunk);
+                    if (chunk.length < pageSize) break;
+                }
+                return all;
+            } catch (error) {
+                const missing = extractMissingColumnName(error);
+                if (missing && cols.includes(missing)) {
+                    cols = cols.filter((col) => col !== missing);
+                    continue;
+                }
+                console.warn("Не удалось загрузить pure_losses_rep:", error instanceof Error ? error.message : error);
+                return [];
+            }
+        }
+        return [];
+    }
+
+    function resolvePureDecision(row) {
+        if (!row) return "";
+        for (const col of PURE_DECISION_COLUMNS) {
+            if (Object.prototype.hasOwnProperty.call(row, col)) {
+                const value = extractDecisionValue(row[col]);
+                if (value) return value;
+            }
+        }
+        return "";
+    }
+
+    function dedupePureRowsByShk(rows) {
+        const out = [];
+        const seen = new Set();
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const shk = normalizeKey(row?.shk);
+            if (!shk || seen.has(shk)) return;
+            seen.add(shk);
+            out.push(row);
+        });
+        return out;
+    }
+
+    function getPureTodayDate() {
+        const now = moscowNowDate();
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+
+    function addDays(dateValue, days) {
+        const base = dateValue instanceof Date
+            ? new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+            : getPureTodayDate();
+        base.setDate(base.getDate() + Number(days || 0));
+        return base;
+    }
+
+    function getWeekStartMonday(dateValue) {
+        const base = dateValue instanceof Date
+            ? new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+            : getPureTodayDate();
+        const day = base.getDay();
+        const diffToMonday = day === 0 ? -6 : 1 - day;
+        return addDays(base, diffToMonday);
+    }
+
+    function compareDateTs(leftTs, rightTs) {
+        const left = Number.isFinite(leftTs) ? leftTs : null;
+        const right = Number.isFinite(rightTs) ? rightTs : null;
+        if (left === null && right === null) return 0;
+        if (left !== null && right === null) return 1;
+        if (left === null && right !== null) return -1;
+        if (left === right) return 0;
+        return left > right ? 1 : -1;
+    }
+
+    function parsePureDeadlineNumber(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+        const text = String(value).trim().replace(/['"]/g, "").replace(",", ".");
+        if (!text) return null;
+        const parsed = Number(text);
+        if (!Number.isFinite(parsed)) return null;
+        return Math.trunc(parsed);
+    }
+
+    function normalizePureDeadlineKey(value) {
+        return String(value || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "")
+            .replace(/['"]/g, "");
+    }
+
+    function extractPureDeadlineOffset(rawData) {
+        if (rawData === null || rawData === undefined) return null;
+
+        if (Array.isArray(rawData)) {
+            for (const item of rawData) {
+                const nested = extractPureDeadlineOffset(item);
+                if (nested !== null) return nested;
+            }
+            return null;
+        }
+
+        if (typeof rawData === "object") {
+            const obj = rawData;
+
+            if (Array.isArray(obj.deadlines)) {
+                for (const item of obj.deadlines) {
+                    if (!item || typeof item !== "object") continue;
+                    const key = normalizePureDeadlineKey(item.key ?? item.name ?? item.status ?? "");
+                    if (key !== "pure") continue;
+                    const value = parsePureDeadlineNumber(item.offset_days ?? item.offset ?? item.value);
+                    if (value !== null) return value;
+                }
+            }
+
+            const directPure = obj.pure ?? obj.Pure ?? obj.PURE;
+            const directValue = parsePureDeadlineNumber(directPure);
+            if (directValue !== null) return directValue;
+
+            for (const [key, value] of Object.entries(obj)) {
+                const normalizedKey = normalizePureDeadlineKey(key);
+                if (normalizedKey === "pure") {
+                    const parsed = parsePureDeadlineNumber(value);
+                    if (parsed !== null) return parsed;
+                    continue;
+                }
+
+                if (normalizedKey === "deadlines" || normalizedKey === "values" || normalizedKey === "config") {
+                    const nested = extractPureDeadlineOffset(value);
+                    if (nested !== null) return nested;
+                }
+            }
+            return null;
+        }
+
+        const text = normalizeKey(rawData);
+        if (!text) return null;
+
+        if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+            try {
+                const parsed = JSON.parse(text);
+                const nested = extractPureDeadlineOffset(parsed);
+                if (nested !== null) return nested;
+            } catch (_) {
+                // ignore JSON parsing error
+            }
+        }
+
+        const pairRegex = /["']?pure["']?\s*:\s*["']?(-?\d+(?:[.,]\d+)?)["']?/i;
+        const match = text.match(pairRegex);
+        if (match && match[1] !== undefined) {
+            const parsed = parsePureDeadlineNumber(match[1]);
+            if (parsed !== null) return parsed;
+        }
+
+        const lines = text.split(/[\r\n;]+/);
+        for (const line of lines) {
+            const normalizedLine = normalizeKey(line);
+            if (!normalizedLine) continue;
+            const lineMatch = normalizedLine.match(/^["']?pure["']?\s*[:=,]\s*["']?(-?\d+(?:[.,]\d+)?)["']?$/i);
+            if (!lineMatch) continue;
+            const parsed = parsePureDeadlineNumber(lineMatch[1]);
+            if (parsed !== null) return parsed;
+        }
+
+        return null;
+    }
+
+    function extractPureDeadlineOffsetFromRows(rows) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        for (const row of safeRows) {
+            const offset = extractPureDeadlineOffset(row?.data);
+            if (offset !== null) return offset;
+        }
+        return null;
+    }
+
+    function createPureDeadlineConfig(offsetDays) {
+        const parsedOffset = parsePureDeadlineNumber(offsetDays);
+        if (parsedOffset === null) {
+            return {
+                offsetDays: null,
+                cutoffDate: null,
+                cutoffIso: ""
+            };
+        }
+
+        const today = getPureTodayDate();
+        const cutoffDate = addDays(today, parsedOffset);
+        return {
+            offsetDays: parsedOffset,
+            cutoffDate,
+            cutoffIso: toIsoDate(cutoffDate)
+        };
+    }
+
+    function normalizePureDeadlineConfig(config) {
+        if (!config || typeof config !== "object") {
+            return createPureDeadlineConfig(null);
+        }
+        return createPureDeadlineConfig(config.offsetDays);
+    }
+
+    function isDateAllowedByDeadline(dateValue, pureDeadlineConfig) {
+        if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return false;
+        const config = normalizePureDeadlineConfig(pureDeadlineConfig);
+        if (!(config.cutoffDate instanceof Date)) return true;
+        return compareDateTs(dateValue.getTime(), config.cutoffDate.getTime()) <= 0;
+    }
+
+    function isCalendarDateInDeadlineRange(dateValue, todayValue, pureDeadlineConfig) {
+        if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return false;
+        const today = todayValue instanceof Date ? todayValue : getPureTodayDate();
+        if (compareDateTs(dateValue.getTime(), today.getTime()) > 0) return false;
+        return isDateAllowedByDeadline(dateValue, pureDeadlineConfig);
+    }
+
+    async function loadPureDeadlineConfig(currentUserWhId) {
+        if (currentPureDeadlineConfig) return currentPureDeadlineConfig;
+        if (!window.supabaseClient) {
+            currentPureDeadlineConfig = createPureDeadlineConfig(null);
+            return currentPureDeadlineConfig;
+        }
+
+        const fetchRows = async (withWhFilter) => {
+            let query = window.supabaseClient
+                .from("wh_data_rep")
+                .select("data, wh_id, data_type")
+                .eq("data_type", DATA_TYPE_PURE_DEADLINES)
+                .limit(300);
+
+            if (withWhFilter && currentUserWhId) {
+                query = query.eq("wh_id", normalizeWhId(currentUserWhId));
+            }
+
+            const { data, error } = await query;
+            if (error) {
+                const errorText = String(error?.message || error?.details || error?.code || "unknown");
+                throw new Error(`Не удалось загрузить дедлайны pure: ${errorText}`);
+            }
+            return Array.isArray(data) ? data : [];
+        };
+
+        let scopedRows = [];
+        try {
+            scopedRows = await fetchRows(true);
+        } catch (error) {
+            console.warn("Pure deadline scoped load failed:", error instanceof Error ? error.message : error);
+        }
+
+        let offsetDays = extractPureDeadlineOffsetFromRows(scopedRows);
+        if (offsetDays === null) {
+            try {
+                const fallbackRows = await fetchRows(false);
+                offsetDays = extractPureDeadlineOffsetFromRows(fallbackRows);
+            } catch (error) {
+                console.warn("Pure deadline fallback load failed:", error instanceof Error ? error.message : error);
+            }
+        }
+
+        currentPureDeadlineConfig = createPureDeadlineConfig(offsetDays);
+        return currentPureDeadlineConfig;
+    }
+
+    async function fetchPureBacklogRows(currentUserWhId, periodFromIso, periodToIso) {
+        if (!currentUserWhId) return [];
+        const columns = ["shk", "date_lost", ...PURE_DECISION_COLUMNS];
+        return fetchPureRowsWithColumns(currentUserWhId, columns, (query) => {
+            return query
+                .gte("date_lost", periodFromIso)
+                .lte("date_lost", periodToIso)
+                .order("date_lost", { ascending: false });
+        });
+    }
+
+    function computePureBacklogPercentFromRows(rows, periodFromIso, periodToIso) {
+        const uniqueRows = dedupePureRowsByShk(rows);
+        let recentTotal = 0;
+        let recentResolved = 0;
+        uniqueRows.forEach((row) => {
+            const dateLost = parseDateValue(row?.date_lost);
+            if (!dateLost) return;
+            const dateIso = toIsoDate(dateLost);
+            if (dateIso < periodFromIso || dateIso > periodToIso) return;
+            recentTotal += 1;
+            if (resolvePureDecision(row)) recentResolved += 1;
+        });
+        if (recentTotal <= 0) return null;
+        const solvedPercent = (recentResolved / recentTotal) * 100;
+        return Math.max(0, 100 - solvedPercent);
+    }
+
+    function computePureMissingDates(rows, pureDeadlineConfig) {
+        const today = getPureTodayDate();
+        const monday = getWeekStartMonday(today);
+        const start = addDays(monday, -21);
+        const uploadDates = new Set();
+        const deadlineConfig = normalizePureDeadlineConfig(pureDeadlineConfig);
+
+        dedupePureRowsByShk(rows).forEach((row) => {
+            const date = parseDateValue(row?.date_lost);
+            if (!date) return;
+            uploadDates.add(toIsoDate(date));
+        });
+
+        const missing = [];
+        for (let i = 0; i < 35; i += 1) {
+            const date = addDays(start, i);
+            const iso = toIsoDate(date);
+            const hasUpload = uploadDates.has(iso);
+            const shouldBeUploaded = isCalendarDateInDeadlineRange(date, today, deadlineConfig);
+            if (!hasUpload && shouldBeUploaded) {
+                missing.push({ iso, day: date.getDate() });
+            }
+        }
+
+        return missing;
+    }
+
+    function buildIsoWithTime(isoDate, timeText) {
+        const safe = parseIsoDate(isoDate);
+        if (!safe) return "";
+        const time = normalizeKey(timeText) || "00:00:00";
+        return `${safe}T${time}+03:00`;
+    }
+
+    function buildRolling30DateTimeRange() {
+        const todayIso = toIsoDate(moscowNowDate());
+        const fromIso = shiftIsoDate(todayIso, -29) || todayIso;
+        return {
+            fromIso: buildIsoWithTime(fromIso, "00:00:00"),
+            toIso: buildIsoWithTime(todayIso, "23:59:59")
+        };
+    }
+
+    function buildRolling60DateTimeRange() {
+        const todayIso = toIsoDate(moscowNowDate());
+        const fromIso = shiftIsoDate(todayIso, -59) || todayIso;
+        return {
+            fromIso: buildIsoWithTime(fromIso, "00:00:00"),
+            toIso: buildIsoWithTime(todayIso, "23:59:59")
+        };
+    }
+
+    function toDateKeyMoscow(value) {
+        if (!value) return "";
+        try {
+            return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Moscow" }).format(new Date(value));
+        } catch {
+            return "";
+        }
+    }
+
+    function getOppIdentifiedState(row) {
+        const raw = row?.is_identified;
+        if (raw === 1 || raw === "1" || raw === true) return 1;
+        if (raw === 0 || raw === "0" || raw === false) return 0;
+
+        const text = String(raw ?? "").trim().toLowerCase();
+        if (text === "true") return 1;
+        if (text === "false") return 0;
+
+        const num = Number(text);
+        if (Number.isFinite(num)) {
+            if (num === 1) return 1;
+            if (num === 0) return 0;
+        }
+        return null;
+    }
+
+    function getOppEmployeeStats(rows) {
+        const map = {};
+        (rows || []).forEach((row) => {
+            const emp = normalizeKey(row?.opp_emp || row?.emp);
+            if (emp === "2405") return;
+            if (!emp) return;
+            map[emp] = (map[emp] || 0) + 1;
+        });
+
+        return Object.entries(map)
+            .map(([emp, count]) => ({ emp, count }))
+            .sort((a, b) => b.count - a.count || a.emp.localeCompare(b.emp, "ru"));
+    }
+
+    function isHelpDecisionValue(value) {
+        const text = normalizeKey(value).toLowerCase().replace(/\s+/g, " ").trim();
+        return text.includes("нужна помощь");
+    }
+
+    function filterPureRowsByRecentDays(rows, days) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        const today = getPureTodayDate();
+        const periodStart = addDays(today, -(Number(days || 0) - 1));
+        return safeRows.filter((row) => {
+            const dateLost = parseDateValue(row?.date_lost);
+            if (!dateLost) return false;
+            return compareDateTs(dateLost.getTime(), periodStart.getTime()) >= 0 &&
+                compareDateTs(dateLost.getTime(), today.getTime()) <= 0;
+        });
+    }
+
+    function computePureBalance(rows, days) {
+        const source = filterPureRowsByRecentDays(rows, days);
+        let balance = 0;
+        source.forEach((row) => {
+            const price = toNumberOrNull(row?.price);
+            if (price !== null) {
+                balance += Math.abs(price);
+            }
+        });
+        return balance;
+    }
+
+    function getPureEmployeeStats(rows) {
+        const map = {};
+        (rows || []).forEach((row) => {
+            const emp = normalizeKey(row?.opp_emp || row?.emp);
+            if (emp === "2405") return;
+            if (!emp) return;
+            map[emp] = (map[emp] || 0) + 1;
+        });
+
+        return Object.entries(map)
+            .map(([emp, count]) => ({ emp, count }))
+            .sort((a, b) => b.count - a.count || a.emp.localeCompare(b.emp, "ru"));
+    }
+
+    function destroyOppRecognitionCharts() {
+        if (oppPeriodChart) {
+            oppPeriodChart.destroy();
+            oppPeriodChart = null;
+        }
+        if (oppEmpDonutChart) {
+            oppEmpDonutChart.destroy();
+            oppEmpDonutChart = null;
+        }
+    }
+
+    function renderOppPeriodChart(rows) {
+        const canvas = document.getElementById("opp-period-chart");
+        if (!canvas || typeof Chart === "undefined") return;
+
+        if (oppPeriodChart) {
+            oppPeriodChart.destroy();
+            oppPeriodChart = null;
+        }
+
+        const byDate = {};
+        (rows || []).forEach((row) => {
+            const recognizedDateKey = toDateKeyMoscow(row?.date);
+            if (recognizedDateKey) {
+                byDate[recognizedDateKey] ??= { transferred: 0, passed: 0 };
+                byDate[recognizedDateKey].transferred += 1;
+            }
+
+            if (getOppIdentifiedState(row) === 1) {
+                const identifiedDateKey = toDateKeyMoscow(row?.date_identified);
+                if (identifiedDateKey) {
+                    byDate[identifiedDateKey] ??= { transferred: 0, passed: 0 };
+                    byDate[identifiedDateKey].passed += 1;
+                }
+            }
+        });
+
+        const labels = Object.keys(byDate).sort();
+        const transferred = labels.map((key) => byDate[key].transferred);
+        const passed = labels.map((key) => byDate[key].passed);
+        const waiting = [];
+        let waitingBalance = 0;
+        labels.forEach((key) => {
+            waitingBalance += Number(byDate[key].transferred || 0);
+            waitingBalance -= Number(byDate[key].passed || 0);
+            if (waitingBalance < 0) waitingBalance = 0;
+            waiting.push(waitingBalance);
+        });
+
+        oppPeriodChart = new Chart(canvas, {
+            type: "line",
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: "Опознано ОПП",
+                        data: transferred,
+                        borderColor: "#16a34a",
+                        backgroundColor: "#16a34a",
+                        borderWidth: 2,
+                        tension: 0.35
+                    },
+                    {
+                        label: "Прошло оприход",
+                        data: passed,
+                        borderColor: "#eab308",
+                        backgroundColor: "#eab308",
+                        borderWidth: 2,
+                        tension: 0.35
+                    },
+                    {
+                        label: "Ожидает оприхода",
+                        data: waiting,
+                        borderColor: "#ef4444",
+                        backgroundColor: "#ef4444",
+                        borderDash: [8, 6],
+                        borderWidth: 2,
+                        tension: 0.35
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}`
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { precision: 0 },
+                        title: { display: true, text: "Количество" }
+                    }
+                }
+            }
+        });
+    }
+
+    function renderOppEmpDonut(rows) {
+        const canvas = document.getElementById("opp-emp-donut-chart");
+        if (!canvas || typeof Chart === "undefined") return;
+
+        if (oppEmpDonutChart) {
+            oppEmpDonutChart.destroy();
+            oppEmpDonutChart = null;
+        }
+
+        const top = getOppEmployeeStats(rows).slice(0, 12);
+        const labels = top.map((item) => item.emp);
+        const values = top.map((item) => item.count);
+
+        const hasData = values.length > 0;
+        const dsLabels = hasData ? labels : ["Нет данных"];
+        const dsValues = hasData ? values : [1];
+        const colors = hasData
+            ? ["#2563eb", "#16a34a", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316", "#84cc16", "#ec4899", "#64748b", "#0ea5e9", "#14b8a6"]
+            : ["#cbd5e1"];
+
+        oppEmpDonutChart = new Chart(canvas, {
+            type: "doughnut",
+            data: {
+                labels: dsLabels,
+                datasets: [
+                    {
+                        data: dsValues,
+                        backgroundColor: colors.slice(0, dsValues.length),
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                if (!hasData) return "Нет данных";
+                                const value = Number(ctx.parsed || 0);
+                                const total = values.reduce((sum, item) => sum + item, 0) || 1;
+                                const pct = ((value / total) * 100).toFixed(1);
+                                return `${ctx.label}: ${value} (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function buildOppRecognitionSectionHtml(rows) {
+        const total = rows.length;
+        const passedCount = rows.filter((row) => getOppIdentifiedState(row) === 1).length;
+        const waitingCount = rows.filter((row) => getOppIdentifiedState(row) === 0).length;
+        const uniqueNm = new Set(rows.map((r) => normalizeKey(r?.nm)).filter(Boolean)).size;
+        const employees = getOppEmployeeStats(rows);
+        const uniqueEmpCount = employees.length;
+
+        const uniqueDates = new Set(rows.map((r) => toDateKeyMoscow(r?.date)).filter(Boolean)).size;
+        const avgPerDayRounded = uniqueDates > 0 ? Math.round(total / uniqueDates) : 0;
+
+        const topEmp = employees[0] || null;
+        const antiTopEmp = employees.length
+            ? [...employees].sort((a, b) => a.count - b.count || a.emp.localeCompare(b.emp, "ru"))[0]
+            : null;
+
+        const topEmpText = topEmp ? `${topEmp.emp} (${topEmp.count})` : "-";
+        const antiTopText = antiTopEmp ? `${antiTopEmp.emp} (${antiTopEmp.count})` : "-";
+
+        if (!rows.length) {
+            return `
+                <section class="status-box" style="margin-top:12px;">
+                    <div class="status-header">
+                        <div class="status-center" style="grid-column:1 / -1;">
+                            <div class="status-code" style="font-size:28px;">Оприход ОПП</div>
+                            <div class="status-desc">Последние 30 дней</div>
+                        </div>
+                    </div>
+                    <div class="muted">Нет данных по оприходу за последние 30 дней.</div>
+                </section>
+            `;
+        }
+
+        return `
+            <section class="status-box" style="margin-top:12px;">
+                <div class="status-header">
+                    <div class="status-side status-side-inline">
+                        <div class="status-inline-row">
+                            <div class="status-inline-item">
+                                <div class="status-big">${total}</div>
+                                <div class="status-label">Опознано ОПП</div>
+                            </div>
+                            <div class="status-inline-item">
+                                <div class="status-big">${uniqueNm}</div>
+                                <div class="status-label">Уникальных НМ</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="status-center">
+                        <div class="status-code">Оприход ОПП</div>
+                        <div class="status-desc">Последние 30 дней</div>
+                    </div>
+
+                    <div class="status-side status-side-inline">
+                        <div class="status-inline-row">
+                            <div class="status-inline-item">
+                                <div class="status-big">${passedCount}</div>
+                                <div class="status-label">Прошло оприход</div>
+                            </div>
+                            <div class="status-inline-item">
+                                <div class="status-big">${waitingCount}</div>
+                                <div class="status-label">Ожидает оприхода</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-metrics">
+                    <div class="metric">
+                        <div class="metric-value">${uniqueEmpCount}</div>
+                        <div class="metric-label">Сотрудников</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${avgPerDayRounded}</div>
+                        <div class="metric-label">Среднее за сутки</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${escapeHtml(topEmpText)}</div>
+                        <div class="metric-label">Топ сотрудник</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${escapeHtml(antiTopText)}</div>
+                        <div class="metric-label">Антитоп сотрудник</div>
+                    </div>
+                </div>
+
+                <div class="opp-chart-wrap">
+                    <canvas id="opp-period-chart" class="chart-appear"></canvas>
+                </div>
+
+                <div class="opp-donut-wrap">
+                    <p class="opp-donut-title">Сотрудники за период</p>
+                    <canvas id="opp-emp-donut-chart"></canvas>
+                </div>
+            </section>
+        `;
+    }
+
+    function renderOppRecognitionCharts() {
+        renderOppPeriodChart(lastOppRecognitionRows);
+        renderOppEmpDonut(lastOppRecognitionRows);
+    }
+
+    function classifyTwoShkEventType(value) {
+        const text = String(value || "")
+            .toLowerCase()
+            .replace(/ё/g, "е")
+            .replace(/[^\wа-я\s]/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        if (!text) return "";
+
+        if (text === "два шк" || text === "2 шк" || text === "2шк" || text === "два ш к") {
+            return TWO_SHK_EVENT_TWO;
+        }
+
+        if (text === "пустая упаковка" || text === "пустаяупаковка") {
+            return TWO_SHK_EVENT_EMPTY;
+        }
+
+        return "";
+    }
+
+    function extractTwoShkDateValue(row) {
+        const keys = ["date", "created_at", "createdAt", "inserted_at", "updated_at"];
+        for (const key of keys) {
+            const value = row?.[key];
+            if (!value) continue;
+            const parsed = Date.parse(String(value));
+            if (!Number.isNaN(parsed)) return String(value);
+        }
+        return "";
+    }
+
+    function isMissingColumnError(error, columnName) {
+        const text = [
+            error?.message || "",
+            error?.details || "",
+            error?.hint || ""
+        ].join(" ").toLowerCase();
+
+        if (!text) return false;
+        return text.includes(String(columnName || "").toLowerCase()) &&
+            (text.includes("does not exist") || text.includes("not found"));
+    }
+
+    async function queryTwoShkRowsByPeriod(fromIso, toIso) {
+        if (!window.supabaseClient) return [];
+        let lastError = null;
+
+        for (const column of TWO_SHK_DATE_COLUMN_CANDIDATES) {
+            let query = window.supabaseClient
+                .from(TABLE_TWO_SHK)
+                .select("*")
+                .order(column, { ascending: false });
+
+            if (fromIso) query = query.gte(column, fromIso);
+            if (toIso) query = query.lte(column, toIso);
+
+            const { data, error } = await query;
+            if (!error) {
+                return Array.isArray(data) ? data : [];
+            }
+
+            lastError = error;
+            if (!isMissingColumnError(error, column)) {
+                console.warn(`Не удалось загрузить ${TABLE_TWO_SHK} по колонке "${column}":`, error);
+            }
+        }
+
+        const { data, error } = await window.supabaseClient.from(TABLE_TWO_SHK).select("*");
+        if (error) {
+            throw lastError || error;
+        }
+
+        let rows = Array.isArray(data) ? data : [];
+        if (fromIso || toIso) {
+            const fromTs = fromIso ? Date.parse(fromIso) : null;
+            const toTs = toIso ? Date.parse(toIso) : null;
+            rows = rows.filter((row) => {
+                const dateValue = extractTwoShkDateValue(row);
+                if (!dateValue) return false;
+                const ts = Date.parse(dateValue);
+                if (Number.isNaN(ts)) return false;
+                if (fromTs !== null && ts < fromTs) return false;
+                if (toTs !== null && ts > toTs) return false;
+                return true;
+            });
+        }
+
+        rows.sort((a, b) => {
+            const aTs = Date.parse(extractTwoShkDateValue(a));
+            const bTs = Date.parse(extractTwoShkDateValue(b));
+            if (Number.isNaN(aTs) && Number.isNaN(bTs)) return 0;
+            if (Number.isNaN(aTs)) return 1;
+            if (Number.isNaN(bTs)) return -1;
+            return bTs - aTs;
+        });
+
+        return rows;
+    }
+
+    async function fetchWarehouseMapByIds(whIds) {
+        if (!window.supabaseClient) return new Map();
+        const map = new Map();
+        const cleanIds = Array.from(new Set((whIds || []).map(normalizeKey).filter(Boolean)));
+        if (!cleanIds.length) return map;
+
+        const chunks = chunkArray(cleanIds, 500);
+        for (const idsChunk of chunks) {
+            const { data, error } = await window.supabaseClient
+                .from("wh_rep")
+                .select("wh_id, wh_name")
+                .in("wh_id", idsChunk);
+
+            if (error) {
+                console.warn("Ошибка чтения wh_rep:", error);
+                break;
+            }
+
+            (data || []).forEach((row) => {
+                const whId = normalizeKey(row?.wh_id);
+                if (!whId) return;
+                map.set(whId, normalizeKey(row?.wh_name));
+            });
+        }
+
+        return map;
+    }
+
+    function buildTwoShkPreparedRows(rows, whMap) {
+        const out = [];
+        (rows || []).forEach((row) => {
+            const eventType = classifyTwoShkEventType(row?.eventtype);
+            if (!eventType) return;
+
+            const whId = normalizeKey(row?.wh_id);
+            if (!whId) return;
+
+            out.push({
+                eventType,
+                whId,
+                whName: normalizeKey(whMap.get(whId)),
+                dateValue: extractTwoShkDateValue(row)
+            });
+        });
+
+        out.sort((a, b) => {
+            const aTs = Date.parse(a.dateValue || "");
+            const bTs = Date.parse(b.dateValue || "");
+            if (Number.isNaN(aTs) && Number.isNaN(bTs)) return 0;
+            if (Number.isNaN(aTs)) return 1;
+            if (Number.isNaN(bTs)) return -1;
+            return bTs - aTs;
+        });
+
+        return out;
+    }
+
+    function aggregateTwoShkTopWh(rows) {
+        const map = new Map();
+
+        rows.forEach((row) => {
+            const whId = row?.whId;
+            if (!whId) return;
+
+            const state = map.get(whId) || {
+                whId,
+                whName: row?.whName || "",
+                twoCount: 0,
+                emptyCount: 0,
+                total: 0
+            };
+
+            if (row.eventType === TWO_SHK_EVENT_TWO) {
+                state.twoCount += 1;
+            } else if (row.eventType === TWO_SHK_EVENT_EMPTY) {
+                state.emptyCount += 1;
+            }
+
+            state.total = state.twoCount + state.emptyCount;
+            map.set(whId, state);
+        });
+
+        return Array.from(map.values())
+            .sort((a, b) => b.total - a.total || a.whId.localeCompare(b.whId, "ru"))
+            .slice(0, 10);
+    }
+
+    function destroyTwoShkChart() {
+        if (twoShkChart) {
+            twoShkChart.destroy();
+            twoShkChart = null;
+        }
+    }
+
+    function renderTwoShkChart(rows) {
+        const canvas = document.getElementById("two-shk-chart");
+        const emptyEl = document.getElementById("two-shk-chart-empty");
+        if (!canvas || typeof Chart === "undefined") return;
+
+        destroyTwoShkChart();
+
+        const top = aggregateTwoShkTopWh(rows);
+        const hasData = top.length > 0;
+        const labels = hasData
+            ? top.map((item) => item.whId || "—")
+            : ["Нет данных"];
+        const twoData = hasData ? top.map((item) => item.twoCount) : [0];
+        const emptyData = hasData ? top.map((item) => item.emptyCount) : [0];
+
+        if (emptyEl) {
+            emptyEl.style.display = hasData ? "none" : "";
+            emptyEl.textContent = hasData ? "" : "Нет данных за последние 30 дней.";
+        }
+
+        twoShkChart = new Chart(canvas, {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: TWO_SHK_EVENT_TWO,
+                        data: twoData,
+                        backgroundColor: "#2563eb",
+                        borderRadius: 6
+                    },
+                    {
+                        label: TWO_SHK_EVENT_EMPTY,
+                        data: emptyData,
+                        backgroundColor: "#f59e0b",
+                        borderRadius: 6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}`
+                        }
+                    },
+                    legend: { position: "bottom" }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { precision: 0 },
+                        title: { display: true, text: "Количество" }
+                    }
+                }
+            }
+        });
+    }
+
+    function sortMixedNumericStrings(a, b) {
+        const aNum = Number(a);
+        const bNum = Number(b);
+        const aIsNum = Number.isFinite(aNum);
+        const bIsNum = Number.isFinite(bNum);
+
+        if (aIsNum && bIsNum) return aNum - bNum;
+        if (aIsNum) return -1;
+        if (bIsNum) return 1;
+        return String(a).localeCompare(String(b), "ru");
+    }
+
+    function formatDateForUi(value) {
+        const parsed = parseDateValue(value);
+        if (!parsed) return normalizeKey(value);
+        const dd = String(parsed.getDate()).padStart(2, "0");
+        const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+        const yyyy = parsed.getFullYear();
+        return `${dd}.${mm}.${yyyy}`;
+    }
+
+    function buildDateRangeKeys(startDateValue, endDateValue) {
+        const startDate = startDateValue instanceof Date ? startDateValue : getPureTodayDate();
+        const endDate = endDateValue instanceof Date ? endDateValue : startDate;
+        const startTs = startDate.getTime();
+        const endTs = endDate.getTime();
+
+        if (compareDateTs(startTs, endTs) > 0) return [];
+
+        const keys = [];
+        let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+        const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+
+        while (compareDateTs(cursor.getTime(), end.getTime()) <= 0) {
+            keys.push(toIsoDate(cursor));
+            cursor = addDays(cursor, 1);
+        }
+
+        return keys;
+    }
+
+    function destroyPureLossesChart() {
+        if (pureLossesChart) {
+            pureLossesChart.destroy();
+            pureLossesChart = null;
+        }
+    }
+
+    function renderPureLossesChart(rows) {
+        const canvas = document.getElementById("pure-losses-chart");
+        const emptyEl = document.getElementById("pure-losses-chart-empty");
+        if (!canvas || typeof Chart === "undefined") return;
+
+        destroyPureLossesChart();
+
+        const today = getPureTodayDate();
+        const dateKeys = buildDateRangeKeys(addDays(today, -29), today);
+        if (!dateKeys.length) {
+            if (emptyEl) {
+                emptyEl.style.display = "";
+                emptyEl.textContent = "Нет данных для отображения графика.";
+            }
+            return;
+        }
+
+        const byDate = new Map();
+        dateKeys.forEach((iso) => {
+            byDate.set(iso, {
+                total: 0,
+                byLr: new Map()
+            });
+        });
+
+        const lrSet = new Set();
+        (rows || []).forEach((row) => {
+            const date = parseDateValue(row?.date_lost);
+            if (!date) return;
+
+            const iso = toIsoDate(date);
+            if (!byDate.has(iso)) return;
+            const bucket = byDate.get(iso);
+
+            bucket.total += 1;
+            const lr = normalizeKey(row?.lr);
+            if (!lr) return;
+            lrSet.add(lr);
+            bucket.byLr.set(lr, (bucket.byLr.get(lr) || 0) + 1);
+        });
+
+        if (emptyEl) {
+            emptyEl.style.display = "none";
+            emptyEl.textContent = "";
+        }
+
+        const labels = dateKeys.map((iso) => formatDateForUi(iso));
+        const lrKeys = Array.from(lrSet).sort(sortMixedNumericStrings);
+
+        const datasets = [{
+            label: "Общее кол-во списаний",
+            data: dateKeys.map((iso) => byDate.get(iso)?.total || 0),
+            borderColor: "#0f172a",
+            backgroundColor: "#0f172a",
+            borderWidth: 1.6,
+            borderDash: [8, 6],
+            pointRadius: 1.8,
+            pointHoverRadius: 3.2,
+            pointHitRadius: 12,
+            tension: 0.24
+        }];
+
+        lrKeys.forEach((lr, index) => {
+            const color = PURE_DYNAMICS_LR_COLORS[index % PURE_DYNAMICS_LR_COLORS.length];
+            datasets.push({
+                label: `LR ${lr}`,
+                data: dateKeys.map((iso) => byDate.get(iso)?.byLr?.get(lr) || 0),
+                borderColor: color,
+                backgroundColor: color,
+                borderWidth: 1.9,
+                pointRadius: 1.9,
+                pointHoverRadius: 3.6,
+                tension: 0.3
+            });
+        });
+
+        pureLossesChart = new Chart(canvas, {
+            type: "line",
+            data: {
+                labels,
+                datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: "index",
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: "top"
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const index = Number(items?.[0]?.dataIndex);
+                                if (!Number.isFinite(index)) return "";
+                                const key = dateKeys[index];
+                                return formatDateForUi(key);
+                            },
+                            label: (ctx) => {
+                                return `${ctx.dataset.label}: ${formatNumber(ctx.parsed?.y || 0)}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        },
+                        title: {
+                            display: true,
+                            text: "Кол-во ШК"
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            autoSkip: true,
+                            maxRotation: 0,
+                            maxTicksLimit: 14
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function renderPureEmpDonut(rows) {
+        const canvas = document.getElementById("pure-emp-donut-chart");
+        if (!canvas || typeof Chart === "undefined") return;
+
+        if (pureLossesChart && pureLossesChart.canvas === canvas) {
+            // no-op safety
+        }
+
+        if (pureLossesEmpDonut) {
+            pureLossesEmpDonut.destroy();
+            pureLossesEmpDonut = null;
+        }
+
+        const top = getPureEmployeeStats(rows).slice(0, 12);
+        const labels = top.map((item) => item.emp);
+        const values = top.map((item) => item.count);
+
+        const hasData = values.length > 0;
+        const dsLabels = hasData ? labels : ["Нет данных"];
+        const dsValues = hasData ? values : [1];
+        const colors = hasData
+            ? ["#2563eb", "#16a34a", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316", "#84cc16", "#ec4899", "#64748b", "#0ea5e9", "#14b8a6"]
+            : ["#cbd5e1"];
+
+        pureLossesEmpDonut = new Chart(canvas, {
+            type: "doughnut",
+            data: {
+                labels: dsLabels,
+                datasets: [
+                    {
+                        data: dsValues,
+                        backgroundColor: colors.slice(0, dsValues.length),
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                if (!hasData) return "Нет данных";
+                                const value = Number(ctx.parsed || 0);
+                                const total = values.reduce((sum, item) => sum + item, 0) || 1;
+                                const pct = ((value / total) * 100).toFixed(1);
+                                return `${ctx.label}: ${value} (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function buildPureLossesSectionHtml(rows) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        const helpCount = lastPureHelpRows.length;
+        const backlogPercent = lastPureBacklogPercent ?? 0;
+        const balance60 = lastPureBalance60;
+
+        if (!safeRows.length) {
+            return `
+                <section class="status-box" style="margin-top:12px;">
+                    <div class="status-header">
+                        <div class="status-center" style="grid-column:1 / -1;">
+                            <div class="status-code" style="font-size:28px;">Чистые списания</div>
+                            <div class="status-desc">Последние 30 дней</div>
+                        </div>
+                    </div>
+                    <div class="muted">Нет данных по чистым списаниям за последние 30 дней.</div>
+                </section>
+            `;
+        }
+
+        return `
+            <section class="status-box" style="margin-top:12px;">
+                <div class="status-header">
+                    <div class="status-center" style="grid-column:1 / -1;">
+                        <div class="status-code" style="font-size:28px;">Чистые списания</div>
+                        <div class="status-desc">Последние 30 дней</div>
+                    </div>
+                </div>
+                <div class="status-metrics" style="margin-bottom:8px;">
+                    <div class="metric opp-clickable ${helpCount === 0 ? "opp-help-good" : helpCount <= 4 ? "opp-help-warn" : "opp-help-bad"}" data-pure-help="1">
+                        <div class="metric-value">${formatNumber(helpCount)}</div>
+                        <div class="metric-label">Нужна помощь</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${escapeHtml(formatPercent(backlogPercent))}</div>
+                        <div class="metric-label">Отставание чистых списаний</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${escapeHtml(formatCurrency(balance60))}</div>
+                        <div class="metric-label">Баланс за 60 дней</div>
+                    </div>
+                </div>
+                <div class="opp-chart-wrap">
+                    <canvas id="pure-losses-chart" class="chart-appear"></canvas>
+                </div>
+                <div id="pure-losses-chart-empty" class="muted" style="display:none;margin-top:6px;"></div>
+                <div class="opp-donut-wrap">
+                    <p class="opp-donut-title">Сотрудники за период</p>
+                    <canvas id="pure-emp-donut-chart"></canvas>
+                </div>
+            </section>
+        `;
+    }
+
+    async function loadOppRecognitionRowsRolling30() {
+        if (!window.supabaseClient) return [];
+
+        const range = buildRolling30DateTimeRange();
+        let query = window.supabaseClient
+            .from(TABLE_NM_REP)
+            .select("date, date_identified, is_identified, emp, nm, place")
+            .order("date", { ascending: false })
+            .gte("date", range.fromIso)
+            .lte("date", range.toIso);
+
+        const { data, error } = await query;
+        if (error || !Array.isArray(data)) {
+            console.warn("Не удалось загрузить nm_rep:", error?.message || error);
+            return [];
+        }
+
+        const srcRows = data.slice();
+        if (!currentWhId) return srcRows;
+
+        const placeMap = await fetchPlaceWarehouseMap(srcRows.map((row) => row?.place));
+        const targetWhId = normalizeKey(currentWhId);
+        return srcRows.filter((row) => {
+            const place = normalizeKey(row?.place);
+            if (!place) return false;
+            const placeWh = normalizeKey(placeMap.get(place));
+            return placeWh === targetWhId;
+        });
+    }
+
+    async function loadTwoShkRowsRolling30() {
+        const range = buildRolling30DateTimeRange();
+        const rawRows = await queryTwoShkRowsByPeriod(range.fromIso, range.toIso);
+        if (!rawRows.length) return [];
+        const whMap = await fetchWarehouseMapByIds(rawRows.map((row) => row?.wh_id));
+        return buildTwoShkPreparedRows(rawRows, whMap);
+    }
+
+    async function loadPureLossRowsRolling30() {
+        if (!currentWhId) return [];
+        const range = buildRolling60DateTimeRange();
+        const columns = [
+            "shk",
+            "date_lost",
+            "lr",
+            "price",
+            "opp_emp",
+            "opp_comment",
+            "comment",
+            "date_solved",
+            "dt_solved",
+            ...PURE_DECISION_COLUMNS
+        ];
+        return fetchPureRowsWithColumns(currentWhId, columns, (query) => {
+            return query
+                .gte("date_lost", range.fromIso)
+                .lte("date_lost", range.toIso)
+                .order("date_lost", { ascending: false });
+        });
+    }
+
+    async function computePureResolvedByShift(currentUserWhId, rangeFromIso, rangeToIso) {
+        const resultMap = new Map();
+        if (!currentUserWhId) return resultMap;
+        const setsByShift = new Map();
+        const endIso = shiftIsoDate(rangeToIso, 1) || rangeToIso;
+
+        for (const solvedCol of PURE_SOLVED_COLUMNS) {
+            const columns = ["shk", solvedCol, ...PURE_DECISION_COLUMNS];
+            const rows = await fetchPureRowsWithColumns(currentUserWhId, columns, (query) => {
+                return query
+                    .gte(solvedCol, `${rangeFromIso}T00:00:00+03:00`)
+                    .lte(solvedCol, `${endIso}T23:59:59+03:00`)
+                    .order(solvedCol, { ascending: false });
+            });
+
+            rows.forEach((row) => {
+                const decision = resolvePureDecision(row);
+                if (!decision) return;
+                const solvedAt = parseTimestampValue(row?.[solvedCol]);
+                if (!Number.isFinite(solvedAt)) return;
+                const shiftId = buildShiftIdByMoscowDate(new Date(solvedAt));
+                if (!shiftId) return;
+                const shk = normalizeKey(row?.shk);
+                if (!shk) return;
+                if (!setsByShift.has(shiftId)) setsByShift.set(shiftId, new Set());
+                setsByShift.get(shiftId).add(shk);
+            });
+        }
+
+        setsByShift.forEach((set, key) => {
+            resultMap.set(key, set.size);
+        });
+        return resultMap;
+    }
+
+    function computeRemainingExpensiveCount(item, options) {
+        const row = item || {};
+        const opts = options && typeof options === "object" ? options : {};
+        const allowGeneric = Boolean(opts.allowGeneric);
+        const remaining = getNumberByKeys(row, [
+            "remainingExpensiveCount",
+            "remaining_expensive_count",
+            "remaining_expensive_due_unique_shk",
+            "remaining_expensive_due",
+            "remaining_expensive_total"
+        ]);
+        if (remaining !== null) {
+            return Math.max(0, remaining);
+        }
+
+        if (allowGeneric) {
+            const remainingGeneric = getNumberByKeys(row, [
+                "remaining_count",
+                "remaining_due_unique_shk",
+                "remaining_due",
+                "count",
+                "cnt",
+                "qty",
+                "quantity",
+                "shk"
+            ]);
+            if (remainingGeneric !== null) {
+                return Math.max(0, remainingGeneric);
+            }
+        }
+
+        const due = getNumberByKeys(row, [
+            "expensiveDueTotal",
+            "expensive_due_total_unique_shk",
+            "expensive_due_total",
+            "expensive_due_count",
+            "expensive_due",
+            "due_expensive_count"
+        ]);
+        const analyzed = getNumberByKeys(row, [
+            "expensiveAnalyzed",
+            "expensive_analyzed_due_unique_shk",
+            "expensive_analyzed_due",
+            "expensive_analyzed",
+            "expensive_analyzed_count",
+            "analyzed_expensive_count"
+        ]);
+        if (due === null && analyzed === null) return 0;
+        return Math.max(0, due - analyzed);
+    }
+
+    function computeRemainingExpensiveSum(item, options) {
+        const row = item || {};
+        const opts = options && typeof options === "object" ? options : {};
+        const allowGeneric = Boolean(opts.allowGeneric);
+        const remaining = getNumberByKeys(row, [
+            "remainingExpensiveSumPrice",
+            "remaining_expensive_sum_price",
+            "remaining_expensive_due_sum_price",
+            "remaining_expensive_total_sum_price",
+            "remaining_expensive_sum",
+            "remaining_expensive_price",
+            "remaining_expensive_amount"
+        ]);
+        if (remaining !== null) {
+            return Math.max(0, remaining);
+        }
+
+        const dueExp = getNumberByKeys(row, [
+            "expensiveDueSumPrice",
+            "expensive_due_total_sum_price",
+            "expensive_due_sum_price",
+            "expensive_due_price",
+            "expensive_due_sum",
+            "expensive_due_amount",
+            "expensive_due_total_price",
+            "expensive_due_total_amount",
+            "expensive_due_price_total"
+        ]);
+        const analyzedExp = getNumberByKeys(row, [
+            "expensiveAnalyzedSumPrice",
+            "expensive_analyzed_due_sum_price",
+            "expensive_analyzed_sum_price",
+            "expensive_analyzed_due_price",
+            "expensive_analyzed_sum",
+            "expensive_analyzed_amount",
+            "expensive_analyzed_total_price",
+            "expensive_analyzed_total_amount",
+            "expensive_analyzed_price_total"
+        ]);
+        if (dueExp !== null || analyzedExp !== null) {
+            return Math.max(0, toNumber(dueExp) - toNumber(analyzedExp));
+        }
+
+        if (allowGeneric) {
+            const remainingGeneric = getNumberByKeys(row, [
+                "remaining_sum_price",
+                "remaining_sum",
+                "sum_price",
+                "sum",
+                "amount",
+                "cost"
+            ]);
+            if (remainingGeneric !== null) {
+                return Math.max(0, remainingGeneric);
+            }
+        }
+
+        const dueTotal = getNumberByKeys(row, ["dueTotal", "due_total_unique_shk", "due_total", "total_due"]);
+        const analyzedTotal = getNumberByKeys(row, ["analyzed", "analyzed_due_unique_shk", "analyzed_due"]);
+        const expensiveDueTotal = getNumberByKeys(row, ["expensiveDueTotal", "expensive_due_total_unique_shk", "expensive_due_total"]);
+        const expensiveAnalyzedTotal = getNumberByKeys(row, ["expensiveAnalyzed", "expensive_analyzed_due_unique_shk", "expensive_analyzed_due", "expensive_analyzed"]);
+        if (
+            dueTotal !== null &&
+            analyzedTotal !== null &&
+            expensiveDueTotal !== null &&
+            expensiveAnalyzedTotal !== null &&
+            Number(dueTotal) === Number(expensiveDueTotal) &&
+            Number(analyzedTotal) === Number(expensiveAnalyzedTotal)
+        ) {
+            const dueAll = getNumberByKeys(row, ["dueSumPrice", "due_total_sum_price", "due_sum_price", "due_total_price"]);
+            const analyzedAll = getNumberByKeys(row, ["analyzedSumPrice", "analyzed_due_sum_price", "analyzed_sum_price", "analyzed_due_price"]);
+            if (dueAll !== null || analyzedAll !== null) {
+                return Math.max(0, toNumber(dueAll) - toNumber(analyzedAll));
+            }
+        }
+        return null;
+    }
+
+    function normalizeUnfinishedDateLabel(rawValue, fallbackDetail, shiftItem) {
+        const raw = normalizeKey(rawValue);
+        if (raw) {
+            const iso = parseYmd(raw);
+            if (iso) return formatDateRu(iso);
+
+            const fallbackYear = parseIsoDate(shiftItem?.date)?.slice(0, 4) || "";
+            const tokens = extractDateTokensRu(raw).map((token) => withFallbackYearRu(token, fallbackYear));
+            if (tokens.length === 1) return tokens[0];
+            if (tokens.length > 1) return `${tokens[0]} - ${tokens[tokens.length - 1]}`;
+
+            return raw;
+        }
+        return buildShortDueLabelForShiftDetail(fallbackDetail, shiftItem);
+    }
+
+    function parseUnfinishedEntriesFromSource(source, detail, shiftItem) {
+        if (!source) return [];
+
+        const out = [];
+        if (Array.isArray(source)) {
+            source.forEach((entry) => {
+                if (!entry) return;
+                const dateLabel = normalizeUnfinishedDateLabel(
+                    entry?.date ??
+                    entry?.ymd ??
+                    entry?.day ??
+                    entry?.due_date ??
+                    entry?.due_for_date ??
+                    entry?.due_for_date_label ??
+                    entry?.label ??
+                    entry?.name,
+                    detail,
+                    shiftItem
+                );
+                const count = computeRemainingExpensiveCount(entry, { allowGeneric: true });
+                const sum = computeRemainingExpensiveSum(entry, { allowGeneric: true });
+                if (count < 0) return;
+                out.push({ dateLabel, count, sum });
+            });
+            return out;
+        }
+
+        if (typeof source === "object") {
+            Object.entries(source).forEach(([key, rawValue]) => {
+                if (rawValue && typeof rawValue === "object") {
+                    const dateLabel = normalizeUnfinishedDateLabel(key, detail, shiftItem);
+                    const count = computeRemainingExpensiveCount(rawValue, { allowGeneric: true });
+                    const sum = computeRemainingExpensiveSum(rawValue, { allowGeneric: true });
+                    if (count < 0) return;
+                    out.push({ dateLabel, count, sum });
+                    return;
+                }
+
+                const rawNumber = parseLooseNumber(rawValue);
+                if (rawNumber === null) return;
+                const count = Math.max(0, rawNumber);
+                const dateLabel = normalizeUnfinishedDateLabel(key, detail, shiftItem);
+                out.push({ dateLabel, count, sum: null });
+            });
+        }
+
+        return out;
+    }
+
+    function buildUnfinishedExpensiveByStatus(monthShiftDynamics) {
+        const shiftsRaw = Array.isArray(monthShiftDynamics) ? monthShiftDynamics : [];
+        const shifts = shiftsRaw
+            .slice()
+            .sort((a, b) => {
+                const aTs = toNumber(a?.shiftSortTs);
+                const bTs = toNumber(b?.shiftSortTs);
+                if (aTs !== bTs) return aTs - bTs;
+                const aDate = parseIsoDate(a?.date) || "";
+                const bDate = parseIsoDate(b?.date) || "";
+                if (aDate !== bDate) return aDate.localeCompare(bDate);
+                return normalizeKey(a?.shiftId).localeCompare(normalizeKey(b?.shiftId));
+            });
+
+        const statusOrder = getConfiguredDeadlineKeys();
+        const indexMap = new Map(statusOrder.map((key, idx) => [key, idx]));
+        const groupsMap = new Map();
+
+        shifts.forEach((shiftItem) => {
+            const details = Array.isArray(shiftItem?.details) ? shiftItem.details : [];
+            const shiftStamp = `${toNumber(shiftItem?.shiftSortTs)}|${normalizeKey(shiftItem?.shiftId)}`;
+
+            details.forEach((detail) => {
+                const statusKey = normalizeDeadlineKey(detail?.key);
+                if (!statusKey) return;
+
+                if (!groupsMap.has(statusKey)) {
+                    groupsMap.set(statusKey, {
+                        key: statusKey,
+                        displayKey: normalizeKey(detail?.displayKey) || DEADLINE_LABELS[statusKey] || statusKey,
+                        sheetNames: new Set(),
+                        entriesMap: new Map()
+                    });
+                }
+                const group = groupsMap.get(statusKey);
+                (Array.isArray(detail?.sheetNames) ? detail.sheetNames : []).forEach((name) => {
+                    const n = normalizeKey(name);
+                    if (n) group.sheetNames.add(n);
+                });
+
+                const sources = [
+                    detail?.remainingExpensiveByDate,
+                    detail?.remaining_expensive_by_date,
+                    detail?.remaining_expensive_due_by_date,
+                    detail?.expensive_remaining_by_date,
+                    detail?.expensive_due_by_date,
+                    detail?.remaining_due_by_date
+                ];
+
+                let entries = [];
+                for (const source of sources) {
+                    const parsed = parseUnfinishedEntriesFromSource(source, detail, shiftItem);
+                    if (parsed.length) {
+                        entries = parsed;
+                        break;
+                    }
+                }
+
+                if (!entries.length) {
+                    const count = computeRemainingExpensiveCount(detail, { allowGeneric: false });
+                    const sum = computeRemainingExpensiveSum(detail, { allowGeneric: true });
+                    if (count > 0) {
+                        entries = [{
+                            dateLabel: buildShortDueLabelForShiftDetail(detail, shiftItem) || "-",
+                            count,
+                            sum
+                        }];
+                    }
+                }
+                if (!entries.length) return;
+
+                const hasAnySum = entries.some((entry) => entry?.sum !== null && entry?.sum !== undefined);
+                if (!hasAnySum) {
+                    const detailRemainingSum = computeRemainingExpensiveSum(detail, { allowGeneric: true });
+                    if (detailRemainingSum !== null && detailRemainingSum > 0) {
+                        const totalCount = entries.reduce((acc, entry) => acc + Math.max(0, toNumber(entry?.count)), 0);
+                        if (totalCount > 0) {
+                            entries = entries.map((entry) => ({
+                                ...entry,
+                                sum: Math.max(0, toNumber(entry?.count)) > 0
+                                    ? detailRemainingSum * (Math.max(0, toNumber(entry?.count)) / totalCount)
+                                    : null
+                            }));
+                        }
+                    }
+                }
+
+                entries.forEach((entry) => {
+                    const dateLabel = normalizeKey(entry?.dateLabel) || "-";
+                    const count = Math.max(0, toNumber(entry?.count));
+                    const sumRaw = entry?.sum;
+                    let sum = (sumRaw === null || sumRaw === undefined || sumRaw === "")
+                        ? null
+                        : Math.max(0, toNumber(sumRaw));
+                    if (count > 0 && sum !== null && sum <= 0) {
+                        // Для дорогостоя (цена > 1000) нулевая сумма при положительном количестве
+                        // чаще всего означает, что API не вернул сумму, а не реальный ноль.
+                        sum = null;
+                    }
+
+                    const prev = group.entriesMap.get(dateLabel);
+                    if (!prev || prev.lastStamp !== shiftStamp) {
+                        group.entriesMap.set(dateLabel, {
+                            dateLabel,
+                            count,
+                            sum: sum === null ? 0 : sum,
+                            hasSum: sum !== null,
+                            lastStamp: shiftStamp
+                        });
+                        return;
+                    }
+
+                    prev.count += count;
+                    if (sum !== null) {
+                        prev.sum += sum;
+                        prev.hasSum = true;
+                    }
+                    group.entriesMap.set(dateLabel, prev);
+                });
+            });
+        });
+
+        const groups = Array.from(groupsMap.values())
+            .map((group) => {
+                const entries = Array.from(group.entriesMap.values())
+                    .filter((entry) => entry.count > 0)
+                    .sort((a, b) => {
+                        const aIso = parseYmd(a.dateLabel) || "";
+                        const bIso = parseYmd(b.dateLabel) || "";
+                        if (aIso && bIso && aIso !== bIso) return bIso.localeCompare(aIso);
+                        return a.dateLabel.localeCompare(b.dateLabel, "ru");
+                    });
+                if (!entries.length) return null;
+
+                return {
+                    key: group.key,
+                    displayKey: group.displayKey,
+                    sheetNames: Array.from(group.sheetNames),
+                    entries,
+                    totalCount: entries.reduce((acc, entry) => acc + toNumber(entry.count), 0),
+                    totalSum: entries.reduce((acc, entry) => acc + (entry.hasSum ? toNumber(entry.sum) : 0), 0),
+                    hasFullSum: entries.every((entry) => entry.hasSum)
+                };
+            })
+            .filter(Boolean);
+
+        groups.sort((a, b) => {
+            const aIndex = indexMap.has(a.key) ? indexMap.get(a.key) : Number.MAX_SAFE_INTEGER;
+            const bIndex = indexMap.has(b.key) ? indexMap.get(b.key) : Number.MAX_SAFE_INTEGER;
+            if (aIndex !== bIndex) return aIndex - bIndex;
+            return a.displayKey.localeCompare(b.displayKey, "ru");
+        });
+
+        return groups;
+    }
+
+    function compactDueDateLabel(label) {
+        const raw = normalizeKey(label);
+        if (!raw) return "-";
+        return raw.replace(/(\d{2}\.\d{2})\.\d{4}/g, "$1");
+    }
+
+    function renderUnfinishedCompactPanel() {
+        const panel = document.getElementById("dashboard-unfinished-panel-content");
+        if (!panel) return;
+
+        const groups = buildUnfinishedExpensiveByStatus(lastMonthShiftDynamics);
+        if (!groups.length) {
+            panel.innerHTML = `<div class="muted" style="font-size:11px;">Нет хвостов по дорогостою.</div>`;
+            return;
+        }
+
+        const html = groups.map((group) => {
+            const rows = group.entries.map((entry) => `
+                <div class="opp-unfinished-mini-row">
+                    <span class="opp-unfinished-mini-date">${escapeHtml(compactDueDateLabel(entry.dateLabel))}</span>
+                    <span class="opp-unfinished-mini-count">${formatNumber(entry.count)} ШК</span>
+                </div>
+            `).join("");
+
+            return `
+                <div class="opp-unfinished-mini-group">
+                    <div class="opp-unfinished-mini-title">${escapeHtml(group.displayKey)}</div>
+                    ${rows}
+                </div>
+            `;
+        }).join("");
+
+        panel.innerHTML = `<div class="opp-unfinished-mini-list">${html}</div>`;
+    }
+
     function formatDateTimeRu(value) {
         const raw = normalizeKey(value);
         if (!raw) return "";
@@ -437,6 +2422,23 @@
             from: `${y}-${m}-01`,
             to: safeTo
         };
+    }
+
+    function getRolling30PeriodByDate(dateIso) {
+        const safeTo = parseIsoDate(dateIso) || toIsoDate(moscowNowDate());
+        const from = shiftIsoDate(safeTo, -29) || safeTo;
+        return { from, to: safeTo };
+    }
+
+    function getPreviousMonthPeriodByDate(dateIso) {
+        const safe = parseIsoDate(dateIso) || toIsoDate(moscowNowDate());
+        const currentMonthStart = parseIsoDate(`${safe.slice(0, 7)}-01`) || safe;
+        const prevMonthEnd = shiftIsoDate(currentMonthStart, -1);
+        if (!prevMonthEnd) {
+            return { from: safe, to: safe };
+        }
+        const prevMonthStart = `${prevMonthEnd.slice(0, 7)}-01`;
+        return { from: prevMonthStart, to: prevMonthEnd };
     }
 
     function chunkArray(items, chunkSize) {
@@ -475,6 +2477,38 @@
 
         base.setDate(base.getDate() - 1);
         return `night:${toIsoDate(base)}`;
+    }
+
+    function findCurrentShiftItem(shiftRows) {
+        const rows = Array.isArray(shiftRows) ? shiftRows : [];
+        if (!rows.length) return null;
+
+        const currentShiftId = buildShiftIdByMoscowDate(new Date());
+        if (currentShiftId) {
+            const exact = rows.find((item) => item.shiftId === currentShiftId);
+            if (exact) return exact;
+
+            const currentType = currentShiftId.startsWith("night:") ? "night" : "day";
+            const sameType = rows.find((item) => normalizeKey(item?.shiftType) === currentType);
+            if (sameType) return sameType;
+        }
+
+        return rows[0] || null;
+    }
+
+    function findPreviousShiftItem(shiftRows, currentShift) {
+        const rows = Array.isArray(shiftRows) ? shiftRows : [];
+        if (!rows.length || !currentShift) return null;
+
+        const idx = rows.findIndex((item) => item.shiftId === currentShift.shiftId);
+        if (idx === -1) return null;
+        return rows[idx + 1] || null;
+    }
+
+    function isPreviousShiftButtonAvailable(nowDate) {
+        const now = nowDate instanceof Date ? nowDate : moscowNowDate();
+        const hh = Number(now.getHours());
+        return (hh >= 8 && hh < 10) || (hh >= 20 && hh < 22);
     }
 
     async function fetchPlaceWarehouseMap(placeIds) {
@@ -972,6 +3006,11 @@
         return Number.isFinite(n) ? n : 0;
     }
 
+    function toNumberOrNull(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
     function normalizeApiRows(payload) {
         let rows = [];
 
@@ -1217,6 +3256,16 @@
                             detail?.expensive_analyzed_due_unique_shk ??
                             detail?.expensive_analyzed_due
                         );
+                        const detailExpensiveDueSumPrice = toNumber(
+                            detail?.expensive_due_total_sum_price ??
+                            detail?.expensive_due_sum_price ??
+                            detail?.expensive_due_price
+                        );
+                        const detailExpensiveAnalyzedSumPrice = toNumber(
+                            detail?.expensive_analyzed_due_sum_price ??
+                            detail?.expensive_analyzed_sum_price ??
+                            detail?.expensive_analyzed_due_price
+                        );
                         const detailAnalyzerValues = Array.isArray(detail?.analyzer_values)
                             ? detail.analyzer_values.map((v) => normalizeKey(v)).filter(Boolean)
                             : [];
@@ -1247,6 +3296,8 @@
                             analyzedSumPrice: detailAnalyzedSumPrice,
                             expensiveDueTotal: detailExpensiveDueTotal,
                             expensiveAnalyzed: detailExpensiveAnalyzed,
+                            expensiveDueSumPrice: detailExpensiveDueSumPrice,
+                            expensiveAnalyzedSumPrice: detailExpensiveAnalyzedSumPrice,
                             expensivePercent: detailExpensiveDueTotal > 0
                                 ? (detailExpensiveAnalyzed / detailExpensiveDueTotal) * 100
                                 : toNumber(detail?.expensive_analyzed_percent),
@@ -1255,6 +3306,7 @@
                             breakdownStatuses: detailBreakdownStatuses,
                             uploadStatus: normalizeKey(detail?.upload_status) || (detailDueTotal > 0 ? "Есть" : "Нет выгрузки"),
                             sheetNames,
+                            remainingExpensiveByDate: detail?.remaining_expensive_by_date ?? detail?.expensive_remaining_by_date ?? detail?.remaining_expensive_due_by_date ?? detail?.expensive_due_by_date ?? null,
                             hasPriceDetail: keyNorm !== "ORS"
                         };
                     })
@@ -1393,7 +3445,13 @@
         return data || null;
     }
 
-    async function fetchReportWithCache(period, cacheScope) {
+    async function fetchReportWithCache(period, cacheScope, options) {
+        const opts = options && typeof options === "object" ? options : {};
+        const preferFreshOnStale = Boolean(opts.preferFreshOnStale);
+        const discardStaleCache = Boolean(opts.discardStaleCache);
+        const onBackgroundFresh = typeof opts.onBackgroundFresh === "function"
+            ? opts.onBackgroundFresh
+            : null;
         const cacheRow = await fetchCachedReportRow(period, cacheScope).catch(() => null);
         const cachedReport = parseReportFromCacheRow(cacheRow);
         if (cachedReport && isCacheFresh(cacheRow)) {
@@ -1401,14 +3459,28 @@
         }
 
         if (cachedReport) {
+            if (preferFreshOnStale) {
+                try {
+                    return await fetchReport(period);
+                } catch (error) {
+                    console.warn("Не удалось принудительно обновить устаревший кэш OPP, использую старые данные:", error instanceof Error ? error.message : error);
+                    return cachedReport;
+                }
+            }
+
             // Возвращаем устаревший кэш сразу, чтобы не блокировать UI медленным API.
             fetchReport(period)
-                .then(() => {
-                    // no-op: новые данные подтянутся при следующем обновлении страницы/поиске
+                .then((freshReport) => {
+                    if (onBackgroundFresh) {
+                        onBackgroundFresh(freshReport);
+                    }
                 })
                 .catch((error) => {
                     console.warn("Не удалось обновить устаревший кэш OPP в фоне:", error instanceof Error ? error.message : error);
                 });
+            if (discardStaleCache) {
+                return null;
+            }
             return cachedReport;
         }
 
@@ -1498,7 +3570,10 @@
     }
 
     function renderShiftDynamicsSectionHtml() {
-        if (!lastShiftDynamics.length) {
+        const source = (Array.isArray(lastMonthShiftDynamics) && lastMonthShiftDynamics.length)
+            ? lastMonthShiftDynamics
+            : lastShiftDynamics;
+        if (!source.length) {
             return `
                 <section class="status-box" style="margin-top:12px;">
                     <div class="status-header">
@@ -1512,7 +3587,15 @@
             `;
         }
 
-        const cardsHtml = lastShiftDynamics.map((item) => {
+        const sorted = source.slice().sort((a, b) => {
+            const aTs = toNumber(a?.shiftSortTs);
+            const bTs = toNumber(b?.shiftSortTs);
+            if (bTs !== aTs) return bTs - aTs;
+            return normalizeKey(b?.date).localeCompare(normalizeKey(a?.date));
+        });
+        const limited = sorted.slice(0, 28);
+
+        const cardsHtml = limited.map((item) => {
             const statusInfo = computeStatusCardLevel(item);
             const statusClass = `opp-status-${statusInfo.level}`;
             const valueText = `${formatNumber(item.analyzed)} / ${formatNumber(item.totalDue)}`;
@@ -1603,20 +3686,348 @@
         `;
     }
 
+    function destroyCurrentShiftBreakdownChart() {
+        if (shiftBreakdownChart) {
+            shiftBreakdownChart.destroy();
+            shiftBreakdownChart = null;
+        }
+    }
+
+    function destroyDashboardCharts() {
+        destroyCurrentShiftBreakdownChart();
+        destroyOppRecognitionCharts();
+        destroyPureLossesChart();
+        destroyTwoShkChart();
+        if (pureLossesEmpDonut) {
+            pureLossesEmpDonut.destroy();
+            pureLossesEmpDonut = null;
+        }
+    }
+
+    function renderCurrentShiftBreakdownChart(shiftItem) {
+        const wrap = document.getElementById("dashboard-breakdown-wrap");
+        const canvas = document.getElementById("dashboard-breakdown-chart");
+        const empty = document.getElementById("dashboard-breakdown-empty");
+        if (!wrap || !canvas || !empty) return;
+
+        destroyCurrentShiftBreakdownChart();
+
+        const details = Array.isArray(shiftItem?.details) ? shiftItem.details : [];
+        const totalMap = new Map();
+        details.forEach((detail) => {
+            const statuses = Array.isArray(detail?.breakdownStatuses) ? detail.breakdownStatuses : [];
+            statuses.forEach((entry) => {
+                const status = normalizeKey(entry?.status);
+                const count = toNumber(entry?.count);
+                if (!status || count <= 0) return;
+                totalMap.set(status, toNumber(totalMap.get(status)) + count);
+            });
+        });
+
+        const sorted = Array.from(totalMap.entries())
+            .map(([status, count]) => ({ status, count }))
+            .sort((a, b) => (b.count - a.count) || a.status.localeCompare(b.status, "ru"));
+
+        if (!sorted.length || typeof Chart === "undefined") {
+            wrap.style.display = "none";
+            empty.style.display = "";
+            empty.textContent = "Нет данных по статусам разбора за смену.";
+            return;
+        }
+
+        const labels = sorted.map((entry) => entry.status);
+        const values = sorted.map((entry) => entry.count);
+        const colors = ["#2563eb", "#16a34a", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316", "#84cc16", "#ec4899", "#64748b", "#0ea5e9", "#14b8a6"];
+
+        shiftBreakdownChart = new Chart(canvas, {
+            type: "doughnut",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        data: values,
+                        backgroundColor: colors.slice(0, values.length),
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" },
+                    title: { display: true, text: "Статусы разбора за смену" },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                const total = values.reduce((sum, val) => sum + val, 0) || 1;
+                                const value = toNumber(ctx.parsed);
+                                const pct = ((value / total) * 100).toFixed(1);
+                                return `${ctx.label}: ${value} (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        empty.style.display = "none";
+        wrap.style.display = "";
+    }
+
+    function renderCurrentShiftTable(shiftItem) {
+        const tableWrap = document.getElementById("dashboard-shift-table-wrap");
+        const body = document.getElementById("dashboard-shift-table-body");
+        const empty = document.getElementById("dashboard-shift-table-empty");
+        if (!tableWrap || !body || !empty) return;
+
+        body.innerHTML = "";
+        const details = Array.isArray(shiftItem?.details) ? shiftItem.details : [];
+        if (!details.length) {
+            tableWrap.style.display = "none";
+            empty.style.display = "";
+            empty.textContent = "По текущей смене нет строк для детализации.";
+            return;
+        }
+
+        details.forEach((item) => {
+            const sheetText = item.sheetNames?.length ? item.sheetNames.join(", ") : "-";
+            const dueLabelShort = buildShortDueLabelForShiftDetail(item, shiftItem);
+            const valueText = `${formatNumber(item.analyzed)} / ${formatNumber(item.dueTotal)}`;
+            const sumText = item.hasPriceDetail
+                ? `${formatCurrency(item.analyzedSumPrice)} / ${formatCurrency(item.dueSumPrice)}`
+                : "Без детализации";
+            const expensiveText = item.hasPriceDetail
+                ? `${formatNumber(item.expensiveAnalyzed)} / ${formatNumber(item.expensiveDueTotal)} (${formatPercent(item.expensivePercent)})`
+                : "Без детализации";
+            const employeeText = item.employeeNames?.length ? item.employeeNames.join(", ") : "-";
+            const statusText = item.uploadStatus || (item.dueTotal > 0 ? "Есть выгрузка" : "Нет выгрузки");
+            const hasUpload = /есть/i.test(statusText);
+            const statusColor = hasUpload ? "#166534" : "#b45309";
+
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td>${escapeHtml(sheetText)}</td>
+                <td>${escapeHtml(dueLabelShort)}</td>
+                <td>${escapeHtml(valueText)}</td>
+                <td>${escapeHtml(sumText)}</td>
+                <td>${escapeHtml(expensiveText)}</td>
+                <td>${escapeHtml(employeeText)}</td>
+                <td style="color:${statusColor};font-weight:600;">${escapeHtml(statusText)}</td>
+            `;
+            body.appendChild(tr);
+        });
+
+        empty.style.display = "none";
+        tableWrap.style.display = "";
+    }
+
+    function renderLagPanel() {
+        const panel = document.getElementById("dashboard-lag-panel-content");
+        if (!panel) return;
+
+        const overallLag = Math.max(0, 100 - toNumber(lastMonthSummary?.percentBySum));
+        const lagBySheets = buildMonthLagByStatus(lastMonthShiftDynamics);
+        const lagBySheetsHtml = lagBySheets.map((entry) => {
+            const valueText = entry.lagPercent === null ? "—" : formatPercent(entry.lagPercent);
+            return `
+                <div class="opp-lag-item">
+                    <span class="opp-lag-item-key" title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</span>
+                    <span class="opp-lag-item-value">${escapeHtml(valueText)}</span>
+                </div>
+            `;
+        }).join("");
+
+        panel.innerHTML = `
+            <div class="opp-lag-main-title">Отставание (общее)</div>
+            <div class="opp-lag-main-value">${escapeHtml(formatPercent(overallLag))}</div>
+            <div class="opp-lag-list">
+                ${lagBySheetsHtml || '<div class="muted" style="font-size:11px;">Нет данных по листам</div>'}
+            </div>
+        `;
+    }
+
+    function renderPureBacklogPanel() {
+        const panel = document.getElementById("dashboard-pure-backlog-panel");
+        if (!panel) return;
+
+        const missingDates = Array.isArray(lastPureMissingDates) ? lastPureMissingDates : [];
+        const hasPercent = lastPureBacklogPercent !== null && lastPureBacklogPercent !== undefined;
+
+        if (!hasPercent && !missingDates.length) {
+            panel.innerHTML = `<div class="muted" style="font-size:11px;">Нет данных для отображения.</div>`;
+            return;
+        }
+
+        const missingHtml = missingDates.length
+            ? `
+                <div class="opp-pure-missing-list">
+                    ${missingDates.map((item) => {
+                const iso = normalizeKey(item?.iso);
+                const day = Number(item?.day);
+                if (!iso || !Number.isFinite(day)) return "";
+                const title = formatDateRu(iso);
+                return `<span class="opp-pure-missing-badge" title="${escapeHtml(title)}">${escapeHtml(day)}</span>`;
+            }).join("")}
+                </div>
+            `
+            : "";
+
+        panel.innerHTML = `
+            <div class="opp-lag-main-title">Отставание (Чистые списания)</div>
+            <div class="opp-lag-main-value">${escapeHtml(hasPercent ? formatPercent(lastPureBacklogPercent) : "—")}</div>
+            ${missingHtml}
+        `;
+    }
+
     function renderSummary() {
         if (!summaryWrap) return;
+
+        destroyDashboardCharts();
 
         const missingSheetsText = lastMissingSheets.length
             ? `В таблице не найдены листы: ${lastMissingSheets.map((v) => escapeHtml(String(v))).join(", ")}`
             : "";
         const generatedText = normalizeKey(lastReportGeneratedAtText);
 
+        if (!lastCurrentShift) {
+            renderHeaderShiftButton(null);
+            renderLagPanel();
+            renderPureBacklogPanel();
+            renderUnfinishedCompactPanel();
+            renderTwoShkChart(lastTwoShkRows);
+            summaryWrap.innerHTML = `
+                ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Актуально на: ${escapeHtml(generatedText)}</div>` : ""}
+                ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
+                <section class="status-box" style="margin-top:0;">
+                    <div class="status-header">
+                        <div class="status-center" style="grid-column:1 / -1;">
+                            <div class="status-code" style="font-size:28px;">Динамика ОПП</div>
+                            <div class="status-desc">Текущая смена не найдена в выгрузке</div>
+                        </div>
+                    </div>
+                    <div class="muted">Проверьте, что в Apps Script API возвращается блок shift_dynamics.</div>
+                </section>
+            `;
+            renderOppRecognitionCharts();
+            renderPureLossesChart(lastPureLossRows);
+            renderPureEmpDonut(filterPureRowsByRecentDays(lastPureLossRows, 30));
+            return;
+        }
+
+        const selectedShift = lastShiftDynamics.find((item) => item.shiftId === selectedShiftId);
+        const shiftItem = selectedShift || lastCurrentShift;
+        if (!shiftItem) {
+            renderHeaderShiftButton(null);
+            renderLagPanel();
+            renderPureBacklogPanel();
+            renderUnfinishedCompactPanel();
+            renderTwoShkChart(lastTwoShkRows);
+            summaryWrap.innerHTML = `
+                ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
+                <section class="status-box" style="margin-top:0;">
+                    <div class="status-header">
+                        <div class="status-center" style="grid-column:1 / -1;">
+                            <div class="status-code" style="font-size:28px;">Динамика ОПП</div>
+                            <div class="status-desc">Текущая смена не найдена в выгрузке</div>
+                        </div>
+                    </div>
+                    <div class="muted">Проверьте, что в Apps Script API возвращается блок shift_dynamics.</div>
+                </section>
+            `;
+            renderOppRecognitionCharts();
+            renderPureLossesChart(lastPureLossRows);
+            renderPureEmpDonut(filterPureRowsByRecentDays(lastPureLossRows, 30));
+            return;
+        }
+
+        selectedShiftId = shiftItem.shiftId;
+        const shiftTitle = `${shiftItem.shiftName} ${shiftItem.displayDate}`;
+        const employeesText = shiftItem.employeeNames?.length ? shiftItem.employeeNames.join(", ") : "-";
+        const canShowPreviousButton = isPreviousShiftButtonAvailable(moscowNowDate());
+        const isViewingPrevious = Boolean(lastPreviousShift && shiftItem.shiftId === lastPreviousShift.shiftId);
+        const switchTargetShift = isViewingPrevious ? lastCurrentShift : lastPreviousShift;
+        const showSwitchButton = canShowPreviousButton && Boolean(switchTargetShift);
+        const pureResolvedCount = toNumber(lastPureResolvedByShift.get(shiftItem.shiftId) || 0);
+        const pureResolvedClass = pureResolvedCount <= 0
+            ? "opp-month-card-bad"
+            : pureResolvedCount <= 10
+                ? "opp-month-card-warn"
+                : "opp-month-card-good";
+
+        const statusCardsHtml = (shiftItem.details || []).map((item) => {
+            const statusInfo = computeStatusCardLevel(item);
+            const statusClass = `opp-status-${statusInfo.level}`;
+            const uploadTitle = statusInfo.hasUpload ? "Выгрузка есть" : "Нет выгрузки";
+            const uploadClass = statusInfo.hasUpload ? "ok" : "bad";
+            const uploadIcon = statusInfo.hasUpload ? "✓" : "✕";
+            return `
+                <div class="opp-status-mini-card ${statusClass}">
+                    <span class="opp-upload-indicator ${uploadClass}" title="${escapeHtml(uploadTitle)}">${uploadIcon}</span>
+                    <div class="opp-status-mini-title">${escapeHtml(item.displayKey)}</div>
+                    <div class="opp-status-mini-value">${formatNumber(item.analyzed)} / ${formatNumber(item.dueTotal)}</div>
+                </div>
+            `;
+        }).join("");
+        const expensiveCardClass = toNumber(shiftItem.expensiveDueTotal) <= 0 ||
+            toNumber(shiftItem.expensiveAnalyzed) >= toNumber(shiftItem.expensiveDueTotal)
+            ? "opp-month-card-good"
+            : "opp-month-card-bad";
+
+        const pureLossesHtml = buildPureLossesSectionHtml(lastPureLossRows);
+        const oppRecognitionHtml = buildOppRecognitionSectionHtml(lastOppRecognitionRows);
+
         summaryWrap.innerHTML = `
-            ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Выгрузка: ${escapeHtml(generatedText)}</div>` : ""}
+            ${generatedText ? `<div class="muted" style="margin:4px 0 10px;">Актуально на: ${escapeHtml(generatedText)}</div>` : ""}
             ${missingSheetsText ? `<div class="muted" style="margin:8px 0 10px;color:#b45309;">${missingSheetsText}</div>` : ""}
-            ${renderMonthSummarySectionHtml()}
-            ${renderTodayDeadlineSectionHtml()}
+            <section class="status-box" style="margin-top:0;">
+                <div class="status-header">
+                    <div class="status-center" style="grid-column:1 / -1;">
+                        <div class="status-code" style="font-size:32px;">${escapeHtml(shiftTitle)}</div>
+                        <div class="status-desc">${escapeHtml(employeesText)}</div>
+                    </div>
+                </div>
+                <div class="opp-month-grid opp-month-grid-main">
+                    <div class="opp-month-card">
+                        <div class="opp-month-label">Разобрано ШК</div>
+                        <div class="opp-month-value">${formatNumber(shiftItem.analyzed)} / ${formatNumber(shiftItem.totalDue)}</div>
+                    </div>
+                    <div class="opp-month-card">
+                        <div class="opp-month-label">Сумма ШК</div>
+                        <div class="opp-month-value">${escapeHtml(formatCurrency(shiftItem.analyzedSumPrice))} / ${escapeHtml(formatCurrency(shiftItem.dueSumPrice))}</div>
+                    </div>
+                    <div class="opp-month-card ${expensiveCardClass}">
+                        <div class="opp-month-label">Дорогостой</div>
+                        <div class="opp-month-value">${formatNumber(shiftItem.expensiveAnalyzed)} / ${formatNumber(shiftItem.expensiveDueTotal)}</div>
+                    </div>
+                    <div class="opp-month-card ${toNumber(shiftItem.oppRecognizedCount) > 0 ? "opp-month-card-good" : "opp-month-card-bad"}">
+                        <div class="opp-month-label">Опознано</div>
+                        <div class="opp-month-value">${formatNumber(shiftItem.oppRecognizedCount)}</div>
+                    </div>
+                    <div class="opp-month-card ${pureResolvedClass}">
+                        <div class="opp-month-label">Разобрано чистых списаний</div>
+                        <div class="opp-month-value">${formatNumber(pureResolvedCount)}</div>
+                    </div>
+                </div>
+                <div class="opp-status-mini-grid">
+                    ${statusCardsHtml || '<div class="muted">По текущей смене нет данных по статусам.</div>'}
+                </div>
+            </section>
+            ${pureLossesHtml}
+            ${oppRecognitionHtml}
         `;
+        summaryWrap.querySelectorAll("[data-pure-help]").forEach((el) => {
+            el.addEventListener("click", openPureHelpModal);
+        });
+        renderHeaderShiftButton(showSwitchButton ? switchTargetShift : null);
+        renderLagPanel();
+        renderPureBacklogPanel();
+        renderUnfinishedCompactPanel();
+        renderTwoShkChart(lastTwoShkRows);
+        renderOppRecognitionCharts();
+        renderPureLossesChart(lastPureLossRows);
+        renderPureEmpDonut(filterPureRowsByRecentDays(lastPureLossRows, 30));
+
     }
 
     function renderDetailsTable() {
@@ -1667,9 +4078,9 @@
     }
 
     function closeShiftModal() {
-        if (shiftBreakdownChart) {
-            shiftBreakdownChart.destroy();
-            shiftBreakdownChart = null;
+        if (shiftModalBreakdownChart) {
+            shiftModalBreakdownChart.destroy();
+            shiftModalBreakdownChart = null;
         }
         if (shiftModalOverall) {
             shiftModalOverall.style.display = "none";
@@ -1678,6 +4089,65 @@
             shiftModalBreakdownWrap.style.display = "none";
         }
         if (shiftModal) shiftModal.classList.add("hidden");
+    }
+
+    function renderPureHelpModalTable(rows) {
+        if (!pureHelpModalBody) return;
+        pureHelpModalBody.innerHTML = "";
+
+        (rows || []).forEach((row) => {
+            const date = parseDateValue(row?.date_lost);
+            const dateText = date ? formatDateRu(toIsoDate(date)) : normalizeKey(row?.date_lost) || "-";
+            const shk = normalizeKey(row?.shk) || "-";
+            const lr = normalizeKey(row?.lr) || "-";
+            const price = formatCurrency(toNumberOrNull(row?.price) ?? 0);
+            const emp = normalizeKey(row?.opp_emp || row?.emp) || "-";
+            const comment = normalizeKey(row?.opp_comment || row?.comment) || "-";
+            const solvedTs = parseTimestampValue(row?.date_solved || row?.dt_solved);
+            const solvedDate = solvedTs ? formatDateRu(toIsoDate(new Date(solvedTs))) : "-";
+            const verdict = resolvePureDecision(row) || "-";
+
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td>${escapeHtml(dateText)}</td>
+                <td>${escapeHtml(shk)}</td>
+                <td>${escapeHtml(lr)}</td>
+                <td>${escapeHtml(price)}</td>
+                <td>${escapeHtml(emp)}</td>
+                <td>${escapeHtml(comment)}</td>
+                <td>${escapeHtml(solvedDate)}</td>
+                <td>${escapeHtml(verdict)}</td>
+            `;
+            pureHelpModalBody.appendChild(tr);
+        });
+    }
+
+    function openPureHelpModal() {
+        if (!pureHelpModal) return;
+        const rows = Array.isArray(lastPureHelpRows) ? lastPureHelpRows : [];
+
+        if (pureHelpModalTitle) {
+            pureHelpModalTitle.textContent = `Нужна помощь — ${rows.length}`;
+        }
+
+        if (!rows.length) {
+            if (pureHelpModalTableWrap) pureHelpModalTableWrap.style.display = "none";
+            if (pureHelpModalEmpty) {
+                pureHelpModalEmpty.style.display = "";
+                pureHelpModalEmpty.textContent = "Нет строк с вердиктом «Нужна помощь».";
+            }
+            pureHelpModal.classList.remove("hidden");
+            return;
+        }
+
+        renderPureHelpModalTable(rows);
+        if (pureHelpModalTableWrap) pureHelpModalTableWrap.style.display = "";
+        if (pureHelpModalEmpty) pureHelpModalEmpty.style.display = "none";
+        pureHelpModal.classList.remove("hidden");
+    }
+
+    function closePureHelpModal() {
+        if (pureHelpModal) pureHelpModal.classList.add("hidden");
     }
 
     function closeCalendarModal() {
@@ -1754,9 +4224,9 @@
     function renderShiftModalBreakdownChart(shiftItem) {
         if (!shiftModalBreakdownWrap || !shiftModalBreakdownChartCanvas) return;
 
-        if (shiftBreakdownChart) {
-            shiftBreakdownChart.destroy();
-            shiftBreakdownChart = null;
+        if (shiftModalBreakdownChart) {
+            shiftModalBreakdownChart.destroy();
+            shiftModalBreakdownChart = null;
         }
 
         const details = Array.isArray(shiftItem?.details) ? shiftItem.details : [];
@@ -1784,7 +4254,7 @@
         const values = sorted.map((entry) => entry.count);
         const colors = ["#2563eb", "#16a34a", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316", "#84cc16", "#ec4899", "#64748b", "#0ea5e9", "#14b8a6"];
 
-        shiftBreakdownChart = new Chart(shiftModalBreakdownChartCanvas, {
+        shiftModalBreakdownChart = new Chart(shiftModalBreakdownChartCanvas, {
             type: "doughnut",
             data: {
                 labels,
@@ -1822,10 +4292,20 @@
         shiftModalBreakdownWrap.style.display = "";
     }
 
+    function findShiftItemById(shiftId) {
+        const targetId = normalizeKey(shiftId);
+        if (!targetId) return null;
+        return (
+            lastShiftDynamics.find((item) => item.shiftId === targetId)
+            || lastMonthShiftDynamics.find((item) => item.shiftId === targetId)
+            || null
+        );
+    }
+
     function openShiftModalById(shiftId) {
         if (!shiftModal) return;
 
-        const target = lastShiftDynamics.find((item) => item.shiftId === shiftId);
+        const target = findShiftItemById(shiftId);
         if (!target) return;
 
         if (shiftModalTitle) {
@@ -1906,24 +4386,15 @@
     }
 
     async function loadReport() {
-        const dateTo = parseIsoDate(dateToEl?.value) || toIsoDate(moscowNowDate());
-        if (dateToEl && dateToEl.value !== dateTo) {
-            dateToEl.value = dateTo;
-        }
-
-        const dateFrom = parseIsoDate(dateFromEl?.value) || shiftIsoDate(dateTo, -7);
-        if (dateFromEl && dateFromEl.value !== dateFrom) {
-            dateFromEl.value = dateFrom;
-        }
-
-        if (dateFrom > dateTo) {
-            setStatus("Дата 'с' не может быть больше даты 'по'.", "error");
-            setErrors([]);
-            return;
-        }
-
-        lastPeriod = getPeriodByDates(dateFrom, dateTo);
-        const monthPeriod = getMonthPeriodByDate(lastPeriod.to);
+        const todayIso = toIsoDate(moscowNowDate());
+        const monthPeriod = getMonthPeriodByDate(todayIso);
+        const previousMonthPeriod = getPreviousMonthPeriodByDate(todayIso);
+        const rolling30Period = getRolling30PeriodByDate(todayIso);
+        const shiftPeriod = {
+            from: shiftIsoDate(todayIso, -1) || monthPeriod.from,
+            to: monthPeriod.to
+        };
+        lastPeriod = shiftPeriod;
 
         setLoading(true);
         setErrors([]);
@@ -1934,37 +4405,141 @@
                 await loadWarehouseConfig();
             }
 
-            const reportPromise = fetchReportWithCache(lastPeriod, CACHE_SCOPE_ADMIN);
-            const sameAsMainPeriod = monthPeriod.from === lastPeriod.from && monthPeriod.to === lastPeriod.to;
-            const monthReportPromise = (sameAsMainPeriod
-                ? reportPromise
-                : fetchReportWithCache(monthPeriod, CACHE_SCOPE_DASHBOARD_MONTH)
+            const monthReportPromise = fetchReportWithCache(
+                monthPeriod,
+                CACHE_SCOPE_DASHBOARD_MONTH
             ).catch((error) => {
                 console.warn("Не удалось загрузить месячные итоги:", error instanceof Error ? error.message : error);
                 return null;
             });
-            const oppPromise = fetchOppRecognizedCountsByShift(lastPeriod).catch((error) => {
+            const previousMonthReportPromise = fetchReportWithCache(
+                previousMonthPeriod,
+                CACHE_SCOPE_DASHBOARD_MONTH,
+                { discardStaleCache: true }
+            )
+                .catch((error) => {
+                    console.warn("Не удалось загрузить итоги предыдущего месяца:", error instanceof Error ? error.message : error);
+                    return null;
+                });
+            const rolling30ReportPromise = fetchReportWithCache(
+                rolling30Period,
+                CACHE_SCOPE_DASHBOARD_ROLLING30
+            ).catch((error) => {
+                console.warn("Не удалось загрузить rolling30 итоги:", error instanceof Error ? error.message : error);
+                return null;
+            });
+            const reportPromise = fetchReportWithCache(shiftPeriod, CACHE_SCOPE_DASHBOARD_SHIFT).catch(async (error) => {
+                console.warn("Не удалось загрузить scope opp_dashboard_shift, пробую fallback через opp_dashboard_month:", error instanceof Error ? error.message : error);
+                const fallbackMonthReport = await monthReportPromise;
+                if (fallbackMonthReport) {
+                    return fallbackMonthReport;
+                }
+                throw error;
+            });
+            const purePromise = (async () => {
+                const [deadlineConfig, backlogRows, resolvedByShift] = await Promise.all([
+                    loadPureDeadlineConfig(currentWhId),
+                    fetchPureBacklogRows(currentWhId, rolling30Period.from, rolling30Period.to),
+                    computePureResolvedByShift(currentWhId, shiftPeriod.from, shiftPeriod.to)
+                ]);
+                const backlog = computePureBacklogPercentFromRows(backlogRows, rolling30Period.from, rolling30Period.to);
+                const missingDates = computePureMissingDates(backlogRows, deadlineConfig);
+                return { backlog, resolvedByShift, missingDates };
+            })().catch((error) => {
+                console.warn("Не удалось загрузить статистику чистых списаний:", error instanceof Error ? error.message : error);
+                return { backlog: null, resolvedByShift: new Map(), missingDates: [] };
+            });
+            const oppPromise = fetchOppRecognizedCountsByShift(shiftPeriod).catch((error) => {
                 console.warn("Не удалось загрузить опознания ОПП по сменам:", error instanceof Error ? error.message : error);
                 return {};
             });
-
-            const [report, monthReport, oppByShift] = await Promise.all([reportPromise, monthReportPromise, oppPromise]);
+            const extraChartsPromise = (async () => {
+                const [oppRows, twoShkRows, pureRows] = await Promise.all([
+                    loadOppRecognitionRowsRolling30(),
+                    loadTwoShkRowsRolling30(),
+                    loadPureLossRowsRolling30()
+                ]);
+                return { oppRows, twoShkRows, pureRows };
+            })().catch((error) => {
+                console.warn("Не удалось загрузить данные доп. графиков:", error instanceof Error ? error.message : error);
+                return { oppRows: [], twoShkRows: [], pureRows: [] };
+            });
+            const [report, monthReport, previousMonthReport, rolling30Report, oppByShift, pureStats, extraCharts] = await Promise.all([
+                reportPromise,
+                monthReportPromise,
+                previousMonthReportPromise,
+                rolling30ReportPromise,
+                oppPromise,
+                purePromise,
+                extraChartsPromise
+            ]);
             lastRows = report.rows;
             lastSummary = report.summary;
             lastTodayDeadline = report.todayDeadline;
             lastReportGeneratedAtText = report.generatedAtText || "";
-            lastShiftDynamics = attachOppCountsToShiftDynamics(report.shiftDynamics, oppByShift);
+            lastShiftDynamics = attachOppCountsToShiftDynamics(
+                Array.isArray(report.shiftDynamics) ? report.shiftDynamics : [],
+                oppByShift
+            );
+            lastCurrentShift = findCurrentShiftItem(lastShiftDynamics);
+            lastPreviousShift = findPreviousShiftItem(lastShiftDynamics, lastCurrentShift);
+            selectedShiftId = lastCurrentShift?.shiftId || "";
+            const rollingRows = Array.isArray(rolling30Report?.shiftDynamics) ? rolling30Report.shiftDynamics : [];
+            if (rollingRows.length) {
+                lastMonthShiftDynamics = rollingRows;
+            } else {
+                const currentMonthRows = Array.isArray(monthReport?.shiftDynamics) ? monthReport.shiftDynamics : [];
+                const previousMonthRows = Array.isArray(previousMonthReport?.shiftDynamics) ? previousMonthReport.shiftDynamics : [];
+                const monthRowsFallback = lastShiftDynamics.filter((item) => {
+                    const d = parseIsoDate(item?.date);
+                    return d && d >= rolling30Period.from && d <= rolling30Period.to;
+                });
+                const mergedMap = new Map();
+                [...previousMonthRows, ...currentMonthRows].forEach((item) => {
+                    const id = normalizeKey(item?.shiftId);
+                    if (!id) return;
+                    mergedMap.set(id, item);
+                });
+                const mergedRows = Array.from(mergedMap.values())
+                    .filter((item) => {
+                        const d = parseIsoDate(item?.date);
+                        return d && d >= rolling30Period.from && d <= rolling30Period.to;
+                    })
+                    .sort((a, b) => {
+                        const aTs = toNumber(a?.shiftSortTs);
+                        const bTs = toNumber(b?.shiftSortTs);
+                        if (bTs !== aTs) return bTs - aTs;
+                        return normalizeKey(b?.date).localeCompare(normalizeKey(a?.date));
+                    });
+                lastMonthShiftDynamics = mergedRows.length ? mergedRows : monthRowsFallback;
+            }
             lastMonthSummary = buildMonthSummaryFromShiftDynamics(
-                monthReport?.shiftDynamics || [],
-                monthPeriod
+                lastMonthShiftDynamics,
+                rolling30Period
             );
             lastMissingSheets = report.missingSheets;
+            lastPureBacklogPercent = pureStats?.backlog ?? null;
+            lastPureResolvedByShift = pureStats?.resolvedByShift instanceof Map
+                ? pureStats.resolvedByShift
+                : new Map();
+            lastPureMissingDates = Array.isArray(pureStats?.missingDates)
+                ? pureStats.missingDates
+                : [];
+            lastOppRecognitionRows = Array.isArray(extraCharts?.oppRows) ? extraCharts.oppRows : [];
+            lastTwoShkRows = Array.isArray(extraCharts?.twoShkRows) ? extraCharts.twoShkRows : [];
+            lastPureLossRows = Array.isArray(extraCharts?.pureRows) ? extraCharts.pureRows : [];
+            const pureRecentRows = filterPureRowsByRecentDays(lastPureLossRows, 30);
+            lastPureHelpRows = pureRecentRows.filter((row) => {
+                const decision = resolvePureDecision(row);
+                return decision && isHelpDecisionValue(decision);
+            });
+            lastPureBalance60 = computePureBalance(lastPureLossRows, 60);
 
             renderSummary();
             setStatus("", "");
 
-            if (!lastRows.length) {
-                toast("За выбранный период данных нет", { type: "info" });
+            if (!lastShiftDynamics.length) {
+                toast("По текущему месяцу нет данных по сменам", { type: "info" });
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -1990,40 +4565,79 @@
                 hasData: false
             };
             lastTodayDeadline = null;
-            lastReportGeneratedAtText = "";
             lastShiftDynamics = [];
+            lastMonthShiftDynamics = [];
+            lastPureBacklogPercent = null;
+            lastPureResolvedByShift = new Map();
+            lastPureMissingDates = [];
+            lastOppRecognitionRows = [];
+            lastTwoShkRows = [];
+            lastPureLossRows = [];
+            lastPureHelpRows = [];
+            lastPureBalance60 = 0;
+            lastCurrentShift = null;
+            lastPreviousShift = null;
+            selectedShiftId = "";
+            lastReportGeneratedAtText = "";
             lastMissingSheets = [];
+            destroyDashboardCharts();
         } finally {
             setLoading(false);
         }
     }
 
     function bindEvents() {
-        if (searchBtn) {
-            searchBtn.addEventListener("click", loadReport);
-        }
-
         if (calendarBtn) {
             calendarBtn.addEventListener("click", openCalendarModal);
         }
 
-        if (dateToEl) {
-            dateToEl.addEventListener("keydown", (event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                loadReport();
+        if (shiftModalCloseBtn) {
+            shiftModalCloseBtn.addEventListener("click", closeShiftModal);
+        }
+        if (shiftModal) {
+            shiftModal.addEventListener("click", (event) => {
+                if (event.target === shiftModal || event.target.classList.contains("modal-backdrop")) {
+                    closeShiftModal();
+                }
             });
         }
 
-        if (dateFromEl) {
-            dateFromEl.addEventListener("keydown", (event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                loadReport();
+        if (calendarModalCloseBtn) {
+            calendarModalCloseBtn.addEventListener("click", closeCalendarModal);
+        }
+        if (calendarModal) {
+            calendarModal.addEventListener("click", (event) => {
+                if (event.target === calendarModal || event.target.classList.contains("modal-backdrop")) {
+                    closeCalendarModal();
+                }
             });
         }
 
-        bindModalEvents();
+        if (pureHelpModalCloseBtn) {
+            pureHelpModalCloseBtn.addEventListener("click", closePureHelpModal);
+        }
+        if (pureHelpModal) {
+            pureHelpModal.addEventListener("click", (event) => {
+                if (event.target === pureHelpModal || event.target.classList.contains("modal-backdrop")) {
+                    closePureHelpModal();
+                }
+            });
+        }
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            if (shiftModal && !shiftModal.classList.contains("hidden")) {
+                closeShiftModal();
+                return;
+            }
+            if (calendarModal && !calendarModal.classList.contains("hidden")) {
+                closeCalendarModal();
+                return;
+            }
+            if (pureHelpModal && !pureHelpModal.classList.contains("hidden")) {
+                closePureHelpModal();
+            }
+        });
     }
 
     async function init() {
@@ -2037,15 +4651,6 @@
 
         bindPageTitleSync();
         bindEvents();
-
-        const defaultTo = parseIsoDate(dateToEl?.value) || toIsoDate(moscowNowDate());
-        if (dateToEl && dateToEl.value !== defaultTo) {
-            dateToEl.value = defaultTo;
-        }
-        const defaultFrom = parseIsoDate(dateFromEl?.value) || shiftIsoDate(defaultTo, -7);
-        if (dateFromEl && dateFromEl.value !== defaultFrom) {
-            dateFromEl.value = defaultFrom;
-        }
 
         try {
             await loadWarehouseConfig();
