@@ -98,6 +98,11 @@
     const openPureTableBtn = document.getElementById("open-pure-table-btn");
     const pureTableModalEl = document.getElementById("pure-table-modal");
     const pureTableCloseBtn = document.getElementById("pure-table-close-btn");
+    const pureMonthPickerBtn = document.getElementById("pure-month-picker-btn");
+    const pureMonthPickerModalEl = document.getElementById("pure-month-picker-modal");
+    const pureMonthPickerCloseBtn = document.getElementById("pure-month-picker-close-btn");
+    const pureMonthPickerListEl = document.getElementById("pure-month-picker-list");
+    const pureMonthPickerFooterEl = document.getElementById("pure-month-picker-footer");
     const pureFilterLrBtn = document.getElementById("pure-filter-lr-btn");
     const pureFilterLrPanel = document.getElementById("pure-filter-lr-panel");
     const pureFilterLrList = document.getElementById("pure-filter-lr-list");
@@ -156,6 +161,8 @@
         activeLrs: new Set(),
         activeStatuses: new Set(),
         activeExtraStatuses: new Set(),
+        activeMonthKey: "",
+        monthSummaries: [],
         decisionOptions: [],
         decisionOptionMap: new Map(),
         onlyUnresolved: false,
@@ -1105,6 +1112,7 @@
 
     function initPureTableModal() {
         if (!openPureTableBtn || !pureTableModalEl || !pureTableBody) return;
+        updateMonthPickerButtonCaption();
 
         openPureTableBtn.addEventListener("click", async () => {
             pureTableModalEl.classList.remove("hidden");
@@ -1115,6 +1123,32 @@
         pureTableCloseBtn?.addEventListener("click", closePureTableModal);
         pureTableRefreshBtn?.addEventListener("click", async () => {
             await loadPureTableRows(userWhId);
+        });
+
+        pureMonthPickerBtn?.addEventListener("click", () => {
+            openMonthPickerModal();
+        });
+
+        pureMonthPickerModalEl?.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.matches("[data-close-month-picker-modal='1']")) {
+                closeMonthPickerModal();
+            }
+        });
+
+        pureMonthPickerCloseBtn?.addEventListener("click", () => {
+            closeMonthPickerModal();
+        });
+
+        pureMonthPickerListEl?.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const card = target.closest("[data-month-key]");
+            if (!(card instanceof HTMLElement)) return;
+            const monthKey = toText(card.dataset.monthKey);
+            setActivePureMonthFilter(monthKey);
+            closeMonthPickerModal();
         });
 
         pureUnresolvedOnlyCheckbox?.addEventListener("change", () => {
@@ -1148,6 +1182,10 @@
         document.addEventListener("keydown", (event) => {
             if (event.key !== "Escape") return;
             if (pureTableModalEl.classList.contains("hidden")) return;
+            if (isMonthPickerModalOpen()) {
+                closeMonthPickerModal();
+                return;
+            }
             if (isRequestLinkModalOpen()) {
                 closeRequestLinkModal();
                 return;
@@ -1244,6 +1282,7 @@
     function closePureTableModal() {
         pureTableModalEl?.classList.add("hidden");
         closeRequestLinkModal();
+        closeMonthPickerModal();
         closePureTableFilterPanels();
         closeActiveVerdictPanel();
         closeAllWmsPopovers();
@@ -1260,6 +1299,178 @@
         pureFilterLrPanel?.classList.add("hidden");
         pureFilterStatusPanel?.classList.add("hidden");
         pureFilterExtraPanel?.classList.add("hidden");
+    }
+
+    function isMonthPickerModalOpen() {
+        return Boolean(pureMonthPickerModalEl && !pureMonthPickerModalEl.classList.contains("hidden"));
+    }
+
+    function openMonthPickerModal() {
+        if (!pureMonthPickerModalEl) return;
+        closePureTableFilterPanels();
+        closeActiveVerdictPanel();
+        closeAllWmsPopovers();
+        renderMonthPickerModalContent();
+        pureMonthPickerModalEl.classList.remove("hidden");
+        pureMonthPickerModalEl.setAttribute("aria-hidden", "false");
+    }
+
+    function closeMonthPickerModal() {
+        if (!pureMonthPickerModalEl) return;
+        pureMonthPickerModalEl.classList.add("hidden");
+        pureMonthPickerModalEl.setAttribute("aria-hidden", "true");
+    }
+
+    function buildMonthSummaries(rows) {
+        const sourceRows = Array.isArray(rows) ? rows : [];
+        const monthMap = new Map();
+        const allSummary = createMonthSummaryBucket("", "Все месяцы");
+
+        sourceRows.forEach((row) => {
+            const monthKey = toText(row?.monthKey);
+            if (!monthKey) return;
+
+            if (!monthMap.has(monthKey)) {
+                monthMap.set(monthKey, createMonthSummaryBucket(monthKey, formatMonthPickerLabel(monthKey)));
+            }
+            updateMonthSummaryBucket(monthMap.get(monthKey), row);
+            updateMonthSummaryBucket(allSummary, row);
+        });
+
+        const monthItems = Array.from(monthMap.values())
+            .map(finalizeMonthSummaryBucket)
+            .sort((left, right) => String(right.key).localeCompare(String(left.key), "ru"));
+
+        return [finalizeMonthSummaryBucket(allSummary), ...monthItems];
+    }
+
+    function createMonthSummaryBucket(key, label) {
+        return {
+            key: toText(key),
+            label: toText(label),
+            totalSum: 0,
+            resolvedSum: 0,
+            expensiveTotal: 0,
+            expensiveResolved: 0,
+            sumWithoutFound: 0,
+            rowCount: 0
+        };
+    }
+
+    function updateMonthSummaryBucket(bucket, row) {
+        if (!bucket || typeof bucket !== "object") return;
+        const price = Math.abs(toNumberOrNull(row?.price) || 0);
+        const decision = extractDecisionValue(row?.decision);
+        const isResolved = Boolean(decision);
+        const isFound = decisionOptionKey(decision) === decisionOptionKey(AUTO_FOUND_DECISION);
+        const isExpensive = price >= EXPENSIVE_PRICE_THRESHOLD;
+
+        bucket.totalSum += price;
+        if (isResolved) {
+            bucket.resolvedSum += price;
+        }
+        if (isExpensive) {
+            bucket.expensiveTotal += 1;
+            if (isResolved) bucket.expensiveResolved += 1;
+        }
+        if (!isFound) {
+            bucket.sumWithoutFound += price;
+        }
+        bucket.rowCount += 1;
+    }
+
+    function finalizeMonthSummaryBucket(bucket) {
+        const total = Number(bucket?.totalSum || 0);
+        const resolved = Number(bucket?.resolvedSum || 0);
+        const percentByPrice = total > 0 ? (resolved / total) * 100 : 0;
+        const level = percentByPrice >= 80 ? "good" : percentByPrice >= 50 ? "warn" : "bad";
+        return {
+            key: toText(bucket?.key),
+            label: toText(bucket?.label) || "—",
+            totalSum: total,
+            resolvedSum: resolved,
+            percentByPrice,
+            expensiveTotal: Math.max(0, Math.trunc(Number(bucket?.expensiveTotal || 0))),
+            expensiveResolved: Math.max(0, Math.trunc(Number(bucket?.expensiveResolved || 0))),
+            sumWithoutFound: Math.max(0, Number(bucket?.sumWithoutFound || 0)),
+            rowCount: Math.max(0, Math.trunc(Number(bucket?.rowCount || 0))),
+            level
+        };
+    }
+
+    function formatMonthPickerLabel(monthKey) {
+        const normalized = toText(monthKey);
+        const match = normalized.match(/^(\d{4})-(\d{2})$/);
+        if (!match) return normalized || "—";
+
+        const year = Number(match[1]);
+        const monthIndex = Number(match[2]) - 1;
+        const monthDate = new Date(year, monthIndex, 1);
+        const monthLabelRaw = new Intl.DateTimeFormat("ru-RU", { month: "long" }).format(monthDate);
+        const monthLabel = monthLabelRaw ? monthLabelRaw[0].toUpperCase() + monthLabelRaw.slice(1) : "—";
+        return `${monthLabel} ${year}`;
+    }
+
+    function getMonthSummaryByKey(monthKey) {
+        const key = toText(monthKey);
+        const summaries = Array.isArray(tableState.monthSummaries) ? tableState.monthSummaries : [];
+        const found = summaries.find((item) => toText(item?.key) === key);
+        if (found) return found;
+        return summaries.find((item) => toText(item?.key) === "") || summaries[0] || null;
+    }
+
+    function setActivePureMonthFilter(monthKey) {
+        const normalized = toText(monthKey);
+        const summaries = Array.isArray(tableState.monthSummaries) ? tableState.monthSummaries : [];
+        if (normalized && !summaries.some((item) => toText(item?.key) === normalized)) return;
+        tableState.activeMonthKey = normalized;
+        updateMonthPickerButtonCaption();
+        renderMonthPickerModalContent();
+        applyPureTableFiltersAndRender();
+    }
+
+    function updateMonthPickerButtonCaption() {
+        if (!pureMonthPickerBtn) return;
+        const summary = getMonthSummaryByKey(tableState.activeMonthKey);
+        const caption = toText(summary?.label) || "Все месяцы";
+        pureMonthPickerBtn.innerHTML = `${escapeHtml(caption)} <span class="caret">▾</span>`;
+    }
+
+    function renderMonthPickerModalContent() {
+        if (!pureMonthPickerListEl || !pureMonthPickerFooterEl) return;
+
+        const summaries = Array.isArray(tableState.monthSummaries) ? tableState.monthSummaries : [];
+        pureMonthPickerListEl.innerHTML = "";
+        pureMonthPickerFooterEl.innerHTML = "";
+        pureMonthPickerFooterEl.hidden = true;
+
+        if (!summaries.length || summaries.every((item) => Number(item?.rowCount || 0) <= 0)) {
+            const empty = document.createElement("div");
+            empty.className = "muted";
+            empty.textContent = "Нет данных по месяцам";
+            pureMonthPickerListEl.appendChild(empty);
+            return;
+        }
+
+        summaries.forEach((summary) => {
+            if (!summary || Number(summary.rowCount || 0) <= 0) return;
+            const card = document.createElement("button");
+            card.type = "button";
+            card.className = `pure-month-picker-card is-${toText(summary.level) || "bad"}`;
+            if (toText(summary.key) === toText(tableState.activeMonthKey)) {
+                card.classList.add("is-selected");
+            }
+            card.dataset.monthKey = toText(summary.key);
+            card.innerHTML = `
+                <div class="pure-month-picker-head">
+                    <div class="pure-month-picker-title">${escapeHtml(summary.label)}</div>
+                    <div class="pure-month-picker-percent">${escapeHtml(formatPercent(summary.percentByPrice))}</div>
+                </div>
+                <div class="pure-month-picker-meta">Дорогостой: ${formatInt(summary.expensiveResolved)} / ${formatInt(summary.expensiveTotal)}</div>
+                <div class="pure-month-picker-loss">Сумма потеряного: ${escapeHtml(formatRub(summary.sumWithoutFound))}</div>
+            `;
+            pureMonthPickerListEl.appendChild(card);
+        });
     }
 
     async function loadPureTableRows(currentUserWhId, options = {}) {
@@ -1290,6 +1501,12 @@
             resolvePureTableUpdateColumns(rawRows);
 
             tableState.rows = rawRows.map((row) => normalizePureTableRow(row));
+            tableState.monthSummaries = buildMonthSummaries(tableState.rows);
+            if (tableState.activeMonthKey && !tableState.monthSummaries.some((item) => item.key === tableState.activeMonthKey)) {
+                tableState.activeMonthKey = "";
+            }
+            updateMonthPickerButtonCaption();
+            renderMonthPickerModalContent();
             tableState.decisionOptions = loadedDecisionOptions.length
                 ? loadedDecisionOptions
                 : buildDecisionOptionsFallback(rawRows);
@@ -1358,6 +1575,11 @@
 
     function normalizePureTableRow(row) {
         const requestLinks = parseRequestLinks(readEditableColumnValue(row, tableState.updateColumnMap.requestLink));
+        const dateLostValue = toText(row?.date_lost);
+        const dateLostParsed = parseDateValue(dateLostValue);
+        const monthKey = dateLostParsed
+            ? `${dateLostParsed.getFullYear()}-${String(dateLostParsed.getMonth() + 1).padStart(2, "0")}`
+            : "";
         return {
             raw: row || {},
             shk: normalizeShk(row?.shk),
@@ -1365,7 +1587,8 @@
             description: toText(row?.description || row?.decription),
             brand: toText(row?.brand),
             shkStateBeforeLost: toText(row?.shk_state_before_lost || row?.shk_state) || "—",
-            dateLost: toText(row?.date_lost),
+            dateLost: dateLostValue,
+            monthKey,
             lr: normalizeLossReason(row?.lr) || toText(row?.lr) || "—",
             price: toNumberOrNull(row?.price),
             decision: extractDecisionValue(readEditableColumnValue(row, tableState.updateColumnMap.decision)),
@@ -2206,6 +2429,7 @@
     function applyPureTableFiltersAndRender() {
         const nowTs = Date.now();
         const filtered = tableState.rows.filter((row) => {
+            const matchMonth = !tableState.activeMonthKey || row.monthKey === tableState.activeMonthKey;
             const matchLr = tableState.activeLrs.has(row.lr);
             const matchStatus = tableState.activeStatuses.has(row.shkStateBeforeLost);
             const matchExtra = rowMatchesExtraFilter(row, tableState.activeExtraStatuses);
@@ -2213,7 +2437,7 @@
             const matchUnresolved = !tableState.onlyUnresolved
                 || !extractDecisionValue(row.decision)
                 || isTemporarilyVisible;
-            return matchLr && matchStatus && matchExtra && matchUnresolved;
+            return matchMonth && matchLr && matchStatus && matchExtra && matchUnresolved;
         });
 
         tableState.filteredRows = sortPureRows(filtered);
@@ -5430,6 +5654,11 @@
             minimumFractionDigits: 0,
             maximumFractionDigits: 2
         }).format(num);
+    }
+
+    function formatRub(value) {
+        const num = Number.isFinite(Number(value)) ? Number(value) : 0;
+        return `${formatPriceForUi(Math.max(0, num))} ₽`;
     }
 
     function formatInt(value) {
