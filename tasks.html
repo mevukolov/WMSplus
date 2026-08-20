@@ -12,33 +12,47 @@
         .tasks-wrap { max-width: 1280px; gap: 16px; }
         .tasks-hero {
             position: relative;
-            overflow: hidden;
-            background: linear-gradient(135deg, #ffffff 0%, #f4f0ff 58%, #ebe5ff 100%);
+            z-index: 60;
+            overflow: visible;
+            background:
+                radial-gradient(circle 130px at calc(100% + 58px) 42px, rgba(98, 60, 234, .13) 0 99%, transparent 100%),
+                linear-gradient(135deg, #ffffff 0%, #f4f0ff 58%, #ebe5ff 100%);
         }
         .tasks-hero::after {
-            content: "";
-            position: absolute;
-            right: -72px;
-            top: -88px;
-            width: 260px;
-            height: 260px;
-            border-radius: 999px;
-            background: rgba(98, 60, 234, .13);
-            pointer-events: none;
+            content: none;
         }
         .tasks-hero-head { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; flex-wrap: wrap; }
+        .tasks-hero-copy { min-width: 280px; flex: 1 1 540px; }
         .tasks-kicker { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
         .tasks-title { margin: 0; color: var(--accent-dark); font-size: clamp(28px, 4vw, 42px); line-height: 1; letter-spacing: -.04em; }
         .tasks-subtitle { margin: 10px 0 0; max-width: 760px; color: #475569; font-size: 15px; line-height: 1.45; }
-        .tasks-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+        .task-search { position: relative; flex: 0 1 390px; width: min(390px, 100%); margin-left: auto; z-index: 1200; }
+        .task-search-input { width: 100%; border: 1px solid rgba(98,60,234,.18); border-radius: 18px; background: rgba(255,255,255,.82); box-shadow: 0 14px 34px rgba(62,46,35,.08); padding: 14px 16px; color: #242038; font-size: 14px; font-weight: 800; outline: none; }
+        .task-search-input:focus { border-color: rgba(98,60,234,.52); box-shadow: 0 16px 38px rgba(98,60,234,.14); }
+        .task-search-results { display: none; position: absolute; z-index: 1300; top: calc(100% + 10px); left: 0; right: 0; max-height: 390px; overflow: auto; border: 1px solid rgba(15,23,42,.1); border-radius: 18px; background: #fff; box-shadow: 0 24px 58px rgba(36,32,56,.18); padding: 8px; }
+        .task-search-results.visible { display: grid; gap: 6px; animation: tasksRiseIn .18s ease-out both; }
+        .task-search-row { width: 100%; border: 0; border-radius: 14px; background: #fff; padding: 10px 12px; text-align: left; cursor: pointer; color: #242038; }
+        .task-search-row:hover { background: #f5f3ff; }
+        .task-search-title { display: block; font-size: 14px; font-weight: 900; overflow-wrap: anywhere; }
+        .task-search-meta { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+        .task-search-empty { padding: 12px; color: #64748b; font-size: 13px; line-height: 1.35; }
+        .tasks-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
         .tasks-action-card { min-height: 180px; padding: 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); text-align: left; color: #0f172a; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
         .tasks-action-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
+        .tasks-action-card.is-disabled { opacity: .42; filter: grayscale(.35); cursor: not-allowed; }
+        .tasks-action-card.is-disabled:hover { transform: none; box-shadow: var(--shadow-sm); border-color: rgba(15,23,42,.08); }
         .tasks-action-icon { width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; background: rgba(98,60,234,.1); color: var(--accent); font-size: 22px; font-weight: 800; }
         .tasks-action-title { margin: 18px 0 8px; font-size: 24px; line-height: 1; color: var(--accent-dark); }
         .tasks-action-text { margin: 0; color: #64748b; line-height: 1.45; font-size: 14px; }
+        .shift-gate-banner { display: none; width: 100%; box-sizing: border-box; position: relative; z-index: 1; border-radius: 20px; border: 1px solid #fecaca; background: #fef2f2; color: #7f1d1d; padding: 16px 18px; box-shadow: var(--shadow-sm); align-items: center; justify-content: space-between; gap: 14px; animation: tasksRiseIn .22s ease-out both; }
+        .shift-gate-banner.visible { display: flex; }
+        .shift-gate-title { margin: 0; font-size: 18px; font-weight: 900; }
+        .shift-gate-text { margin: 4px 0 0; color: #991b1b; line-height: 1.35; }
+        .shift-gate-banner.good { border-color: #bbf7d0; background: #ecfdf5; color: #14532d; }
+        .shift-gate-banner.good .shift-gate-text { color: #166534; }
         .tasks-page { display: none; }
         .tasks-page.active { display: block; }
-        .tasks-page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+        .tasks-page-head { display: flex; justify-content: flex-start; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
         .tasks-page-title { margin: 0; font-size: 28px; color: var(--accent-dark); }
         .tasks-page-note { margin: 6px 0 0; color: #64748b; font-size: 14px; }
         .calendar-shell { padding: 16px; }
@@ -46,14 +60,14 @@
         .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
         .weekday { color: #64748b; font-size: 12px; font-weight: 800; text-align: center; }
         .calendar-day { position: relative; border: 0; min-height: 72px; border-radius: 14px; padding: 9px; background: #e2e8f0; color: #0f172a; text-align: left; cursor: default; }
-        .calendar-day.status-gray { background: #e5e7eb; }
-        .calendar-day.status-red { background: #fecaca; }
-        .calendar-day.status-yellow { background: #fde68a; box-shadow: inset 0 0 0 2px rgba(180, 83, 9, .18); }
-        .calendar-day.status-green { background: #bbf7d0; }
+        .calendar-day.status-gray, .backfill-day.status-gray { background: #e5e7eb; }
+        .calendar-day.status-red, .backfill-day.status-red { background: #fecaca; }
+        .calendar-day.status-yellow, .backfill-day.status-yellow { background: #fde68a; box-shadow: inset 0 0 0 2px rgba(180, 83, 9, .18); }
+        .calendar-day.status-green, .backfill-day.status-green { background: #bbf7d0; }
         .day-number { display: block; font-size: 18px; font-weight: 900; color: #242038; }
         .day-progress { display: block; margin-top: 6px; font-size: 12px; color: #475569; }
         .calendar-tooltip { display: none; position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 20; width: 240px; padding: 10px; border-radius: 12px; background: #242038; color: #fff; box-shadow: var(--shadow-md); font-size: 12px; }
-        .calendar-day:hover .calendar-tooltip { display: block; }
+        .calendar-day:hover .calendar-tooltip, .backfill-day:hover .calendar-tooltip { display: block; }
         .tooltip-title { display: block; margin-bottom: 6px; font-weight: 900; }
         .tooltip-line { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
         .tooltip-dot { width: 8px; height: 8px; border-radius: 99px; background: #ef4444; flex: 0 0 auto; }
@@ -68,8 +82,7 @@
         .module-name { display: flex; justify-content: space-between; gap: 8px; margin: 0; color: #242038; font-size: 18px; font-weight: 900; }
         .module-date { margin-top: 8px; color: #623cea; font-weight: 800; font-size: 13px; }
         .module-desc { margin: 8px 0 0; color: #64748b; font-size: 13px; line-height: 1.35; }
-        .upload-work { display: none; margin-top: 14px; padding: 16px; }
-        .upload-work.active { display: block; }
+        .upload-work { display: none; }
         .work-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
         .work-title { margin: 0; color: #242038; font-size: 24px; }
         .work-subtitle { margin: 5px 0 0; color: #64748b; }
@@ -77,6 +90,7 @@
         .file-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
         .file-input { display: none; }
         .file-name { color: #64748b; font-size: 13px; }
+        .hidden { display: none !important; }
         .status-line { margin-top: 12px; border-radius: 14px; padding: 12px 14px; background: #f8fafc; border: 1px solid #e2e8f0; color: #334155; white-space: pre-line; }
         .status-line.good { background: #ecfdf5; border-color: #bbf7d0; color: #166534; }
         .status-line.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
@@ -92,6 +106,9 @@
         .done-box.visible { display: block; }
         .master-slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
         .slot-card { border-radius: 16px; background: #fff; border: 1px solid #e2e8f0; padding: 14px; }
+        .master-step-card { grid-column: 1 / -1; }
+        .master-step-list { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .master-step-done { display: inline-flex; align-items: center; border-radius: 999px; padding: 6px 10px; background: #ecfdf5; color: #166534; font-size: 12px; font-weight: 800; }
         .slot-title { margin: 0; color: #242038; font-size: 17px; font-weight: 900; }
         .slot-note { margin: 6px 0 0; color: #64748b; font-size: 13px; }
         .reject-panel { display: none; margin-top: 14px; }
@@ -102,8 +119,177 @@
         .tasks-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
         .tasks-modal-title { margin: 0; font-size: 24px; color: var(--accent-dark); }
         .empty-state { border-radius: 16px; border: 1px dashed rgba(15,23,42,.14); background: #f8fafc; padding: 18px; color: #475569; line-height: 1.45; }
-        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots { grid-template-columns: 1fr; } .tasks-actions { grid-template-columns: 1fr; } }
-        @media (max-width: 760px) { body { padding: 14px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } }
+        @keyframes tasksRiseIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes tasksModalIn { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes tasksOverlayIn { from { opacity: 0; } to { opacity: 1; } }
+        .tasks-hero, .tasks-actions, .tasks-page.active { animation: tasksRiseIn .28s ease-out both; }
+        .calendar-shell, .review-shell { animation: tasksRiseIn .24s ease-out both; }
+        .tasks-action-card, .module-card, .calendar-day, .mini-stat, .slot-card { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background-color .16s ease; }
+        .calendar-day:hover, .mini-stat:hover, .slot-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+        .tasks-action-card:nth-child(2) { animation-delay: .04s; }
+        .module-card { animation: tasksRiseIn .22s ease-out both; }
+        .module-card:nth-child(2) { animation-delay: .025s; }
+        .module-card:nth-child(3) { animation-delay: .05s; }
+        .module-card:nth-child(4) { animation-delay: .075s; }
+        .module-card:nth-child(5) { animation-delay: .1s; }
+        .module-card:nth-child(6) { animation-delay: .125s; }
+        .module-card:nth-child(7) { animation-delay: .15s; }
+        .module-card:nth-child(8) { animation-delay: .175s; }
+        .tasks-flow-modal.upload-work {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            min-height: 100dvh;
+            z-index: 4100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 18px;
+            background: rgba(36,32,56,.42);
+            backdrop-filter: blur(4px);
+            animation: tasksOverlayIn .18s ease-out both;
+        }
+        .tasks-flow-modal.upload-work.active { display: flex; }
+        #taskDetailModal { z-index: 4300; }
+        #editTareTaskModal,
+        #deferTaskModal,
+        #reopenConfirmModal,
+        #splitShkConfirmModal { z-index: 4400; }
+        .tasks-flow-card {
+            width: min(920px, 100%);
+            max-height: 88vh;
+            overflow: auto;
+            border-radius: 22px;
+            background: #fff;
+            border: 1px solid rgba(15,23,42,.08);
+            box-shadow: var(--shadow-md);
+            padding: 18px;
+            animation: tasksModalIn .22s cubic-bezier(.2,.8,.2,1) both;
+        }
+        .tasks-flow-card-wide { width: min(1160px, 100%); }
+        .tasks-flow-card .module-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .tasks-flow-card .preview-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+        .backfill-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+        .backfill-day { position: relative; border: 0; min-height: 64px; border-radius: 14px; padding: 9px; background: #f1f5f9; color: #242038; text-align: left; cursor: pointer; }
+        .backfill-day:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+        .backfill-day:disabled { opacity: .42; cursor: not-allowed; transform: none; box-shadow: none; }
+        .backfill-day.is-selected { outline: 2px solid var(--accent); background: #ede9fe; }
+        .review-shell { padding: 16px; }
+        .review-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
+        .review-view-wrap { display: inline-flex; align-items: center; gap: 10px; }
+        .review-tool-square { width: 42px; height: 42px; border: 0; border-radius: 12px; background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); font-size: 20px; font-weight: 900; cursor: pointer; }
+        .review-tool-square:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); color: var(--accent); }
+        .review-tool-divider { width: 1px; height: 34px; background: #dbe3ec; }
+        .review-view-tabs { display: inline-flex; gap: 8px; padding: 4px; border-radius: 14px; background: #f1f5f9; }
+        .review-view-tab { border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }
+        .review-view-tab.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
+        .review-status { color: #64748b; font-size: 13px; min-height: 18px; }
+        .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+        .review-section-card { min-height: 116px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 18px; text-align: left; cursor: pointer; }
+        .review-section-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: rgba(98,60,234,.26); }
+        .review-section-card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(98,60,234,.18), var(--shadow-sm); }
+        .review-section-name { display: flex; justify-content: space-between; gap: 12px; color: #242038; font-size: 18px; line-height: 1.15; font-weight: 900; }
+        .review-section-name strong { font-size: 24px; line-height: 1; }
+        .review-section-meta { margin-top: 14px; color: #64748b; font-size: 13px; line-height: 1.35; }
+        .inactive-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .inactive-card { min-height: 150px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 16px; text-align: left; cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+        .inactive-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: rgba(98,60,234,.26); }
+        .inactive-card-title { display: flex; justify-content: space-between; gap: 12px; color: #242038; font-size: 18px; font-weight: 900; }
+        .inactive-card-note { margin-top: 10px; color: #64748b; font-size: 13px; line-height: 1.4; }
+        .review-table-card { border: 1px solid #dbe3ec; border-radius: 16px; overflow: hidden; background: #fff; }
+        .review-table-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+        .review-table-title { margin: 0; color: #242038; font-size: 18px; }
+        .review-table-subtitle { color: #64748b; font-size: 12px; }
+        .review-table-scroll { max-height: 62vh; overflow: auto; background: #fff; }
+        .review-data-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; }
+        .review-data-table th,
+        .review-data-table td { border: 1px solid #e5e7eb; padding: 8px 10px; vertical-align: top; background: #fff; }
+        .review-data-table th { position: sticky; top: -1px; z-index: 5; background: #f8fafc; font-weight: 700; color: #0f172a; text-align: left; white-space: nowrap; box-shadow: 0 1px 0 #d1d5db; }
+        .review-data-table td { white-space: nowrap; }
+        .review-data-table td.review-wrap-cell { white-space: normal; min-width: 220px; max-width: 360px; line-height: 1.3; }
+        .review-click-row { cursor: pointer; }
+        .review-click-row:hover td { background: #f8fafc; }
+        .review-task-title { font-weight: 800; color: #242038; }
+        .review-task-sub { margin-top: 4px; color: #64748b; font-size: 12px; }
+        .review-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 800; background: #f1f5f9; color: #334155; }
+        .review-price-cell { font-weight: 900; color: #0f172a; }
+        .review-tags { display: flex; flex-wrap: wrap; gap: 4px; max-width: 240px; }
+        .review-sort-btn { border: 0; background: transparent; padding: 0; color: inherit; font: inherit; font-weight: 900; cursor: pointer; }
+        .review-sort-btn:hover { color: var(--accent); }
+        .task-detail-card { width: min(860px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+        .task-detail-head { padding: 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+        .task-detail-title { margin: 0; color: #242038; font-size: 24px; line-height: 1.1; }
+        .task-detail-title.copyable { cursor: copy; }
+        .task-detail-title.copyable:hover { color: var(--accent); }
+        .task-detail-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+        .task-detail-body { padding: 18px; overflow: auto; }
+        .task-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .task-info-item { border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px 12px; background: #fff; }
+        .task-info-item.copyable { cursor: copy; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+        .task-info-item.copyable:hover { border-color: rgba(98,60,234,.32); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+        .task-info-label { color: #64748b; font-size: 12px; font-weight: 800; }
+        .task-info-value { margin-top: 4px; color: #242038; font-weight: 900; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .task-description-box { margin-top: 12px; border-radius: 16px; border: 1px solid #e2e8f0; background: #fff; padding: 14px; color: #334155; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .task-description-box.copyable { cursor: copy; }
+        .task-description-box.copyable:hover { border-color: rgba(98,60,234,.32); box-shadow: var(--shadow-sm); }
+        .task-history-box { margin-top: 12px; border-radius: 16px; border: 1px solid #fde68a; background: #fffbeb; padding: 14px; color: #713f12; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .task-history-box.copyable { cursor: copy; }
+        .task-history-box.copyable:hover { border-color: #f59e0b; box-shadow: var(--shadow-sm); }
+        .task-form { margin-top: 14px; display: grid; gap: 10px; min-width: 0; }
+        .task-form label { color: #334155; font-size: 13px; font-weight: 900; }
+        .task-form textarea, .task-form select, .task-form input { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; border: 1px solid #dbe3ec; border-radius: 14px; padding: 11px 12px; background: #fff; color: #242038; font: inherit; }
+        .task-form textarea { min-height: 96px; resize: vertical; }
+        .task-complete-btn { min-height: 56px; justify-content: center; font-size: 16px; background: #16a34a; border-color: #16a34a; }
+        .task-complete-btn:hover { background: #15803d; border-color: #15803d; }
+        .task-complete-btn:disabled { opacity: .48; background: #94a3b8; border-color: #94a3b8; cursor: not-allowed; transform: none; box-shadow: none; }
+        .task-small-card { width: min(560px, calc(100vw - 32px)); }
+        .task-small-form { display: grid; gap: 12px; margin-top: 14px; }
+        .task-small-form label { color: #334155; font-size: 13px; font-weight: 900; }
+        .task-small-form textarea,
+        .task-small-form input { box-sizing: border-box; width: 100%; border: 1px solid #dbe3ec; border-radius: 14px; padding: 11px 12px; background: #fff; color: #242038; font: inherit; }
+        .task-small-form textarea { min-height: 104px; resize: vertical; }
+        .tare-edit-list { display: grid; gap: 8px; margin-top: 14px; }
+        .tare-edit-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 10px 12px; }
+        .tare-edit-row:hover { border-color: rgba(98,60,234,.28); box-shadow: var(--shadow-sm); }
+        .tare-edit-main { min-width: 0; color: #242038; font-weight: 900; }
+        .tare-edit-meta { margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+        .tare-detach-btn { opacity: 0; transition: opacity .14s ease, transform .14s ease; }
+        .tare-edit-row:hover .tare-detach-btn,
+        .tare-detach-btn:focus { opacity: 1; }
+        .split-confirm-note { margin-top: 12px; border-radius: 16px; border: 1px solid #fecaca; background: #fff1f2; color: #7f1d1d; padding: 14px; line-height: 1.45; }
+        .shift-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+        .shift-form-grid label { color: #334155; font-size: 13px; font-weight: 900; }
+        .shift-form-grid select { box-sizing: border-box; width: 100%; margin-top: 6px; border: 1px solid #dbe3ec; border-radius: 14px; padding: 11px 12px; background: #fff; color: #242038; font: inherit; }
+        .shift-pure-stats { margin-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        .shift-pure-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+        .shift-list-box { border: 1px solid #e2e8f0; border-radius: 16px; padding: 12px; background: #fff; }
+        .shift-list-title { margin: 0 0 8px; color: #242038; font-weight: 900; }
+        .shift-list-row { display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid #f1f5f9; padding: 7px 0; color: #334155; font-size: 13px; }
+        .actualize-step { margin-top: 14px; display: grid; gap: 12px; }
+        .movement-list { display: grid; gap: 8px; margin-top: 12px; }
+        .movement-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 10px 12px; }
+        .movement-row.removed { opacity: .45; text-decoration: line-through; }
+        .movement-main { min-width: 0; color: #242038; font-weight: 900; }
+        .movement-change-list { display: grid; gap: 5px; margin-top: 8px; font-weight: 700; }
+        .movement-change { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; align-items: start; color: #334155; font-size: 12px; line-height: 1.35; }
+        .movement-change span { color: #8b6f5b; font-weight: 900; }
+        .movement-change strong { color: #242038; font-weight: 900; overflow-wrap: anywhere; }
+        .movement-meta { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+        .actualize-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0 14px; }
+        .actualize-summary div { border: 1px solid #e2e8f0; background: #fff; border-radius: 16px; padding: 12px 14px; box-shadow: 0 12px 28px rgba(62, 46, 35, .07); }
+        .actualize-summary strong { display: block; color: #242038; font-size: 22px; line-height: 1; }
+        .actualize-summary span { display: block; margin-top: 6px; color: #64748b; font-size: 12px; font-weight: 800; }
+        .movement-tare-card { border: 1px solid #fde68a; border-radius: 16px; background: #fffbeb; padding: 12px; margin-top: 10px; }
+        .movement-tare-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .toasts { z-index: 7000; }
+        .review-full-card { width: min(1560px, calc(100vw - 32px)); height: calc(100dvh - 32px); max-height: none; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+        .review-full-card .review-table-card { border: 0; border-radius: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+        .review-full-card .review-table-scroll { max-height: none; height: auto; flex: 1; min-height: 0; }
+        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid { grid-template-columns: 1fr; } .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .actualize-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 760px) { body { padding: 14px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } }
     </style>
 </head>
 <body>
@@ -123,13 +309,24 @@
 <main class="wrap tasks-wrap">
     <section class="card tasks-hero">
         <div class="tasks-hero-head">
-            <div>
+            <div class="tasks-hero-copy">
                 <p class="tasks-kicker">ОПП // WMS+</p>
                 <h1 class="tasks-title">Задачи и выгрузки</h1>
                 <p class="tasks-subtitle">Новый контур WMS+: XLSX читается прямо в браузере, задачи и журнал выгрузок сохраняются в Supabase.</p>
             </div>
-            <a class="btn btn-outline" href="index.html">На главную</a>
+            <div class="task-search">
+                <input id="taskSearchInput" class="task-search-input" type="search" autocomplete="off" placeholder="Найти задачу по ШК или таре">
+                <div id="taskSearchResults" class="task-search-results" aria-live="polite"></div>
+            </div>
         </div>
+    </section>
+
+    <section id="shiftGateBanner" class="shift-gate-banner" aria-live="polite">
+        <div>
+            <p id="shiftGateTitle" class="shift-gate-title">Смена не открыта</p>
+            <p id="shiftGateText" class="shift-gate-text"></p>
+        </div>
+        <button id="openShiftFromBanner" class="btn btn-rect" type="button">Открыть смену</button>
     </section>
 
     <section id="tasksHome" class="tasks-actions">
@@ -141,17 +338,22 @@
         <button id="openReview" class="tasks-action-card" type="button">
             <span class="tasks-action-icon">✓</span>
             <h2 class="tasks-action-title">Разбор</h2>
-            <p class="tasks-action-text">Будущий рабочий экран разбора задач внутри WMS+. Пока пустая заготовка.</p>
+            <p class="tasks-action-text">Активные задачи по участкам: таблица, карточка задачи, комментарий, вердикт и завершение.</p>
+        </button>
+        <button id="openInactive" class="tasks-action-card" type="button">
+            <span class="tasks-action-icon">◌</span>
+            <h2 class="tasks-action-title">Неактивные задачи</h2>
+            <p class="tasks-action-text">Завершенные задачи и задания, которые ждут даты переоткрытия.</p>
         </button>
     </section>
 
     <section id="uploadsPage" class="tasks-page">
         <div class="tasks-page-head">
+            <button id="homeFromUploads" class="btn btn-outline" type="button" aria-label="Назад">←</button>
             <div>
                 <h2 class="tasks-page-title">Выгрузки</h2>
                 <p id="uploadsStatus" class="tasks-page-note">Загружаю журнал и настройки...</p>
             </div>
-            <button id="homeFromUploads" class="btn btn-outline" type="button">Домик</button>
         </div>
 
         <section class="card calendar-shell">
@@ -168,73 +370,261 @@
             </div>
             <div id="calendarGrid" class="calendar-grid"></div>
         </section>
+    </section>
 
-        <section id="moduleChooser" class="card upload-work">
-            <div class="work-head">
-                <div>
-                    <h3 class="work-title">Выберите выгрузку</h3>
-                    <p id="chooserDateText" class="work-subtitle">Плановые даты на сегодня.</p>
-                </div>
-                <button id="closeChooser" class="btn btn-outline" type="button">Свернуть</button>
+    <section id="reviewPage" class="tasks-page">
+        <div class="tasks-page-head">
+            <button id="homeFromReview" class="btn btn-outline" type="button" aria-label="Назад">←</button>
+            <div>
+                <h2 class="tasks-page-title">Разбор</h2>
+                <p class="tasks-page-note">Вот актуальные задачи на сегодня</p>
             </div>
-            <div id="moduleGrid" class="module-grid"></div>
+        </div>
+        <section class="card review-shell">
+            <div class="review-toolbar">
+                <div>
+                    <div class="review-view-wrap">
+                        <button id="openActualizeTasks" class="review-tool-square" type="button" title="Актуализировать активные задачи">▤</button>
+                        <span class="review-tool-divider" aria-hidden="true"></span>
+                        <div class="review-view-tabs" aria-label="Вид разбора">
+                            <button id="reviewViewSections" class="review-view-tab active" type="button">Участки</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="reviewStatus" class="review-status">Задачи еще не загружены.</div>
+            </div>
+            <div id="reviewSectionsGrid" class="review-sections-grid"></div>
+            <div id="reviewTableWrap" class="review-table-card"></div>
         </section>
+    </section>
 
-        <section id="uploadWork" class="card upload-work">
-            <div class="work-head">
-                <div>
-                    <h3 id="workTitle" class="work-title">Выгрузка</h3>
-                    <p id="workSubtitle" class="work-subtitle"></p>
-                </div>
-                <button id="backToChooser" class="btn btn-outline" type="button">К выбору</button>
+    <section id="inactivePage" class="tasks-page">
+        <div class="tasks-page-head">
+            <button id="homeFromInactive" class="btn btn-outline" type="button" aria-label="Назад">←</button>
+            <div>
+                <h2 class="tasks-page-title">Неактивные задачи</h2>
+                <p id="inactiveStatus" class="tasks-page-note">Загружаю неактивные задачи...</p>
             </div>
-            <div id="workInstruction" class="instruction"></div>
-            <div id="fileControls" class="file-row"></div>
-            <div id="workStatus" class="status-line">Выберите файл.</div>
-            <div id="previewGrid" class="preview-grid"></div>
-            <div id="sampleWrap" class="sample-table-wrap"></div>
-            <div class="file-row">
-                <button id="saveUpload" class="btn btn-rect" type="button" disabled>Сохранить выгрузку</button>
-                <button id="repeatUpload" class="btn btn-outline" type="button">Выгрузить повторно</button>
-            </div>
-            <div id="doneBox" class="done-box"></div>
-        </section>
-
-        <section id="masterWork" class="card upload-work">
-            <div class="work-head">
-                <div>
-                    <h3 class="work-title">Мастер-выгрузка</h3>
-                    <p id="masterSubtitle" class="work-subtitle">Загрузите файлы, WMS+ сам разнесет строки по нужным выгрузкам.</p>
-                </div>
-                <button id="closeMaster" class="btn btn-outline" type="button">Свернуть</button>
-            </div>
-            <div id="masterSlots" class="master-slots"></div>
-            <div class="file-row">
-                <button id="copyMasterTransfers" class="btn btn-outline" type="button" disabled>Скопировать номера передач</button>
-                <button id="buildMasterPreview" class="btn btn-rect" type="button" disabled>Проверить файлы</button>
-            </div>
-            <textarea id="masterTransferFallback" class="input" style="display:none;min-height:120px;margin-top:10px" readonly></textarea>
-            <div id="masterStatus" class="status-line">Жду файлы.</div>
-            <div id="masterSummary" class="module-grid"></div>
-            <div class="file-row">
-                <button id="showRejects" class="btn btn-outline" type="button" disabled>Посмотреть неактуальные строки</button>
-                <button id="saveMaster" class="btn btn-rect" type="button" disabled>Сохранить выгрузку</button>
-            </div>
-            <div id="masterRejects" class="reject-panel"></div>
-            <div id="masterDone" class="done-box"></div>
+        </div>
+        <section class="card review-shell">
+            <div id="inactiveGrid" class="inactive-grid"></div>
         </section>
     </section>
 </main>
 
-<div id="reviewModal" class="tasks-modal" aria-hidden="true">
-    <div class="tasks-modal-card" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
-        <div class="tasks-modal-head">
-            <h2 id="reviewModalTitle" class="tasks-modal-title">Разбор</h2>
-            <button id="closeReview" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+<section id="shiftOpeningModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Открытие смены</h3>
+                <p id="shiftOpeningSubtitle" class="work-subtitle">Выберите ответственных и загрузите чистые списания.</p>
+            </div>
+            <button id="closeShiftOpening" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="empty-state">Пока пусто. Здесь будет новый интерфейс разбора задач WMS+.</div>
+        <div class="shift-form-grid">
+            <label>Входящий поток
+                <select id="shiftIncomingSelect"></select>
+            </label>
+            <label>Исходящий поток
+                <select id="shiftOutgoingSelect"></select>
+            </label>
+        </div>
+        <div class="file-row">
+            <label class="btn btn-rect" for="shiftPureLossesFile">Загрузить чистые списания</label>
+            <input id="shiftPureLossesFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+            <span id="shiftPureLossesFileName" class="file-name">Файл пока не выбран</span>
+        </div>
+        <div id="shiftPureStats" class="shift-pure-stats"></div>
+        <div id="shiftPureDetails" class="shift-pure-detail"></div>
+        <div id="shiftOpeningStatus" class="status-line">Жду выбор сотрудников и файл чистых списаний.</div>
+        <div class="file-row">
+            <button id="saveShiftOpening" class="btn btn-rect task-complete-btn" type="button" disabled>Открыть смену</button>
+        </div>
     </div>
-</div>
+</section>
+
+<section id="actualizeTasksModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Актуализировать активные задачи</h3>
+                <p class="work-subtitle">Скопируйте активные ШК, выгрузите по ним Superset и подтвердите движение.</p>
+            </div>
+            <button id="closeActualizeTasks" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="actualize-step">
+            <div class="file-row">
+                <button id="copyActiveShk" class="btn btn-rect" type="button">Копировать активные ШК</button>
+                <label id="actualizeUploadLabel" class="btn btn-outline hidden" for="actualizeSupersetFile">Добавить данные из Superset</label>
+                <input id="actualizeSupersetFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+            </div>
+            <div id="actualizeStatus" class="status-line">Сначала скопируйте список активных ШК.</div>
+            <div id="actualizeResults"></div>
+        </div>
+    </div>
+</section>
+
+<section id="moduleChooser" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Выберите выгрузку</h3>
+                <p id="chooserDateText" class="work-subtitle">Плановые даты на сегодня.</p>
+            </div>
+            <button id="closeChooser" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="moduleGrid" class="module-grid"></div>
+    </div>
+</section>
+
+<section id="uploadWork" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 id="workTitle" class="work-title">Выгрузка</h3>
+                <p id="workSubtitle" class="work-subtitle"></p>
+            </div>
+            <button id="backToChooser" class="btn btn-outline" type="button">← К выбору</button>
+        </div>
+        <div id="workInstruction" class="instruction"></div>
+        <div id="fileControls" class="file-row"></div>
+        <div id="workStatus" class="status-line">Выберите файл.</div>
+        <div id="previewGrid" class="preview-grid"></div>
+        <div id="sampleWrap" class="sample-table-wrap"></div>
+        <div class="file-row">
+            <button id="saveUpload" class="btn btn-rect" type="button" disabled>Сохранить выгрузку</button>
+            <button id="repeatUpload" class="btn btn-outline" type="button">Выгрузить повторно</button>
+        </div>
+        <div id="doneBox" class="done-box"></div>
+    </div>
+</section>
+
+<section id="masterWork" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Мастер-выгрузка</h3>
+                <p id="masterSubtitle" class="work-subtitle">Загрузите файлы, WMS+ сам разнесет строки по нужным выгрузкам.</p>
+            </div>
+            <button id="closeMaster" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="masterSlots" class="master-slots"></div>
+        <div id="masterTopActions" class="file-row hidden">
+            <button id="copyMasterTransfers" class="btn btn-outline" type="button" disabled>Скопировать номера передач</button>
+            <button id="buildMasterPreview" class="btn btn-rect" type="button" disabled>Проверить файлы</button>
+        </div>
+        <textarea id="masterTransferFallback" class="input" style="display:none;min-height:120px;margin-top:10px" readonly></textarea>
+        <div id="masterStatus" class="status-line">Жду файлы.</div>
+        <div id="masterSummary" class="module-grid"></div>
+        <div id="masterBottomActions" class="file-row hidden">
+            <button id="showRejects" class="btn btn-outline" type="button" disabled>Посмотреть неактуальные строки</button>
+            <button id="saveMaster" class="btn btn-rect" type="button" disabled>Сохранить выгрузку</button>
+        </div>
+        <div id="masterRejects" class="reject-panel"></div>
+        <div id="masterDone" class="done-box"></div>
+    </div>
+</section>
+
+<section id="backfillCalendarModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Ручная догрузка</h3>
+                <p class="work-subtitle">Выберите дату в прошлом или сегодня.</p>
+            </div>
+            <button id="closeBackfillCalendar" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="backfillCalendarGrid" class="backfill-calendar-grid"></div>
+    </div>
+</section>
+
+<section id="reviewSectionModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card review-full-card">
+        <div id="reviewSectionTableWrap" class="review-table-card"></div>
+    </div>
+</section>
+
+<section id="taskDetailModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div id="taskDetailWrap" class="tasks-flow-card task-detail-card"></div>
+</section>
+
+<section id="editTareTaskModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Редактировать тару</h3>
+                <p class="work-subtitle">Можно отделить ШК в отдельную задачу. Обратного объединения тут нет.</p>
+            </div>
+            <button id="closeEditTareTask" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="editTareTaskWrap"></div>
+        <div id="editTareTaskStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="splitShkConfirmModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Отделить ШК?</h3>
+                <p class="work-subtitle">WMS+ создаст отдельную задачу по выбранному товару.</p>
+            </div>
+            <button id="closeSplitShkConfirm" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="splitShkConfirmText" class="split-confirm-note"></div>
+        <div class="file-row">
+            <button id="confirmSplitShk" class="btn btn-rect task-complete-btn" type="button">Да, отделить</button>
+            <button id="cancelSplitShk" class="btn btn-outline" type="button">Отмена</button>
+        </div>
+        <div id="splitShkConfirmStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="deferTaskModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Отложить задачу</h3>
+                <p class="work-subtitle">Задача уйдет из активного разбора до выбранной даты.</p>
+            </div>
+            <button id="closeDeferTask" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="task-small-form">
+            <label for="deferReasonInput">Укажите причину</label>
+            <textarea id="deferReasonInput" placeholder="Почему задачу нужно отложить"></textarea>
+            <label for="deferDateInput">Укажите дату и время переоткрытия задачи</label>
+            <input id="deferDateInput" type="datetime-local">
+            <div class="file-row">
+                <button id="saveDeferTask" class="btn btn-rect task-complete-btn" type="button" disabled>Отложить</button>
+                <button id="cancelDeferTask" class="btn btn-outline" type="button">Отмена</button>
+            </div>
+            <div id="deferTaskStatus" class="review-status"></div>
+        </div>
+    </div>
+</section>
+
+<section id="reopenConfirmModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Переоткрыть задачу?</h3>
+                <p class="work-subtitle">Вы хотите переоткрыть задачу?</p>
+            </div>
+            <button id="closeReopenConfirm" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="file-row">
+            <button id="confirmReopenTask" class="btn btn-rect task-complete-btn" type="button">Да, переоткрыть</button>
+            <button id="cancelReopenTask" class="btn btn-outline" type="button">Отмена</button>
+        </div>
+        <div id="reopenConfirmStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="inactiveTasksModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card review-full-card">
+        <div id="inactiveTasksTableWrap" class="review-table-card"></div>
+    </div>
+</section>
 
 <div id="toasts" class="toasts"></div>
 
