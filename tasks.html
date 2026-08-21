@@ -36,11 +36,19 @@
         .task-search-title { display: block; font-size: 14px; font-weight: 900; overflow-wrap: anywhere; }
         .task-search-meta { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
         .task-search-empty { padding: 12px; color: #64748b; font-size: 13px; line-height: 1.35; }
+        .tasks-home-groups { display: grid; gap: 16px; }
+        .tasks-home-group { border: 1px solid rgba(15,23,42,.08); border-radius: 24px; background: rgba(255,255,255,.72); box-shadow: var(--shadow-sm); padding: 16px; animation: tasksRiseIn .24s ease-out both; }
+        .tasks-home-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .tasks-home-group-title { margin: 0; color: var(--accent-dark); font-size: 22px; line-height: 1; letter-spacing: -.02em; }
+        .tasks-home-group-note { margin: 4px 0 0; color: #64748b; font-size: 13px; }
         .tasks-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+        .tasks-home-group .tasks-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .tasks-action-card { min-height: 180px; padding: 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); text-align: left; color: #0f172a; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
         .tasks-action-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
         .tasks-action-card.is-disabled { opacity: .42; filter: grayscale(.35); cursor: not-allowed; }
         .tasks-action-card.is-disabled:hover { transform: none; box-shadow: var(--shadow-sm); border-color: rgba(15,23,42,.08); }
+        .tasks-action-card.is-muted { opacity: .48; filter: grayscale(.3); }
+        .tasks-action-card.is-muted:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
         .tasks-action-icon { width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; background: rgba(98,60,234,.1); color: var(--accent); font-size: 22px; font-weight: 800; }
         .tasks-action-title { margin: 18px 0 8px; font-size: 24px; line-height: 1; color: var(--accent-dark); }
         .tasks-action-text { margin: 0; color: #64748b; line-height: 1.45; font-size: 14px; }
@@ -119,6 +127,30 @@
         .tasks-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
         .tasks-modal-title { margin: 0; font-size: 24px; color: var(--accent-dark); }
         .empty-state { border-radius: 16px; border: 1px dashed rgba(15,23,42,.14); background: #f8fafc; padding: 18px; color: #475569; line-height: 1.45; }
+        .journal-scroll { flex: 1; min-height: 0; overflow: auto; padding: 18px; background: #f8fafc; }
+        .journal-layout { display: block; }
+        .journal-panel { border: 1px solid #e2e8f0; border-radius: 22px; background: #fff; padding: 16px; box-shadow: var(--shadow-sm); }
+        .journal-panel-title { margin: 0 0 12px; color: var(--accent-dark); font-size: 18px; font-weight: 1000; }
+        .journal-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; color: #64748b; font-size: 12px; font-weight: 1000; text-align: center; text-transform: uppercase; }
+        .journal-day-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+        .journal-day { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; padding: 10px; text-align: left; cursor: default; min-height: 86px; font: inherit; color: #242038; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease; }
+        .journal-day.has-run { cursor: pointer; background: #fff; box-shadow: var(--shadow-sm); }
+        .journal-day.has-run:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
+        .journal-day.completed { border-color: #bbf7d0; background: #ecfdf5; }
+        .journal-day.active-run { border-color: #fde68a; background: #fffbeb; }
+        .journal-day.is-selected { outline: 2px solid var(--accent); box-shadow: 0 18px 42px rgba(98,60,234,.14); }
+        .journal-day-empty { min-height: 86px; border-radius: 14px; background: transparent; }
+        .journal-day-date { display: block; color: var(--accent-dark); font-weight: 1000; font-size: 15px; line-height: 1.05; }
+        .journal-day-status { display: block; margin-top: 8px; color: #64748b; font-size: 12px; line-height: 1.25; font-weight: 850; }
+        .journal-detail-card { flex: 1; min-height: 0; display: flex; flex-direction: column; border-radius: 18px; background: #fff; border: 0; padding: 0; }
+        .journal-stats-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+        .journal-stat { border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; padding: 12px; min-width: 0; }
+        .journal-stat span { display: block; color: #64748b; font-size: 12px; font-weight: 1000; }
+        .journal-stat strong { display: block; margin-top: 5px; color: #242038; font-size: 20px; line-height: 1.12; font-weight: 1000; overflow-wrap: anywhere; }
+        .journal-action-list { flex: 1; min-height: 0; display: grid; align-content: start; gap: 8px; max-height: none; overflow: auto; padding: 14px; }
+        .journal-action-row { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 12px; }
+        .journal-action-main { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: #242038; font-weight: 900; }
+        .journal-action-meta { margin-top: 6px; color: #64748b; font-size: 12px; line-height: 1.4; white-space: pre-line; }
         @keyframes tasksRiseIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes tasksModalIn { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @keyframes tasksOverlayIn { from { opacity: 0; } to { opacity: 1; } }
@@ -153,6 +185,9 @@
         .tasks-flow-modal.upload-work.active { display: flex; }
         #taskDetailModal { z-index: 4300; }
         #specialInfoModal { z-index: 4450; }
+        #prespisokSecondLineModal { z-index: 4250; }
+        #prespisokJournalModal { z-index: 4250; }
+        #prespisokJournalDetailModal { z-index: 4350; }
         #editTareTaskModal,
         #deferTaskModal,
         #reopenConfirmModal,
@@ -333,6 +368,8 @@
         .prespisok-start:hover { transform: translateY(-7px) scale(1.045) rotate(-1deg); box-shadow: 0 34px 100px rgba(250,204,21,.44); filter: saturate(1.2); }
         .prespisok-start:active { transform: translateY(2px) scale(.96) rotate(1deg); box-shadow: 0 10px 30px rgba(250,204,21,.28); }
         .prespisok-start-small { display: block; margin: 22px auto 0; min-height: 78px; font-size: clamp(24px, 4vw, 42px); }
+        .prespisok-second-line-btn { background: rgba(255,255,255,.94); color: #24172c; border-color: rgba(255,255,255,.5); box-shadow: 0 18px 48px rgba(255,255,255,.15); }
+        .prespisok-second-line-btn:hover { background: #fff; color: #623cea; transform: translateY(-3px) scale(1.015); }
         .prespisok-file-panel, .prespisok-play-panel, .prespisok-finish-panel { position: relative; z-index: 1; margin-top: 28px; border: 1px solid rgba(255,255,255,.14); border-radius: 28px; background: rgba(255,255,255,.1); box-shadow: 0 26px 80px rgba(0,0,0,.22); padding: clamp(18px, 3vw, 30px); backdrop-filter: blur(14px); }
         .prespisok-file-drop { display: grid; place-items: center; min-height: 220px; border: 2px dashed rgba(255,255,255,.28); border-radius: 22px; background: rgba(255,255,255,.08); text-align: center; }
         .prespisok-file-drop label { display: inline-flex; align-items: center; justify-content: center; border-radius: 18px; background: #facc15; color: #24172c; padding: 16px 22px; font-size: 18px; font-weight: 1000; cursor: pointer; }
@@ -346,8 +383,10 @@
         .prespisok-item-timer-card.danger { background: rgba(239,68,68,.26); box-shadow: 0 0 44px rgba(239,68,68,.24); transform: scale(1.07); animation: prespisokShake .34s linear infinite; }
         .prespisok-item-timer-card.doom { background: rgba(69,10,10,.78); box-shadow: 0 0 66px rgba(127,29,29,.46); transform: scale(1.13); animation: prespisokPanic .18s linear infinite; }
         .prespisok-item-timer-card.kick { animation: prespisokKick .7s cubic-bezier(.2,1.8,.2,1); }
-        .prespisok-task-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 18px; align-items: stretch; }
+        .prespisok-play-panel { max-height: calc(100dvh - 172px); overflow: auto; }
+        .prespisok-task-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 18px; align-items: start; }
         .prespisok-task-main, .prespisok-side { border-radius: 24px; background: rgba(255,255,255,.94); color: #242038; padding: 20px; }
+        .prespisok-side { max-height: calc(100dvh - 260px); overflow: auto; }
         .prespisok-task-main h3 { margin: 0; font-size: clamp(28px, 4vw, 48px); letter-spacing: -.04em; }
         .prespisok-entity-subtitle { margin: 8px 0 0; color: #64748b; font-size: 18px; font-weight: 1000; }
         .prespisok-badge-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
@@ -365,7 +404,7 @@
         .prespisok-action-btn { border: 0; border-radius: 16px; padding: 15px 16px; background: #fff; color: #24172c; text-align: left; font-weight: 1000; cursor: pointer; box-shadow: var(--shadow-sm); transition: transform .14s ease, background .14s ease, box-shadow .14s ease; }
         .prespisok-action-btn:hover, .prespisok-action-btn.active { transform: translateY(-5px) scale(1.025); background: #facc15; box-shadow: 0 20px 46px rgba(250,204,21,.28); }
         .prespisok-action-btn:active { transform: translateY(2px) scale(.98); }
-        .prespisok-extra { display: grid; gap: 8px; margin-top: 12px; }
+        .prespisok-extra { display: grid; gap: 8px; margin-top: 12px; position: sticky; bottom: 0; z-index: 3; border-radius: 18px; background: rgba(255,255,255,.96); padding-top: 10px; }
         .prespisok-extra input { border: 1px solid #dbe3ec; border-radius: 14px; padding: 12px; font: inherit; }
         .prespisok-submit { min-height: 54px; border: 0; border-radius: 16px; background: #16a34a; color: #fff; font-weight: 1000; cursor: pointer; }
         .prespisok-submit-arcade, .prespisok-submit { min-height: 66px; text-transform: uppercase; letter-spacing: .06em; box-shadow: 0 18px 46px rgba(22,163,74,.26); transition: transform .14s ease, box-shadow .14s ease, filter .14s ease; }
@@ -373,7 +412,7 @@
         .prespisok-submit-arcade:active, .prespisok-submit:active:not(:disabled) { transform: translateY(3px) scale(.97); }
         .prespisok-submit:disabled { opacity: .45; cursor: not-allowed; }
         .prespisok-history { margin-top: 14px; border-radius: 16px; background: #f8fafc; padding: 12px; color: #334155; font-size: 13px; line-height: 1.4; }
-        .prespisok-finish-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+        .prespisok-finish-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
         .prespisok-finish-stat { border-radius: 18px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.14); padding: 16px; }
         .prespisok-finish-stat.saved { background: rgba(22,163,74,.18); border-color: rgba(134,239,172,.28); }
         .prespisok-finish-stat.writeoff { background: rgba(239,68,68,.18); border-color: rgba(254,202,202,.28); }
@@ -387,11 +426,12 @@
         @keyframes prespisokShake { 0%,100% { transform: scale(1.07) translateX(0); } 25% { transform: scale(1.08) translateX(-2px); } 75% { transform: scale(1.08) translateX(2px); } }
         @keyframes prespisokPanic { 0%,100% { transform: scale(1.13) translate(0,0) rotate(0deg); } 25% { transform: scale(1.15) translate(-3px,1px) rotate(-1deg); } 50% { transform: scale(1.14) translate(3px,-1px) rotate(1deg); } 75% { transform: scale(1.16) translate(-1px,3px) rotate(-.5deg); } }
         @keyframes prespisokKick { 0% { transform: scale(.7) rotate(-6deg); opacity: .4; } 55% { transform: scale(1.22) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
-        @media (max-width: 980px) { .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid { grid-template-columns: 1fr; } .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid { grid-template-columns: 1fr; } .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .actualize-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 980px) { .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 1120px) { .journal-action-list { max-height: none; } }
+        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
-        @media (max-width: 760px) { body { padding: 14px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } }
+        @media (max-width: 760px) { body { padding: 14px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
     </style>
 </head>
 <body>
@@ -431,27 +471,71 @@
         <button id="openShiftFromBanner" class="btn btn-rect" type="button">Открыть смену</button>
     </section>
 
-    <section id="tasksHome" class="tasks-actions">
-        <button id="openUploads" class="tasks-action-card" type="button">
-            <span class="tasks-action-icon">⇧</span>
-            <h2 class="tasks-action-title">Выгрузки</h2>
-            <p class="tasks-action-text">Календарь, мастер-выгрузка и ручные загрузки. Данные складываются в WMS+ Supabase.</p>
-        </button>
-        <button id="openReview" class="tasks-action-card" type="button">
-            <span class="tasks-action-icon">✓</span>
-            <h2 class="tasks-action-title">Разбор</h2>
-            <p class="tasks-action-text">Активные задачи по участкам: таблица, карточка задачи, комментарий, вердикт и завершение.</p>
-        </button>
-        <button id="openInactive" class="tasks-action-card" type="button">
-            <span class="tasks-action-icon">◌</span>
-            <h2 class="tasks-action-title">Неактивные задачи</h2>
-            <p class="tasks-action-text">Завершенные задачи и задания, которые ждут даты переоткрытия.</p>
-        </button>
-        <button id="openPrespisok" class="tasks-action-card prespisok-entry" type="button">
-            <span class="tasks-action-icon">⚡</span>
-            <h2 class="tasks-action-title">Предсписок</h2>
-            <p class="tasks-action-text">Аркадная финальная проверка ШК и тар перед списанием. Тестовый запуск доступен в любое время, боевое окно: 14:30-16:00.</p>
-        </button>
+    <section id="tasksHome" class="tasks-home-groups">
+        <div class="tasks-home-group">
+            <div class="tasks-home-group-head">
+                <div>
+                    <h2 class="tasks-home-group-title">Предразбор</h2>
+                    <p class="tasks-home-group-note">Регулярные выгрузки, активный разбор и хвосты задач.</p>
+                </div>
+            </div>
+            <div class="tasks-actions">
+                <button id="openUploads" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">⇧</span>
+                    <h2 class="tasks-action-title">Выгрузки</h2>
+                    <p class="tasks-action-text">Календарь, мастер-выгрузка и ручные загрузки. Данные складываются в WMS+ Supabase.</p>
+                </button>
+                <button id="openReview" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">✓</span>
+                    <h2 class="tasks-action-title">Разбор</h2>
+                    <p class="tasks-action-text">Активные задачи по участкам: таблица, карточка задачи, комментарий, вердикт и завершение.</p>
+                </button>
+                <button id="openRequests" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">?</span>
+                    <h2 class="tasks-action-title">Запросы</h2>
+                    <p class="tasks-action-text">Запросы входящего потока, списания AWH и коробки на входе отдельно от предразбора.</p>
+                </button>
+                <button id="openInactive" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">◌</span>
+                    <h2 class="tasks-action-title">Неактивные задачи</h2>
+                    <p class="tasks-action-text">Завершенные задачи и задания, которые ждут даты переоткрытия.</p>
+                </button>
+            </div>
+        </div>
+        <div class="tasks-home-group">
+            <div class="tasks-home-group-head">
+                <div>
+                    <h2 class="tasks-home-group-title">Предсписок</h2>
+                    <p class="tasks-home-group-note">Финальная проверка перед списанием. Боевой интервал: 14:30-20:00.</p>
+                </div>
+            </div>
+            <div class="tasks-actions">
+                <button id="openPrespisok" class="tasks-action-card prespisok-entry" type="button">
+                    <span class="tasks-action-icon">⚡</span>
+                    <h2 class="tasks-action-title">Предсписок</h2>
+                    <p class="tasks-action-text">Аркадная проверка ШК и тар перед списанием, с журналом и задачами второй линии.</p>
+                </button>
+                <button id="openPrespisokSecondLineHome" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">Ⅱ</span>
+                    <h2 class="tasks-action-title">2-я линия предсписка</h2>
+                    <p class="tasks-action-text">Задачи из предсписка, которые отправлены на дополнительный разбор.</p>
+                </button>
+                <button id="openPrespisokJournal" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">☷</span>
+                    <h2 class="tasks-action-title">Журнал предсписка</h2>
+                    <p class="tasks-action-text">История запусков по дням: кто разбирал, какие ШК прошли и какие вердикты выбраны.</p>
+                </button>
+            </div>
+        </div>
+        <div class="tasks-home-group">
+            <div class="tasks-home-group-head">
+                <div>
+                    <h2 class="tasks-home-group-title">Чистые списания</h2>
+                    <p class="tasks-home-group-note">Место под следующий блок. Пока просто держим парковку для будущей красоты.</p>
+                </div>
+            </div>
+            <div class="empty-state">Раздел пока без кнопок.</div>
+        </div>
     </section>
 
     <section id="uploadsPage" class="tasks-page">
@@ -502,6 +586,28 @@
             </div>
             <div id="reviewSectionsGrid" class="review-sections-grid"></div>
             <div id="reviewTableWrap" class="review-table-card"></div>
+        </section>
+    </section>
+
+    <section id="requestsPage" class="tasks-page">
+        <div class="tasks-page-head">
+            <button id="homeFromRequests" class="btn btn-outline" type="button" aria-label="Назад">←</button>
+            <div>
+                <h2 class="tasks-page-title">Запросы</h2>
+                <p class="tasks-page-note">Запросы входящего потока, списания AWH и коробки на входе.</p>
+            </div>
+        </div>
+        <section class="card review-shell">
+            <div class="review-toolbar">
+                <div class="review-view-wrap">
+                    <div class="review-view-tabs" aria-label="Вид запросов">
+                        <button id="requestsViewSections" class="review-view-tab active" type="button">Участки</button>
+                    </div>
+                </div>
+                <div id="requestsStatus" class="review-status">Задачи еще не загружены.</div>
+            </div>
+            <div id="requestsSectionsGrid" class="review-sections-grid"></div>
+            <div id="requestsTableWrap" class="review-table-card"></div>
         </section>
     </section>
 
@@ -734,6 +840,24 @@
 <section id="inactiveTasksModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card review-full-card">
         <div id="inactiveTasksTableWrap" class="review-table-card"></div>
+    </div>
+</section>
+
+<section id="prespisokSecondLineModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card review-full-card">
+        <div id="prespisokSecondLineWrap" class="review-table-card"></div>
+    </div>
+</section>
+
+<section id="prespisokJournalModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card review-full-card">
+        <div id="prespisokJournalWrap" class="review-table-card"></div>
+    </div>
+</section>
+
+<section id="prespisokJournalDetailModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card review-full-card">
+        <div id="prespisokJournalDetailWrap" class="review-table-card"></div>
     </div>
 </section>
 

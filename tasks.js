@@ -16,6 +16,9 @@
     const WMS_SHIFTS_TABLE = "wms_shifts";
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
+    const SUPABASE_FUNCTIONS_BASE_URL = ((typeof window !== "undefined" && window.SUPABASE_URL) || "https://bgphllmzmlwurfnbagho.supabase.co").replace(/\/$/, "") + "/functions/v1";
+    const SUPABASE_PUBLIC_ANON_KEY = (typeof window !== "undefined" && window.SUPABASE_ANON_KEY) || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJncGhsbG16bWx3dXJmbmJhZ2hvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTQwNzIsImV4cCI6MjA3ODUzMDA3Mn0.a1_Wbtpbs9P-_UDqwjGqAIjvwK5WbT_M3B7g5BHtR2Q";
+    const WMS_TASK_WRITEBACK_FUNCTION = "wms-task-writeback";
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
@@ -33,9 +36,10 @@
     const MOVEMENT_AUTO_CLOSE_MINUTES = 10;
     const MOVEMENT_AUTO_CLOSE_MIN_MS = MOVEMENT_AUTO_CLOSE_MINUTES * 60 * 1000;
     const PRESPISOK_STORAGE_KEY = "wms_prespisok_progress_v1";
-    const PRESPISOK_TEST_MODE = true;
+    const PRESPISOK_TEST_MODE = false;
     const PRESPISOK_START_MINUTE = 14 * 60 + 30;
-    const PRESPISOK_END_MINUTE = 16 * 60;
+    const PRESPISOK_END_MINUTE = 20 * 60;
+    const PRESPISOK_RESERVATION_TTL_MS = 20 * 60 * 1000;
     const PURE_COLUMN_VARIANTS = {
         shk: ["ШК", "shk", "Шк", "Штрихкод"],
         nm: ["ID номенклатуры", "ID Номенклатуры", "ID НМ", "nm"],
@@ -284,6 +288,11 @@
         "Движение после продажи",
         "Другие задачи",
     ];
+    const REQUEST_SECTIONS = [
+        "Запросы входящего потока",
+        "Списания AWH",
+        "Коробки на входе",
+    ];
     const REVIEW_VERDICTS = [
         "Не выбран",
         "Найден/Релиз/Списан",
@@ -292,6 +301,15 @@
         "Отправлен запрос",
         "Нет на МХ/Не найден",
         "Добавлен в исключения",
+    ];
+    const INCOMING_FLOW_ATTACHMENT_OPTIONS = [
+        "Не выбран",
+        "Вложено верно",
+        "Вложено неверно",
+        "Отправлен под пустым стикером",
+        "Дубль",
+        "Некорректный запрос",
+        "Движение",
     ];
     const DEFERRED_VERDICT_FIELDS = {
         "Отправлен запрос": "Направление запроса",
@@ -374,6 +392,7 @@
         manualDate: "",
         activeModule: "",
         activeDate: "",
+        repeatUploadUnlocked: false,
         files: {},
         rows: {},
         preview: null,
@@ -383,6 +402,10 @@
             rows: [],
             loading: false,
             loaded: false,
+            activeSection: "",
+            sort: { key: "price", dir: "desc" },
+        },
+        requests: {
             activeSection: "",
             sort: { key: "price", dir: "desc" },
         },
@@ -461,6 +484,28 @@
             finished: false,
             leaderboard: [],
             clockTimer: null,
+            reservations: {},
+            remoteRun: null,
+            progressOnly: false,
+            joinedRemote: false,
+            syncTimer: null,
+        },
+        prespisokSecondLine: {
+            rows: [],
+            loading: false,
+            loaded: false,
+            sort: { key: "price", dir: "desc" },
+        },
+        prespisokHome: {
+            loading: false,
+            run: null,
+        },
+        prespisokJournal: {
+            loading: false,
+            runs: [],
+            actionsByRunId: {},
+            selectedRunId: "",
+            error: "",
         },
     };
 
@@ -785,11 +830,17 @@
         setFlowModalOpen("reopenConfirmModal", false);
         setFlowModalOpen("splitShkConfirmModal", false);
         setFlowModalOpen("inactiveTasksModal", false);
+        setFlowModalOpen("prespisokSecondLineModal", false);
+        setFlowModalOpen("prespisokJournalModal", false);
         setFlowModalOpen("specialInfoModal", false);
         setFlowModalOpen("prespisokModal", false);
         if (state.prespisok && state.prespisok.clockTimer) {
             clearInterval(state.prespisok.clockTimer);
             state.prespisok.clockTimer = null;
+        }
+        if (state.prespisok && state.prespisok.syncTimer) {
+            clearInterval(state.prespisok.syncTimer);
+            state.prespisok.syncTimer = null;
         }
     }
 
@@ -887,7 +938,46 @@
         $("tasksHome").style.display = "grid";
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
+        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
+        renderPrespisokHomeCard();
+        void refreshPrespisokHomeState();
+    }
+
+    function renderPrespisokHomeCard() {
+        const card = $("openPrespisok");
+        if (!card) return;
+        const text = card.querySelector(".tasks-action-text");
+        const run = state.prespisokHome.run;
+        const status = normalizeText(run && run.status);
+        const info = prespisokWindowInfo();
+        const completed = status === "completed" || Boolean(state.prespisok.finished);
+        const active = status === "started" || status === "in_progress";
+        const muted = state.prespisokHome.loading || completed || (!active && !info.inWindow);
+        card.classList.toggle("is-muted", muted);
+        if (!text) return;
+        if (state.prespisokHome.loading) {
+            text.textContent = "Проверяю сегодняшний запуск предсписка...";
+        } else if (completed) {
+            text.textContent = "Сегодня предсписок уже завершён. Детали смотри в журнале или во второй линии.";
+        } else if (active) {
+            text.textContent = "Предсписок уже в работе. Можно наблюдать прогресс или подключиться вторым номером.";
+        } else if (!info.inWindow) {
+            text.textContent = "Доступен в боевое окно " + info.windowLabel + ". Пока можно смотреть журнал и вторую линию.";
+        } else {
+            text.textContent = "Аркадная проверка ШК и тар перед списанием, с журналом и задачами второй линии.";
+        }
+    }
+
+    async function refreshPrespisokHomeState() {
+        state.prespisokHome.loading = true;
+        renderPrespisokHomeCard();
+        try {
+            state.prespisokHome.run = await fetchTodayPrespisokRun();
+        } finally {
+            state.prespisokHome.loading = false;
+            renderPrespisokHomeCard();
+        }
     }
 
     async function showUploads() {
@@ -900,6 +990,7 @@
         closeFlowModals();
         $("tasksHome").style.display = "none";
         $("reviewPage").classList.remove("active");
+        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         $("uploadsPage").classList.add("active");
         $("uploadsStatus").textContent = "Загружаю журнал и настройки...";
@@ -912,9 +1003,22 @@
         closeFlowModals();
         $("tasksHome").style.display = "none";
         $("uploadsPage").classList.remove("active");
+        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         $("reviewPage").classList.add("active");
         renderReview();
+        void loadReviewTasks();
+    }
+
+    function showRequestsPage() {
+        state.view = "requests";
+        closeFlowModals();
+        $("tasksHome").style.display = "none";
+        $("uploadsPage").classList.remove("active");
+        $("reviewPage").classList.remove("active");
+        $("inactivePage").classList.remove("active");
+        $("requestsPage").classList.add("active");
+        renderRequests();
         void loadReviewTasks();
     }
 
@@ -924,6 +1028,7 @@
         $("tasksHome").style.display = "none";
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
+        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.add("active");
         renderInactive();
         void loadInactiveTasks();
@@ -1120,13 +1225,20 @@
         } finally {
             state.review.loading = false;
             renderReview();
-            if ($("reviewSectionModal") && $("reviewSectionModal").classList.contains("active")) renderReviewTable(reviewGroupedRows());
+            renderRequests();
+            refreshOpenSectionModal();
         }
     }
 
     async function fetchReviewTaskRows(db) {
         const rows = await fetchWmsTaskRows(db, "active");
         return rows.filter(isActiveReviewTask);
+    }
+
+    function refreshOpenSectionModal() {
+        if (!$("reviewSectionModal") || !$("reviewSectionModal").classList.contains("active")) return;
+        if (state.view === "requests") renderRequestsTable(requestsGroupedRows());
+        else renderReviewTable(reviewGroupedRows());
     }
 
     function setActualizeStatus(message, type) {
@@ -1153,7 +1265,7 @@
 
     function activeTaskShkList() {
         const shks = new Set();
-        (state.review.rows || []).filter(isActiveReviewTask).forEach((row) => {
+        (state.review.rows || []).filter((row) => isActiveReviewTask(row) && canSystemActualizeMovement(row)).forEach((row) => {
             taskItems(row).forEach((item) => {
                 const shk = normalizeIdentifier(item.shk);
                 if (shk) shks.add(shk);
@@ -1684,7 +1796,7 @@
                 $("actualizeResults").innerHTML = "<div class='status-line good'>Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + ".</div>";
             }
             setActualizeStatus("Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + ".", "good");
-            if ($("reviewSectionModal") && $("reviewSectionModal").classList.contains("active")) renderReviewTable(reviewGroupedRows());
+            refreshOpenSectionModal();
         } catch (error) {
             console.error("actualize close movement failed:", error);
             setActualizeStatus("Не удалось закрыть задачи: " + (error && error.message ? error.message : String(error)), "error");
@@ -1772,11 +1884,32 @@
         return "Другие задачи";
     }
 
+    function requestSectionName(row) {
+        const taskType = normalizeForMatch(row && row.task_type);
+        const title = normalizeForMatch(row && row.title);
+        const sourceModule = normalizeForMatch(row && row.source_module);
+        const combined = [taskType, title, sourceModule, normalizeForMatch(row && row.upload_type)].join(" ");
+        if (combined.includes("запрос") && combined.includes("вход")) return "Запросы входящего потока";
+        if (combined.includes("списания awh") || combined.includes("awh")) return "Списания AWH";
+        if (combined.includes("короб") && combined.includes("вход")) return "Коробки на входе";
+        return "";
+    }
+
     function reviewGroupedRows() {
         const grouped = new Map(REVIEW_SECTIONS.map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
+            if (isPrespisokTask(row) || requestSectionName(row)) return;
             const section = grouped.has(taskSectionName(row)) ? taskSectionName(row) : "Другие задачи";
             grouped.get(section).push(row);
+        });
+        return grouped;
+    }
+
+    function requestsGroupedRows() {
+        const grouped = new Map(REQUEST_SECTIONS.map((section) => [section, []]));
+        (state.review.rows || []).forEach((row) => {
+            const section = requestSectionName(row);
+            if (section && grouped.has(section)) grouped.get(section).push(row);
         });
         return grouped;
     }
@@ -1809,6 +1942,15 @@
         const tags = reviewTags(row).map(normalizeForMatch);
         const combined = normalizeForMatch([row && row.source_module, row && row.upload_type, row && row.task_type].join(" "));
         return tags.includes("предсписок") || combined.includes("предсписок") || combined.includes("prespisok");
+    }
+
+    function isAfterSaleMovementTask(row) {
+        const combined = normalizeForMatch([row && row.source_module, row && row.upload_type, row && row.task_type, row && row.title].join(" "));
+        return combined.includes("after_sale_movement") || combined.includes("движение после продажи") || /\bors\b/.test(combined);
+    }
+
+    function canSystemActualizeMovement(row) {
+        return !isAfterSaleMovementTask(row);
     }
 
     function reviewSourceIds(row) {
@@ -1943,6 +2085,120 @@
         });
     }
 
+    function setRequestsStatus(message, type) {
+        const el = $("requestsStatus");
+        if (!el) return;
+        el.textContent = message || "";
+        el.style.color = type === "error" ? "#b91c1c" : type === "good" ? "#15803d" : "#64748b";
+    }
+
+    function renderRequests() {
+        if (!$("requestsSectionsGrid") || !$("requestsTableWrap")) return;
+        if (state.review.loading) {
+            setRequestsStatus("Загружаю задачи из Supabase...");
+            $("requestsSectionsGrid").innerHTML = "";
+            $("requestsTableWrap").innerHTML = "<div class='empty-state'>Загружаю задачи...</div>";
+            return;
+        }
+        const grouped = requestsGroupedRows();
+        if (!state.requests.activeSection || !(grouped.get(state.requests.activeSection) || []).length) {
+            state.requests.activeSection = REQUEST_SECTIONS.find((section) => (grouped.get(section) || []).length) || REQUEST_SECTIONS[0];
+        }
+        setRequestsStatus(state.review.loaded ? "Запросы загружены." : "Задачи еще не загружены.", state.review.loaded ? "good" : "");
+        renderRequestsSections(grouped);
+        const section = state.requests.activeSection || REQUEST_SECTIONS[0];
+        const rows = sortedRequestRows(grouped.get(section) || []);
+        $("requestsTableWrap").innerHTML = state.review.loaded
+            ? (rows.length ? "" : "<div class='empty-state'>Выберите участок. На выбранном участке \"" + escapeHtml(section) + "\" активных запросов пока нет.</div>")
+            : "<div class='empty-state'>Нажмите \"Запросы\", и WMS+ загрузит задачи из Supabase.</div>";
+    }
+
+    function renderRequestsSections(grouped) {
+        $("requestsSectionsGrid").innerHTML = REQUEST_SECTIONS.map((section) => {
+            const rows = grouped.get(section) || [];
+            const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
+            const active = section === state.requests.activeSection ? " active" : "";
+            return "<button type='button' class='review-section-card" + active + "' data-request-section='" + escapeHtml(section) + "'>"
+                + "<div class='review-section-name'><span>" + escapeHtml(section) + "</span><strong>" + rows.length + "</strong></div>"
+                + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
+                + "</button>";
+        }).join("");
+        $("requestsSectionsGrid").querySelectorAll("[data-request-section]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.requests.activeSection = button.dataset.requestSection || REQUEST_SECTIONS[0];
+                renderRequests();
+                openRequestsSectionModal();
+            });
+        });
+    }
+
+    function sortedRequestRows(rows) {
+        const previous = state.review.sort;
+        state.review.sort = state.requests.sort || { key: "price", dir: "desc" };
+        const sorted = sortedReviewRows(rows);
+        state.review.sort = previous;
+        return sorted;
+    }
+
+    function openRequestsSectionModal() {
+        renderRequestsTable(requestsGroupedRows());
+        setFlowModalOpen("reviewSectionModal", true);
+    }
+
+    function renderRequestsTable(grouped) {
+        const section = state.requests.activeSection || REQUEST_SECTIONS[0];
+        const rows = sortedRequestRows(grouped.get(section) || []);
+        const target = $("reviewSectionTableWrap");
+        if (!target) return;
+        if (!state.review.loaded) {
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Запросы</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
+            const closeBtn = $("closeReviewSectionModal");
+            if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+            return;
+        }
+        if (!rows.length) {
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач нет.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Пусто. Непривычно, но приятно.</div>";
+            const closeBtn = $("closeReviewSectionModal");
+            if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+            return;
+        }
+        const body = rows.map((row) => {
+            const status = displayTaskStatus(row);
+            const verdict = normalizeText(row.opp_verdict);
+            return "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>"
+                + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + "</div></td>"
+                + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
+                + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + (verdict && verdict !== "Не выбран" ? "<div class='review-task-sub'>Вердикт: " + escapeHtml(verdict) + "</div>" : "") + "</td>"
+                + "</tr>";
+        }).join("");
+        const previousSort = state.review.sort;
+        state.review.sort = state.requests.sort || { key: "price", dir: "desc" };
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
+            + "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
+            + reviewSortHead("title", "Задача")
+            + reviewSortHead("price", "Стоимость")
+            + reviewSortHead("status", "Статус")
+            + "</tr></thead><tbody>" + body + "</tbody></table></div>";
+        state.review.sort = previousSort;
+        const refresh = $("refreshReviewTasks");
+        if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
+        const closeBtn = $("closeReviewSectionModal");
+        if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+        target.querySelectorAll("[data-review-sort]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const key = button.dataset.reviewSort || "price";
+                const current = state.requests.sort || { key: "price", dir: "desc" };
+                state.requests.sort = current.key === key
+                    ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+                    : { key, dir: key === "price" ? "desc" : "asc" };
+                renderRequestsTable(requestsGroupedRows());
+            });
+        });
+        target.querySelectorAll("[data-task-detail]").forEach((row) => {
+            row.addEventListener("click", () => openTaskDetail(row.dataset.taskDetail, "review"));
+        });
+    }
+
     function reviewSortHead(key, label) {
         const sort = state.review.sort || { key: "price", dir: "desc" };
         const arrow = sort.key === key ? (sort.dir === "asc" ? " ↑" : " ↓") : "";
@@ -1971,6 +2227,7 @@
         if (key === "movement") return normalizeText(row && row.source_last_movement_at);
         if (key === "name") return taskItemName(row);
         if (key === "entityType") return taskEntityTypeLabel(row);
+        if (key === "creator") return prespisokTaskCreator(row);
         return normalizeText(row && row.title);
     }
 
@@ -2028,6 +2285,84 @@
     function taskRouteLabel(row) {
         const payload = taskPayload(row);
         return normalizeText(payload.route_label || payload.routeLabel || payload.parking || payload.place);
+    }
+
+    function isIncomingFlowRequestTask(row) {
+        return requestSectionName(row) === "Запросы входящего потока";
+    }
+
+    function extractIdsFromLooseText(value) {
+        const text = normalizeText(value);
+        if (!text) return [];
+        const matches = text.match(/[+-]?\d+(?:[.,]\d+)?e[+-]?\d+|\d{5,}(?:\.0+)?/gi) || [];
+        return matches.map(normalizeIdentifier).filter((id) => /^\d{5,}$/.test(id));
+    }
+
+    function firstTextFromPayload(row, keys) {
+        const payload = taskPayload(row);
+        const sources = [payload];
+        if (payload.row && typeof payload.row === "object") sources.push(payload.row);
+        if (Array.isArray(payload.rows) && payload.rows[0] && typeof payload.rows[0] === "object") sources.push(payload.rows[0]);
+        for (const source of sources) {
+            for (const key of keys) {
+                const value = source[key];
+                if (Array.isArray(value)) {
+                    const joined = value.map(normalizeText).filter(Boolean).join(", ");
+                    if (joined) return joined;
+                }
+                const text = normalizeText(value);
+                if (text) return text;
+            }
+        }
+        return "";
+    }
+
+    function textAfterDescriptionLabel(row, labels) {
+        const lines = normalizeText(row && row.description).split(/\r?\n|<br\s*\/?>/i).map((line) => normalizeText(line.replace(/<[^>]+>/g, "")));
+        for (const line of lines) {
+            const match = line.match(/^([^:]+):\s*(.*)$/);
+            if (!match) continue;
+            const key = normalizeForMatch(match[1]);
+            if (labels.some((label) => key === normalizeForMatch(label))) return normalizeText(match[2]);
+        }
+        return "";
+    }
+
+    function incomingFlowSender(row) {
+        return firstTextFromPayload(row, [
+            "sender_lo", "lo_sender", "source_lo", "lo", "office", "sender_office", "source_office", "lo_name",
+            "ЛО-отправитель", "Наименование ЛО", "C",
+        ]) || textAfterDescriptionLabel(row, ["ЛО-отправитель", "Наименование ЛО"]);
+    }
+
+    function incomingFlowRequestDate(row) {
+        const raw = firstTextFromPayload(row, [
+            "request_time", "requested_at", "timestamp", "created_at", "time", "request_at", "source_created_at",
+            "Отметка времени", "Время запроса", "A",
+        ]) || normalizeText(row && row.source_last_movement_at) || normalizeText(row && row.upload_effective_date);
+        const parsed = parseDateTime(raw);
+        if (!parsed.date) return "-";
+        return /:\d{2}/.test(normalizeText(raw)) ? formatRuDateTime(raw) : formatRuDate(parsed.date);
+    }
+
+    function incomingFlowShkList(row) {
+        const seen = new Set();
+        const ids = [];
+        const add = (value) => {
+            extractIdsFromLooseText(value).forEach((id) => {
+                if (!seen.has(id)) {
+                    seen.add(id);
+                    ids.push(id);
+                }
+            });
+        };
+        (Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : []).forEach(add);
+        [
+            firstTextFromPayload(row, ["shk", "shks", "item_shk", "target_shk", "requested_shk", "search_shk", "incoming_shk", "barcode", "barcodes", "product", "products", "Искомый ШК", "D"]),
+            normalizeText(row && row.source_id),
+            textAfterDescriptionLabel(row, ["Искомый ШК", "ШК в запросе", "ШК"]),
+        ].forEach(add);
+        return ids;
     }
 
     function isSingleShkTask(row) {
@@ -2097,6 +2432,16 @@
     }
 
     function taskSearchMeta(row) {
+        if (row && row.__kind === "prespisok_action") {
+            const payload = taskPayload(row);
+            return [
+                "Журнал предсписка",
+                payload.run_date ? formatRuDate(payload.run_date) : "",
+                row.opp_verdict || "",
+                payload.actor_label ? "Кто: " + payload.actor_label : "",
+                formatMoney(row.source_price_sum),
+            ].filter(Boolean).join(" · ");
+        }
         const ids = taskItems(row).map((item) => item.shk).filter(Boolean);
         const shownIds = ids.slice(0, 4).join(", ") + (ids.length > 4 ? " +" + (ids.length - 4) : "");
         const route = taskRouteLabel(row);
@@ -2139,10 +2484,121 @@
                 const id = button.dataset.searchTaskId || "";
                 setTaskSearchResultsVisible(false);
                 const row = findTaskRow(id);
+                if (row && row.__kind === "prespisok_action") {
+                    openPrespisokActionSearchDetail(row);
+                    return;
+                }
                 openTaskDetail(id, row && isActiveReviewTask(row) ? "review" : "inactive");
             });
         });
         setTaskSearchResultsVisible(true);
+    }
+
+    function prespisokActionSearchId(row) {
+        return "prespisok-action:" + normalizeText(row && row.run_id) + ":" + normalizeText(row && row.item_key || row && row.id || row && row.created_at);
+    }
+
+    function normalizePrespisokActionSearchRow(row, run) {
+        const payload = row && row.payload && typeof row.payload === "object" ? row.payload : {};
+        const sourceIds = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
+        const actorLabel = [normalizeText(row && row.operator_name), normalizeText(row && row.operator_id)].filter(Boolean).join(" / ")
+            || [normalizeText(payload.actor && payload.actor.name), normalizeText(payload.actor && payload.actor.id)].filter(Boolean).join(" / ");
+        const entity = normalizeIdentifier(row && (row.source_tare_id || row.entity_id)) || sourceIds[0] || "-";
+        return {
+            __kind: "prespisok_action",
+            id: prespisokActionSearchId(row),
+            source_module: "wms_prespisok",
+            source_id: entity,
+            source_payload: {
+                prespisok_action: payload,
+                run_date: normalizeText(run && run.run_date),
+                run_status: normalizeText(run && run.status),
+                actor_label: actorLabel,
+                extra_value: normalizeText(row && row.extra_value),
+            },
+            source_shk_ids: sourceIds,
+            source_tare_id: normalizeIdentifier(row && row.source_tare_id),
+            source_price_sum: Number(row && row.price) || Number(payload.price) || 0,
+            source_last_movement_at: normalizeText(row && row.created_at),
+            upload_type: "prespisok_journal",
+            upload_effective_date: normalizeText(run && run.run_date),
+            task_type: "Журнал предсписка",
+            title: "Предсписок | " + entity,
+            description: "",
+            priority_label: "История",
+            due_date: normalizeText(run && run.run_date),
+            responsibility_zone: "Нет привязки",
+            task_status: "Завершено",
+            opp_verdict: normalizeText(row && row.verdict) || normalizeText(payload.verdict),
+            assignee_employee_id: normalizeText(row && row.operator_id),
+            assignee_name: normalizeText(row && row.operator_name),
+            tags: ["Предсписок", "Журнал"],
+            is_deleted: false,
+            completed_at: normalizeText(row && row.created_at),
+            updated_at: normalizeText(row && row.created_at),
+        };
+    }
+
+    async function queryPrespisokActionSearch(db, id) {
+        if (!db || !id) return [];
+        const base = () => db
+            .from(WMS_PRESPISOK_ACTIONS_TABLE)
+            .select("*")
+            .limit(20);
+        const settled = await Promise.allSettled([
+            base().contains("source_shk_ids", [id]),
+            base().eq("source_tare_id", id),
+            base().eq("entity_id", id),
+        ]);
+        const byKey = new Map();
+        settled.forEach((result) => {
+            if (result.status !== "fulfilled" || (result.value && result.value.error)) return;
+            (Array.isArray(result.value.data) ? result.value.data : []).forEach((row) => {
+                const key = normalizeText(row.run_id) + "|" + normalizeText(row.item_key) + "|" + normalizeText(row.created_at);
+                if (!byKey.has(key)) byKey.set(key, row);
+            });
+        });
+        const actions = Array.from(byKey.values());
+        if (!actions.length) return [];
+        const runIds = Array.from(new Set(actions.map((row) => normalizeText(row.run_id)).filter(Boolean)));
+        const runsById = new Map();
+        if (runIds.length) {
+            const { data, error } = await db.from(WMS_PRESPISOK_RUNS_TABLE).select("*").in("id", runIds);
+            if (!error) (data || []).forEach((run) => runsById.set(run.id, run));
+        }
+        return actions.map((row) => normalizePrespisokActionSearchRow(row, runsById.get(row.run_id))).filter(Boolean);
+    }
+
+    function openPrespisokActionSearchDetail(row) {
+        const target = $("specialInfoWrap");
+        if (!target) return;
+        const payload = taskPayload(row);
+        const action = payload.prespisok_action || {};
+        const shks = (Array.isArray(row.source_shk_ids) ? row.source_shk_ids : []).map(normalizeIdentifier).filter(Boolean).join("\n") || "-";
+        const lines = [
+            ["Дата предсписка", payload.run_date ? formatRuDate(payload.run_date) : "-"],
+            ["Цель", normalizeIdentifier(row.source_tare_id) ? "Тара " + normalizeIdentifier(row.source_tare_id) : "ШК " + (normalizeIdentifier(row.source_id) || "-")],
+            ["Вердикт", row.opp_verdict || "-"],
+            ["Ссылка/комментарий", payload.extra_value || "-"],
+            ["Кто разбирал", payload.actor_label || "-"],
+            ["Время решения", formatRuDateTime(row.completed_at)],
+            ["Стоимость", formatMoney(row.source_price_sum)],
+            ["ШК", shks],
+        ];
+        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>Разбор из журнала предсписка</h3><p class='work-subtitle'>Это история, не активная задача.</p></div><button id='closeSpecialInfo' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
+            + "<div class='special-info-list'><article class='special-info-card'>"
+            + lines.map((line) => "<button type='button' class='special-info-line copyable' data-copy-value='" + escapeHtml(line[1]) + "' title='Нажми, чтобы скопировать'><span>" + escapeHtml(line[0]) + "</span><strong>" + escapeHtml(line[1]) + "</strong></button>").join("")
+            + "</article></div>";
+        $("closeSpecialInfo").addEventListener("click", closeSpecialInfoModal);
+        target.querySelectorAll("[data-copy-value]").forEach((field) => {
+            field.addEventListener("click", async () => {
+                const text = field.dataset.copyValue || "";
+                if (!text || text === "-") return;
+                const copied = await copyText(text);
+                toast(copied ? "Скопировано." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+            });
+        });
+        setFlowModalOpen("specialInfoModal", true);
     }
 
     async function queryTaskSearch(value) {
@@ -2180,6 +2636,10 @@
             (result.value && Array.isArray(result.value.data) ? result.value.data : []).forEach((row) => {
                 if (row && row.id && !byId.has(row.id)) byId.set(row.id, row);
             });
+        });
+        const prespisokRows = id ? await queryPrespisokActionSearch(db, id).catch(() => []) : [];
+        prespisokRows.forEach((row) => {
+            if (row && row.id && !byId.has(row.id)) byId.set(row.id, row);
         });
         if (!byId.size && errors.length === settled.length && errors[0]) throw errors[0];
         return Array.from(byId.values())
@@ -2232,18 +2692,26 @@
     function taskDetailInfo(row) {
         const tags = reviewTags(row);
         const assignee = [normalizeText(row.assignee_name), normalizeText(row.assignee_employee_id)].filter(Boolean).join(" / ") || "Не назначен";
+        const isIncomingFlow = isIncomingFlowRequestTask(row);
         const taskItemList = taskItems(row);
-        const targetId = isTareTask(row)
+        const targetId = isIncomingFlow
+            ? incomingFlowShkList(row)[0] || normalizeIdentifier(row && row.source_id)
+            : isTareTask(row)
             ? normalizeIdentifier(row.source_tare_id) || normalizeIdentifier(taskPayload(row).tare_id || taskPayload(row).transfer)
             : normalizeIdentifier(taskItemList[0] && taskItemList[0].shk) || normalizeIdentifier(row.source_shk_ids && row.source_shk_ids[0]);
         const items = [
             taskInfoItem(isTareTask(row) ? "Искомая тара" : "Искомый ШК", targetId),
             taskInfoItem("Стоимость", formatMoney(row.source_price_sum)),
-            taskInfoItem("Дедлайн", formatRuDate(row.due_date)),
-            taskInfoItem("Дата выгрузки", formatRuDate(row.upload_effective_date)),
-            taskInfoItem("Последнее движение", formatRuDateTime(row.source_last_movement_at)),
-            taskInfoItem("Исполнитель", assignee),
         ];
+        if (isIncomingFlow) {
+            items.push(taskInfoItem("ЛО-отправитель", incomingFlowSender(row)));
+            items.push(taskInfoItem("Дата запроса", incomingFlowRequestDate(row)));
+        } else {
+            items.push(taskInfoItem("Дедлайн", formatRuDate(row.due_date)));
+            items.push(taskInfoItem("Дата выгрузки", formatRuDate(row.upload_effective_date)));
+        }
+        items.push(taskInfoItem("Последнее движение", formatRuDateTime(row.source_last_movement_at)));
+        items.push(taskInfoItem("Исполнитель", assignee));
         const itemName = taskItemName(row);
         if (isSingleShkTask(row) && itemName) items.splice(1, 0, taskInfoItem("Наименование", itemName));
         const routeLabel = normalizeText(taskPayload(row).route_label);
@@ -2330,7 +2798,21 @@
             + "<span class='task-tare-price'>" + escapeHtml(formatMoney(item.price)) + "</span>"
             + "</button>").join("");
         return "<div class='task-tare-box'>"
-            + "<div class='task-tare-head'><strong>ШК в таре</strong><button id='copyAllTareShk' class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(ids) + "'>Скопировать все</button></div>"
+            + "<div class='task-tare-head'><strong>ШК в таре</strong><button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(ids) + "'>Скопировать все</button></div>"
+            + "<div class='task-tare-list'>" + (rows || "<div class='task-tare-meta'>ШК не найдены</div>") + "</div>"
+            + "</div>";
+    }
+
+    function incomingFlowShkInfoBox(row) {
+        if (!isIncomingFlowRequestTask(row)) return "";
+        const ids = incomingFlowShkList(row);
+        const all = ids.join("\n");
+        const rows = ids.map((id) => "<button class='task-tare-row' type='button' data-copy-single-shk='" + escapeHtml(id) + "' title='Скопировать этот ШК'>"
+            + "<span class='task-tare-shk'>" + escapeHtml(id) + "</span>"
+            + "<span class='task-tare-meta'>ШК из запроса</span>"
+            + "</button>").join("");
+        return "<div class='task-tare-box'>"
+            + "<div class='task-tare-head'><strong>ШК в запросе</strong><button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(all) + "'>Скопировать все</button></div>"
             + "<div class='task-tare-list'>" + (rows || "<div class='task-tare-meta'>ШК не найдены</div>") + "</div>"
             + "</div>";
     }
@@ -2365,28 +2847,33 @@
         if (!target) return;
         const savedReview = taskReviewPayload(row);
         const readOnly = state.taskDetail.source === "inactive" || isCompletedTask(row) || isWaitingReopenTask(row);
+        const incomingFlow = isIncomingFlowRequestTask(row);
         const verdict = normalizeText(row.opp_verdict) && normalizeText(row.opp_verdict) !== "Не выбран"
             ? normalizeText(row.opp_verdict)
-            : normalizeText(savedReview.verdict) || "Не выбран";
-        const formVerdict = REVIEW_VERDICTS.includes(verdict) ? verdict : "Не выбран";
+            : normalizeText(savedReview.verdict || savedReview.attachment) || "Не выбран";
+        const verdictOptions = incomingFlow ? INCOMING_FLOW_ATTACHMENT_OPTIONS : REVIEW_VERDICTS;
+        const formVerdict = verdictOptions.includes(verdict) ? verdict : "Не выбран";
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const readOnlyReviewLines = [
             "Комментарий: " + (savedReview.comment || "-"),
-            "Вердикт: " + (verdict || "-"),
+            (incomingFlow ? "Вложение: " : "Вердикт: ") + (verdict || "-"),
         ];
+        if (incomingFlow) readOnlyReviewLines.push("ID виновного: " + (savedReview.guilty_id || "-"));
         if (savedReview.extra_label || savedReview.extra_value) readOnlyReviewLines.push((savedReview.extra_label || "Доп. поле") + ": " + (savedReview.extra_value || "-"));
         if (savedReview.completed_by_name || savedReview.completed_by_id) readOnlyReviewLines.push("Исполнитель: " + [savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / "));
         const reviewBlock = readOnly
             ? "<div class='task-description-box copyable' data-copy-value='" + escapeHtml(readOnlyReviewLines.join("\n")) + "' title='Нажми, чтобы скопировать'><strong>Комментарий:</strong><br>" + escapeHtml(savedReview.comment || "-")
-                + "<br><br><strong>Вердикт:</strong><br>" + escapeHtml(verdict || "-")
+                + "<br><br><strong>" + (incomingFlow ? "Вложение" : "Вердикт") + ":</strong><br>" + escapeHtml(verdict || "-")
+                + (incomingFlow ? "<br><br><strong>ID виновного:</strong><br>" + escapeHtml(savedReview.guilty_id || "-") : "")
                 + (savedReview.extra_label || savedReview.extra_value ? "<br><br><strong>" + escapeHtml(savedReview.extra_label || "Доп. поле") + ":</strong><br>" + escapeHtml(savedReview.extra_value || "-") : "")
                 + (savedReview.completed_by_name || savedReview.completed_by_id ? "<br><br><strong>Исполнитель:</strong><br>" + escapeHtml([savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / ")) : "")
                 + "</div>"
             : "<div class='task-form'>"
-                + "<label for='taskCommentInput'>Комментарий</label>"
+                + "<label for='taskCommentInput'>" + (incomingFlow ? "Комментарий ОПП" : "Комментарий") + "</label>"
                 + "<textarea id='taskCommentInput' placeholder='Что сделали по задаче'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
-                + "<label for='taskVerdictInput'>Вердикт</label>"
-                + "<select id='taskVerdictInput'>" + REVIEW_VERDICTS.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
+                + "<label for='taskVerdictInput'>" + (incomingFlow ? "Вложение" : "Вердикт") + "</label>"
+                + "<select id='taskVerdictInput'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
+                + (incomingFlow ? "<label for='taskGuiltyIdInput'>ID виновного</label><input id='taskGuiltyIdInput' type='text' value='" + escapeHtml(savedReview.guilty_id || "") + "' placeholder='ID сотрудника'>" : "")
                 + "<div id='taskExtraFieldWrap' class='" + (extraLabel ? "" : "hidden") + "'><label id='taskExtraLabel' for='taskExtraInput'>" + escapeHtml(extraLabel) + "</label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
                 + "<button id='completeTaskBtn' class='btn btn-rect task-complete-btn' type='button' disabled>Завершить задачу</button>"
                 + "<div id='taskDetailStatus' class='review-status'></div>"
@@ -2395,6 +2882,7 @@
             + "<div class='task-detail-body'>"
             + "<div class='task-info-grid'>" + taskDetailInfo(row) + "</div>"
             + taskTagsBox(row)
+            + incomingFlowShkInfoBox(row)
             + taskTareInfoBox(row)
             + taskHistoryBox(row)
             + reviewBlock
@@ -2410,12 +2898,13 @@
         });
         const reopenBtn = $("reopenTaskBtn");
         if (reopenBtn) reopenBtn.addEventListener("click", () => openReopenConfirm(row.id));
-        const copyAllTare = $("copyAllTareShk");
-        if (copyAllTare) copyAllTare.addEventListener("click", async () => {
-            const text = copyAllTare.dataset.copyShk || "";
-            if (!text) return;
-            const copied = await copyText(text);
-            toast(copied ? "ШК в таре скопированы." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+        target.querySelectorAll("[data-copy-shk]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const text = button.dataset.copyShk || "";
+                if (!text) return;
+                const copied = await copyText(text);
+                toast(copied ? "Список ШК скопирован." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+            });
         });
         target.querySelectorAll("[data-copy-single-shk]").forEach((button) => {
             button.addEventListener("click", async () => {
@@ -2433,7 +2922,7 @@
         if (editBtn) editBtn.addEventListener("click", () => openEditTareTaskModal(row.id));
         const deferBtn = $("openDeferTaskBtn");
         if (deferBtn) deferBtn.addEventListener("click", () => openDeferTaskModal(row.id));
-        ["taskCommentInput", "taskVerdictInput", "taskExtraInput"].forEach((id) => {
+        ["taskCommentInput", "taskVerdictInput", "taskExtraInput", "taskGuiltyIdInput"].forEach((id) => {
             const el = $(id);
             if (el) el.addEventListener(id === "taskVerdictInput" ? "change" : "input", updateTaskDetailForm);
         });
@@ -2647,7 +3136,7 @@
                 renderEditTareTaskModal(updated);
             }
             renderReview();
-            if ($("reviewSectionModal") && $("reviewSectionModal").classList.contains("active")) renderReviewTable(reviewGroupedRows());
+            refreshOpenSectionModal();
             return true;
         } catch (error) {
             console.error("detach shk failed:", error);
@@ -2683,7 +3172,7 @@
                 renderEditTareTaskModal(updated);
             }
             renderReview();
-            if ($("reviewSectionModal") && $("reviewSectionModal").classList.contains("active")) renderReviewTable(reviewGroupedRows());
+            refreshOpenSectionModal();
         } catch (error) {
             console.error("add shk failed:", error);
             if (status) status.textContent = "Не удалось добавить ШК: " + (error && error.message ? error.message : String(error));
@@ -2691,6 +3180,8 @@
     }
 
     function updateTaskDetailForm() {
+        const row = findTaskRow(state.taskDetail.rowId);
+        const incomingFlow = isIncomingFlowRequestTask(row);
         const verdict = normalizeText($("taskVerdictInput") && $("taskVerdictInput").value) || "Не выбран";
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const extraWrap = $("taskExtraFieldWrap");
@@ -2699,9 +3190,11 @@
         if (extraLabelEl) extraLabelEl.textContent = extraLabel;
         const comment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
         const extra = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
+        const guiltyId = normalizeIdentifier($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value);
         const missing = [];
-        if (!comment) missing.push("Комментарий");
-        if (!verdict || verdict === "Не выбран") missing.push("Вердикт");
+        if (!comment) missing.push(incomingFlow ? "Комментарий ОПП" : "Комментарий");
+        if (!verdict || verdict === "Не выбран") missing.push(incomingFlow ? "Вложение" : "Вердикт");
+        if (incomingFlow && !guiltyId) missing.push("ID виновного");
         if (verdict === SYSTEM_MOVEMENT_VERDICT) missing.push("доступный пользователю вердикт");
         if (extraLabel && !extra) missing.push(extraLabel);
         const ready = missing.length === 0;
@@ -2725,42 +3218,105 @@
         return { id, name };
     }
 
+    function needsSourceWriteback(row) {
+        return isIncomingFlowRequestTask(row);
+    }
+
+    function wmsWritebackSecret() {
+        return normalizeText(localStorage.getItem("wms_task_writeback_secret") || localStorage.getItem("WMS_TASK_WRITEBACK_SECRET"));
+    }
+
+    async function writeBackTaskToSource(row, review) {
+        if (!needsSourceWriteback(row)) return null;
+        const response = await fetch(SUPABASE_FUNCTIONS_BASE_URL + "/" + WMS_TASK_WRITEBACK_FUNCTION, {
+            method: "POST",
+            headers: {
+                accept: "application/json",
+                "content-type": "application/json",
+                apikey: SUPABASE_PUBLIC_ANON_KEY,
+                authorization: "Bearer " + SUPABASE_PUBLIC_ANON_KEY,
+            },
+            body: JSON.stringify({
+                task_id: row.id,
+                secret: wmsWritebackSecret() || undefined,
+                review,
+            }),
+        });
+        const text = await response.text();
+        let payload = {};
+        try {
+            payload = text ? JSON.parse(text) : {};
+        } catch (_error) {
+            payload = { raw: text };
+        }
+        if (!response.ok || payload.ok === false) {
+            const message = payload && payload.error ? payload.error : text || response.statusText;
+            throw new Error("Не удалось записать результат в источник: " + message);
+        }
+        return payload;
+    }
+
     async function completeTaskFromDetail(id) {
         const db = supabaseDb();
         if (!db || !id) return;
         const row = findTaskRow(id);
         if (!row) return;
         const user = currentWmsUser();
+        const incomingFlow = isIncomingFlowRequestTask(row);
         const verdict = normalizeText($("taskVerdictInput") && $("taskVerdictInput").value) || "Не выбран";
         const comment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const extraValue = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
+        const guiltyId = incomingFlow ? normalizeIdentifier($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value) : "";
         if (verdict === SYSTEM_MOVEMENT_VERDICT) {
             const status = $("taskDetailStatus");
             if (status) status.textContent = "Вердикт “" + SYSTEM_MOVEMENT_VERDICT + "” ставится только системой при актуализации движения.";
             return;
         }
-        if (!comment || verdict === "Не выбран" || (extraLabel && !extraValue)) {
+        if (!comment || verdict === "Не выбран" || (extraLabel && !extraValue) || (incomingFlow && !guiltyId)) {
             const status = $("taskDetailStatus");
-            if (status) status.textContent = "Заполни комментарий, вердикт и обязательное поле по выбранному вердикту.";
+            if (status) status.textContent = incomingFlow
+                ? "Заполни Комментарий ОПП, Вложение и ID виновного."
+                : "Заполни комментарий, вердикт и обязательное поле по выбранному вердикту.";
             return;
         }
         const now = new Date().toISOString();
         const isDeferred = Boolean(DEFERRED_VERDICT_FIELDS[verdict]);
+        const reviewPayload = {
+            comment,
+            verdict,
+            attachment: incomingFlow ? verdict : "",
+            guilty_id: guiltyId || "",
+            extra_label: extraLabel,
+            extra_value: extraValue,
+            completed_by_id: user.id || null,
+            completed_by_name: user.name || null,
+            completed_at: now,
+            reopen_after: isDeferred ? addDaysIso(2) : null,
+        };
         const reopenAfter = isDeferred ? addDaysIso(2) : null;
+        const button = $("completeTaskBtn");
+        const status = $("taskDetailStatus");
+        if (button) button.disabled = true;
+        let writebackResponse = null;
+        try {
+            if (!isDeferred && needsSourceWriteback(row)) {
+                if (status) status.textContent = "Записываю результат в исходную таблицу...";
+                writebackResponse = await writeBackTaskToSource(row, reviewPayload);
+            }
+        } catch (error) {
+            console.error("wms source writeback failed:", error);
+            if (status) status.textContent = error && error.message ? error.message : String(error);
+            if (button) button.disabled = false;
+            return;
+        }
         const nextPayload = {
             ...taskPayload(row),
             wms_review: {
                 ...taskReviewPayload(row),
-                comment,
-                verdict,
-                extra_label: extraLabel,
-                extra_value: extraValue,
-                completed_by_id: user.id || null,
-                completed_by_name: user.name || null,
-                completed_at: now,
-                reopen_after: reopenAfter,
+                ...reviewPayload,
             },
+            wms_writeback: writebackResponse,
         };
         const payload = {
             opp_verdict: verdict,
@@ -2772,9 +3328,6 @@
             source_payload: nextPayload,
             updated_at: now,
         };
-        const button = $("completeTaskBtn");
-        const status = $("taskDetailStatus");
-        if (button) button.disabled = true;
         if (status) status.textContent = "Сохраняю задачу...";
         try {
             const { data, error } = await db
@@ -2790,7 +3343,7 @@
             setReviewStatus(isDeferred ? "Задача отложена до " + formatRuDateTime(reopenAfter) + "." : "Задача завершена.", "good");
             closeTaskDetail();
             renderReview();
-            if ($("reviewSectionModal") && $("reviewSectionModal").classList.contains("active")) renderReviewTable(reviewGroupedRows());
+            refreshOpenSectionModal();
         } catch (error) {
             console.error("wms task complete failed:", error);
             if (status) status.textContent = "Не удалось завершить задачу: " + (error && error.message ? error.message : String(error));
@@ -2896,7 +3449,7 @@
             closeTaskDetail();
             setReviewStatus("Задача отложена до " + formatRuDateTime(reopenAfter) + ".", "good");
             renderReview();
-            if ($("reviewSectionModal") && $("reviewSectionModal").classList.contains("active")) renderReviewTable(reviewGroupedRows());
+            refreshOpenSectionModal();
         } catch (error) {
             console.error("wms task defer failed:", error);
             if (status) status.textContent = "Не удалось отложить задачу: " + (error && error.message ? error.message : String(error));
@@ -3072,6 +3625,280 @@
         });
     }
 
+    async function loadPrespisokSecondLineTasks() {
+        const db = supabaseDb();
+        if (!db) throw new Error("Supabase недоступен.");
+        state.prespisokSecondLine.loading = true;
+        renderPrespisokSecondLineTable();
+        try {
+            const rows = await fetchWmsTaskRows(db, "active");
+            state.prespisokSecondLine.rows = rows.filter((row) => isActiveReviewTask(row) && isPrespisokTask(row));
+            state.prespisokSecondLine.loaded = true;
+        } finally {
+            state.prespisokSecondLine.loading = false;
+            renderPrespisokSecondLineTable();
+        }
+    }
+
+    async function openPrespisokSecondLineModal() {
+        setFlowModalOpen("prespisokSecondLineModal", true);
+        renderPrespisokSecondLineTable();
+        await loadPrespisokSecondLineTasks();
+    }
+
+    function closePrespisokSecondLineModal() {
+        setFlowModalOpen("prespisokSecondLineModal", false);
+    }
+
+    function closePrespisokJournalModal() {
+        setFlowModalOpen("prespisokJournalModal", false);
+        setFlowModalOpen("prespisokJournalDetailModal", false);
+    }
+
+    function closePrespisokJournalDetailModal() {
+        setFlowModalOpen("prespisokJournalDetailModal", false);
+    }
+
+    async function openPrespisokJournalModal() {
+        setFlowModalOpen("prespisokJournalModal", true);
+        state.prespisokJournal.selectedRunId = "";
+        renderPrespisokJournal();
+        await loadPrespisokJournal();
+    }
+
+    function sortedPrespisokSecondLineRows(rows) {
+        const previous = state.review.sort;
+        state.review.sort = state.prespisokSecondLine.sort || { key: "price", dir: "desc" };
+        const sorted = sortedReviewRows(rows || []);
+        state.review.sort = previous;
+        return sorted;
+    }
+
+    function prespisokTaskCreator(row) {
+        const payload = taskPayload(row);
+        return [normalizeText(payload.prespisok_created_by_name), normalizeText(payload.prespisok_created_by_id)].filter(Boolean).join(" / ") || "Не определено";
+    }
+
+    function renderPrespisokSecondLineTable() {
+        const target = $("prespisokSecondLineWrap");
+        if (!target) return;
+        const rows = sortedPrespisokSecondLineRows(state.prespisokSecondLine.rows || []);
+        if (state.prespisokSecondLine.loading) {
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>2-я линия предсписка</h3><div class='review-table-subtitle'>Загружаю задачи с тегом Предсписок...</div></div><button id='closePrespisokSecondLine' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Гружу. Даже вторая линия не любит ждать, но потерпит.</div>";
+        } else {
+            const body = rows.map((row) => "<tr class='review-click-row' data-prespisok-second-task='" + escapeHtml(row.id) + "'>"
+                + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + "</div><div class='review-task-sub'>Создал: " + escapeHtml(prespisokTaskCreator(row)) + "</div></td>"
+                + "<td><span class='review-pill'>" + escapeHtml(taskEntityTypeLabel(row)) + "</span></td>"
+                + "<td class='review-wrap-cell'>" + escapeHtml(taskItemName(row) || "-") + "</td>"
+                + "<td class='review-wrap-cell'>" + escapeHtml(prespisokTaskCreator(row)) + "</td>"
+                + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
+                + "<td><span class='review-pill'>" + escapeHtml(displayTaskStatus(row)) + "</span></td>"
+                + "</tr>").join("");
+            const previousSort = state.review.sort;
+            state.review.sort = state.prespisokSecondLine.sort || { key: "price", dir: "desc" };
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>2-я линия предсписка</h3><div class='review-table-subtitle'>Задачи, созданные из предсписка кнопкой “Создать задачу”. Задач: " + rows.length + ".</div></div><div class='file-row' style='margin-top:0'><button id='refreshPrespisokSecondLine' class='btn btn-outline' type='button'>Обновить</button><button id='closePrespisokSecondLine' class='btn btn-square' type='button'>×</button></div></div>"
+                + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
+                + reviewSortHead("title", "Задача")
+                + reviewSortHead("entityType", "Тип")
+                + reviewSortHead("name", "Наименование")
+                + reviewSortHead("creator", "Кто создал")
+                + reviewSortHead("price", "Стоимость")
+                + reviewSortHead("status", "Статус")
+                + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>Задач второй линии пока нет.</div>");
+            state.review.sort = previousSort;
+        }
+        const close = $("closePrespisokSecondLine");
+        if (close) close.addEventListener("click", closePrespisokSecondLineModal);
+        const refresh = $("refreshPrespisokSecondLine");
+        if (refresh) refresh.addEventListener("click", () => { void loadPrespisokSecondLineTasks(); });
+        target.querySelectorAll("[data-review-sort]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const key = button.dataset.reviewSort || "price";
+                const current = state.prespisokSecondLine.sort || { key: "price", dir: "desc" };
+                state.prespisokSecondLine.sort = current.key === key
+                    ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+                    : { key, dir: key === "price" ? "desc" : "asc" };
+                renderPrespisokSecondLineTable();
+            });
+        });
+        target.querySelectorAll("[data-prespisok-second-task]").forEach((row) => {
+            row.addEventListener("click", () => {
+                const taskId = row.dataset.prespisokSecondTask;
+                const task = (state.prespisokSecondLine.rows || []).find((item) => item.id === taskId);
+                if (task && !(state.review.rows || []).some((item) => item.id === task.id)) state.review.rows.push(task);
+                openTaskDetail(taskId, "review");
+            });
+        });
+    }
+
+    function prespisokRunStatusLabel(status) {
+        const normalized = normalizeText(status);
+        if (normalized === "completed") return "Сделан";
+        if (normalized === "started" || normalized === "in_progress") return "В работе";
+        return normalized || "Не сделан";
+    }
+
+    function prespisokJournalDays() {
+        const days = [];
+        for (let offset = 29; offset >= 0; offset -= 1) days.push(addDays(state.today, -offset));
+        return days;
+    }
+
+    function weekdayIndexMonday(isoDate) {
+        const date = new Date(normalizeText(isoDate) + "T00:00:00Z");
+        if (!Number.isFinite(date.getTime())) return 0;
+        return (date.getUTCDay() + 6) % 7;
+    }
+
+    function latestPrespisokRunsByDate() {
+        const byDate = new Map();
+        (state.prespisokJournal.runs || []).forEach((run) => {
+            const date = normalizeText(run.run_date);
+            if (!date) return;
+            const current = byDate.get(date);
+            if (!current || normalizeText(run.updated_at) > normalizeText(current.updated_at)) byDate.set(date, run);
+        });
+        return byDate;
+    }
+
+    function prespisokActionActorLabel(action) {
+        return [normalizeText(action && action.actor && action.actor.name), normalizeText(action && action.actor && action.actor.id)].filter(Boolean).join(" / ") || "Не определено";
+    }
+
+    function prespisokActionEntityLabel(action) {
+        const tare = normalizeIdentifier(action && action.source_tare_id);
+        const shks = Array.isArray(action && action.source_shk_ids) ? action.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
+        if (tare) return "Тара " + tare + (shks.length ? " · ШК: " + shks.slice(0, 4).join(", ") + (shks.length > 4 ? " +" + (shks.length - 4) : "") : "");
+        return "ШК " + (normalizeIdentifier(action && action.entity_id) || shks[0] || "-");
+    }
+
+    function prespisokJournalMoneyStats(actions) {
+        return (actions || []).reduce((acc, action) => {
+            const key = normalizeText(action.action_key);
+            const verdict = normalizeForMatch(action.verdict);
+            const price = Number(action.price) || 0;
+            if (key === "movement" || key === "release" || verdict === "движение" || verdict === "нужен релиз") acc.saved += price;
+            if (key === "auto_writeoff" || key === "writeoff" || verdict === "автосписание" || verdict === "нужно списание") acc.writeoff += price;
+            return acc;
+        }, { saved: 0, writeoff: 0 });
+    }
+
+    async function loadPrespisokJournal() {
+        const db = supabaseDb();
+        if (!db) {
+            state.prespisokJournal.error = "Supabase недоступен.";
+            renderPrespisokJournal();
+            return;
+        }
+        state.prespisokJournal.loading = true;
+        state.prespisokJournal.error = "";
+        renderPrespisokJournal();
+        try {
+            const start = addDays(state.today, -29);
+            const { data, error } = await db
+                .from(WMS_PRESPISOK_RUNS_TABLE)
+                .select("*")
+                .eq("wh_id", WH_ID)
+                .gte("run_date", start)
+                .lte("run_date", state.today)
+                .order("run_date", { ascending: false })
+                .order("updated_at", { ascending: false });
+            if (error) throw error;
+            state.prespisokJournal.runs = Array.isArray(data) ? data : [];
+        } catch (error) {
+            state.prespisokJournal.error = error && error.message ? error.message : String(error);
+        } finally {
+            state.prespisokJournal.loading = false;
+            renderPrespisokJournal();
+        }
+    }
+
+    async function selectPrespisokJournalRun(runId) {
+        state.prespisokJournal.selectedRunId = runId || "";
+        renderPrespisokJournal();
+        setFlowModalOpen("prespisokJournalDetailModal", true);
+        renderPrespisokJournalDetail();
+        if (!runId || state.prespisokJournal.actionsByRunId[runId]) return;
+        const actions = await fetchPrespisokActions(runId);
+        state.prespisokJournal.actionsByRunId[runId] = Array.isArray(actions) ? actions : [];
+        renderPrespisokJournal();
+        renderPrespisokJournalDetail();
+    }
+
+    function renderPrespisokJournalDetail() {
+        const target = $("prespisokJournalDetailWrap");
+        if (!target) return;
+        const selectedRun = (state.prespisokJournal.runs || []).find((run) => run.id === state.prespisokJournal.selectedRunId) || null;
+        const selectedActions = selectedRun ? state.prespisokJournal.actionsByRunId[selectedRun.id] : null;
+        if (!selectedRun) {
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Детали предсписка</h3><div class='review-table-subtitle'>Выберите день в журнале.</div></div><button id='closePrespisokJournalDetail' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Запуск не выбран.</div>";
+        } else if (!selectedActions) {
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Предсписок за " + escapeHtml(formatRuDate(selectedRun.run_date)) + "</h3><div class='review-table-subtitle'>Загружаю разборы...</div></div><button id='closePrespisokJournalDetail' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Гружу список ШК и вердикты. Сейчас будет не сыро, а прожарено.</div>";
+        } else {
+            const money = prespisokJournalMoneyStats(selectedActions || []);
+            const runOperator = [normalizeText(selectedRun.operator_name), normalizeText(selectedRun.operator_id)].filter(Boolean).join(" / ") || "Не определено";
+            const actionsHtml = (selectedActions || []).map((action) => {
+                const extra = normalizeText(action.extra_value);
+                const shks = Array.isArray(action.source_shk_ids) ? action.source_shk_ids.map(normalizeIdentifier).filter(Boolean).join("\n") : "";
+                return "<article class='journal-action-row'>"
+                    + "<div class='journal-action-main'><span>" + escapeHtml(prespisokActionEntityLabel(action)) + "</span><span>" + escapeHtml(action.verdict || "-") + "</span></div>"
+                    + "<div class='journal-action-meta'>"
+                    + "Кто разбирал: " + escapeHtml(prespisokActionActorLabel(action)) + "\n"
+                    + "Время решения: " + escapeHtml(formatRuDateTime(action.created_at)) + "\n"
+                    + "Стоимость: " + escapeHtml(formatMoney(action.price)) + "\n"
+                    + (extra ? "Ссылка/комментарий: " + escapeHtml(extra) + "\n" : "")
+                    + (shks ? "ШК:\n" + escapeHtml(shks) : "")
+                    + "</div></article>";
+            }).join("");
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Предсписок за " + escapeHtml(formatRuDate(selectedRun.run_date)) + "</h3><div class='review-table-subtitle'>Разборы, вердикты, деньги и кто держал оборону.</div></div><button id='closePrespisokJournalDetail' class='btn btn-square' type='button'>×</button></div>"
+                + "<div class='journal-detail-card'>"
+                + "<div class='journal-stats-strip'>"
+                + "<div class='journal-stat'><span>Разобрано</span><strong>" + escapeHtml(String(selectedRun.completed_items || selectedActions.length || 0)) + "/" + escapeHtml(String(selectedRun.total_items || 0)) + "</strong></div>"
+                + "<div class='journal-stat'><span>Начал запуск</span><strong>" + escapeHtml(runOperator) + "</strong></div>"
+                + "<div class='journal-stat'><span>Время</span><strong>" + escapeHtml(formatDuration(selectedRun.elapsed_ms || 0)) + "</strong></div>"
+                + "<div class='journal-stat'><span>Спасено</span><strong>" + escapeHtml(formatMoney(money.saved)) + "</strong></div>"
+                + "<div class='journal-stat'><span>Списано</span><strong>" + escapeHtml(formatMoney(money.writeoff)) + "</strong></div>"
+                + "</div>"
+                + "<div class='journal-action-list'>" + (actionsHtml || "<div class='empty-state'>Разборов по этому запуску нет.</div>") + "</div>"
+                + "</div>";
+        }
+        const close = $("closePrespisokJournalDetail");
+        if (close) close.addEventListener("click", closePrespisokJournalDetailModal);
+    }
+
+    function renderPrespisokJournal() {
+        const target = $("prespisokJournalWrap");
+        if (!target) return;
+        const byDate = latestPrespisokRunsByDate();
+        const days = prespisokJournalDays();
+        const leadingBlanks = days.length ? weekdayIndexMonday(days[0]) : 0;
+        const daysHtml = Array.from({ length: leadingBlanks }).map(() => "<div class='journal-day-empty'></div>").join("") + days.map((date) => {
+            const run = byDate.get(date);
+            const status = run ? prespisokRunStatusLabel(run.status) : "Не сделан";
+            const selected = run && run.id === state.prespisokJournal.selectedRunId ? " is-selected" : "";
+            const cls = run ? " has-run " + (normalizeText(run.status) === "completed" ? "completed" : "active-run") + selected : "";
+            const attrs = run ? " type='button' data-prespisok-journal-run='" + escapeHtml(run.id) + "'" : "";
+            const tag = run ? "button" : "div";
+            return "<" + tag + " class='journal-day" + cls + "'" + attrs + ">"
+                + "<span class='journal-day-date'>" + escapeHtml(formatRuDate(date)) + "</span>"
+                + "<span class='journal-day-status'>" + escapeHtml(status) + "</span>"
+                + (run ? "<span class='journal-day-status'>Разобрано: " + escapeHtml(String(run.completed_items || 0)) + "/" + escapeHtml(String(run.total_items || 0)) + "</span>" : "")
+                + "</" + tag + ">";
+        }).join("");
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Журнал предсписка</h3><div class='review-table-subtitle'>" + (state.prespisokJournal.loading ? "Загружаю последние 30 дней..." : "Последние 30 дней: видно, был ли предсписок и что по нему решили.") + "</div></div><div class='file-row' style='margin-top:0'><button id='refreshPrespisokJournal' class='btn btn-outline' type='button'>Обновить</button><button id='closePrespisokJournal' class='btn btn-square' type='button'>×</button></div></div>"
+            + (state.prespisokJournal.error ? "<div class='status-line error'>Не удалось открыть журнал: " + escapeHtml(state.prespisokJournal.error) + "</div>" : "")
+            + "<div class='journal-scroll'><div class='journal-layout'>"
+            + "<section class='journal-panel'><h4 class='journal-panel-title'>Календарь</h4><div class='journal-weekdays'><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div><div class='journal-day-grid'>" + daysHtml + "</div></section>"
+            + "</div></div>";
+        const close = $("closePrespisokJournal");
+        if (close) close.addEventListener("click", closePrespisokJournalModal);
+        const refresh = $("refreshPrespisokJournal");
+        if (refresh) refresh.addEventListener("click", () => { void loadPrespisokJournal(); });
+        target.querySelectorAll("[data-prespisok-journal-run]").forEach((button) => {
+            button.addEventListener("click", () => { void selectPrespisokJournalRun(button.dataset.prespisokJournalRun || ""); });
+        });
+    }
+
     async function loadUploadMeta() {
         state.loadingStatus = true;
         renderModuleChooser();
@@ -3182,6 +4009,7 @@
     function chooseModule(module) {
         state.activeModule = module;
         state.activeDate = uploadDateForModule(module);
+        state.repeatUploadUnlocked = false;
         state.preview = null;
         state.rows = {};
         state.files = {};
@@ -3200,11 +4028,30 @@
         $("workInstruction").innerHTML = instructionHtml(module, state.activeDate);
         $("doneBox").classList.remove("visible");
         $("saveUpload").disabled = true;
+        $("saveUpload").classList.remove("hidden");
+        $("repeatUpload").classList.add("hidden");
         renderPreview(null);
-        renderFileControls(module);
         const existing = runForUpload(module, state.activeDate);
-        if (existing) setStatus("Выгрузка за эту дату уже есть. Можно выгрузить повторно, запись и задачи будут обновлены без дублей.", "good");
-        else setStatus("Выберите файл для расчета.");
+        if (existing && !state.repeatUploadUnlocked) {
+            $("workInstruction").classList.add("hidden");
+            $("fileControls").innerHTML = "";
+            $("fileControls").classList.add("hidden");
+            $("previewGrid").innerHTML = "";
+            $("sampleWrap").innerHTML = "";
+            $("saveUpload").classList.add("hidden");
+            $("repeatUpload").classList.remove("hidden");
+            setStatus("Выгрузка за эту дату уже есть. Если нужно заменить данные, нажмите “Выгрузить повторно”.", "good");
+            return;
+        }
+        $("workInstruction").classList.remove("hidden");
+        $("fileControls").classList.remove("hidden");
+        renderFileControls(module);
+        if (existing) {
+            $("repeatUpload").classList.remove("hidden");
+            setStatus("Повторная выгрузка включена. Выберите файл, запись обновится без дублей.", "good");
+        } else {
+            setStatus("Выберите файл для расчета.");
+        }
     }
 
     function instructionHtml(module, date) {
@@ -4026,7 +4873,7 @@
             source_tare_id: options.tareId || "",
             source_price_sum: options.price || 0,
             source_last_movement_at: sourceLastMovement(options.rows),
-            search_text: [options.title, itemName, options.taskType, options.column, options.tareId, ...sourceIds].filter(Boolean).join(" "),
+            search_text: [options.title, itemName, options.taskType, options.column, options.tareId, ...(options.searchParts || []), ...sourceIds].filter(Boolean).join(" "),
             upload_type: options.uploadType,
             upload_effective_date: options.businessDate,
             task_type: options.taskType,
@@ -4615,6 +5462,14 @@
         return PRESPISOK_STORAGE_KEY + ":leaderboard";
     }
 
+    function prespisokActor() {
+        const user = currentWmsUser();
+        return {
+            id: normalizeText(user.id) || normalizeText(user.employee_id) || normalizeText(user.name) || "local",
+            name: normalizeText(user.name) || "Неизвестный сотрудник",
+        };
+    }
+
     function prespisokElapsedMs() {
         const active = state.prespisok.timerStartedAt ? Date.now() - state.prespisok.timerStartedAt : 0;
         return (Number(state.prespisok.elapsedBeforeMs) || 0) + active;
@@ -4635,9 +5490,14 @@
 
     function formatDuration(ms) {
         const total = Math.max(Math.floor((Number(ms) || 0) / 1000), 0);
-        const minutes = Math.floor(total / 60);
+        const hours = Math.floor(total / 3600);
+        const minutes = Math.floor((total % 3600) / 60);
         const seconds = total % 60;
-        return String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+        return [
+            hours ? hours + " ч" : "",
+            minutes ? minutes + " мин" : "",
+            seconds + " сек",
+        ].filter(Boolean).join(" ");
     }
 
     function formatPrespisokWriteoffAt(value) {
@@ -4668,6 +5528,8 @@
             itemElapsedBeforeMs: prespisokItemElapsedMs(),
             history: state.prespisok.history,
             finished: state.prespisok.finished,
+            reservations: state.prespisok.reservations || {},
+            joinedRemote: Boolean(state.prespisok.joinedRemote),
         };
     }
 
@@ -4675,6 +5537,7 @@
         return {
             date: state.today,
             file_name: state.prespisok.fileName,
+            items_full: state.prespisok.items || [],
             items: (state.prespisok.items || []).map((item) => ({
                 key: prespisokItemKey(item),
                 type: item.type,
@@ -4685,6 +5548,7 @@
                 source_shk_ids: (item.rows || []).map((row) => row.shk),
             })),
             actions: state.prespisok.actions || [],
+            reservations: state.prespisok.reservations || {},
         };
     }
 
@@ -4718,6 +5582,8 @@
                 history: parsed.history && typeof parsed.history === "object" ? parsed.history : {},
                 finished: false,
                 selectedAction: "",
+                reservations: parsed.reservations && typeof parsed.reservations === "object" ? parsed.reservations : {},
+                joinedRemote: Boolean(parsed.joinedRemote),
             };
             return Boolean(state.prespisok.items.length);
         } catch (_error) {
@@ -4742,17 +5608,162 @@
         state.prespisok.history = {};
         state.prespisok.selectedAction = "";
         state.prespisok.finished = false;
+        state.prespisok.reservations = {};
+        state.prespisok.remoteRun = null;
+        state.prespisok.progressOnly = false;
+        state.prespisok.joinedRemote = false;
     }
 
-    function openPrespisokModal() {
+    function prespisokRunPayload(run) {
+        const payload = run && run.payload;
+        return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+    }
+
+    async function fetchTodayPrespisokRun() {
+        const db = supabaseDb();
+        if (!db) return null;
+        try {
+            const { data, error } = await db
+                .from(WMS_PRESPISOK_RUNS_TABLE)
+                .select("*")
+                .eq("wh_id", WH_ID)
+                .eq("run_date", state.today)
+                .order("updated_at", { ascending: false })
+                .limit(1);
+            if (error) throw error;
+            return Array.isArray(data) && data.length ? data[0] : null;
+        } catch (error) {
+            console.warn("today prespisok run failed:", error);
+            return null;
+        }
+    }
+
+    async function fetchActivePrespisokRun() {
+        const db = supabaseDb();
+        if (!db) return null;
+        try {
+            const { data, error } = await db
+                .from(WMS_PRESPISOK_RUNS_TABLE)
+                .select("*")
+                .eq("wh_id", WH_ID)
+                .eq("run_date", state.today)
+                .in("status", ["started", "in_progress"])
+                .order("updated_at", { ascending: false })
+                .limit(1);
+            if (error) throw error;
+            return Array.isArray(data) && data.length ? data[0] : null;
+        } catch (error) {
+            console.warn("active prespisok run failed:", error);
+            return null;
+        }
+    }
+
+    async function fetchPrespisokActions(runId) {
+        const db = supabaseDb();
+        if (!db || !runId) return [];
+        try {
+            const { data, error } = await db
+                .from(WMS_PRESPISOK_ACTIONS_TABLE)
+                .select("*")
+                .eq("run_id", runId)
+                .order("created_at", { ascending: true });
+            if (error) throw error;
+            return (data || []).map((row) => {
+                const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+                return {
+                    ...payload,
+                    run_id: row.run_id,
+                    item_key: row.item_key,
+                    action_key: payload.action_key || "",
+                    entity_type: row.entity_type,
+                    entity_id: row.entity_id,
+                    verdict: row.verdict,
+                    extra_value: row.extra_value || "",
+                    price: Number(row.price) || Number(payload.price) || 0,
+                    source_shk_ids: Array.isArray(row.source_shk_ids) ? row.source_shk_ids : [],
+                    source_tare_id: row.source_tare_id || "",
+                    task_created: Boolean(row.task_created),
+                    created_at: row.created_at,
+                    actor: {
+                        id: row.operator_id || (payload.actor && payload.actor.id) || "",
+                        name: row.operator_name || (payload.actor && payload.actor.name) || "",
+                    },
+                };
+            });
+        } catch (error) {
+            console.warn("prespisok actions sync failed:", error);
+            return null;
+        }
+    }
+
+    async function syncPrespisokRunActions() {
+        if (!state.prespisok.runId) return;
+        const actions = await fetchPrespisokActions(state.prespisok.runId);
+        if (Array.isArray(actions)) state.prespisok.actions = actions;
+        const run = await fetchActivePrespisokRun();
+        if (run && run.id === state.prespisok.runId) {
+            const payload = prespisokRunPayload(run);
+            if (payload.reservations && typeof payload.reservations === "object") state.prespisok.reservations = payload.reservations;
+            state.prespisok.remoteRun = run;
+        }
+    }
+
+    function applyPrespisokRemoteRun(run, join) {
+        if (!run) return false;
+        const payload = prespisokRunPayload(run);
+        const fullItems = Array.isArray(payload.items_full) ? payload.items_full : [];
+        state.prespisok.remoteRun = run;
+        state.prespisok.progressOnly = !join;
+        state.prespisok.runId = run.id;
+        state.prespisok.fileName = normalizeText(run.file_name || payload.file_name);
+        state.prespisok.startedAt = normalizeText(run.started_at);
+        state.prespisok.elapsedBeforeMs = Number(run.elapsed_ms) || 0;
+        state.prespisok.excludedCount = Number(run.excluded_items) || 0;
+        state.prespisok.reservations = payload.reservations && typeof payload.reservations === "object" ? payload.reservations : {};
+        if (join && fullItems.length) {
+            state.prespisok.items = fullItems;
+            state.prespisok.rows = Array.isArray(payload.rows) ? payload.rows : [];
+            state.prespisok.index = 0;
+            state.prespisok.history = {};
+            state.prespisok.finished = false;
+            state.prespisok.progressOnly = false;
+            state.prespisok.joinedRemote = true;
+            state.prespisok.timerStartedAt = Date.now();
+            state.prespisok.itemTimerStartedAt = Date.now();
+            return true;
+        }
+        return fullItems.length > 0;
+    }
+
+    async function openPrespisokModal() {
         closeFlowModals();
-        loadPrespisokState();
         setFlowModalOpen("prespisokModal", true);
+        const target = $("prespisokWrap");
+        if (target) target.innerHTML = prespisokTopHtml("Проверяю, не начал ли кто-то предсписок раньше. Паранойя? Нет, совместная работа.") + "<div class='prespisok-center'><div class='prespisok-wait'>Проверяю запуск</div></div>";
+        const hasLocal = loadPrespisokState();
+        if (hasLocal) {
+            await syncPrespisokRunActions();
+        } else {
+            const remote = await fetchActivePrespisokRun() || await fetchTodayPrespisokRun();
+            if (remote) {
+                applyPrespisokRemoteRun(remote, false);
+                const actions = await fetchPrespisokActions(remote.id);
+                state.prespisok.actions = Array.isArray(actions) ? actions : [];
+            }
+        }
         renderPrespisok();
         if (state.prespisok.clockTimer) clearInterval(state.prespisok.clockTimer);
         state.prespisok.clockTimer = setInterval(() => {
             if ($("prespisokModal") && $("prespisokModal").classList.contains("active") && !state.prespisok.items.length) renderPrespisok();
         }, 30000);
+        if (state.prespisok.syncTimer) clearInterval(state.prespisok.syncTimer);
+        state.prespisok.syncTimer = setInterval(() => {
+            if ($("prespisokModal") && $("prespisokModal").classList.contains("active") && state.prespisok.runId) {
+                void syncPrespisokRunActions().then(() => {
+                    if (state.prespisok.progressOnly) renderPrespisok();
+                });
+            }
+        }, 15000);
     }
 
     function closePrespisokModal() {
@@ -4767,6 +5778,8 @@
         persistPrespisokState();
         if (state.prespisok.clockTimer) clearInterval(state.prespisok.clockTimer);
         state.prespisok.clockTimer = null;
+        if (state.prespisok.syncTimer) clearInterval(state.prespisok.syncTimer);
+        state.prespisok.syncTimer = null;
         setFlowModalOpen("prespisokModal", false);
     }
 
@@ -4797,7 +5810,7 @@
         return "<div class='prespisok-top-stats'>"
             + "<div class='prespisok-top-stat'><span>Общее время</span><strong id='prespisokTotalTimer'>" + escapeHtml(formatDuration(prespisokElapsedMs())) + "</strong></div>"
             + "<div class='prespisok-top-stat good'><span>Спасено</span><strong id='prespisokSavedMoney'>" + escapeHtml(formatMoney(stats.saved)) + "</strong></div>"
-            + "<div class='prespisok-top-stat bad'><span>Допущено к списанию</span><strong id='prespisokWriteoffMoney'>" + escapeHtml(formatMoney(stats.writeoff)) + "</strong></div>"
+            + "<div class='prespisok-top-stat bad'><span>Списано</span><strong id='prespisokWriteoffMoney'>" + escapeHtml(formatMoney(stats.writeoff)) + "</strong></div>"
             + "</div>";
     }
 
@@ -4811,7 +5824,7 @@
 
     function prespisokTopHtml(subtitle) {
         return "<div class='prespisok-top'>"
-            + "<div><p class='prespisok-kicker'>Финальная проверка перед списанием</p><h2 class='prespisok-title'>Предсписок</h2><p class='prespisok-subtitle'>" + escapeHtml(subtitle || (PRESPISOK_TEST_MODE ? "Тестовый режим: запуск доступен в любое время. Боевой таймер пока сидит в углу и делает вид, что не обиделся." : "Окно разбора: 14:30-16:00. Тут не склад, тут арена последнего шанса.")) + "</p></div>"
+            + "<div><p class='prespisok-kicker'>Финальная проверка перед списанием</p><h2 class='prespisok-title'>Предсписок</h2><p class='prespisok-subtitle'>" + escapeHtml(subtitle || (PRESPISOK_TEST_MODE ? "Тестовый режим: запуск доступен в любое время. Боевой таймер пока сидит в углу и делает вид, что не обиделся." : "Окно разбора: 14:30-20:00. Тут не склад, тут арена последнего шанса.")) + "</p></div>"
             + "<div class='prespisok-top-right'>" + prespisokTopStatsHtml() + "<button id='closePrespisok' class='btn btn-square prespisok-close' type='button' aria-label='Закрыть'>×</button></div>"
             + "</div>";
     }
@@ -4820,6 +5833,10 @@
         const target = $("prespisokWrap");
         if (!target) return;
         const info = prespisokWindowInfo();
+        if (state.prespisok.progressOnly && state.prespisok.remoteRun) {
+            renderPrespisokRemoteProgress();
+            return;
+        }
         if (!state.prespisok.items.length) {
             const saved = loadPrespisokState();
             if (saved) {
@@ -4829,17 +5846,79 @@
         }
         if (!state.prespisok.items.length && !info.inWindow) {
             target.innerHTML = prespisokTopHtml("Сегодняшнее окно: " + info.windowLabel + ". Раньше нельзя, позже тоже нельзя. Да, режим строгий, как акт списания без подписи.")
-                + "<div class='prespisok-center'><div class='prespisok-wait'>До разбора предсписка<br>" + escapeHtml(info.waitLabel) + "</div></div>";
+                + "<div class='prespisok-center'><div><div class='prespisok-wait'>До разбора предсписка<br>" + escapeHtml(info.waitLabel) + "</div><button id='showPrespisokSecondLine' class='btn btn-outline prespisok-start-small prespisok-second-line-btn' type='button'>Показать задачи 2-й линии из предсписка</button></div></div>";
             bindPrespisokClose();
+            $("showPrespisokSecondLine").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
             return;
         }
         if (!state.prespisok.items.length) {
             target.innerHTML = prespisokTopHtml("Окно открыто. Загружаем XLSX и начинаем финальную проверку без лишней лирики.")
-                + "<div class='prespisok-center'><button id='startPrespisok' class='prespisok-start' type='button'>Начать</button></div>";
+                + "<div class='prespisok-center'><div><button id='startPrespisok' class='prespisok-start' type='button'>Начать</button><button id='showPrespisokSecondLine' class='btn btn-outline prespisok-start-small prespisok-second-line-btn' type='button'>Показать задачи 2-й линии из предсписка</button></div></div>";
             bindPrespisokClose();
             $("startPrespisok").addEventListener("click", renderPrespisokFileStep);
+            $("showPrespisokSecondLine").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
             return;
         }
+        renderPrespisokPlay();
+    }
+
+    function renderPrespisokRemoteProgress() {
+        const target = $("prespisokWrap");
+        if (!target) return;
+        const run = state.prespisok.remoteRun || {};
+        const payload = prespisokRunPayload(run);
+        const actions = state.prespisok.actions || [];
+        const total = Number(run.total_items) || (Array.isArray(payload.items) ? payload.items.length : 0);
+        const completed = actions.length || Number(run.completed_items) || 0;
+        const isCompletedRun = normalizeText(run.status) === "completed";
+        const money = actions.reduce((acc, action) => {
+            const key = normalizeText(action.action_key);
+            const verdict = normalizeForMatch(action.verdict);
+            const price = Number(action.price) || 0;
+            if (key === "movement" || key === "release" || verdict === "движение" || verdict === "нужен релиз") acc.saved += price;
+            if (key === "auto_writeoff" || key === "writeoff" || verdict === "автосписание" || verdict === "нужно списание") acc.writeoff += price;
+            return acc;
+        }, { saved: 0, writeoff: 0 });
+        const operator = normalizeText(run.operator_name) || "другой сотрудник";
+        const canJoin = !isCompletedRun && Array.isArray(payload.items_full) && payload.items_full.length;
+        target.innerHTML = prespisokTopHtml(isCompletedRun ? "Сегодняшний предсписок уже завершён. Для деталей открой журнал." : "Предсписок уже в работе. Можно наблюдать прогресс или подключиться вторым номером.")
+            + "<section class='prespisok-file-panel'>"
+            + "<h3 class='prespisok-title' style='font-size:clamp(30px,5vw,62px)'>" + (isCompletedRun ? "Предсписок завершён" : "Предсписок в работе") + "</h3>"
+            + "<p class='prespisok-subtitle'>Начал: " + escapeHtml(operator) + (isCompletedRun ? ". Сводка ниже, грязные подробности в журнале." : ". Не деремся за один ШК: WMS+ резервирует текущую цель за сотрудником.") + "</p>"
+            + "<div class='prespisok-finish-grid'>"
+            + "<div class='prespisok-finish-stat'><span>Сделано</span><strong>" + completed + "/" + total + "</strong></div>"
+            + "<div class='prespisok-finish-stat'><span>Осталось</span><strong>" + Math.max(total - completed, 0) + "</strong></div>"
+            + "<div class='prespisok-finish-stat'><span>Общее время</span><strong>" + escapeHtml(formatDuration(run.elapsed_ms || 0)) + "</strong></div>"
+            + "<div class='prespisok-finish-stat saved'><span>Спасено</span><strong>" + escapeHtml(formatMoney(money.saved)) + "</strong></div>"
+            + "<div class='prespisok-finish-stat writeoff'><span>Списано</span><strong>" + escapeHtml(formatMoney(money.writeoff)) + "</strong></div>"
+            + "</div>"
+            + "<div class='file-row'>"
+            + (canJoin ? "<button id='joinPrespisokRun' class='prespisok-submit prespisok-submit-arcade' type='button'>Подключиться к разбору</button>" : (isCompletedRun ? "<button id='openPrespisokJournalFromRun' class='btn btn-rect prespisok-second-line-btn' type='button'>Открыть журнал предсписка</button>" : "<div class='status-line error'>К этому запуску нельзя подключиться: он создан старой версией без полного списка целей.</div>"))
+            + "<button id='showPrespisokSecondLine' class='btn btn-outline prespisok-second-line-btn' type='button'>Показать задачи 2-й линии из предсписка</button>"
+            + "</div>"
+            + "</section>";
+        bindPrespisokClose();
+        if ($("joinPrespisokRun")) $("joinPrespisokRun").addEventListener("click", () => { void joinPrespisokRun(); });
+        if ($("openPrespisokJournalFromRun")) $("openPrespisokJournalFromRun").addEventListener("click", () => { void openPrespisokJournalModal(); });
+        if ($("showPrespisokSecondLine")) $("showPrespisokSecondLine").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
+    }
+
+    async function joinPrespisokRun() {
+        const run = state.prespisok.remoteRun || await fetchActivePrespisokRun();
+        if (!run) {
+            resetPrespisokState();
+            renderPrespisok();
+            return;
+        }
+        const actions = await fetchPrespisokActions(run.id);
+        state.prespisok.actions = Array.isArray(actions) ? actions : [];
+        const ok = applyPrespisokRemoteRun(run, true);
+        if (!ok) {
+            state.prespisok.progressOnly = true;
+            renderPrespisok();
+            return;
+        }
+        persistPrespisokState();
         renderPrespisokPlay();
     }
 
@@ -4942,9 +6021,13 @@
 
     function prespisokUrgencyScore(item) {
         const price = Number(item.price) || 0;
-        const date = parseDateTime(item.predictedWriteoffAt).date;
-        const daysLeft = date ? Math.max((Date.parse(date + "T00:00:00Z") - Date.parse(state.today + "T00:00:00Z")) / 86400000, -30) : 30;
-        return price * 1.8 + Math.max(0, 30 - daysLeft) * 900;
+        const parsed = parseDateTime(item.predictedWriteoffAt);
+        const fallbackTs = parsed.date ? Date.parse(parsed.date + "T23:59:59Z") : Date.now() + 30 * 86400000;
+        const targetTs = parsed.ts || fallbackTs;
+        const hoursLeft = Math.max((targetTs - Date.now()) / 3600000, -72);
+        const timeScore = Math.max(0, 336 - hoursLeft) * 7000;
+        const priceScore = Math.log10(price + 10) * 1800 + Math.min(price, 100000) / 12;
+        return timeScore + priceScore;
     }
 
     function buildPrespisokItems(rows) {
@@ -5135,10 +6218,45 @@
 
     function currentPrespisokItem() {
         const done = new Set((state.prespisok.actions || []).map((action) => action.item_key));
+        const actor = prespisokActor();
+        const reservations = state.prespisok.reservations || {};
+        const isBlockedByOther = (key) => {
+            const reservation = reservations[key];
+            if (!reservation || !reservation.actor_id || reservation.actor_id === actor.id) return false;
+            const reservedAt = parseDateTime(reservation.reserved_at).ts || 0;
+            return reservedAt && Date.now() - reservedAt < PRESPISOK_RESERVATION_TTL_MS;
+        };
         let index = Math.max(Number(state.prespisok.index) || 0, 0);
-        while (index < state.prespisok.items.length && done.has(prespisokItemKey(state.prespisok.items[index]))) index += 1;
+        while (index < state.prespisok.items.length) {
+            const key = prespisokItemKey(state.prespisok.items[index]);
+            if (!done.has(key) && !isBlockedByOther(key)) break;
+            index += 1;
+        }
         state.prespisok.index = index;
         return state.prespisok.items[index] || null;
+    }
+
+    function hasUnfinishedPrespisokItems() {
+        const done = new Set((state.prespisok.actions || []).map((action) => action.item_key));
+        return (state.prespisok.items || []).some((item) => !done.has(prespisokItemKey(item)));
+    }
+
+    async function reservePrespisokItem(item) {
+        if (!item || !state.prespisok.runId) return;
+        const key = prespisokItemKey(item);
+        const actor = prespisokActor();
+        const current = state.prespisok.reservations && state.prespisok.reservations[key];
+        if (current && current.actor_id === actor.id) return;
+        state.prespisok.reservations = {
+            ...(state.prespisok.reservations || {}),
+            [key]: {
+                actor_id: actor.id,
+                actor_name: actor.name,
+                reserved_at: new Date().toISOString(),
+            },
+        };
+        persistPrespisokState();
+        await upsertPrespisokRun("in_progress");
     }
 
     function prespisokSnark(item) {
@@ -5192,12 +6310,20 @@
         if (!target) return;
         const item = currentPrespisokItem();
         if (!item) {
+            if (hasUnfinishedPrespisokItems()) {
+                target.innerHTML = prespisokTopHtml("Все свободные цели сейчас заняты другим сотрудником. Да, коллективная работа иногда выглядит как очередь в столовую.")
+                    + "<div class='prespisok-center'><div><div class='prespisok-wait'>Жду свободную цель</div><button id='refreshPrespisokFreeItem' class='prespisok-start prespisok-start-small' type='button'>Проверить еще раз</button></div></div>";
+                bindPrespisokClose();
+                $("refreshPrespisokFreeItem").addEventListener("click", () => { void syncPrespisokRunActions().then(renderPrespisokPlay); });
+                return;
+            }
             void finishPrespisokRun();
             renderPrespisokFinish();
             return;
         }
         if (!state.prespisok.timerStartedAt) state.prespisok.timerStartedAt = Date.now();
         if (!state.prespisok.itemTimerStartedAt) state.prespisok.itemTimerStartedAt = Date.now();
+        void reservePrespisokItem(item);
         const progress = (state.prespisok.actions || []).length;
         const total = state.prespisok.items.length;
         const rowsHtml = (item.rows || []).map((row) => "<div class='prespisok-item-line'><strong>" + escapeHtml(row.shk) + "</strong><span>" + escapeHtml(row.status || "-") + "</span><span>" + escapeHtml(formatMoney(row.price)) + "</span></div>").join("");
@@ -5293,6 +6419,8 @@
     async function createPrespisokTask(item, actionLabel, extraValue) {
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
+        const actor = currentWmsUser();
+        const actorLabel = [actor.name, actor.id].filter(Boolean).join(" / ") || "Не определено";
         const rows = (item.rows || []).map((row) => ({ ...row, product: row.shk, name: "", product_status: row.status, created_at: row.last_status_at, mx: row.tare_place || row.destination_office }));
         const task = taskRecord({
             module: "prespisok",
@@ -5311,10 +6439,20 @@
             tareId: item.type === "tare" ? item.id : rows[0] && rows[0].tare_id,
             price: item.price,
             tags: ["Предсписок"],
-            payload: { entity_type: item.type === "tare" ? "tare" : "shk", prespisok: true, prespisok_action: actionLabel, prespisok_extra: extraValue, rows: rows.slice(0, 80) },
+            payload: {
+                entity_type: item.type === "tare" ? "tare" : "shk",
+                prespisok: true,
+                prespisok_action: actionLabel,
+                prespisok_extra: extraValue,
+                prespisok_created_by_id: actor.id || "",
+                prespisok_created_by_name: actor.name || "",
+                rows: rows.slice(0, 80),
+            },
+            searchParts: [actor.name, actor.id, actionLabel, extraValue],
             infoLines: [
                 "Решение предсписка: " + actionLabel,
                 extraValue ? "Ссылка/комментарий: " + extraValue : "",
+                "Создал задачу: " + actorLabel,
                 "Прогнозируемая дата списания: " + formatPrespisokWriteoffAt(item.predictedWriteoffAt),
                 item.type === "tare" ? "ШК в таре:" : "Искомый ШК: " + item.id,
                 ...(item.type === "tare" ? rows.map((row) => "- " + row.product + " / " + (row.product_status || "-") + " / " + formatMoney(row.price)) : []),
@@ -5326,8 +6464,15 @@
     }
 
     async function applyPrespisokAction(actionKey, extraValue) {
+        await syncPrespisokRunActions();
         const item = currentPrespisokItem();
         if (!item) return;
+        const itemKey = prespisokItemKey(item);
+        if ((state.prespisok.actions || []).some((action) => action.item_key === itemKey)) {
+            toast("Эту цель уже разобрали. Переключаю дальше.", "info");
+            renderPrespisokPlay();
+            return;
+        }
         const status = $("prespisokActionStatus");
         const submit = $("submitPrespisokAction");
         if (submit) submit.disabled = true;
@@ -5343,7 +6488,7 @@
             }
             const action = {
                 run_id: state.prespisok.runId,
-                item_key: prespisokItemKey(item),
+                item_key: itemKey,
                 action_key: actionKey,
                 entity_type: item.type,
                 entity_id: item.id,
@@ -5358,6 +6503,7 @@
                 actor: currentWmsUser(),
             };
             state.prespisok.actions.push(action);
+            if (state.prespisok.reservations) delete state.prespisok.reservations[itemKey];
             state.prespisok.index += 1;
             state.prespisok.elapsedBeforeMs = prespisokElapsedMs();
             state.prespisok.itemElapsedBeforeMs = 0;
@@ -5379,6 +6525,7 @@
         const db = supabaseDb();
         if (!db || !state.prespisok.runId) return;
         const user = currentWmsUser();
+        const existingRun = state.prespisok.remoteRun || {};
         const payload = {
             id: state.prespisok.runId,
             wh_id: WH_ID,
@@ -5389,14 +6536,16 @@
             completed_items: state.prespisok.actions.length || 0,
             excluded_items: state.prespisok.excludedCount || 0,
             elapsed_ms: Math.round(prespisokElapsedMs()),
-            operator_id: user.id || null,
-            operator_name: user.name || null,
+            operator_id: existingRun.operator_id || user.id || null,
+            operator_name: existingRun.operator_name || user.name || null,
             started_at: state.prespisok.startedAt || new Date().toISOString(),
             finished_at: statusValue === "completed" ? new Date().toISOString() : null,
             payload: prespisokCompactPayload(),
         };
         try {
             await db.from(WMS_PRESPISOK_RUNS_TABLE).upsert(payload, { onConflict: "id" });
+            state.prespisokHome.run = payload;
+            renderPrespisokHomeCard();
         } catch (error) {
             console.warn("prespisok run log skipped:", error);
         }
@@ -5483,7 +6632,7 @@
             + "<div class='prespisok-finish-stat saved'><span>Спасено ШК</span><strong>" + moneyStats.savedCount + "</strong></div>"
             + "<div class='prespisok-finish-stat saved'><span>Спасено рублей</span><strong>" + escapeHtml(formatMoney(moneyStats.saved)) + "</strong></div>"
             + "<div class='prespisok-finish-stat writeoff'><span>Автосписание ШК</span><strong>" + moneyStats.autoWriteoffCount + "</strong></div>"
-            + "<div class='prespisok-finish-stat writeoff'><span>К списанию рублей</span><strong>" + escapeHtml(formatMoney(moneyStats.writeoff)) + "</strong></div>"
+            + "<div class='prespisok-finish-stat writeoff'><span>Списано рублей</span><strong>" + escapeHtml(formatMoney(moneyStats.writeoff)) + "</strong></div>"
             + "</div>"
             + "<div class='prespisok-file-panel'><h3>Таблица лидеров</h3><table class='sample-table'><thead><tr><th>#</th><th>Сотрудник</th><th>Разобрано</th><th>Время</th></tr></thead><tbody>" + topRows + "</tbody></table><div class='status-line good'>Личный рекорд: " + escapeHtml(best.actions + "/" + best.total + " за " + formatDuration(best.elapsed_ms)) + ".</div><button id='resetPrespisokFinished' class='btn btn-rect' type='button'>Закрыть и очистить прогресс</button></div>"
             + "</section>";
@@ -5605,6 +6754,10 @@
 
     function resetCurrentUpload() {
         if (!state.activeModule) return;
+        state.repeatUploadUnlocked = true;
+        state.preview = null;
+        state.rows = {};
+        state.files = {};
         renderWorkShell(state.activeModule);
     }
 
@@ -5961,8 +7114,11 @@
     function initEvents() {
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
+        $("openRequests").addEventListener("click", showRequestsPage);
         $("openInactive").addEventListener("click", showInactivePage);
-        $("openPrespisok").addEventListener("click", openPrespisokModal);
+        $("openPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
+        $("openPrespisokSecondLineHome").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
+        $("openPrespisokJournal").addEventListener("click", () => { void openPrespisokJournalModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
             if ((state.taskSearch.rows || []).length) setTaskSearchResultsVisible(true);
@@ -5990,6 +7146,7 @@
         $("saveShiftOpening").addEventListener("click", () => { void saveShiftOpening(); });
         $("homeFromUploads").addEventListener("click", showHome);
         $("homeFromReview").addEventListener("click", showHome);
+        $("homeFromRequests").addEventListener("click", showHome);
         $("homeFromInactive").addEventListener("click", showHome);
         $("makeUpload").addEventListener("click", () => openChooser(""));
         $("backfillUpload").addEventListener("click", openBackfillChooser);
@@ -6001,6 +7158,7 @@
         $("closeMaster").addEventListener("click", () => setFlowModalOpen("masterWork", false));
         $("closeBackfillCalendar").addEventListener("click", () => setFlowModalOpen("backfillCalendarModal", false));
         $("reviewViewSections").addEventListener("click", renderReview);
+        $("requestsViewSections").addEventListener("click", renderRequests);
         $("openActualizeTasks").addEventListener("click", () => { void openActualizeTasksModal(); });
         $("closeActualizeTasks").addEventListener("click", closeActualizeTasksModal);
         $("copyActiveShk").addEventListener("click", () => { void copyActiveShkForActualize(); });
@@ -6034,6 +7192,8 @@
         $("backfillCalendarModal").addEventListener("click", (event) => { if (event.target === $("backfillCalendarModal")) setFlowModalOpen("backfillCalendarModal", false); });
         $("reviewSectionModal").addEventListener("click", (event) => { if (event.target === $("reviewSectionModal")) closeReviewSectionModal(); });
         $("inactiveTasksModal").addEventListener("click", (event) => { if (event.target === $("inactiveTasksModal")) setFlowModalOpen("inactiveTasksModal", false); });
+        $("prespisokSecondLineModal").addEventListener("click", (event) => { if (event.target === $("prespisokSecondLineModal")) setFlowModalOpen("prespisokSecondLineModal", false); });
+        $("prespisokJournalModal").addEventListener("click", (event) => { if (event.target === $("prespisokJournalModal")) closePrespisokJournalModal(); });
         document.addEventListener("keydown", (event) => {
             if (event.key !== "Escape") return;
             if ($("specialInfoModal").classList.contains("active")) {
@@ -6046,6 +7206,8 @@
                 || $("reopenConfirmModal").classList.contains("active")
                 || $("splitShkConfirmModal").classList.contains("active")) return;
             if ($("prespisokModal").classList.contains("active")) requestPrespisokClose();
+            else if ($("prespisokSecondLineModal").classList.contains("active")) setFlowModalOpen("prespisokSecondLineModal", false);
+            else if ($("prespisokJournalModal").classList.contains("active")) closePrespisokJournalModal();
             else if ($("inactiveTasksModal").classList.contains("active")) setFlowModalOpen("inactiveTasksModal", false);
             else if ($("actualizeTasksModal").classList.contains("active")) closeActualizeTasksModal();
             else if ($("shiftOpeningModal").classList.contains("active")) closeShiftOpeningModal();
@@ -6061,6 +7223,8 @@
         initEvents();
         renderCalendar();
         renderShiftGate();
+        renderPrespisokHomeCard();
+        void refreshPrespisokHomeState();
         void loadShiftState();
     }
 
