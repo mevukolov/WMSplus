@@ -30,6 +30,8 @@
     const AUTO_FOUND_EMP_ID = "2405";
     const AUTO_FOUND_COMMENT = "У товара есть движение";
     const SYSTEM_MOVEMENT_VERDICT = "Система - Движение";
+    const MOVEMENT_AUTO_CLOSE_MINUTES = 10;
+    const MOVEMENT_AUTO_CLOSE_MIN_MS = MOVEMENT_AUTO_CLOSE_MINUTES * 60 * 1000;
     const PRESPISOK_STORAGE_KEY = "wms_prespisok_progress_v1";
     const PRESPISOK_TEST_MODE = true;
     const PRESPISOK_START_MINUTE = 14 * 60 + 30;
@@ -1335,6 +1337,31 @@
         return { raw, ts: 0, label: raw || "-" };
     }
 
+    function movementTimeInfo(row, item, supersetRow) {
+        const taskMovement = itemMovementInfo(row, item);
+        const supersetRaw = normalizeText(supersetRow && (supersetRow.last_status_iso || supersetRow.last_status_at));
+        const supersetParsed = parseDateTime(supersetRaw);
+        const supersetTs = Number(supersetRow && supersetRow.last_status_ts) || supersetParsed.ts || 0;
+        const deltaMs = taskMovement.ts && supersetTs ? supersetTs - taskMovement.ts : null;
+        return {
+            taskMovement,
+            supersetTs,
+            supersetLabel: supersetTs ? formatRuDateTime(supersetRaw || new Date(supersetTs).toISOString()) : (supersetRaw || "-"),
+            deltaMs,
+            canAutoClose: Number.isFinite(deltaMs) && deltaMs >= MOVEMENT_AUTO_CLOSE_MIN_MS,
+        };
+    }
+
+    function formatMovementDelta(deltaMs) {
+        if (!Number.isFinite(deltaMs)) return "разница не определена";
+        const sign = deltaMs >= 0 ? "+" : "-";
+        const totalMinutes = Math.floor(Math.abs(deltaMs) / 60000);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        if (hours) return sign + hours + " ч " + minutes + " мин";
+        return sign + minutes + " мин";
+    }
+
     function movementChangeList(row, item, supersetRow) {
         if (!supersetRow) return [];
         const changes = [];
@@ -1348,9 +1375,14 @@
         if (statusChanged) {
             changes.push({ reason: "статус изменился", label: "Статус", before: beforeStatus || "-", after: afterStatus || "-" });
         }
-        const taskMovement = itemMovementInfo(row, item);
-        if (supersetRow.last_status_ts && taskMovement.ts && supersetRow.last_status_ts > taskMovement.ts) {
-            changes.push({ reason: "дата свежее", label: "Дата движения", before: taskMovement.label || "-", after: formatRuDateTime(supersetRow.last_status_iso || supersetRow.last_status_at) });
+        const time = movementTimeInfo(row, item, supersetRow);
+        if (time.supersetTs && time.taskMovement.ts) {
+            changes.push({
+                reason: time.canAutoClose ? "дата позже минимум на " + MOVEMENT_AUTO_CLOSE_MINUTES + " минут" : "дата без достаточного сдвига",
+                label: "Дата движения",
+                before: time.taskMovement.label || "-",
+                after: time.supersetLabel + " (" + formatMovementDelta(time.deltaMs) + ")",
+            });
         }
         const office = normalizeIdentifier(supersetRow.last_office);
         if (office && office !== WH_ID) {
@@ -1360,11 +1392,12 @@
     }
 
     function movementReasonList(row, item, supersetRow) {
+        if (!movementTimeInfo(row, item, supersetRow).canAutoClose) return [];
         return movementChangeList(row, item, supersetRow).map((change) => change.reason);
     }
 
     function hasConfirmedMovement(row, item, supersetRow) {
-        return movementReasonList(row, item, supersetRow).length > 0;
+        return movementTimeInfo(row, item, supersetRow).canAutoClose;
     }
 
     function buildMovementCandidates(supersetRows) {
@@ -1420,7 +1453,7 @@
         return "Проверено строк: " + stats.rows
             + ". Активных ШК в задачах: " + stats.active_shks
             + ". Найдено совпадений: " + stats.matched_active
-            + ". Уже не на СЦ: " + stats.matched_outside_office + ".";
+            + ". С другим офисом в Superset: " + stats.matched_outside_office + ".";
     }
 
     function actualizeSummaryHtml(candidates) {
@@ -1431,7 +1464,7 @@
         return "<div class='actualize-summary'>"
             + "<div><strong>" + escapeHtml(String(stats.rows)) + "</strong><span>строк проверено</span></div>"
             + "<div><strong>" + escapeHtml(String(stats.matched_active)) + "</strong><span>активных ШК найдено</span></div>"
-            + "<div><strong>" + escapeHtml(String(movedCount)) + "</strong><span>ШК с движением</span></div>"
+            + "<div><strong>" + escapeHtml(String(movedCount)) + "</strong><span>ШК с движением +10 мин</span></div>"
             + "<div><strong>" + escapeHtml(String(partialCount)) + "</strong><span>частичных тар</span></div>"
             + "</div>";
     }
@@ -1462,7 +1495,7 @@
         const candidates = state.actualize.candidates || [];
         const statsLine = actualizeStatsLine();
         if (!candidates.length) {
-            target.innerHTML = actualizeSummaryHtml(candidates) + "<div class='empty-state'>Активных задач с подтвержденным движением не найдено. " + escapeHtml(statsLine) + "</div>";
+            target.innerHTML = actualizeSummaryHtml(candidates) + "<div class='empty-state'>Активных задач с движением минимум на 10 минут позже исходных данных не найдено. " + escapeHtml(statsLine) + "</div>";
             setActualizeStatus("Superset прочитан. Кандидатов на закрытие нет.", "good");
             return;
         }
@@ -1484,7 +1517,7 @@
                 + movementActionButton(candidate.row.id, "split_remaining", "Создать задачи на оставшиеся ШК", action)
                 + "</div></div>";
         }).join("");
-        target.innerHTML = "<div class='status-line good'>Проверьте найденные движения и уберите лишние строки кнопкой “−”, если в список попало что-то не то.</div>"
+        target.innerHTML = "<div class='status-line good'>Проверьте движения: в список попали только ШК, где время Superset минимум на 10 минут позже исходного времени задачи.</div>"
             + actualizeSummaryHtml(candidates)
             + (fullHtml ? "<h4>Полное закрытие</h4>" + fullHtml : "")
             + (partialHtml ? "<h4>Частичное движение по тарам</h4>" + partialHtml : "")
@@ -3703,35 +3736,37 @@
         };
     }
 
-    function isRwpStatus(value) { return normalizeForMatch(value) === normalizeForMatch(RWP_STATUS); }
-    function isPmBufferStatus(value) { return PM_BUFFER_STATUSES.has(normalizeForMatch(value)); }
+    function sourceStatusCode(value) { return latinStatusCode(value).toLowerCase() || normalizeForMatch(value); }
+    function sourceRowStatus(row) { return sourceStatusCode(row && row.product_status); }
+    function isRwpStatus(value) { return sourceStatusCode(value) === "rwp" || normalizeForMatch(value) === normalizeForMatch(RWP_STATUS); }
+    function isPmBufferStatus(value) { return PM_BUFFER_STATUSES.has(sourceStatusCode(value)); }
     function mxHasPresortExclusion(mx) { const normalized = normalizeForMatch(mx); return PRESORT_EXCLUDED_MX_PARTS.some((part) => normalized.includes(part)); }
     function mxIncludes(row, part) { return normalizeForMatch(row && row.mx).includes(normalizeForMatch(part)); }
     function mxHasBuffer(row) { return normalizeForMatch(row && row.mx).includes("буфер"); }
     function isPresortStatus(row) {
-        const status = normalizeForMatch(row && row.product_status);
+        const status = sourceRowStatus(row);
         if (status === "sps") return true;
         if (status === "pwt") return !mxHasBuffer(row) && !mxHasPresortExclusion(row && row.mx);
         if ((status === "gws" || status === "wmi") && !mxHasPresortExclusion(row && row.mx)) return true;
         return false;
     }
-    function isLabelingStatus(row) { return normalizeForMatch(row && row.product_status) === "lgr"; }
+    function isLabelingStatus(row) { return sourceRowStatus(row) === "lgr"; }
     function isMarketplaceStatus(row) {
-        const status = normalizeForMatch(row && row.product_status);
+        const status = sourceRowStatus(row);
         if (status === "pap") return true;
         return (status === "gws" || status === "pwt") && mxIncludes(row, "Пред сортировка МП");
     }
     function isPcStatus(row) {
-        const status = normalizeForMatch(row && row.product_status);
+        const status = sourceRowStatus(row);
         if (status === "smc") return true;
         return (status === "gws" || status === "pwt") && mxIncludes(row, "Сортировка в сетки");
     }
     function isWmiMpPcStatus(row) {
-        const status = normalizeForMatch(row && row.product_status);
+        const status = sourceRowStatus(row);
         return status === "wmi" && (mxIncludes(row, "Пред сортировка МП") || mxIncludes(row, "Сортировка в сетки"));
     }
-    function isNoOrderUsdStatus(row) { return normalizeForMatch(row && row.product_status) === "usd"; }
-    function isNoOrderTmmStatus(row) { return normalizeForMatch(row && row.product_status) === "tmm"; }
+    function isNoOrderUsdStatus(row) { return sourceRowStatus(row) === "usd"; }
+    function isNoOrderTmmStatus(row) { return sourceRowStatus(row) === "tmm"; }
     function isMultiShipmentBufferMx(value) { return normalizeForMatch(value).includes("буфер мультиотгрузки"); }
     function mxHasBoxes(row) { return normalizeForMatch(row && row.mx).includes("коробк"); }
     function isGateMx(value) { return normalizeForMatch(value).includes("ворота"); }
