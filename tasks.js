@@ -13,6 +13,7 @@
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
+    const SAVE_TASK_CHUNK_SIZE = 100;
     const TWO_SHK_TABLE = "2shk_rep";
     const PURE_URL_FILTER_CHUNK_SIZE = 80;
     const PURE_INSERT_CHUNK_SIZE = 400;
@@ -3006,6 +3007,13 @@
         const max = Math.min(rows.length, 30);
         for (let i = 0; i < max; i += 1) {
             const line = rows[i].map(normalizeText).join(" ").toLowerCase();
+            if (kind === "afterSaleMovement") {
+                const normalized = normalizeForMatch(line);
+                const oldFormat = normalized.includes("товар") && normalized.includes("дата статуса") && normalized.includes("статус после реализации");
+                const newFormat = normalized.includes("шк") && normalized.includes("время статуса") && normalized.includes("статус");
+                if (oldFormat || newFormat) return i;
+                continue;
+            }
             if (markers.every((marker) => line.includes(marker))) return i;
         }
         return 0;
@@ -3066,9 +3074,31 @@
     }
 
     function normalizeAfterSaleMovementRow(row, rowNumber) {
+        const v2Product = normalizeIdentifier(row[1]);
+        const v2StatusAt = parseDateTime(row[2]);
+        if (v2Product && v2StatusAt.ts && normalizeText(row[3])) {
+            const office = normalizeText(row[0]);
+            const block = normalizeText(row[5]);
+            return {
+                row_number: rowNumber,
+                office,
+                block,
+                product: v2Product,
+                realized_at: normalizeText(row[8]),
+                status_id: "",
+                status: normalizeText(row[3]),
+                status_at: normalizeText(row[2]),
+                mx: [office, block].filter(Boolean).join(" / "),
+                tare: normalizeIdentifier(row[6]),
+                employee_id: normalizeIdentifier(row[7]),
+                employee: "",
+                office_id: normalizeIdentifier(row[4]),
+                source_format: "after_sale_movement_v2",
+            };
+        }
         const product = normalizeIdentifier(row[2]);
         if (!product) return null;
-        return { row_number: rowNumber, office: normalizeText(row[0]), block: normalizeText(row[1]), product, realized_at: normalizeText(row[3]), status_id: normalizeIdentifier(row[4]), status: normalizeText(row[5]), status_at: normalizeText(row[6]), mx: normalizeText(row[7]), tare: normalizeIdentifier(row[8]), employee_id: normalizeIdentifier(row[9]), employee: normalizeText(row[10]) };
+        return { row_number: rowNumber, office: normalizeText(row[0]), block: normalizeText(row[1]), product, realized_at: normalizeText(row[3]), status_id: normalizeIdentifier(row[4]), status: normalizeText(row[5]), status_at: normalizeText(row[6]), mx: normalizeText(row[7]), tare: normalizeIdentifier(row[8]), employee_id: normalizeIdentifier(row[9]), employee: normalizeText(row[10]), source_format: "after_sale_movement_v1" };
     }
 
     async function readObjectWorkbookRows(file) {
@@ -4277,6 +4307,8 @@
                 secondaryFileName: state.files.carrier ? state.files.carrier.name : "",
                 rowsCount: state.rows.primary ? state.rows.primary.length : 0,
                 summary: summarizePreview(state.preview),
+            }, (progress) => {
+                setStatus("Сохраняю в Supabase: пачка " + progress.chunk + "/" + progress.totalChunks + ", задач " + progress.saved + "/" + progress.totalTasks + "...");
             });
             if (response && response.upload_run) mergeRun(response.upload_run);
             renderCalendar();
@@ -4298,7 +4330,7 @@
         return result;
     }
 
-    async function saveTasksAndRun(module, businessDate, tasks, meta) {
+    async function saveTasksAndRun(module, businessDate, tasks, meta, onProgress) {
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
         const def = moduleDef(module);
@@ -4313,12 +4345,32 @@
             file_name: meta.fileName || "",
             secondary_file_name: meta.secondaryFileName || "",
             rows_count: meta.rowsCount || 0,
-            tasks_count: tasks.length,
+            tasks_count: payloadTasks.length,
             summary: meta.summary || {},
         };
-        const { data, error } = await db.rpc(SAVE_RPC, { p_tasks: payloadTasks, p_run: run });
-        if (error) throw error;
-        return data || { ok: true, upserted_count: tasks.length };
+        const chunks = chunkArray(payloadTasks, SAVE_TASK_CHUNK_SIZE);
+        let totalUpserted = 0;
+        let uploadRun = null;
+        if (!chunks.length) return { ok: true, upserted_count: 0, upload_run: null };
+        for (let i = 0; i < chunks.length; i += 1) {
+            if (onProgress) onProgress({ chunk: i + 1, totalChunks: chunks.length, chunkSize: chunks[i].length, saved: totalUpserted, totalTasks: payloadTasks.length });
+            const isLast = i === chunks.length - 1;
+            const { data, error } = await db.rpc(SAVE_RPC, { p_tasks: chunks[i], p_run: isLast ? run : {} });
+            if (error) throw error;
+            totalUpserted += Number(data && data.upserted_count) || chunks[i].length;
+            if (data && data.upload_run) uploadRun = data.upload_run;
+        }
+        if (uploadRun && uploadRun.id && Number(uploadRun.upserted_count) !== totalUpserted) {
+            uploadRun = { ...uploadRun, upserted_count: totalUpserted };
+            const { data, error } = await db
+                .from(RUNS_TABLE)
+                .update({ upserted_count: totalUpserted })
+                .eq("id", uploadRun.id)
+                .select("*")
+                .single();
+            if (!error && data) uploadRun = data;
+        }
+        return { ok: true, upserted_count: totalUpserted, upload_run: uploadRun };
     }
 
     function mergeRun(run) {
@@ -4650,6 +4702,8 @@
                     secondaryFileName: item.module === "pm" && state.master.fileNames.carrier ? state.master.fileNames.carrier : "",
                     rowsCount: sourceRowsCountForMasterModule(item.module),
                     summary: summarizePreview(item.preview),
+                }, (progress) => {
+                    setMasterStatus("Сохраняю: " + moduleDef(item.module).label + ". Пачка " + progress.chunk + "/" + progress.totalChunks + ", задач в модуле " + progress.saved + "/" + progress.totalTasks + ". Уже сохранено всего: " + total + ".");
                 });
                 total += Number(response.upserted_count || tasks.length) || 0;
                 if (response.upload_run) mergeRun(response.upload_run);
