@@ -36,7 +36,7 @@
         .task-search-title { display: block; font-size: 14px; font-weight: 900; overflow-wrap: anywhere; }
         .task-search-meta { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
         .task-search-empty { padding: 12px; color: #64748b; font-size: 13px; line-height: 1.35; }
-        .tasks-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+        .tasks-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
         .tasks-action-card { min-height: 180px; padding: 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); text-align: left; color: #0f172a; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
         .tasks-action-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
         .tasks-action-card.is-disabled { opacity: .42; filter: grayscale(.35); cursor: not-allowed; }
@@ -152,6 +152,7 @@
         }
         .tasks-flow-modal.upload-work.active { display: flex; }
         #taskDetailModal { z-index: 4300; }
+        #specialInfoModal { z-index: 4450; }
         #editTareTaskModal,
         #deferTaskModal,
         #reopenConfirmModal,
@@ -212,6 +213,7 @@
         .review-click-row:hover td { background: #f8fafc; }
         .review-task-title { font-weight: 800; color: #242038; }
         .review-task-sub { margin-top: 4px; color: #64748b; font-size: 12px; }
+        .review-task-route { display: inline-flex; margin-top: 5px; border-radius: 999px; background: #fef3c7; color: #854d0e; padding: 3px 8px; font-size: 12px; font-weight: 900; }
         .review-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 800; background: #f1f5f9; color: #334155; }
         .review-price-cell { font-weight: 900; color: #0f172a; }
         .review-tags { display: flex; flex-wrap: wrap; gap: 4px; max-width: 240px; }
@@ -230,9 +232,30 @@
         .task-info-item.copyable:hover { border-color: rgba(98,60,234,.32); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
         .task-info-label { color: #64748b; font-size: 12px; font-weight: 800; }
         .task-info-value { margin-top: 4px; color: #242038; font-weight: 900; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .task-tags-box { margin-top: 12px; border-radius: 16px; border: 1px solid #e2e8f0; background: #fff; padding: 12px; }
+        .task-tags-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .task-tag-pill { border: 0; border-radius: 999px; background: #f1f5f9; color: #334155; padding: 7px 10px; font-size: 12px; font-weight: 900; cursor: copy; }
+        .task-tag-pill.special { background: #fff7ed; color: #9a3412; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(249,115,22,.22); }
+        .task-tag-pill:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+        .special-info-list { display: grid; gap: 12px; margin-top: 14px; }
+        .special-info-card { border: 1px solid #fed7aa; border-radius: 18px; background: #fff7ed; padding: 14px; }
+        .special-info-line { width: 100%; display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; border: 0; border-bottom: 1px solid rgba(251,146,60,.18); background: transparent; padding: 8px 0; text-align: left; cursor: copy; }
+        .special-info-line span { color: #9a3412; font-size: 12px; font-weight: 900; }
+        .special-info-line strong { color: #242038; overflow-wrap: anywhere; }
+        .special-info-link { display: inline-flex; margin-top: 12px; border-radius: 12px; background: #ea580c; color: #fff; padding: 10px 12px; font-weight: 900; text-decoration: none; }
+        .special-info-muted { margin-top: 12px; color: #9a3412; font-size: 13px; font-weight: 800; }
         .task-description-box { margin-top: 12px; border-radius: 16px; border: 1px solid #e2e8f0; background: #fff; padding: 14px; color: #334155; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
         .task-description-box.copyable { cursor: copy; }
         .task-description-box.copyable:hover { border-color: rgba(98,60,234,.32); box-shadow: var(--shadow-sm); }
+        .task-tare-box { margin-top: 12px; border-radius: 16px; border: 1px solid #e2e8f0; background: #fff; padding: 14px; color: #334155; }
+        .task-tare-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+        .task-tare-head strong { color: #242038; }
+        .task-tare-list { display: grid; gap: 6px; }
+        .task-tare-row { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; border: 1px solid #edf2f7; border-radius: 12px; background: #f8fafc; padding: 8px 10px; color: #334155; text-align: left; cursor: copy; }
+        .task-tare-row:hover { border-color: rgba(98,60,234,.28); background: #f5f3ff; }
+        .task-tare-shk { color: #242038; font-weight: 900; overflow-wrap: anywhere; }
+        .task-tare-meta { color: #64748b; font-size: 12px; overflow-wrap: anywhere; }
+        .task-tare-price { color: #242038; font-size: 12px; font-weight: 900; white-space: nowrap; }
         .task-history-box { margin-top: 12px; border-radius: 16px; border: 1px solid #fde68a; background: #fffbeb; padding: 14px; color: #713f12; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
         .task-history-box.copyable { cursor: copy; }
         .task-history-box.copyable:hover { border-color: #f59e0b; box-shadow: var(--shadow-sm); }
@@ -286,6 +309,85 @@
         .review-full-card { width: min(1560px, calc(100vw - 32px)); height: calc(100dvh - 32px); max-height: none; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
         .review-full-card .review-table-card { border: 0; border-radius: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; }
         .review-full-card .review-table-scroll { max-height: none; height: auto; flex: 1; min-height: 0; }
+        #prespisokModal.prespisok-modal { padding: 0; align-items: stretch; justify-content: stretch; background: #120f1f; backdrop-filter: none; }
+        .prespisok-card { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; border: 0; overflow: hidden; padding: 0; background: radial-gradient(circle at 82% 14%, rgba(250,204,21,.18), transparent 28%), radial-gradient(circle at 12% 82%, rgba(98,60,234,.24), transparent 34%), linear-gradient(135deg, #171326 0%, #24172c 52%, #3e2e23 100%); color: #fff; }
+        .prespisok-wrap { position: relative; min-height: 100%; padding: clamp(18px, 3vw, 42px); box-sizing: border-box; overflow: auto; }
+        .prespisok-wrap::before { content: ""; position: fixed; right: clamp(12px, 5vw, 72px); bottom: clamp(10px, 4vw, 58px); width: min(36vw, 430px); aspect-ratio: 1; border-radius: 46% 54% 40% 60%; background: radial-gradient(circle at 44% 34%, #facc15 0 6%, transparent 7%), radial-gradient(circle at 60% 34%, #facc15 0 6%, transparent 7%), radial-gradient(circle at 51% 58%, rgba(255,255,255,.9) 0 10%, transparent 11%), linear-gradient(145deg, rgba(255,255,255,.14), rgba(255,255,255,.035)); box-shadow: inset 0 0 0 2px rgba(255,255,255,.14), 0 24px 80px rgba(0,0,0,.28); opacity: .36; transform: rotate(-8deg); pointer-events: none; animation: prespisokFloat 5.4s ease-in-out infinite; }
+        @keyframes prespisokFloat { 0%,100% { transform: translateY(0) rotate(-8deg); } 50% { transform: translateY(-18px) rotate(-4deg); } }
+        @keyframes prespisokPulse { 0%,100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.04); opacity: 1; } }
+        .prespisok-top { position: relative; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+        .prespisok-top-right { display: flex; align-items: flex-start; gap: 12px; }
+        .prespisok-top-stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+        .prespisok-top-stat { min-width: 132px; border-radius: 18px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.12); padding: 11px 12px; box-shadow: 0 14px 44px rgba(0,0,0,.18); }
+        .prespisok-top-stat span { display: block; color: rgba(255,255,255,.62); font-size: 10px; font-weight: 1000; letter-spacing: .08em; text-transform: uppercase; }
+        .prespisok-top-stat strong { display: block; margin-top: 4px; color: #fff; font-size: 18px; line-height: 1; white-space: nowrap; }
+        .prespisok-top-stat.good strong { color: #86efac; }
+        .prespisok-top-stat.bad strong { color: #fecaca; }
+        .prespisok-kicker { margin: 0 0 8px; color: #facc15; font-weight: 1000; letter-spacing: .14em; text-transform: uppercase; }
+        .prespisok-title { margin: 0; font-size: clamp(36px, 7vw, 86px); line-height: .9; letter-spacing: -.06em; }
+        .prespisok-subtitle { margin: 14px 0 0; max-width: 760px; color: rgba(255,255,255,.72); font-size: clamp(15px, 2vw, 19px); line-height: 1.45; }
+        .prespisok-close { border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.12); color: #fff; }
+        .prespisok-center { position: relative; z-index: 1; min-height: 58dvh; display: grid; place-items: center; text-align: center; }
+        .prespisok-wait { font-size: clamp(38px, 8vw, 104px); line-height: .92; font-weight: 1000; letter-spacing: -.06em; text-shadow: 0 18px 60px rgba(0,0,0,.34); animation: prespisokPulse 2.1s ease-in-out infinite; }
+        .prespisok-start { min-width: min(520px, 88vw); min-height: 104px; border: 0; border-radius: 28px; background: #facc15; color: #24172c; font-size: clamp(28px, 5vw, 54px); font-weight: 1000; cursor: pointer; box-shadow: 0 26px 80px rgba(250,204,21,.3); transition: transform .16s ease, box-shadow .16s ease, filter .16s ease; animation: prespisokPulse 1.7s ease-in-out infinite; }
+        .prespisok-start:hover { transform: translateY(-7px) scale(1.045) rotate(-1deg); box-shadow: 0 34px 100px rgba(250,204,21,.44); filter: saturate(1.2); }
+        .prespisok-start:active { transform: translateY(2px) scale(.96) rotate(1deg); box-shadow: 0 10px 30px rgba(250,204,21,.28); }
+        .prespisok-start-small { display: block; margin: 22px auto 0; min-height: 78px; font-size: clamp(24px, 4vw, 42px); }
+        .prespisok-file-panel, .prespisok-play-panel, .prespisok-finish-panel { position: relative; z-index: 1; margin-top: 28px; border: 1px solid rgba(255,255,255,.14); border-radius: 28px; background: rgba(255,255,255,.1); box-shadow: 0 26px 80px rgba(0,0,0,.22); padding: clamp(18px, 3vw, 30px); backdrop-filter: blur(14px); }
+        .prespisok-file-drop { display: grid; place-items: center; min-height: 220px; border: 2px dashed rgba(255,255,255,.28); border-radius: 22px; background: rgba(255,255,255,.08); text-align: center; }
+        .prespisok-file-drop label { display: inline-flex; align-items: center; justify-content: center; border-radius: 18px; background: #facc15; color: #24172c; padding: 16px 22px; font-size: 18px; font-weight: 1000; cursor: pointer; }
+        .prespisok-hud { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+        .prespisok-hud-card { border-radius: 18px; background: rgba(255,255,255,.12); padding: 14px; border: 1px solid rgba(255,255,255,.12); }
+        .prespisok-hud-card span { display: block; color: rgba(255,255,255,.64); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+        .prespisok-hud-card strong { display: block; margin-top: 5px; color: #fff; font-size: 24px; line-height: 1; }
+        .prespisok-item-timer-card { transition: transform .25s ease, background .25s ease, box-shadow .25s ease; }
+        .prespisok-item-timer-card strong { font-size: 30px; }
+        .prespisok-item-timer-card.warn { background: rgba(250,204,21,.22); box-shadow: 0 0 34px rgba(250,204,21,.18); transform: scale(1.03); }
+        .prespisok-item-timer-card.danger { background: rgba(239,68,68,.26); box-shadow: 0 0 44px rgba(239,68,68,.24); transform: scale(1.07); animation: prespisokShake .34s linear infinite; }
+        .prespisok-item-timer-card.doom { background: rgba(69,10,10,.78); box-shadow: 0 0 66px rgba(127,29,29,.46); transform: scale(1.13); animation: prespisokPanic .18s linear infinite; }
+        .prespisok-item-timer-card.kick { animation: prespisokKick .7s cubic-bezier(.2,1.8,.2,1); }
+        .prespisok-task-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 18px; align-items: stretch; }
+        .prespisok-task-main, .prespisok-side { border-radius: 24px; background: rgba(255,255,255,.94); color: #242038; padding: 20px; }
+        .prespisok-task-main h3 { margin: 0; font-size: clamp(28px, 4vw, 48px); letter-spacing: -.04em; }
+        .prespisok-entity-subtitle { margin: 8px 0 0; color: #64748b; font-size: 18px; font-weight: 1000; }
+        .prespisok-badge-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+        .prespisok-badge { display: inline-flex; border-radius: 999px; background: #f1f5f9; color: #334155; padding: 7px 10px; font-size: 12px; font-weight: 1000; }
+        .prespisok-badge.hot { background: #fee2e2; color: #991b1b; }
+        .prespisok-badge.gold { background: #fef3c7; color: #854d0e; }
+        .prespisok-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+        .prespisok-info { border-radius: 16px; background: #f8fafc; padding: 12px; }
+        .prespisok-info span { display: block; color: #64748b; font-size: 12px; font-weight: 900; }
+        .prespisok-info strong { display: block; margin-top: 4px; color: #242038; overflow-wrap: anywhere; }
+        .prespisok-items { margin-top: 14px; max-height: 210px; overflow: auto; border-radius: 16px; border: 1px solid #e2e8f0; }
+        .prespisok-item-line { display: grid; grid-template-columns: minmax(120px, .75fr) minmax(0, 1fr) auto; gap: 8px; padding: 9px 10px; border-bottom: 1px solid #edf2f7; font-size: 12px; }
+        .prespisok-snark { border-radius: 22px; background: #24172c; color: #fff; padding: 18px; line-height: 1.45; font-size: 17px; font-weight: 900; }
+        .prespisok-actions { display: grid; gap: 10px; margin-top: 14px; }
+        .prespisok-action-btn { border: 0; border-radius: 16px; padding: 15px 16px; background: #fff; color: #24172c; text-align: left; font-weight: 1000; cursor: pointer; box-shadow: var(--shadow-sm); transition: transform .14s ease, background .14s ease, box-shadow .14s ease; }
+        .prespisok-action-btn:hover, .prespisok-action-btn.active { transform: translateY(-5px) scale(1.025); background: #facc15; box-shadow: 0 20px 46px rgba(250,204,21,.28); }
+        .prespisok-action-btn:active { transform: translateY(2px) scale(.98); }
+        .prespisok-extra { display: grid; gap: 8px; margin-top: 12px; }
+        .prespisok-extra input { border: 1px solid #dbe3ec; border-radius: 14px; padding: 12px; font: inherit; }
+        .prespisok-submit { min-height: 54px; border: 0; border-radius: 16px; background: #16a34a; color: #fff; font-weight: 1000; cursor: pointer; }
+        .prespisok-submit-arcade, .prespisok-submit { min-height: 66px; text-transform: uppercase; letter-spacing: .06em; box-shadow: 0 18px 46px rgba(22,163,74,.26); transition: transform .14s ease, box-shadow .14s ease, filter .14s ease; }
+        .prespisok-submit-arcade:hover, .prespisok-submit:hover:not(:disabled) { transform: translateY(-5px) scale(1.03); box-shadow: 0 28px 70px rgba(22,163,74,.34); filter: saturate(1.18); }
+        .prespisok-submit-arcade:active, .prespisok-submit:active:not(:disabled) { transform: translateY(3px) scale(.97); }
+        .prespisok-submit:disabled { opacity: .45; cursor: not-allowed; }
+        .prespisok-history { margin-top: 14px; border-radius: 16px; background: #f8fafc; padding: 12px; color: #334155; font-size: 13px; line-height: 1.4; }
+        .prespisok-finish-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+        .prespisok-finish-stat { border-radius: 18px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.14); padding: 16px; }
+        .prespisok-finish-stat.saved { background: rgba(22,163,74,.18); border-color: rgba(134,239,172,.28); }
+        .prespisok-finish-stat.writeoff { background: rgba(239,68,68,.18); border-color: rgba(254,202,202,.28); }
+        .prespisok-finish-stat span { color: rgba(255,255,255,.68); font-size: 12px; font-weight: 900; }
+        .prespisok-finish-stat strong { display: block; margin-top: 6px; font-size: 30px; color: #fff; }
+        .prespisok-exit-panel { max-width: 760px; margin-left: auto; margin-right: auto; text-align: center; }
+        .prespisok-exit-panel h3 { margin: 0; color: #fff; font-size: clamp(32px, 5vw, 64px); letter-spacing: -.05em; }
+        .prespisok-exit-take { color: rgba(255,255,255,.78); font-size: 19px; font-weight: 900; }
+        .prespisok-exit-actions { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; margin-top: 18px; }
+        .prespisok-exit-btn { min-height: 66px; color: #fff; border-color: rgba(255,255,255,.32); }
+        @keyframes prespisokShake { 0%,100% { transform: scale(1.07) translateX(0); } 25% { transform: scale(1.08) translateX(-2px); } 75% { transform: scale(1.08) translateX(2px); } }
+        @keyframes prespisokPanic { 0%,100% { transform: scale(1.13) translate(0,0) rotate(0deg); } 25% { transform: scale(1.15) translate(-3px,1px) rotate(-1deg); } 50% { transform: scale(1.14) translate(3px,-1px) rotate(1deg); } 75% { transform: scale(1.16) translate(-1px,3px) rotate(-.5deg); } }
+        @keyframes prespisokKick { 0% { transform: scale(.7) rotate(-6deg); opacity: .4; } 55% { transform: scale(1.22) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
+        @media (max-width: 980px) { .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid { grid-template-columns: 1fr; } .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid { grid-template-columns: 1fr; } .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .actualize-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
@@ -344,6 +446,11 @@
             <span class="tasks-action-icon">◌</span>
             <h2 class="tasks-action-title">Неактивные задачи</h2>
             <p class="tasks-action-text">Завершенные задачи и задания, которые ждут даты переоткрытия.</p>
+        </button>
+        <button id="openPrespisok" class="tasks-action-card prespisok-entry" type="button">
+            <span class="tasks-action-icon">⚡</span>
+            <h2 class="tasks-action-title">Предсписок</h2>
+            <p class="tasks-action-text">Аркадная финальная проверка ШК и тар перед списанием. Тестовый запуск доступен в любое время, боевое окно: 14:30-16:00.</p>
         </button>
     </section>
 
@@ -548,6 +655,10 @@
     <div id="taskDetailWrap" class="tasks-flow-card task-detail-card"></div>
 </section>
 
+<section id="specialInfoModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div id="specialInfoWrap" class="tasks-flow-card task-small-card"></div>
+</section>
+
 <section id="editTareTaskModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card task-small-card">
         <div class="work-head">
@@ -623,6 +734,12 @@
 <section id="inactiveTasksModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card review-full-card">
         <div id="inactiveTasksTableWrap" class="review-table-card"></div>
+    </div>
+</section>
+
+<section id="prespisokModal" class="tasks-flow-modal upload-work prespisok-modal" aria-hidden="true">
+    <div class="tasks-flow-card prespisok-card">
+        <div id="prespisokWrap" class="prespisok-wrap"></div>
     </div>
 </section>
 
