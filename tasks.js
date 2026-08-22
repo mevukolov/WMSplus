@@ -22,7 +22,10 @@
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
-    const SAVE_TASK_CHUNK_SIZE = 100;
+    const SAVE_TASK_CHUNK_SIZE = 40;
+    const SAVE_HEAVY_TASK_CHUNK_SIZE = 12;
+    const SAVE_MAX_CHUNK_JSON_CHARS = 180000;
+    const SAVE_HEAVY_MAX_CHUNK_JSON_CHARS = 90000;
     const TWO_SHK_TABLE = "2shk_rep";
     const PURE_URL_FILTER_CHUNK_SIZE = 80;
     const PURE_INSERT_CHUNK_SIZE = 400;
@@ -4290,6 +4293,98 @@
         return chunks;
     }
 
+    function jsonChars(value) {
+        try {
+            return JSON.stringify(value).length;
+        } catch (_error) {
+            return 0;
+        }
+    }
+
+    function isHeavySaveModule(module) {
+        return ["packaging", "rwp", "presort", "marketplace_pc", "wmi_mp_pc", "no_order"].includes(module);
+    }
+
+    function isHeavySaveTask(task) {
+        const shks = Array.isArray(task && task.source_shk_ids) ? task.source_shk_ids.length : 0;
+        const payloadSize = jsonChars(task && task.source_payload);
+        return shks > 12 || payloadSize > 18000 || Boolean(task && task.source_tare_id);
+    }
+
+    function saveChunkLimits(module, tasks) {
+        const hasHeavyTasks = (tasks || []).some(isHeavySaveTask);
+        const heavy = isHeavySaveModule(module) || hasHeavyTasks;
+        return {
+            maxCount: heavy ? SAVE_HEAVY_TASK_CHUNK_SIZE : SAVE_TASK_CHUNK_SIZE,
+            maxChars: heavy ? SAVE_HEAVY_MAX_CHUNK_JSON_CHARS : SAVE_MAX_CHUNK_JSON_CHARS,
+        };
+    }
+
+    function chunkTasksForSave(module, tasks) {
+        const limits = saveChunkLimits(module, tasks);
+        const chunks = [];
+        let current = [];
+        let currentChars = 2;
+        (tasks || []).forEach((task) => {
+            const taskChars = Math.max(jsonChars(task), 2) + 1;
+            if (current.length && (current.length >= limits.maxCount || currentChars + taskChars > limits.maxChars)) {
+                chunks.push(current);
+                current = [];
+                currentChars = 2;
+            }
+            current.push(task);
+            currentChars += taskChars;
+        });
+        if (current.length) chunks.push(current);
+        return chunks;
+    }
+
+    function errorText(error) {
+        if (!error) return "";
+        if (typeof error === "string") return error;
+        const parts = [error.message, error.details, error.hint, error.code, error.name].map(normalizeText).filter(Boolean);
+        if (parts.length) return parts.join(" ");
+        try {
+            return JSON.stringify(error);
+        } catch (_jsonError) {
+            return String(error);
+        }
+    }
+
+    function isRetryableSaveTimeout(error) {
+        const text = errorText(error).toLowerCase();
+        return text.includes("statement timeout")
+            || text.includes("canceling statement")
+            || text.includes("57014")
+            || text.includes("request timeout")
+            || text.includes("networkerror")
+            || text.includes("failed to fetch");
+    }
+
+    function compactTaskItemForSave(item) {
+        const normalized = normalizeTaskItem(item);
+        if (!normalized) return null;
+        return {
+            shk: normalized.shk,
+            name: normalized.name,
+            status: normalized.status,
+            price: normalized.price,
+            mx: normalized.mx,
+            movement: normalized.movement,
+            row_number: normalized.row_number,
+        };
+    }
+
+    function compactTaskForSave(task) {
+        const payload = task && task.source_payload && typeof task.source_payload === "object" && !Array.isArray(task.source_payload)
+            ? { ...task.source_payload }
+            : {};
+        if (Array.isArray(payload.task_items)) {
+            payload.task_items = payload.task_items.map(compactTaskItemForSave).filter(Boolean);
+        }
+        return { ...task, source_payload: payload };
+    }
+
     async function loadPureAutoLossReasonIds() {
         const db = supabaseDb();
         if (!db) return new Set(PURE_AUTO_IDS);
@@ -4690,7 +4785,7 @@
             mx: normalizeText(row && (row.mx || row.block)),
             movement: normalizeText(row && (row.last_movement || row.created_at || row.status_at)),
             row_number: row && row.row_number ? row.row_number : null,
-            raw: row || {},
+            raw: null,
         };
     }
 
@@ -6680,7 +6775,11 @@
                 rowsCount: state.rows.primary ? state.rows.primary.length : 0,
                 summary: summarizePreview(state.preview),
             }, (progress) => {
-                setStatus("Сохраняю в Supabase: пачка " + progress.chunk + "/" + progress.totalChunks + ", задач " + progress.saved + "/" + progress.totalTasks + "...");
+                if (progress.phase === "split") {
+                    setStatus("Supabase не прожевал пачку из " + progress.chunkSize + " задач. Делю на части по " + progress.nextChunkSize + " и продолжаю: сохранено " + progress.saved + "/" + progress.totalTasks + "...");
+                    return;
+                }
+                setStatus("Сохраняю в Supabase: пачка " + progress.chunk + "/" + progress.totalChunks + " (" + progress.chunkSize + " задач), сохранено " + progress.saved + "/" + progress.totalTasks + "...");
             });
             if (response && response.upload_run) mergeRun(response.upload_run);
             renderCalendar();
@@ -6702,11 +6801,62 @@
         return result;
     }
 
+    function rpcUpsertedCount(data, fallback) {
+        const value = Number(data && data.upserted_count);
+        return Number.isFinite(value) ? value : fallback;
+    }
+
+    async function saveRpcChunkAdaptive(db, chunk, run, context) {
+        context.physicalBatch += 1;
+        if (context.onProgress) {
+            context.onProgress({
+                phase: "rpc_start",
+                chunk: context.initialChunk,
+                totalChunks: context.initialTotalChunks,
+                chunkSize: chunk.length,
+                saved: context.saved,
+                totalTasks: context.totalTasks,
+                physicalBatch: context.physicalBatch,
+            });
+        }
+        const { data, error } = await db.rpc(SAVE_RPC, { p_tasks: chunk, p_run: run || {} });
+        if (!error) {
+            return {
+                upserted: rpcUpsertedCount(data, chunk.length),
+                uploadRun: data && data.upload_run ? data.upload_run : null,
+            };
+        }
+        if (chunk.length > 1 && isRetryableSaveTimeout(error)) {
+            const mid = Math.max(Math.floor(chunk.length / 2), 1);
+            if (context.onProgress) {
+                context.onProgress({
+                    phase: "split",
+                    chunk: context.initialChunk,
+                    totalChunks: context.initialTotalChunks,
+                    chunkSize: chunk.length,
+                    nextChunkSize: mid,
+                    saved: context.saved,
+                    totalTasks: context.totalTasks,
+                    physicalBatch: context.physicalBatch,
+                    error: errorText(error),
+                });
+            }
+            const left = await saveRpcChunkAdaptive(db, chunk.slice(0, mid), {}, context);
+            context.saved += left.upserted;
+            const right = await saveRpcChunkAdaptive(db, chunk.slice(mid), run || {}, context);
+            return {
+                upserted: left.upserted + right.upserted,
+                uploadRun: right.uploadRun || left.uploadRun,
+            };
+        }
+        throw error;
+    }
+
     async function saveTasksAndRun(module, businessDate, tasks, meta, onProgress) {
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
         const def = moduleDef(module);
-        const payloadTasks = (tasks || []).map((task) => ({ ...task, module: undefined, column: undefined }));
+        const payloadTasks = (tasks || []).map((task) => ({ ...compactTaskForSave(task), module: undefined, column: undefined }));
         const run = {
             upload_date: state.today,
             effective_date: businessDate,
@@ -6720,17 +6870,27 @@
             tasks_count: payloadTasks.length,
             summary: meta.summary || {},
         };
-        const chunks = chunkArray(payloadTasks, SAVE_TASK_CHUNK_SIZE);
+        const chunks = chunkTasksForSave(module, payloadTasks);
         let totalUpserted = 0;
         let uploadRun = null;
         if (!chunks.length) return { ok: true, upserted_count: 0, upload_run: null };
+        const progressContext = {
+            onProgress,
+            initialTotalChunks: chunks.length,
+            totalTasks: payloadTasks.length,
+            physicalBatch: 0,
+            saved: 0,
+            initialChunk: 1,
+        };
         for (let i = 0; i < chunks.length; i += 1) {
-            if (onProgress) onProgress({ chunk: i + 1, totalChunks: chunks.length, chunkSize: chunks[i].length, saved: totalUpserted, totalTasks: payloadTasks.length });
+            progressContext.initialChunk = i + 1;
+            progressContext.saved = totalUpserted;
+            if (onProgress) onProgress({ phase: "chunk", chunk: i + 1, totalChunks: chunks.length, chunkSize: chunks[i].length, saved: totalUpserted, totalTasks: payloadTasks.length, physicalBatch: progressContext.physicalBatch });
             const isLast = i === chunks.length - 1;
-            const { data, error } = await db.rpc(SAVE_RPC, { p_tasks: chunks[i], p_run: isLast ? run : {} });
-            if (error) throw error;
-            totalUpserted += Number(data && data.upserted_count) || chunks[i].length;
-            if (data && data.upload_run) uploadRun = data.upload_run;
+            const result = await saveRpcChunkAdaptive(db, chunks[i], isLast ? run : {}, progressContext);
+            totalUpserted += result.upserted;
+            progressContext.saved = totalUpserted;
+            if (result.uploadRun) uploadRun = result.uploadRun;
         }
         if (uploadRun && uploadRun.id && Number(uploadRun.upserted_count) !== totalUpserted) {
             uploadRun = { ...uploadRun, upserted_count: totalUpserted };
@@ -7079,7 +7239,11 @@
                     rowsCount: sourceRowsCountForMasterModule(item.module),
                     summary: summarizePreview(item.preview),
                 }, (progress) => {
-                    setMasterStatus("Сохраняю: " + moduleDef(item.module).label + ". Пачка " + progress.chunk + "/" + progress.totalChunks + ", задач в модуле " + progress.saved + "/" + progress.totalTasks + ". Уже сохранено всего: " + total + ".");
+                    if (progress.phase === "split") {
+                        setMasterStatus("Сохраняю: " + moduleDef(item.module).label + ". Пачка из " + progress.chunkSize + " задач оказалась тяжелой, делю на части по " + progress.nextChunkSize + ". В модуле сохранено " + progress.saved + "/" + progress.totalTasks + ", всего ранее: " + total + ".");
+                        return;
+                    }
+                    setMasterStatus("Сохраняю: " + moduleDef(item.module).label + ". Пачка " + progress.chunk + "/" + progress.totalChunks + " (" + progress.chunkSize + " задач), в модуле сохранено " + progress.saved + "/" + progress.totalTasks + ". Уже сохранено всего: " + total + ".");
                 });
                 total += Number(response.upserted_count || tasks.length) || 0;
                 if (response.upload_run) mergeRun(response.upload_run);
