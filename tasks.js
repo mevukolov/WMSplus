@@ -26,6 +26,7 @@
     const SAVE_HEAVY_TASK_CHUNK_SIZE = 12;
     const SAVE_MAX_CHUNK_JSON_CHARS = 180000;
     const SAVE_HEAVY_MAX_CHUNK_JSON_CHARS = 90000;
+    const FILTER_NONE = "__wms_filter_none__";
     const TWO_SHK_TABLE = "2shk_rep";
     const PURE_URL_FILTER_CHUNK_SIZE = 80;
     const PURE_INSERT_CHUNK_SIZE = 400;
@@ -36,6 +37,9 @@
     const AUTO_FOUND_EMP_ID = "2405";
     const AUTO_FOUND_COMMENT = "У товара есть движение";
     const SYSTEM_MOVEMENT_VERDICT = "Система - Движение";
+    const SYSTEM_NO_SHK_NOT_FOUND_VERDICT = "Система - Не найден Без ШК";
+    const SYSTEM_NO_SHK_FOUND_VERDICT = "Система - Обнаружен Без ШК";
+    const QUICK_NO_SHK_PURE_NOT_FOUND_MARKER = "[WMS+ Без ШК: не найден]";
     const MOVEMENT_AUTO_CLOSE_MINUTES = 10;
     const MOVEMENT_AUTO_CLOSE_MIN_MS = MOVEMENT_AUTO_CLOSE_MINUTES * 60 * 1000;
     const PRESPISOK_STORAGE_KEY = "wms_prespisok_progress_v1";
@@ -406,11 +410,18 @@
             loading: false,
             loaded: false,
             activeSection: "",
+            modalMode: "",
             sort: { key: "price", dir: "desc" },
+            filters: createReviewFilterState(),
         },
         requests: {
             activeSection: "",
             sort: { key: "price", dir: "desc" },
+            filters: createReviewFilterState(),
+        },
+        reviewCanvas: {
+            sort: { key: "price", dir: "desc" },
+            filters: createReviewFilterState(),
         },
         inactive: {
             rows: [],
@@ -461,6 +472,21 @@
             supersetDebug: null,
             processing: false,
         },
+        quickNoShk: {
+            loading: false,
+            items: [],
+            index: 0,
+            actions: [],
+            started: false,
+            processing: false,
+            photoCache: {},
+            pureCandidates: [],
+            supersetRows: [],
+            supersetByShk: new Map(),
+            missingNm: 0,
+            needsSuperset: false,
+            fileName: "",
+        },
         taskSearch: {
             rows: [],
             loading: false,
@@ -502,6 +528,8 @@
         prespisokHome: {
             loading: false,
             run: null,
+            timer: null,
+            leaderboard: [],
         },
         prespisokJournal: {
             loading: false,
@@ -513,6 +541,17 @@
     };
 
     const $ = (id) => document.getElementById(id);
+
+    function createReviewFilterState() {
+        return {
+            date: "",
+            movementStatuses: new Set(),
+            entityTypes: new Set(),
+            taskStatuses: new Set(),
+            sectionNames: new Set(),
+            openKey: "",
+        };
+    }
 
     function normalizeText(value) {
         if (value === null || value === undefined) return "";
@@ -822,6 +861,7 @@
         }
         setFlowModalOpen("shiftOpeningModal", false);
         setFlowModalOpen("actualizeTasksModal", false);
+        setFlowModalOpen("quickNoShkModal", false);
         setFlowModalOpen("moduleChooser", false);
         setFlowModalOpen("uploadWork", false);
         setFlowModalOpen("masterWork", false);
@@ -945,12 +985,167 @@
         $("inactivePage").classList.remove("active");
         renderPrespisokHomeCard();
         void refreshPrespisokHomeState();
+        void refreshPrespisokLeaderboard();
+    }
+
+    function formatMinutesCountdown(minutes) {
+        const total = Math.max(Number(minutes) || 0, 0);
+        if (!total) return "сейчас";
+        const hours = Math.floor(total / 60);
+        const mins = total % 60;
+        return [
+            hours ? hours + " ч" : "",
+            mins ? mins + " мин" : "",
+        ].filter(Boolean).join(" ") || "меньше минуты";
+    }
+
+    function prespisokLeaderboardScore(row) {
+        const elapsed = Number(row && row.elapsed_ms) || 0;
+        const shks = Number(row && (row.shk_count || row.actions || row.total)) || 0;
+        if (!elapsed || !shks) return Number.POSITIVE_INFINITY;
+        return elapsed / shks;
+    }
+
+    function formatPrespisokLeaderSpeed(row) {
+        const score = prespisokLeaderboardScore(row);
+        if (!Number.isFinite(score)) return "-";
+        return formatDuration(score) + "/ШК";
+    }
+
+    function aggregatePrespisokLeaderboardFromRuns(runs) {
+        const byUser = new Map();
+        (runs || []).forEach((run) => {
+            const employeeId = normalizeText(run.operator_id) || normalizeText(run.operator_name) || "unknown";
+            const current = byUser.get(employeeId) || {
+                name: normalizeText(run.operator_name) || "Неизвестный герой",
+                employee_id: normalizeText(run.operator_id),
+                runs: 0,
+                shk_count: 0,
+                elapsed_ms: 0,
+            };
+            current.runs += 1;
+            current.shk_count += Number(run.completed_items) || Number(run.total_items) || 0;
+            current.elapsed_ms += Number(run.elapsed_ms) || 0;
+            byUser.set(employeeId, current);
+        });
+        return Array.from(byUser.values()).filter((row) => row.shk_count > 0 && row.elapsed_ms > 0);
+    }
+
+    function aggregatePrespisokLeaderboardFromActions(actions, runById) {
+        const byUser = new Map();
+        (actions || []).forEach((action) => {
+            const payload = action && action.payload && typeof action.payload === "object" && !Array.isArray(action.payload) ? action.payload : {};
+            const run = runById.get(normalizeText(action && action.run_id)) || {};
+            const actor = payload.actor && typeof payload.actor === "object" ? payload.actor : {};
+            const employeeId = normalizeText(action && action.operator_id) || normalizeText(actor.id) || normalizeText(run.operator_id) || normalizeText(action && action.operator_name) || normalizeText(actor.name) || normalizeText(run.operator_name) || "unknown";
+            const name = normalizeText(action && action.operator_name) || normalizeText(actor.name) || normalizeText(run.operator_name) || "Неизвестный герой";
+            const shkIds = Array.isArray(action && action.source_shk_ids) ? action.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
+            const shkCount = shkIds.length || 1;
+            const elapsed = Number(payload.item_elapsed_ms) || 0;
+            if (!elapsed) return;
+            const current = byUser.get(employeeId) || {
+                name,
+                employee_id: employeeId === "unknown" ? "" : employeeId,
+                runs: new Set(),
+                shk_count: 0,
+                elapsed_ms: 0,
+            };
+            current.name = current.name || name;
+            current.shk_count += shkCount;
+            current.elapsed_ms += elapsed;
+            if (action && action.run_id) current.runs.add(normalizeText(action.run_id));
+            byUser.set(employeeId, current);
+        });
+        return Array.from(byUser.values()).map((row) => ({
+            ...row,
+            runs: row.runs && row.runs.size ? row.runs.size : 0,
+        })).filter((row) => row.shk_count > 0 && row.elapsed_ms > 0);
+    }
+
+    function aggregatePrespisokLeaderboardRows(rows) {
+        const byUser = new Map();
+        const cutoff = addDays(state.today, -13);
+        (rows || []).forEach((row) => {
+            if (!row) return;
+            const rowDate = normalizeText(row.date || row.run_date);
+            if (rowDate && cutoff && rowDate < cutoff) return;
+            const employeeId = normalizeText(row.employee_id || row.operator_id || row.name || row.operator_name) || "unknown";
+            const count = Number(row.shk_count || row.actions || row.completed_items || row.total_items || row.total) || 0;
+            const elapsed = Number(row.elapsed_ms) || 0;
+            if (!count || !elapsed) return;
+            const current = byUser.get(employeeId) || {
+                name: normalizeText(row.name || row.operator_name) || "Неизвестный герой",
+                employee_id: employeeId === "unknown" ? "" : employeeId,
+                runs: 0,
+                shk_count: 0,
+                elapsed_ms: 0,
+            };
+            current.name = current.name || normalizeText(row.name || row.operator_name) || "Неизвестный герой";
+            current.runs += Number(row.runs) || 1;
+            current.shk_count += count;
+            current.elapsed_ms += elapsed;
+            byUser.set(employeeId, current);
+        });
+        return Array.from(byUser.values()).filter((row) => row.shk_count > 0 && row.elapsed_ms > 0);
+    }
+
+    function renderPrespisokHomeLeaderboard() {
+        const card = $("prespisokLeaderboardCard");
+        if (!card) return;
+        const sourceRows = state.prespisokHome.leaderboard && state.prespisokHome.leaderboard.length
+            ? state.prespisokHome.leaderboard
+            : loadPrespisokLeaderboard();
+        const rows = aggregatePrespisokLeaderboardRows(sourceRows)
+            .sort((a, b) => prespisokLeaderboardScore(a) - prespisokLeaderboardScore(b))
+            .slice(0, 3);
+        const list = rows.length
+            ? rows.map((row, index) => "<div class='prespisok-leader-row'><span><strong>" + (index + 1) + ". " + escapeHtml(row.name || "Без имени") + "</strong><br>" + escapeHtml((row.shk_count || row.actions || 0) + " ШК · " + (row.runs || 1) + " смен") + "</span><span>" + escapeHtml(formatPrespisokLeaderSpeed(row)) + "</span></div>").join("")
+            : "<div class='prespisok-leader-row'><span>За 14 дней забегов нет.</span></div>";
+        card.innerHTML = "<span class='tasks-action-icon'>♕</span>"
+            + "<h2 class='tasks-action-title'>Лидеры</h2>"
+            + "<p class='tasks-action-text'>Среднее время на 1 ШК за 14 дней.</p>"
+            + "<div class='prespisok-leader-list'>" + list + "</div>";
+    }
+
+    async function refreshPrespisokLeaderboard() {
+        const db = supabaseDb();
+        if (!db) return;
+        try {
+            const { data, error } = await db
+                .from(WMS_PRESPISOK_RUNS_TABLE)
+                .select("id,run_date,total_items,completed_items,elapsed_ms,operator_id,operator_name,finished_at,updated_at,status")
+                .eq("wh_id", WH_ID)
+                .eq("status", "completed")
+                .gte("run_date", addDays(state.today, -13))
+                .order("finished_at", { ascending: false, nullsFirst: false })
+                .limit(80);
+            if (error) throw error;
+            const runs = data || [];
+            const runById = new Map(runs.map((run) => [normalizeText(run.id), run]));
+            let leaderboard = [];
+            if (runs.length) {
+                const actionRows = [];
+                for (const chunk of chunkArray(runs.map((run) => normalizeText(run.id)).filter(Boolean), 80)) {
+                    const actions = await readOptionalRows(db, WMS_PRESPISOK_ACTIONS_TABLE, (query) => query
+                        .select("run_id,source_shk_ids,operator_id,operator_name,payload")
+                        .in("run_id", chunk));
+                    if (actions.ok) actionRows.push(...actions.rows);
+                }
+                leaderboard = aggregatePrespisokLeaderboardFromActions(actionRows, runById);
+            }
+            state.prespisokHome.leaderboard = leaderboard.length ? leaderboard : aggregatePrespisokLeaderboardFromRuns(runs);
+            renderPrespisokHomeLeaderboard();
+        } catch (error) {
+            console.warn("prespisok leaderboard failed:", error);
+        }
     }
 
     function renderPrespisokHomeCard() {
+        renderPrespisokHomeLeaderboard();
         const card = $("openPrespisok");
         if (!card) return;
         const text = card.querySelector(".tasks-action-text");
+        const badge = $("prespisokCountdownBadge");
         const run = state.prespisokHome.run;
         const status = normalizeText(run && run.status);
         const info = prespisokWindowInfo();
@@ -958,6 +1153,21 @@
         const active = status === "started" || status === "in_progress";
         const muted = state.prespisokHome.loading || completed || (!active && !info.inWindow);
         card.classList.toggle("is-muted", muted);
+        if (badge) {
+            badge.className = "tasks-home-timer";
+            if (state.prespisokHome.loading) {
+                badge.textContent = "Проверяю окно";
+            } else if (completed) {
+                badge.textContent = "Сегодня закрыт";
+                badge.classList.add("is-closed");
+            } else if (active || info.inWindow) {
+                badge.textContent = active ? "В работе" : "Окно открыто";
+                badge.classList.add("is-live");
+            } else {
+                badge.textContent = "До старта: " + info.waitDurationLabel;
+                badge.classList.add("is-wait");
+            }
+        }
         if (!text) return;
         if (state.prespisokHome.loading) {
             text.textContent = "Проверяю сегодняшний запуск предсписка...";
@@ -966,10 +1176,15 @@
         } else if (active) {
             text.textContent = "Предсписок уже в работе. Можно наблюдать прогресс или подключиться вторым номером.";
         } else if (!info.inWindow) {
-            text.textContent = "Доступен в боевое окно " + info.windowLabel + ". Пока можно смотреть журнал и вторую линию.";
+            text.textContent = "До начала: " + info.waitDurationLabel + ". Окно " + info.windowLabel + ". Пока можно смотреть журнал и вторую линию.";
         } else {
             text.textContent = "Аркадная проверка ШК и тар перед списанием, с журналом и задачами второй линии.";
         }
+    }
+
+    function startPrespisokHomeTimer() {
+        if (state.prespisokHome.timer) clearInterval(state.prespisokHome.timer);
+        state.prespisokHome.timer = setInterval(renderPrespisokHomeCard, 30000);
     }
 
     async function refreshPrespisokHomeState() {
@@ -1234,13 +1449,171 @@
     }
 
     async function fetchReviewTaskRows(db) {
-        const rows = await fetchWmsTaskRows(db, "active");
+        let rows = await fetchWmsTaskRows(db, "active");
+        const legacyRows = await fetchLegacyWeeekRequestRows(db);
+        const migrated = await ensureLegacyWeeekRequestsInWms(db, rows, legacyRows);
+        if (migrated) rows = await fetchWmsTaskRows(db, "active");
+        else rows = mergeLegacyRowsForDisplay(rows, legacyRows);
         return rows.filter(isActiveReviewTask);
+    }
+
+    function taskDedupeKey(row) {
+        return [
+            normalizeText(row && row.source_module),
+            normalizeText(row && row.source_id),
+            normalizeText(row && row.task_type),
+        ].join("\u001f");
+    }
+
+    function legacyRequestSourceModule(section) {
+        if (section === "Запросы входящего потока") return "incoming_flow_requests";
+        if (section === "Списания AWH") return "awh_writeoffs";
+        if (section === "Коробки на входе") return "incoming_boxes";
+        return "legacy_weeek_requests";
+    }
+
+    function legacyWeeekPayload(row) {
+        const payload = row && row.source_payload;
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) return { ...payload };
+        if (typeof payload === "string") return parseJsonSafe(payload, {});
+        return {};
+    }
+
+    function normalizeLegacyWeeekTaskRow(row) {
+        const payload = legacyWeeekPayload(row);
+        const base = {
+            source_module: normalizeText(row && row.source_module),
+            upload_type: normalizeText(row && row.upload_type),
+            task_type: normalizeText(row && row.task_type),
+            title: normalizeText(row && (row.title || row.name)),
+            description: normalizeText(row && row.description),
+        };
+        const section = requestSectionName(base);
+        const sourceModule = base.source_module || legacyRequestSourceModule(section);
+        const idSources = [
+            row && row.source_shk_ids,
+            row && row.source_id,
+            base.title,
+            base.description,
+            JSON.stringify(payload),
+        ];
+        const sourceShkIds = Array.from(new Set(idSources.flatMap(extractIdsFromLooseText)));
+        const sourceId = normalizeText(row && row.source_id) || sourceShkIds.join(" ") || normalizeText(row && row.id);
+        const movementRaw = normalizeText(row && row.source_last_movement_at)
+            || normalizeText(payload.request_time || payload.requested_at || payload.last_movement || payload.created_at || payload.date)
+            || normalizeText(row && row.created_at);
+        const movement = parseDateTime(movementRaw);
+        const tagsRaw = row && row.tags;
+        const parsedTags = typeof tagsRaw === "string" ? parseJsonSafe(tagsRaw, tagsRaw.split(",")) : tagsRaw;
+        const tags = Array.isArray(parsedTags) ? parsedTags.map(normalizeText).filter(Boolean) : [];
+        return {
+            id: "legacy-weeek:" + normalizeText(row && row.id),
+            __legacy_weeek: true,
+            legacy_weeek_id: normalizeText(row && row.id),
+            source_module: sourceModule,
+            source_id: sourceId,
+            source_row_id: normalizeText(row && row.source_row_id),
+            source_payload: payload,
+            source_shk_ids: sourceShkIds,
+            source_tare_id: normalizeIdentifier(row && row.source_tare_id),
+            source_price_sum: Number(row && row.source_price_sum) || 0,
+            source_last_movement_at: movement.iso || normalizeText(row && row.created_at),
+            upload_type: base.upload_type || sourceModule,
+            upload_effective_date: normalizeText(row && row.upload_effective_date) || movement.date || normalizeText(row && row.created_at).slice(0, 10),
+            task_type: base.task_type || section,
+            title: base.title || sourceId || section,
+            description: base.description,
+            priority: Number(row && row.priority) || 0,
+            priority_label: normalizeText(row && row.priority_label),
+            due_date: normalizeText(row && row.due_date),
+            responsibility_zone: normalizeText(row && row.responsibility_zone),
+            task_status: normalizeText(row && row.task_status) || (row && row.weeek_completed ? "Завершено" : "Не начато"),
+            opp_verdict: normalizeText(row && row.opp_verdict) || "Не выбран",
+            assignee_employee_id: normalizeIdentifier(row && row.assignee_employee_id),
+            assignee_name: normalizeText(row && row.assignee_name),
+            tags,
+            is_deleted: Boolean(row && (row.is_deleted || row.weeek_deleted)),
+            weeek_completed: Boolean(row && row.weeek_completed),
+            completed_at: normalizeText(row && row.completed_at),
+            reopened_at: normalizeText(row && row.reopened_at),
+            reopen_after: normalizeText(row && row.reopen_after),
+            created_at: normalizeText(row && row.created_at),
+            updated_at: normalizeText(row && row.updated_at),
+        };
+    }
+
+    async function fetchLegacyWeeekRequestRows(db) {
+        const result = [];
+        const pageSize = 1000;
+        const maxRows = 5000;
+        for (let from = 0; from < maxRows; from += pageSize) {
+            const read = await readOptionalRows(db, WEEEK_TASKS_TABLE, (query) => query
+                .select("*")
+                .eq("weeek_deleted", false)
+                .or("weeek_completed.is.null,weeek_completed.eq.false")
+                .or("task_type.ilike.%Запрос%,title.ilike.%Запрос%,source_module.ilike.%incoming_flow%,task_type.ilike.%AWH%,title.ilike.%AWH%,source_module.ilike.%awh%,task_type.ilike.%Короб%,title.ilike.%Короб%,source_module.ilike.%incoming_boxes%")
+                .order("updated_at", { ascending: false, nullsFirst: false })
+                .range(from, from + pageSize - 1));
+            const fallback = read.ok ? null : await readOptionalRows(db, WEEEK_TASKS_TABLE, (query) => query
+                .select("*")
+                .order("updated_at", { ascending: false, nullsFirst: false })
+                .range(from, from + pageSize - 1));
+            const finalRead = read.ok ? read : fallback;
+            if (!finalRead || !finalRead.ok) return [];
+            const batch = finalRead.rows || [];
+            result.push(...batch);
+            if (batch.length < pageSize) break;
+        }
+        return result
+            .map(normalizeLegacyWeeekTaskRow)
+            .filter((row) => requestSectionName(row) && !row.is_deleted && !row.weeek_completed && taskStatus(row) !== "Завершено");
+    }
+
+    function mergeLegacyRowsForDisplay(wmsRows, legacyRows) {
+        const existing = new Set((wmsRows || []).map(taskDedupeKey));
+        const merged = (wmsRows || []).slice();
+        (legacyRows || []).forEach((row) => {
+            if (existing.has(taskDedupeKey(row))) return;
+            merged.push(row);
+        });
+        return merged;
+    }
+
+    async function ensureLegacyWeeekRequestsInWms(db, wmsRows, legacyRows) {
+        const existing = new Set((wmsRows || []).map(taskDedupeKey));
+        const missing = (legacyRows || []).filter((row) => !existing.has(taskDedupeKey(row)));
+        if (!missing.length) return false;
+        const payloads = missing.map((row) => {
+            const { id: _id, __legacy_weeek: _legacy, legacy_weeek_id: legacyId, weeek_completed: _weeekCompleted, ...task } = row;
+            return compactTaskForSave({
+                ...task,
+                source_payload: {
+                    ...(task.source_payload || {}),
+                    legacy_weeek_id: legacyId,
+                    migrated_from: "weeek_tasks",
+                    migrated_at: new Date().toISOString(),
+                },
+            });
+        });
+        try {
+            const chunks = chunkArray(payloads, 20);
+            const context = { onProgress: null, initialTotalChunks: chunks.length, totalTasks: payloads.length, physicalBatch: 0, saved: 0, initialChunk: 1 };
+            for (let i = 0; i < chunks.length; i += 1) {
+                context.initialChunk = i + 1;
+                await saveRpcChunkAdaptive(db, chunks[i], {}, context);
+                context.saved += chunks[i].length;
+            }
+            return true;
+        } catch (error) {
+            console.warn("legacy WEEEK request migration failed:", error);
+            return false;
+        }
     }
 
     function refreshOpenSectionModal() {
         if (!$("reviewSectionModal") || !$("reviewSectionModal").classList.contains("active")) return;
         if (state.view === "requests") renderRequestsTable(requestsGroupedRows());
+        else if (state.review.modalMode === "canvas") renderReviewCanvasTable();
         else renderReviewTable(reviewGroupedRows());
     }
 
@@ -1302,6 +1675,7 @@
             state.actualize.removedShks = new Set();
             state.actualize.tareActions = {};
             renderActualizeResults();
+            void enrichTaskNomenclatureFromSuperset(rows).catch((error) => console.warn("superset nomenclature enrich skipped:", error));
         } catch (error) {
             console.error("actualize superset failed:", error);
             setActualizeStatus("Не удалось разобрать Superset: " + (error && error.message ? error.message : String(error)), "error");
@@ -1534,6 +1908,114 @@
             });
         });
         return candidates;
+    }
+
+    function taskNmByShk(row) {
+        const payload = taskPayload(row);
+        const map = payload.nm_by_shk;
+        return map && typeof map === "object" && !Array.isArray(map) ? map : {};
+    }
+
+    function taskNameByShk(row) {
+        const payload = taskPayload(row);
+        const map = payload.name_by_shk;
+        return map && typeof map === "object" && !Array.isArray(map) ? map : {};
+    }
+
+    function itemNomenclature(row, item) {
+        const shk = normalizeIdentifier(item && item.shk);
+        const raw = item && item.raw && typeof item.raw === "object" ? item.raw : {};
+        const nm = normalizeIdentifier(item && item.nm)
+            || normalizeIdentifier(raw.nm || raw.nm_id || raw.nmId || raw.nmID)
+            || normalizeIdentifier(taskNmByShk(row)[shk]);
+        const name = normalizeText(item && item.name)
+            || normalizeText(raw.name)
+            || normalizeText(taskNameByShk(row)[shk]);
+        return { nm, name };
+    }
+
+    function applySupersetNomenclatureToItem(row, item, supersetRow) {
+        if (!item || !supersetRow || !supersetRow.nm) return { item, changed: false };
+        if (hasConfirmedMovement(row, item, supersetRow)) return { item, changed: false };
+        const current = itemNomenclature(row, item);
+        const nm = normalizeIdentifier(supersetRow.nm);
+        const name = normalizeText(current.name || supersetRow.name);
+        const changed = current.nm !== nm || (!current.name && name);
+        if (!changed) return { item, changed: false };
+        const raw = item.raw && typeof item.raw === "object" ? { ...item.raw } : {};
+        raw.nm = nm;
+        if (name && !raw.name) raw.name = name;
+        return {
+            changed: true,
+            item: {
+                ...item,
+                nm,
+                name,
+                raw,
+            },
+        };
+    }
+
+    async function enrichTaskNomenclatureFromSuperset(supersetRows, options) {
+        const db = supabaseDb();
+        const byShk = latestSupersetByShk(supersetRows);
+        if (!db || !byShk.size) return { updated: 0, missing: 0 };
+        const tasks = (state.review.rows || []).filter(isActiveReviewTask);
+        let updated = 0;
+        let missing = 0;
+        const plans = [];
+        tasks.forEach((row) => {
+            const payload = taskPayload(row);
+            const nmByShk = { ...taskNmByShk(row) };
+            const nameByShk = { ...taskNameByShk(row) };
+            let changed = false;
+            const items = taskItems(row).map((item) => {
+                const shk = normalizeIdentifier(item.shk);
+                const supersetRow = byShk.get(shk);
+                if (!supersetRow) {
+                    if (!itemNomenclature(row, item).nm) missing += 1;
+                    return item;
+                }
+                const applied = applySupersetNomenclatureToItem(row, item, supersetRow);
+                const nextItem = applied.item;
+                if (applied.changed) changed = true;
+                const info = itemNomenclature(row, nextItem);
+                if (info.nm) nmByShk[shk] = info.nm;
+                if (info.name) nameByShk[shk] = info.name;
+                if (!info.nm) missing += 1;
+                return nextItem;
+            });
+            if (!changed) return;
+            plans.push({ row, items, nmByShk, nameByShk, payload });
+        });
+        const statusTarget = options && options.statusTarget ? $(options.statusTarget) : null;
+        await runLimitedPool(plans, 4, async (plan) => {
+            const now = new Date().toISOString();
+            const nextPayload = payloadWithItems(plan.row, plan.items, {
+                nm_by_shk: plan.nmByShk,
+                name_by_shk: plan.nameByShk,
+                superset_nomenclature_updated_at: now,
+            });
+            const searchText = [
+                plan.row.title,
+                plan.row.task_type,
+                plan.row.source_tare_id,
+                ...plan.items.map((item) => item.shk),
+                ...plan.items.map((item) => item.name),
+                ...plan.items.map((item) => item.nm),
+            ].filter(Boolean).join(" ");
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .update({ source_payload: nextPayload, search_text: searchText, updated_at: now })
+                .eq("id", plan.row.id)
+                .select("id,source_payload,updated_at")
+                .single();
+            if (error) throw error;
+            refreshTaskRow(plan.row.id, data || { source_payload: nextPayload, updated_at: now });
+            updated += 1;
+            if (statusTarget) statusTarget.textContent = "Дополняю НМ: обновлено задач " + updated + "/" + plans.length + ".";
+        });
+        return { updated, missing };
     }
 
     function actualizeSupersetStats(rows) {
@@ -1809,6 +2291,663 @@
         }
     }
 
+    function resetQuickNoShkState(keepPhotos) {
+        state.quickNoShk = {
+            loading: false,
+            items: [],
+            index: 0,
+            actions: [],
+            started: false,
+            processing: false,
+            photoCache: keepPhotos && state.quickNoShk ? (state.quickNoShk.photoCache || {}) : {},
+            pureCandidates: [],
+            supersetRows: [],
+            supersetByShk: new Map(),
+            missingNm: 0,
+            needsSuperset: false,
+            fileName: "",
+        };
+    }
+
+    function isQuickNoShkPureCandidate(row) {
+        if (!row) return false;
+        const status = statusCode(row.shk_state_before_lost || row.shk_state);
+        if (status !== "SAS" && status !== "SMC" && status !== "EPR") return false;
+        const comment = pureResolutionValue(row, ["opp_comment", "comment"]);
+        if (normalizeForMatch(comment).includes(normalizeForMatch(QUICK_NO_SHK_PURE_NOT_FOUND_MARKER))) return false;
+        return !pureResolutionValue(row, ["opp_deecision", "opp_decision", "decision"]);
+    }
+
+    async function fetchQuickNoShkPureCandidates() {
+        const db = supabaseDb();
+        if (!db) return [];
+        const rows = [];
+        const pageSize = 1000;
+        for (let from = 0; from < 10000; from += pageSize) {
+            const { data, error } = await db
+                .from(PURE_LOSSES_TABLE)
+                .select("*")
+                .eq("wh_id", WH_ID)
+                .or("shk_state_before_lost.ilike.SAS%,shk_state_before_lost.ilike.SMC%,shk_state_before_lost.ilike.EPR%")
+                .range(from, from + pageSize - 1);
+            if (error) {
+                console.warn("quick no shk pure candidates skipped:", error);
+                return rows;
+            }
+            const batch = Array.isArray(data) ? data : [];
+            rows.push(...batch.filter(isQuickNoShkPureCandidate));
+            if (batch.length < pageSize) break;
+        }
+        const seen = new Set();
+        return rows.filter((row) => {
+            const shk = normalizeIdentifier(row && row.shk);
+            const dateLost = parseDateTime(row && row.date_lost).date || normalizeText(row && row.date_lost);
+            const key = [shk, dateLost, normalizeIdentifier(row && row.wh_id)].join("|");
+            if (!shk || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
+    function isQuickNoShkEligibleTask(row) {
+        if (!row || !isActiveReviewTask(row) || requestSectionName(row) || isPrespisokTask(row)) return false;
+        if (taskSectionName(row) !== "Предсортировка") return false;
+        return true;
+    }
+
+    function quickNoShkSupersetRow(shk) {
+        const key = normalizeIdentifier(shk);
+        return key && state.quickNoShk.supersetByShk instanceof Map ? state.quickNoShk.supersetByShk.get(key) : null;
+    }
+
+    function quickNoShkPureItem(row, supersetRow) {
+        const shk = normalizeIdentifier(row && row.shk);
+        if (!shk) return null;
+        const idTarget = pureRowIdTarget(row);
+        const dateLost = parseDateTime(row && row.date_lost).date || normalizeText(row && row.date_lost);
+        const nomenclature = {
+            nm: normalizeIdentifier(row && row.nm) || normalizeIdentifier(supersetRow && supersetRow.nm),
+            name: normalizeText(row && (row.decription || row.description)) || normalizeText(supersetRow && supersetRow.name) || "Наименование не найдено",
+        };
+        return {
+            kind: "pure",
+            key: "pure:" + (idTarget ? idTarget.column + ":" + idTarget.value : [shk, dateLost, normalizeIdentifier(row && row.wh_id)].join("|")),
+            row_id: "",
+            pure_row: row,
+            pure_id_target: idTarget,
+            shk,
+            nm: nomenclature.nm,
+            name: nomenclature.name,
+            status: normalizeText(row && (row.shk_state_before_lost || row.shk_state)) || statusCode(row && row.shk_state_before_lost),
+            movement: normalizeText(supersetRow && supersetRow.last_status_at) || normalizeText(row && row.date_lost),
+            price: Number(row && row.price) || Number(supersetRow && supersetRow.price) || 0,
+            task_title: "Чистые списания",
+            last_office: normalizeIdentifier(supersetRow && supersetRow.last_office),
+        };
+    }
+
+    function hasQuickNoShkKeptActiveCheck(row, shk) {
+        const target = normalizeIdentifier(shk);
+        const payload = taskPayload(row);
+        const checks = [];
+        if (payload.no_shk_review && typeof payload.no_shk_review === "object" && !Array.isArray(payload.no_shk_review)) checks.push(payload.no_shk_review);
+        if (Array.isArray(payload.no_shk_review_history)) checks.push(...payload.no_shk_review_history);
+        return checks.some((check) => normalizeIdentifier(check && check.shk) === target
+            && normalizeText(check && check.result) === SYSTEM_NO_SHK_NOT_FOUND_VERDICT
+            && Boolean(check && check.kept_active));
+    }
+
+    function buildQuickNoShkItems() {
+        const items = [];
+        (state.review.rows || []).filter(isQuickNoShkEligibleTask).forEach((row) => {
+            const taskItemsList = taskItems(row);
+            taskItemsList.forEach((item) => {
+                if (hasQuickNoShkKeptActiveCheck(row, item.shk)) return;
+                const price = Number(item.price) || (taskItemsList.length === 1 ? reviewPrice(row) : 0);
+                const nomenclature = itemNomenclature(row, item);
+                items.push({
+                    kind: "task",
+                    key: row.id + ":" + item.shk,
+                    row_id: row.id,
+                    row_is_tare: isTareTask(row),
+                    tare_id: normalizeIdentifier(row.source_tare_id),
+                    shk: item.shk,
+                    nm: nomenclature.nm,
+                    name: nomenclature.name || taskItemName(row) || "Наименование не найдено",
+                    status: item.status || "",
+                    movement: item.movement || row.source_last_movement_at || "",
+                    price,
+                    task_title: displayTaskTitle(row),
+                });
+            });
+        });
+        const hasSuperset = state.quickNoShk.supersetByShk instanceof Map && state.quickNoShk.supersetByShk.size > 0;
+        if (hasSuperset) {
+            (state.quickNoShk.pureCandidates || []).forEach((row) => {
+                const supersetRow = quickNoShkSupersetRow(row && row.shk);
+                if (!supersetRow || normalizeIdentifier(supersetRow.last_office) === WH_ID) return;
+                const item = quickNoShkPureItem(row, supersetRow);
+                if (item) items.push(item);
+            });
+        }
+        items.sort((a, b) => (a.nm ? 1 : 0) - (b.nm ? 1 : 0) || b.price - a.price || String(a.shk).localeCompare(String(b.shk), "ru", { numeric: true }));
+        state.quickNoShk.items = items;
+        state.quickNoShk.missingNm = items.filter((item) => !item.nm).length;
+        state.quickNoShk.needsSuperset = state.quickNoShk.missingNm > 0 || ((state.quickNoShk.pureCandidates || []).length > 0 && !hasSuperset);
+        if (state.quickNoShk.index >= items.length) state.quickNoShk.index = Math.max(items.length - 1, 0);
+        return items;
+    }
+
+    function quickNoShkTopHtml(subtitle) {
+        return "<div class='quick-no-shk-top'>"
+            + "<div><p class='quick-no-shk-kicker'>ОПП // быстрый без ШК</p><h2 class='quick-no-shk-title'>Без ШК</h2><p class='quick-no-shk-subtitle'>" + escapeHtml(subtitle || "Фото, быстрый глазной контроль и безопасный системный вердикт.") + "</p></div>"
+            + "<button id='closeQuickNoShk' class='btn btn-square prespisok-close' type='button' aria-label='Закрыть'>×</button>"
+            + "</div>";
+    }
+
+    async function openQuickNoShkModal() {
+        closeFlowModals();
+        resetQuickNoShkState(true);
+        setFlowModalOpen("quickNoShkModal", true);
+        renderQuickNoShkLoading();
+        await Promise.all([
+            (!state.review.loaded && !state.review.loading) ? loadReviewTasks() : Promise.resolve(),
+            fetchQuickNoShkPureCandidates().then((rows) => { state.quickNoShk.pureCandidates = rows; }),
+        ]);
+        buildQuickNoShkItems();
+        renderQuickNoShk();
+    }
+
+    function closeQuickNoShkModal() {
+        setFlowModalOpen("quickNoShkModal", false);
+    }
+
+    function bindQuickNoShkClose() {
+        const close = $("closeQuickNoShk");
+        if (close) close.addEventListener("click", closeQuickNoShkModal);
+    }
+
+    function renderQuickNoShkLoading() {
+        const target = $("quickNoShkWrap");
+        if (!target) return;
+        target.innerHTML = quickNoShkTopHtml("Собираю ШК предсортировки и подходящие чистые списания. Если всё пусто, значит сегодня хотя бы эта часть склада решила не устраивать цирк.")
+            + "<section class='quick-no-shk-panel'><div class='quick-no-shk-center'><div class='prespisok-wait'>Ищу цели</div></div></section>";
+        bindQuickNoShkClose();
+    }
+
+    function renderQuickNoShk() {
+        const target = $("quickNoShkWrap");
+        if (!target) return;
+        const items = state.quickNoShk.items || [];
+        if (state.quickNoShk.needsSuperset) {
+            renderQuickNoShkNeedsNm();
+            return;
+        }
+        if (!items.length) {
+            target.innerHTML = quickNoShkTopHtml("Режим доступен, когда есть активные ШК предсортировки или чистые списания SAS/SMC/EPR с последним офисом не " + WH_ID + ".")
+                + "<section class='quick-no-shk-panel'><div class='quick-no-shk-center'><div><div class='prespisok-wait'>Целей нет</div><p class='quick-no-shk-subtitle'>Пока нечего проверять. Редкий случай, когда склад не подкинул мелкой пакости.</p></div></div></section>";
+            bindQuickNoShkClose();
+            return;
+        }
+        if (!state.quickNoShk.started) {
+            target.innerHTML = quickNoShkTopHtml("Готово к быстрой проверке: " + items.length + " ШК. Фото берется по Код НМ, вердикт закрывает задачу системно.")
+                + "<section class='quick-no-shk-panel'><div class='quick-no-shk-center'><div><button id='startQuickNoShk' class='quick-no-shk-start' type='button'>Начать</button><p class='quick-no-shk-subtitle'>Попаданий: " + items.length + ". НМ заполнены у всех целей.</p></div></div></section>";
+            bindQuickNoShkClose();
+            $("startQuickNoShk").addEventListener("click", () => {
+                state.quickNoShk.started = true;
+                state.quickNoShk.index = 0;
+                renderQuickNoShkPlay();
+            });
+            return;
+        }
+        renderQuickNoShkPlay();
+    }
+
+    function quickNoShkSupersetNeededShks() {
+        const ids = new Set();
+        (state.quickNoShk.items || []).forEach((item) => {
+            if (!item.nm && item.shk) ids.add(item.shk);
+        });
+        const hasSuperset = state.quickNoShk.supersetByShk instanceof Map && state.quickNoShk.supersetByShk.size > 0;
+        if (!hasSuperset) {
+            (state.quickNoShk.pureCandidates || []).forEach((row) => {
+                const shk = normalizeIdentifier(row && row.shk);
+                if (shk) ids.add(shk);
+            });
+        }
+        return Array.from(ids).sort((a, b) => a.localeCompare(b, "ru", { numeric: true }));
+    }
+
+    async function copyQuickNoShkSupersetShks() {
+        const ids = quickNoShkSupersetNeededShks();
+        const status = $("quickNoShkStatus");
+        if (!ids.length) {
+            if (status) {
+                status.className = "status-line good";
+                status.textContent = "Копировать нечего: нужные ШК уже дополнены.";
+            }
+            return;
+        }
+        const copied = await copyText(ids.join("\n"));
+        if (status) {
+            status.className = "status-line " + (copied ? "good" : "error");
+            status.textContent = copied
+                ? "Скопировано ШК: " + ids.length + ". Теперь выгрузите их из Superset и загрузите файл сюда."
+                : "Браузер заблокировал копирование. Можно выделить ШК вручную, но браузер, конечно, выбрал драму.";
+        }
+        toast(copied ? "Скопировано ШК: " + ids.length : "Браузер заблокировал копирование.", copied ? "success" : "error");
+    }
+
+    function renderQuickNoShkNeedsNm() {
+        const target = $("quickNoShkWrap");
+        if (!target) return;
+        const pureCount = (state.quickNoShk.pureCandidates || []).length;
+        const copyCount = quickNoShkSupersetNeededShks().length;
+        const reasons = [];
+        if (state.quickNoShk.missingNm > 0) reasons.push("у " + state.quickNoShk.missingNm + " целей нет Код НМ");
+        if (pureCount > 0 && !(state.quickNoShk.supersetByShk instanceof Map && state.quickNoShk.supersetByShk.size > 0)) reasons.push("нужно проверить чистые списания SAS/SMC/EPR по офису последнего МХ");
+        target.innerHTML = quickNoShkTopHtml((reasons.length ? reasons.join("; ") : "Нужна Superset-выгрузка") + ".")
+            + "<section class='quick-no-shk-panel'><div class='quick-no-shk-file'>"
+            + "<div class='status-line error'>Нужен файл Superset. Я беру из него “Код НМ”, наименование и “Офис последнего МХ” для чистых списаний.</div>"
+            + "<button id='copyQuickNoShkShks' class='btn btn-rect' type='button'>Скопировать ШК" + (copyCount ? " (" + copyCount + ")" : "") + "</button>"
+            + "<div class='file-row'><label class='btn btn-rect' for='quickNoShkSupersetFile'>Добавить данные из Superset</label><input id='quickNoShkSupersetFile' class='file-input' type='file' accept='.xlsx,.xls,.csv'><span id='quickNoShkFileName' class='file-name'>Файл пока не выбран</span></div>"
+            + "<div id='quickNoShkStatus' class='status-line'>После загрузки я дополню задачи номенклатурой и вернусь к старту режима.</div>"
+            + "</div></section>";
+        bindQuickNoShkClose();
+        $("copyQuickNoShkShks").addEventListener("click", () => { void copyQuickNoShkSupersetShks(); });
+        $("quickNoShkSupersetFile").addEventListener("change", () => {
+            const file = $("quickNoShkSupersetFile").files && $("quickNoShkSupersetFile").files[0];
+            if (file) void handleQuickNoShkSupersetFile(file);
+        });
+    }
+
+    async function handleQuickNoShkSupersetFile(file) {
+        if (!file) return;
+        state.quickNoShk.fileName = file.name || "";
+        if ($("quickNoShkFileName")) $("quickNoShkFileName").textContent = "Файл выбран: " + state.quickNoShk.fileName;
+        const status = $("quickNoShkStatus");
+        if (status) status.textContent = "Читаю Superset и достаю Код НМ...";
+        try {
+            const rows = await readSupersetRows(file);
+            state.quickNoShk.supersetRows = rows;
+            state.quickNoShk.supersetByShk = latestSupersetByShk(rows);
+            await enrichTaskNomenclatureFromSuperset(rows, { statusTarget: "quickNoShkStatus" });
+            state.actualize.rows = rows;
+            state.actualize.stats = actualizeSupersetStats(rows);
+            state.actualize.candidates = buildMovementCandidates(rows);
+            buildQuickNoShkItems();
+            if (status) status.textContent = "НМ дополнены. Возвращаюсь к проверке.";
+            renderQuickNoShk();
+        } catch (error) {
+            console.error("quick no shk superset failed:", error);
+            if (status) {
+                status.className = "status-line error";
+                status.textContent = "Не удалось обработать файл: " + (error && error.message ? error.message : String(error));
+            }
+        }
+    }
+
+    function currentQuickNoShkItem() {
+        const done = new Set((state.quickNoShk.actions || []).map((action) => action.key));
+        let index = Math.max(Number(state.quickNoShk.index) || 0, 0);
+        while (index < (state.quickNoShk.items || []).length && done.has(state.quickNoShk.items[index].key)) index += 1;
+        state.quickNoShk.index = index;
+        return (state.quickNoShk.items || [])[index] || null;
+    }
+
+    function quickNoShkPhotoHtml(item) {
+        const cacheKey = normalizeIdentifier(item && item.nm);
+        const hasCache = cacheKey && Object.prototype.hasOwnProperty.call(state.quickNoShk.photoCache, cacheKey);
+        const imageUrl = hasCache ? state.quickNoShk.photoCache[cacheKey] : "";
+        if (imageUrl) return "<img id='quickNoShkPhoto' class='quick-no-shk-photo' src='" + escapeHtml(imageUrl) + "' alt='Фото товара'>";
+        if (hasCache) return "<div id='quickNoShkPhotoEmpty' class='quick-no-shk-photo-empty'>Фото по НМ " + escapeHtml(cacheKey || "-") + " не найдено.<br>Проверяем руками, как в доисторические времена.</div>";
+        return "<div id='quickNoShkPhotoEmpty' class='quick-no-shk-photo-empty'>Ищу фото по НМ " + escapeHtml(cacheKey || "-") + "...</div>";
+    }
+
+    async function loadQuickNoShkPhoto(item) {
+        const nm = normalizeIdentifier(item && item.nm);
+        if (!nm || Object.prototype.hasOwnProperty.call(state.quickNoShk.photoCache, nm)) return;
+        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 4, maxHosts: 30 });
+        const found = await findFirstLoadableImage(urls);
+        state.quickNoShk.photoCache[nm] = found || "";
+        const current = currentQuickNoShkItem();
+        if (current && current.key === item.key && $("quickNoShkModal") && $("quickNoShkModal").classList.contains("active")) renderQuickNoShkPlay();
+    }
+
+    function renderQuickNoShkPlay() {
+        const target = $("quickNoShkWrap");
+        if (!target) return;
+        const item = currentQuickNoShkItem();
+        if (!item) {
+            renderQuickNoShkFinish();
+            return;
+        }
+        const progress = (state.quickNoShk.actions || []).length;
+        const total = (state.quickNoShk.items || []).length;
+        target.innerHTML = quickNoShkTopHtml("Быстрый режим: " + progress + "/" + total + ". Смотри фото, сверяй глазами, жми без философского романа.")
+            + "<section class='quick-no-shk-panel'>"
+            + "<div class='quick-no-shk-game'>"
+            + "<div class='quick-no-shk-photo-wrap'>" + quickNoShkPhotoHtml(item) + "</div>"
+            + "<aside class='quick-no-shk-side'>"
+            + "<h3>" + escapeHtml(item.shk) + "</h3>"
+            + "<p class='quick-no-shk-name'>" + escapeHtml(item.name || "Наименование не найдено") + "</p>"
+            + "<div class='quick-no-shk-info'>"
+            + "<div><span>Код НМ</span><strong>" + escapeHtml(item.nm || "-") + "</strong></div>"
+            + "<div><span>Стоимость</span><strong>" + escapeHtml(formatMoney(item.price)) + "</strong></div>"
+            + "<div><span>Статус</span><strong>" + escapeHtml(item.status || "-") + "</strong></div>"
+            + "<div><span>Дата последнего движения</span><strong>" + escapeHtml(formatRuDateTime(item.movement)) + "</strong></div>"
+            + "<div><span>Источник</span><strong>" + escapeHtml(item.kind === "pure" ? "Чистые списания" : (Number(item.price) < 1000 ? "Предсортировка до 1000" : "Предсортировка 1000+")) + "</strong></div>"
+            + "</div>"
+            + "<div id='quickNoShkActionStatus' class='review-status'></div>"
+            + "<div class='quick-no-shk-actions'>"
+            + "<button class='quick-no-shk-action not-found' type='button' data-quick-no-shk='not_found'>Не найден</button>"
+            + "<button class='quick-no-shk-action found' type='button' data-quick-no-shk='found'>Есть</button>"
+            + "</div>"
+            + "</aside></div></section>";
+        bindQuickNoShkClose();
+        target.querySelectorAll("[data-quick-no-shk]").forEach((button) => {
+            button.addEventListener("click", () => { void applyQuickNoShkAction(button.dataset.quickNoShk || ""); });
+        });
+        void loadQuickNoShkPhoto(item);
+    }
+
+    async function completeTaskBySystemNoShk(row, item, verdict, note) {
+        const db = supabaseDb();
+        if (!db) throw new Error("Supabase недоступен.");
+        const user = currentWmsUser();
+        const now = new Date().toISOString();
+        const makeReviewPayload = (basePayload) => ({
+            ...(basePayload || {}),
+            wms_review: {
+                ...taskReviewPayload(row),
+                comment: note,
+                verdict,
+                completed_by_id: user.id || null,
+                completed_by_name: user.name || null,
+                completed_at: now,
+                no_shk_checked_at: now,
+            },
+            no_shk_review: {
+                shk: item.shk,
+                nm: item.nm,
+                name: item.name,
+                result: verdict,
+                checked_at: now,
+                checked_by_id: user.id || null,
+                checked_by_name: user.name || null,
+            },
+        });
+        const items = taskItems(row);
+        const sourceItem = items.find((candidate) => normalizeIdentifier(candidate.shk) === normalizeIdentifier(item.shk)) || item;
+        if (isTareTask(row) && items.length > 1) {
+            const enrichedSourceItem = {
+                ...sourceItem,
+                nm: item.nm || sourceItem.nm || "",
+                name: item.name || sourceItem.name || "",
+                raw: {
+                    ...((sourceItem.raw && typeof sourceItem.raw === "object") ? sourceItem.raw : {}),
+                    nm: item.nm || sourceItem.nm || "",
+                    name: item.name || sourceItem.name || "",
+                },
+            };
+            const rest = items.filter((candidate) => normalizeIdentifier(candidate.shk) !== normalizeIdentifier(item.shk));
+            const splitTask = splitTaskFromTare(row, enrichedSourceItem);
+            const splitPayload = makeReviewPayload({
+                ...taskPayload(splitTask),
+                item_name: item.name || sourceItem.name || "",
+            });
+            Object.assign(splitTask, {
+                task_status: "Завершено",
+                opp_verdict: verdict,
+                assignee_employee_id: user.id || null,
+                assignee_name: user.name || null,
+                completed_at: now,
+                reopen_after: null,
+                source_payload: splitPayload,
+                search_text: [splitTask.title, splitTask.task_type, item.shk, item.nm, item.name, verdict].filter(Boolean).join(" "),
+                updated_at: now,
+            });
+            const { error: saveError } = await db.rpc(SAVE_RPC, { p_tasks: [compactTaskForSave(splitTask)], p_run: {} });
+            if (saveError) throw saveError;
+            const checked = Array.isArray(taskPayload(row).no_shk_checked_shks) ? taskPayload(row).no_shk_checked_shks : [];
+            await updateTareTaskItems(row, rest, {
+                no_shk_checked_shks: Array.from(new Set(checked.concat(item.shk).filter(Boolean))),
+                no_shk_last_checked_at: now,
+            });
+            return splitTask;
+        }
+        const nextPayload = makeReviewPayload(taskPayload(row));
+        const payload = {
+            task_status: "Завершено",
+            opp_verdict: verdict,
+            assignee_employee_id: user.id || null,
+            assignee_name: user.name || null,
+            completed_at: now,
+            reopen_after: null,
+            source_payload: nextPayload,
+            updated_at: now,
+        };
+        const { data, error } = await db
+            .from(WMS_TASKS_TABLE)
+            .update(payload)
+            .eq("id", row.id)
+            .select("id,source_payload,task_status,opp_verdict,assignee_employee_id,assignee_name,completed_at,reopen_after,updated_at")
+            .single();
+        if (error) throw error;
+        refreshTaskRow(row.id, data || payload);
+        state.review.rows = (state.review.rows || []).filter((task) => task.id !== row.id);
+        return data || payload;
+    }
+
+    async function markTaskNoShkCheckedWithoutClosing(row, item, verdict, note) {
+        const db = supabaseDb();
+        if (!db) throw new Error("Supabase недоступен.");
+        const user = currentWmsUser();
+        const now = new Date().toISOString();
+        const basePayload = taskPayload(row);
+        const reviewPayload = {
+            ...(basePayload.no_shk_review && typeof basePayload.no_shk_review === "object" && !Array.isArray(basePayload.no_shk_review) ? basePayload.no_shk_review : {}),
+            shk: item.shk,
+            nm: item.nm,
+            name: item.name,
+            result: verdict,
+            comment: note,
+            checked_at: now,
+            checked_by_id: user.id || null,
+            checked_by_name: user.name || null,
+            kept_active: true,
+        };
+        const history = Array.isArray(basePayload.no_shk_review_history) ? basePayload.no_shk_review_history.slice(-49) : [];
+        const extraPayload = {
+            no_shk_review: reviewPayload,
+            no_shk_review_history: history.concat(reviewPayload),
+            no_shk_last_checked_at: now,
+        };
+        const items = taskItems(row);
+        if (isTareTask(row) && items.length > 1) {
+            await updateTareTaskItems(row, items, extraPayload);
+            return row;
+        }
+        const nextPayload = { ...basePayload, ...extraPayload };
+        const { data, error } = await db
+            .from(WMS_TASKS_TABLE)
+            .update({ source_payload: nextPayload, updated_at: now })
+            .eq("id", row.id)
+            .select("id,source_payload,updated_at")
+            .single();
+        if (error) throw error;
+        refreshTaskRow(row.id, data || { source_payload: nextPayload, updated_at: now });
+        return data || row;
+    }
+
+    async function updatePureNoShkFound(item) {
+        const db = supabaseDb();
+        if (!db) throw new Error("Supabase недоступен.");
+        const row = item && item.pure_row ? item.pure_row : {};
+        const user = currentWmsUser();
+        const patch = {
+            opp_deecision: AUTO_FOUND_DECISION,
+            opp_emp: user.id || AUTO_FOUND_EMP_ID,
+            opp_comment: "Быстрая проверка Без ШК: товар обнаружен при оклейке.",
+        };
+        const unsupported = new Set();
+        const apply = async () => {
+            const finalPatch = {};
+            Object.entries(patch).forEach(([key, value]) => {
+                if (!unsupported.has(key)) finalPatch[key] = value;
+            });
+            if (!Object.keys(finalPatch).length) return false;
+            let query = db.from(PURE_LOSSES_TABLE).update(finalPatch);
+            if (item.pure_id_target && item.pure_id_target.column && item.pure_id_target.value) {
+                query = query.eq(item.pure_id_target.column, item.pure_id_target.value);
+            } else {
+                query = query
+                    .eq("shk", item.shk)
+                    .eq("wh_id", normalizeIdentifier(row.wh_id) || WH_ID)
+                    .eq("date_lost", parseDateTime(row.date_lost).date || normalizeText(row.date_lost));
+            }
+            const { error } = await query;
+            if (!error) return true;
+            const missing = extractMissingColumnName(error);
+            if (missing && Object.prototype.hasOwnProperty.call(finalPatch, missing)) {
+                unsupported.add(missing);
+                return apply();
+            }
+            throw new Error("Не удалось обновить чистое списание: " + error.message);
+        };
+        return apply();
+    }
+
+    async function markPureNoShkNotFound(item) {
+        const db = supabaseDb();
+        if (!db) throw new Error("Supabase недоступен.");
+        const row = item && item.pure_row ? item.pure_row : {};
+        const user = currentWmsUser();
+        const existingComment = pureResolutionValue(row, ["opp_comment", "comment"]);
+        const markerLine = QUICK_NO_SHK_PURE_NOT_FOUND_MARKER
+            + " " + (user.name || user.id || "Сотрудник")
+            + ": товар не найден при быстрой проверке, вердикт в чистые списания не записан.";
+        const nextComment = normalizeForMatch(existingComment).includes(normalizeForMatch(QUICK_NO_SHK_PURE_NOT_FOUND_MARKER))
+            ? existingComment
+            : [existingComment, markerLine].filter(Boolean).join("\n");
+        const patch = {
+            opp_comment: nextComment,
+            comment: nextComment,
+        };
+        const unsupported = new Set();
+        const apply = async () => {
+            const finalPatch = {};
+            Object.entries(patch).forEach(([key, value]) => {
+                if (!unsupported.has(key)) finalPatch[key] = value;
+            });
+            if (!Object.keys(finalPatch).length) return false;
+            let query = db.from(PURE_LOSSES_TABLE).update(finalPatch);
+            if (item.pure_id_target && item.pure_id_target.column && item.pure_id_target.value) {
+                query = query.eq(item.pure_id_target.column, item.pure_id_target.value);
+            } else {
+                query = query
+                    .eq("shk", item.shk)
+                    .eq("wh_id", normalizeIdentifier(row.wh_id) || WH_ID)
+                    .eq("date_lost", parseDateTime(row.date_lost).date || normalizeText(row.date_lost));
+            }
+            const { error } = await query;
+            if (!error) return true;
+            const missing = extractMissingColumnName(error);
+            if (missing && Object.prototype.hasOwnProperty.call(finalPatch, missing)) {
+                unsupported.add(missing);
+                return apply();
+            }
+            throw new Error("Не удалось поставить отметку чистого списания: " + error.message);
+        };
+        return apply();
+    }
+
+    async function applyQuickNoShkAction(actionKey) {
+        if (state.quickNoShk.processing) return;
+        const item = currentQuickNoShkItem();
+        if (!item) return;
+        const row = item.kind === "task" ? findTaskRow(item.row_id) : null;
+        if (item.kind === "task" && !row) {
+            state.quickNoShk.actions.push({ key: item.key, shk: item.shk, result: "missing_task" });
+            renderQuickNoShkPlay();
+            return;
+        }
+        const found = actionKey === "found";
+        const verdict = found ? SYSTEM_NO_SHK_FOUND_VERDICT : SYSTEM_NO_SHK_NOT_FOUND_VERDICT;
+        const note = found ? "Быстрая проверка Без ШК: товар обнаружен при оклейке." : "Быстрая проверка Без ШК: товар не найден.";
+        state.quickNoShk.processing = true;
+        const status = $("quickNoShkActionStatus");
+        if (status) status.textContent = "Фиксирую вердикт...";
+        document.querySelectorAll("[data-quick-no-shk]").forEach((button) => { button.disabled = true; });
+        try {
+            let effectiveVerdict = verdict;
+            let keptActive = false;
+            if (item.kind === "pure") {
+                if (found) {
+                    await updatePureNoShkFound(item);
+                    effectiveVerdict = AUTO_FOUND_DECISION;
+                } else {
+                    await markPureNoShkNotFound(item);
+                    keptActive = true;
+                    effectiveVerdict = "Не найден, без записи в чистые списания";
+                }
+            } else if (found || Number(item.price) < 1000) {
+                await completeTaskBySystemNoShk(row, item, verdict, note);
+            } else {
+                await markTaskNoShkCheckedWithoutClosing(row, item, verdict, note);
+                keptActive = true;
+            }
+            state.quickNoShk.actions.push({
+                key: item.key,
+                shk: item.shk,
+                nm: item.nm,
+                name: item.name,
+                price: item.price,
+                verdict: effectiveVerdict,
+                found,
+                kind: item.kind || "task",
+                keptActive,
+                at: new Date().toISOString(),
+            });
+            state.quickNoShk.index += 1;
+            renderQuickNoShkPlay();
+            refreshOpenSectionModal();
+        } catch (error) {
+            console.error("quick no shk action failed:", error);
+            if (status) {
+                status.style.color = "#b91c1c";
+                status.textContent = "Не удалось сохранить результат: " + (error && error.message ? error.message : String(error));
+            }
+            document.querySelectorAll("[data-quick-no-shk]").forEach((button) => { button.disabled = false; });
+        } finally {
+            state.quickNoShk.processing = false;
+        }
+    }
+
+    function renderQuickNoShkFinish() {
+        const target = $("quickNoShkWrap");
+        if (!target) return;
+        const actions = state.quickNoShk.actions || [];
+        const found = actions.filter((action) => action.found);
+        const notFound = actions.filter((action) => !action.found);
+        const keptActive = actions.filter((action) => action.keptActive);
+        const foundRows = found.map((action) => "<div class='quick-no-shk-finish-row'><strong>" + escapeHtml(action.shk) + "</strong><br>" + escapeHtml(action.name || "-") + "<br>НМ: " + escapeHtml(action.nm || "-") + " · " + escapeHtml(formatMoney(action.price)) + (action.kind === "pure" ? " · чистые списания" : "") + "</div>").join("");
+        target.innerHTML = quickNoShkTopHtml("Проверка завершена. Найденное при оклейке вынесено отдельно, остальное закрыто системным вердиктом.")
+            + "<section class='quick-no-shk-panel'>"
+            + "<div class='prespisok-finish-grid'>"
+            + "<div class='prespisok-finish-stat'><span>Проверено</span><strong>" + actions.length + "</strong></div>"
+            + "<div class='prespisok-finish-stat saved'><span>Есть</span><strong>" + found.length + "</strong></div>"
+            + "<div class='prespisok-finish-stat writeoff'><span>Не найден</span><strong>" + notFound.length + "</strong></div>"
+            + "<div class='prespisok-finish-stat'><span>Остались в ручном</span><strong>" + keptActive.length + "</strong></div>"
+            + "</div>"
+            + "<h3 class='quick-no-shk-title' style='font-size:clamp(28px,4vw,54px);margin-top:18px'>Найдено при оклейке</h3>"
+            + "<div class='quick-no-shk-finish-list'>" + (foundRows || "<div class='quick-no-shk-finish-row'>Ничего не нашли. Иногда реальность скучнее файла.</div>") + "</div>"
+            + "<div class='file-row'><button id='closeQuickNoShkFinish' class='quick-no-shk-start' type='button'>Закрыть</button></div>"
+            + "</section>";
+        bindQuickNoShkClose();
+        $("closeQuickNoShkFinish").addEventListener("click", closeQuickNoShkModal);
+    }
+
     async function fetchWmsTaskRows(db, mode) {
         const pageSize = 1000;
         const maxRows = 20000;
@@ -1908,6 +3047,10 @@
         return grouped;
     }
 
+    function reviewCanvasRows() {
+        return (state.review.rows || []).filter((row) => isActiveReviewTask(row) && !isPrespisokTask(row) && !requestSectionName(row));
+    }
+
     function requestsGroupedRows() {
         const grouped = new Map(REQUEST_SECTIONS.map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
@@ -1977,6 +3120,269 @@
         return "background:#f8fafc;color:#64748b;";
     }
 
+    function sectionFilterState(mode) {
+        const holder = mode === "requests" ? state.requests : mode === "canvas" ? state.reviewCanvas : state.review;
+        if (!holder.filters) holder.filters = createReviewFilterState();
+        return holder.filters;
+    }
+
+    function resetSectionFilters(mode) {
+        const holder = mode === "requests" ? state.requests : mode === "canvas" ? state.reviewCanvas : state.review;
+        holder.filters = createReviewFilterState();
+    }
+
+    function taskFilterDate(row) {
+        return parseDateTime(row && row.upload_effective_date).date
+            || parseDateTime(row && row.source_last_movement_at).date
+            || parseDateTime(row && row.due_date).date
+            || parseDateTime(row && row.created_at).date;
+    }
+
+    function taskMovementStatusOptions(row) {
+        const result = new Set();
+        taskItems(row).forEach((item) => {
+            const code = latinStatusCode(item.status);
+            const value = code || normalizeText(item.status);
+            if (value) result.add(value);
+        });
+        return Array.from(result);
+    }
+
+    function taskEntityFilterValue(row) {
+        return isTareTask(row) ? "tare" : "shk";
+    }
+
+    function taskEntityFilterLabel(value) {
+        return value === "tare" ? "Тары" : "ШК";
+    }
+
+    function taskStatusFilterValue(row) {
+        return displayTaskStatus(row) || "Не начато";
+    }
+
+    function sortedUnique(values) {
+        return Array.from(new Set((values || []).map(normalizeText).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ru", { numeric: true, sensitivity: "base" }));
+    }
+
+    function dateLevelForRows(rows) {
+        const hasRed = (rows || []).some((row) => reviewPrice(row) > 5000);
+        if (hasRed) return "red";
+        const hasYellow = (rows || []).some((row) => reviewPrice(row) > 1000);
+        return hasYellow ? "yellow" : "";
+    }
+
+    function sectionDateBuckets(rows) {
+        const buckets = new Map();
+        (rows || []).forEach((row) => {
+            const date = taskFilterDate(row);
+            if (!date) return;
+            const bucket = buckets.get(date) || [];
+            bucket.push(row);
+            buckets.set(date, bucket);
+        });
+        return buckets;
+    }
+
+    function calendarStartMonday(isoDate) {
+        if (!isoDate) return "";
+        const date = new Date(isoDate + "T00:00:00Z");
+        const day = date.getUTCDay() || 7;
+        date.setUTCDate(date.getUTCDate() - day + 1);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function calendarEndSunday(isoDate) {
+        if (!isoDate) return "";
+        const date = new Date(isoDate + "T00:00:00Z");
+        const day = date.getUTCDay() || 7;
+        date.setUTCDate(date.getUTCDate() + (7 - day));
+        return date.toISOString().slice(0, 10);
+    }
+
+    function filterMatchesSet(value, selectedSet) {
+        if (selectedSet && selectedSet.has(FILTER_NONE)) return false;
+        return !selectedSet || !selectedSet.size || selectedSet.has(value);
+    }
+
+    function applySectionFilters(mode, rows) {
+        const filters = sectionFilterState(mode);
+        return (rows || []).filter((row) => {
+            const date = taskFilterDate(row);
+            if (filters.date === FILTER_NONE) return false;
+            if (filters.date && date !== filters.date) return false;
+            const movementOptions = taskMovementStatusOptions(row);
+            if (filters.movementStatuses.size && !movementOptions.some((value) => filters.movementStatuses.has(value))) return false;
+            if (!filterMatchesSet(taskEntityFilterValue(row), filters.entityTypes)) return false;
+            if (!filterMatchesSet(taskStatusFilterValue(row), filters.taskStatuses)) return false;
+            if (mode === "canvas" && !filterMatchesSet(taskSectionName(row), filters.sectionNames)) return false;
+            return true;
+        });
+    }
+
+    function filterOptionsForRows(rows) {
+        return {
+            movementStatuses: sortedUnique((rows || []).flatMap(taskMovementStatusOptions)),
+            entityTypes: ["shk", "tare"].filter((value) => (rows || []).some((row) => taskEntityFilterValue(row) === value)),
+            taskStatuses: sortedUnique((rows || []).map(taskStatusFilterValue)),
+            sectionNames: REVIEW_SECTIONS.filter((section) => (rows || []).some((row) => taskSectionName(row) === section)),
+        };
+    }
+
+    function filterSummaryText(mode, filterKey, options, labelForValue) {
+        const filters = sectionFilterState(mode);
+        const selected = filters[filterKey] || new Set();
+        if (!options.length) return "Нет значений";
+        if (selected.has(FILTER_NONE)) return "Ничего не выбрано";
+        if (!selected.size || selected.size >= options.length) return "Выбраны все";
+        if (selected.size === 1) {
+            const value = Array.from(selected)[0];
+            return labelForValue ? labelForValue(value) : value;
+        }
+        return "Выбрано: " + selected.size;
+    }
+
+    function renderFilterCheckboxes(mode, filterKey, options, labelForValue) {
+        const filters = sectionFilterState(mode);
+        const selected = filters[filterKey] || new Set();
+        const noneChecked = selected.has(FILTER_NONE);
+        const allChecked = !noneChecked && (!selected.size || selected.size >= options.length);
+        if (!options.length) return "<div class='review-filter-empty-note'>Нет значений.</div>";
+        return "<div class='review-filter-options'>"
+            + "<label class='review-filter-check'><input type='checkbox' data-review-filter-all='" + escapeHtml(filterKey) + "' " + (allChecked ? "checked" : "") + "> Выбрать всё</label>"
+            + options.map((value) => {
+            const label = labelForValue ? labelForValue(value) : value;
+            return "<label class='review-filter-check'><input type='checkbox' data-review-filter='" + escapeHtml(filterKey) + "' value='" + escapeHtml(value) + "' " + (allChecked || selected.has(value) ? "checked" : "") + "> " + escapeHtml(label) + "</label>";
+        }).join("") + "</div>";
+    }
+
+    function renderFilterCalendar(mode, rows) {
+        const filters = sectionFilterState(mode);
+        const buckets = sectionDateBuckets(rows);
+        const dates = Array.from(buckets.keys()).sort();
+        if (!dates.length) return "<div class='review-filter-empty-note'>Нет дат.</div>";
+        const start = calendarStartMonday(dates[0]);
+        const end = calendarEndSunday(dates[dates.length - 1]);
+        const weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => "<span class='review-filter-weekday'>" + day + "</span>").join("");
+        const cells = [];
+        for (let current = start; current && current <= end; current = addDays(current, 1)) {
+            const bucket = buckets.get(current) || [];
+            if (!bucket.length) {
+                cells.push("<span class='review-filter-empty'></span>");
+                continue;
+            }
+            const level = dateLevelForRows(bucket);
+            cells.push("<button class='review-filter-day" + (level ? " level-" + level : "") + (filters.date === current ? " is-selected" : "") + "' type='button' data-review-filter-date='" + escapeHtml(current) + "' title='" + escapeHtml(formatRuDate(current) + " · " + bucket.length + " задач") + "'>" + Number(current.slice(8, 10)) + "</button>");
+        }
+        return "<div class='review-filter-calendar'>" + weekdays + cells.join("") + "</div>";
+    }
+
+    function renderSectionFilters(mode, baseRows, filteredRows) {
+        const options = filterOptionsForRows(baseRows);
+        const filters = sectionFilterState(mode);
+        const dateSummary = filters.date === FILTER_NONE ? "Ничего не выбрано" : filters.date ? formatRuDate(filters.date) : "Выбраны все";
+        const control = (key, title, summary, body) => "<div class='review-filter-block" + (filters.openKey === key ? " is-open" : "") + "'>"
+            + "<span class='review-filter-title'>" + escapeHtml(title) + "</span>"
+            + "<button class='review-filter-trigger' type='button' data-review-filter-toggle='" + escapeHtml(key) + "'><span class='review-filter-summary'>" + escapeHtml(summary) + "</span><span class='review-filter-chevron'>⌄</span></button>"
+            + "<div class='review-filter-popover'><p class='review-filter-menu-title'>" + escapeHtml(title) + "</p>" + body + "</div>"
+            + "</div>";
+        return "<div class='review-filter-dropdown'><div class='review-filter-panel'>"
+            + control("date", "Дата", dateSummary, "<div class='review-filter-options'><label class='review-filter-check'><input type='checkbox' data-review-filter-date-all='1' " + (!filters.date ? "checked" : "") + "> Выбрать всё</label></div>" + renderFilterCalendar(mode, baseRows))
+            + (mode === "canvas" ? control("sectionNames", "Участок", filterSummaryText(mode, "sectionNames", options.sectionNames), renderFilterCheckboxes(mode, "sectionNames", options.sectionNames)) : "")
+            + control("movementStatuses", "Статус последнего движения", filterSummaryText(mode, "movementStatuses", options.movementStatuses), renderFilterCheckboxes(mode, "movementStatuses", options.movementStatuses))
+            + control("entityTypes", "Тип задачи", filterSummaryText(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel), renderFilterCheckboxes(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel))
+            + control("taskStatuses", "Статус", filterSummaryText(mode, "taskStatuses", options.taskStatuses), renderFilterCheckboxes(mode, "taskStatuses", options.taskStatuses) + "<div class='review-filter-empty-note' style='margin-top:8px'>Показано: " + escapeHtml(filteredRows.length) + " из " + escapeHtml(baseRows.length) + "</div>")
+            + "</div></div>";
+    }
+
+    function filterRenderTarget(mode) {
+        if (mode === "review") return $("reviewTableWrap");
+        return $("reviewSectionTableWrap");
+    }
+
+    function rerenderSectionKeepingPosition(target, mode, renderAgain) {
+        const modalCard = target.closest(".tasks-modal-card");
+        const modalScroll = modalCard ? modalCard.scrollTop : 0;
+        const tableScroll = target.querySelector(".review-table-scroll");
+        const tableScrollTop = tableScroll ? tableScroll.scrollTop : 0;
+        const popover = target.querySelector(".review-filter-block.is-open .review-filter-popover");
+        const popoverScrollTop = popover ? popover.scrollTop : 0;
+        renderAgain();
+        requestAnimationFrame(() => {
+            const nextTarget = filterRenderTarget(mode) || target;
+            const nextModalCard = nextTarget.closest(".tasks-modal-card");
+            const nextTableScroll = nextTarget.querySelector(".review-table-scroll");
+            const nextPopover = nextTarget.querySelector(".review-filter-block.is-open .review-filter-popover");
+            if (nextModalCard) nextModalCard.scrollTop = modalScroll;
+            if (nextTableScroll) nextTableScroll.scrollTop = tableScrollTop;
+            if (nextPopover) nextPopover.scrollTop = popoverScrollTop;
+        });
+    }
+
+    function syncRenderedFilterCheckboxes(target, mode) {
+        const filters = sectionFilterState(mode);
+        target.querySelectorAll("[data-review-filter-all]").forEach((input) => {
+            const key = input.dataset.reviewFilterAll;
+            const selected = filters[key] || new Set();
+            const optionInputs = Array.from(target.querySelectorAll("input[data-review-filter='" + key + "']"));
+            const total = optionInputs.length;
+            const selectedCount = selected.has(FILTER_NONE) ? 0 : !selected.size ? total : selected.size;
+            input.checked = total > 0 && selectedCount === total;
+            input.indeterminate = selectedCount > 0 && selectedCount < total;
+            optionInputs.forEach((option) => {
+                option.checked = !selected.has(FILTER_NONE) && (!selected.size || selected.has(option.value));
+            });
+        });
+    }
+
+    function bindSectionFilterEvents(target, mode, renderAgain) {
+        target.querySelectorAll("[data-review-filter-toggle]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const filters = sectionFilterState(mode);
+                const key = button.dataset.reviewFilterToggle || "";
+                filters.openKey = filters.openKey === key ? "" : key;
+                renderAgain();
+            });
+        });
+        target.querySelectorAll("[data-review-filter-date-all]").forEach((input) => {
+            input.addEventListener("change", () => {
+                const filters = sectionFilterState(mode);
+                filters.date = input.checked ? "" : FILTER_NONE;
+                filters.openKey = "date";
+                rerenderSectionKeepingPosition(target, mode, renderAgain);
+            });
+        });
+        target.querySelectorAll("[data-review-filter-date]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const filters = sectionFilterState(mode);
+                const value = button.dataset.reviewFilterDate || "";
+                filters.date = filters.date === value ? "" : value;
+                filters.openKey = "date";
+                rerenderSectionKeepingPosition(target, mode, renderAgain);
+            });
+        });
+        target.querySelectorAll("[data-review-filter-all]").forEach((input) => {
+            input.addEventListener("change", () => {
+                const filters = sectionFilterState(mode);
+                const key = input.dataset.reviewFilterAll;
+                if (key) filters[key] = input.checked ? new Set() : new Set([FILTER_NONE]);
+                filters.openKey = key || "";
+                rerenderSectionKeepingPosition(target, mode, renderAgain);
+            });
+        });
+        target.querySelectorAll("[data-review-filter]").forEach((input) => {
+            input.addEventListener("change", () => {
+                const filters = sectionFilterState(mode);
+                const key = input.dataset.reviewFilter;
+                const optionInputs = Array.from(target.querySelectorAll("input[data-review-filter='" + key + "']"));
+                const checked = optionInputs.filter((item) => item.checked).map((item) => item.value);
+                filters[key] = !checked.length ? new Set([FILTER_NONE]) : checked.length >= optionInputs.length ? new Set() : new Set(checked);
+                filters.openKey = key;
+                rerenderSectionKeepingPosition(target, mode, renderAgain);
+            });
+        });
+        syncRenderedFilterCheckboxes(target, mode);
+    }
+
     function renderReview() {
         if (!$("reviewSectionsGrid") || !$("reviewTableWrap")) return;
         if (state.review.loading) {
@@ -2003,6 +3409,7 @@
         $("reviewSectionsGrid").querySelectorAll("[data-review-section]").forEach((button) => {
             button.addEventListener("click", () => {
                 state.review.activeSection = button.dataset.reviewSection || REVIEW_SECTIONS[0];
+                resetSectionFilters("review");
                 renderReview();
                 openReviewSectionModal();
             });
@@ -2024,17 +3431,21 @@
     }
 
     function openReviewSectionModal() {
+        state.review.modalMode = "section";
         renderReviewTable(reviewGroupedRows());
         setFlowModalOpen("reviewSectionModal", true);
     }
 
     function closeReviewSectionModal() {
+        state.review.modalMode = "";
         setFlowModalOpen("reviewSectionModal", false);
     }
 
     function renderReviewTable(grouped) {
         const section = state.review.activeSection || REVIEW_SECTIONS[0];
-        const rows = sortedReviewRows(grouped.get(section) || []);
+        const baseRows = grouped.get(section) || [];
+        const filteredRows = applySectionFilters("review", baseRows);
+        const rows = sortedReviewRows(filteredRows);
         const target = $("reviewSectionTableWrap");
         if (!target) return;
         if (!state.review.loaded) {
@@ -2043,7 +3454,7 @@
             if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
             return;
         }
-        if (!rows.length) {
+        if (!baseRows.length) {
             target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач на участке нет.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Пусто. Красиво, если это правда.</div>";
             const closeBtn = $("closeReviewSectionModal");
             if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
@@ -2061,18 +3472,20 @@
                 + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + (verdict && verdict !== "Не выбран" ? "<div class='review-task-sub'>Вердикт: " + escapeHtml(verdict) + "</div>" : "") + "</td>"
                 + "</tr>";
         }).join("");
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
-            + "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
+            + renderSectionFilters("review", baseRows, rows)
+            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("entityType", "Тип задачи")
             + reviewSortHead("name", "Наименование")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
-            + "</tr></thead><tbody>" + body + "</tbody></table></div>";
+            + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
         const refresh = $("refreshReviewTasks");
         if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
         const closeBtn = $("closeReviewSectionModal");
         if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+        bindSectionFilterEvents(target, "review", () => renderReviewTable(reviewGroupedRows()));
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
                 const key = button.dataset.reviewSort || "price";
@@ -2081,6 +3494,77 @@
                     ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
                     : { key, dir: key === "price" ? "desc" : "asc" };
                 renderReviewTable(reviewGroupedRows());
+            });
+        });
+        target.querySelectorAll("[data-task-detail]").forEach((row) => {
+            row.addEventListener("click", () => openTaskDetail(row.dataset.taskDetail, "review"));
+        });
+    }
+
+    function sortedCanvasRows(rows) {
+        const previous = state.review.sort;
+        state.review.sort = state.reviewCanvas.sort || { key: "price", dir: "desc" };
+        const sorted = sortedReviewRows(rows);
+        state.review.sort = previous;
+        return sorted;
+    }
+
+    function openReviewCanvasModal() {
+        state.review.modalMode = "canvas";
+        resetSectionFilters("canvas");
+        renderReviewCanvasTable();
+        setFlowModalOpen("reviewSectionModal", true);
+    }
+
+    function renderReviewCanvasTable() {
+        const baseRows = reviewCanvasRows();
+        const filteredRows = applySectionFilters("canvas", baseRows);
+        const rows = sortedCanvasRows(filteredRows);
+        const target = $("reviewSectionTableWrap");
+        if (!target) return;
+        if (!state.review.loaded) {
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Полотно разбора</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
+            const closeBtn = $("closeReviewSectionModal");
+            if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+            return;
+        }
+        const body = rows.map((row) => {
+            const status = displayTaskStatus(row);
+            const verdict = normalizeText(row.opp_verdict);
+            const route = taskRouteLabel(row);
+            return "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>"
+                + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + " · " + escapeHtml(taskSectionName(row)) + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
+                + "<td><span class='review-pill'>" + escapeHtml(taskEntityTypeLabel(row)) + "</span></td>"
+                + "<td class='review-wrap-cell'>" + escapeHtml(taskItemName(row) || "-") + "</td>"
+                + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
+                + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + (verdict && verdict !== "Не выбран" ? "<div class='review-task-sub'>Вердикт: " + escapeHtml(verdict) + "</div>" : "") + "</td>"
+                + "</tr>";
+        }).join("");
+        const previousSort = state.review.sort;
+        state.review.sort = state.reviewCanvas.sort || { key: "price", dir: "desc" };
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Полотно разбора</h3><div class='review-table-subtitle'>Все активные задачи разбора: " + rows.length + " из " + baseRows.length + ".</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
+            + renderSectionFilters("canvas", baseRows, rows)
+            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
+            + reviewSortHead("title", "Задача")
+            + reviewSortHead("entityType", "Тип задачи")
+            + reviewSortHead("name", "Наименование")
+            + reviewSortHead("price", "Стоимость")
+            + reviewSortHead("status", "Статус")
+            + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
+        state.review.sort = previousSort;
+        const refresh = $("refreshReviewTasks");
+        if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
+        const closeBtn = $("closeReviewSectionModal");
+        if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+        bindSectionFilterEvents(target, "canvas", renderReviewCanvasTable);
+        target.querySelectorAll("[data-review-sort]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const key = button.dataset.reviewSort || "price";
+                const current = state.reviewCanvas.sort || { key: "price", dir: "desc" };
+                state.reviewCanvas.sort = current.key === key
+                    ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+                    : { key, dir: key === "price" ? "desc" : "asc" };
+                renderReviewCanvasTable();
             });
         });
         target.querySelectorAll("[data-task-detail]").forEach((row) => {
@@ -2129,6 +3613,7 @@
         $("requestsSectionsGrid").querySelectorAll("[data-request-section]").forEach((button) => {
             button.addEventListener("click", () => {
                 state.requests.activeSection = button.dataset.requestSection || REQUEST_SECTIONS[0];
+                resetSectionFilters("requests");
                 renderRequests();
                 openRequestsSectionModal();
             });
@@ -2150,7 +3635,9 @@
 
     function renderRequestsTable(grouped) {
         const section = state.requests.activeSection || REQUEST_SECTIONS[0];
-        const rows = sortedRequestRows(grouped.get(section) || []);
+        const baseRows = grouped.get(section) || [];
+        const filteredRows = applySectionFilters("requests", baseRows);
+        const rows = sortedRequestRows(filteredRows);
         const target = $("reviewSectionTableWrap");
         if (!target) return;
         if (!state.review.loaded) {
@@ -2159,7 +3646,7 @@
             if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
             return;
         }
-        if (!rows.length) {
+        if (!baseRows.length) {
             target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач нет.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Пусто. Непривычно, но приятно.</div>";
             const closeBtn = $("closeReviewSectionModal");
             if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
@@ -2176,17 +3663,19 @@
         }).join("");
         const previousSort = state.review.sort;
         state.review.sort = state.requests.sort || { key: "price", dir: "desc" };
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
-            + "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
+            + renderSectionFilters("requests", baseRows, rows)
+            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
-            + "</tr></thead><tbody>" + body + "</tbody></table></div>";
+            + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
         state.review.sort = previousSort;
         const refresh = $("refreshReviewTasks");
         if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
         const closeBtn = $("closeReviewSectionModal");
         if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+        bindSectionFilterEvents(target, "requests", () => renderRequestsTable(requestsGroupedRows()));
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
                 const key = button.dataset.reviewSort || "price";
@@ -2253,6 +3742,7 @@
         return {
             shk,
             name: normalizeText(value.name || raw.name),
+            nm: normalizeIdentifier(value.nm || raw.nm || raw.nm_id || raw.nmId || raw.nmID),
             status: normalizeText(value.status || raw.product_status || raw.last_status || raw.status),
             price: Number(value.price ?? raw.price) || 0,
             mx: normalizeText(value.mx || raw.mx || raw.block),
@@ -2269,7 +3759,7 @@
         const sourceRows = Array.isArray(payload.rows) ? payload.rows : payload.row ? [payload.row] : [];
         const fromRows = sourceRows.map(taskItemFromSourceRow).filter(Boolean);
         if (fromRows.length) return fromRows;
-        return (Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : []).map((id) => ({ shk: normalizeIdentifier(id), name: "", status: "", price: 0, mx: "", movement: "", row_number: null, raw: {} })).filter((item) => item.shk);
+        return (Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : []).map((id) => ({ shk: normalizeIdentifier(id), name: "", nm: "", status: "", price: 0, mx: "", movement: "", row_number: null, raw: {} })).filter((item) => item.shk);
     }
 
     function taskItemName(row) {
@@ -3017,8 +4507,9 @@
     }
 
     function itemsSourceRows(items) {
-        return (items || []).map((item) => item.raw && Object.keys(item.raw).length ? item.raw : {
+        return (items || []).map((item) => item.raw && Object.keys(item.raw).length ? { ...item.raw, nm: item.nm || item.raw.nm, name: item.name || item.raw.name } : {
             product: item.shk,
+            nm: item.nm,
             name: item.name,
             product_status: item.status,
             price: item.price,
@@ -4104,7 +5595,9 @@
         const input = $("file-" + key);
         input.addEventListener("change", () => {
             const file = input.files && input.files[0];
-            if (file) handler(file).catch((error) => setStatus(error && error.message ? error.message : String(error), "error"));
+            if (!file) return;
+            input.value = "";
+            handler(file).catch((error) => setStatus(error && error.message ? error.message : String(error), "error"));
         });
     }
 
@@ -4367,6 +5860,7 @@
         return {
             shk: normalized.shk,
             name: normalized.name,
+            nm: normalized.nm,
             status: normalized.status,
             price: normalized.price,
             mx: normalized.mx,
@@ -4774,12 +6268,135 @@
         return "Тара " + normalizeIdentifier(tare);
     }
 
+    function normalizeNmDigits(value) {
+        return String(value || "").replace(/\D/g, "");
+    }
+
+    function normalizeHttpUrl(value) {
+        let url = normalizeText(value);
+        if (!url) return "";
+        if (url.startsWith("//")) url = "https:" + url;
+        if (url.startsWith("http://")) url = "https://" + url.slice(7);
+        return /^https?:\/\//i.test(url) ? url : "";
+    }
+
+    function isLikelyImageUrl(url) {
+        const value = String(url || "");
+        return /\.(webp|jpe?g|png)(?:\?|$)/i.test(value)
+            || /\/images\/(big|c516x688|tm)\//i.test(value)
+            || /\/img\//i.test(value);
+    }
+
+    function uniqueUrls(urls) {
+        const result = [];
+        const seen = new Set();
+        (urls || []).forEach((raw) => {
+            const url = normalizeHttpUrl(raw);
+            if (!url || !isLikelyImageUrl(url) || seen.has(url)) return;
+            seen.add(url);
+            result.push(url);
+        });
+        return result;
+    }
+
+    function buildWbImageCandidatesByNm(nm, options) {
+        const digits = normalizeNmDigits(nm);
+        if (!digits) return [];
+        const article = Number(digits);
+        if (!Number.isFinite(article)) return [];
+        const opts = options || {};
+        const maxHosts = Math.max(12, Math.min(Number(opts.maxHosts || 40), 99));
+        const maxPics = Math.max(1, Math.min(Number(opts.maxPics || 4), 12));
+        const vol = Math.floor(article / 100000);
+        const part = Math.floor(article / 1000);
+        const urls = [];
+        const hosts = [];
+        for (let i = 1; i <= maxHosts; i += 1) {
+            const idx = String(i).padStart(2, "0");
+            hosts.push("https://basket-" + idx + ".wbbasket.ru");
+            hosts.push("https://basket-" + idx + ".wb.ru");
+        }
+        for (let imageIndex = 1; imageIndex <= maxPics; imageIndex += 1) {
+            ["big", "c516x688"].forEach((size) => {
+                ["webp", "jpg"].forEach((ext) => {
+                    hosts.forEach((host) => urls.push(host + "/vol" + vol + "/part" + part + "/" + digits + "/images/" + size + "/" + imageIndex + "." + ext));
+                });
+            });
+        }
+        const shard = digits.slice(0, Math.max(digits.length - 4, 1)) + "0000";
+        for (let imageIndex = 1; imageIndex <= Math.min(maxPics, 6); imageIndex += 1) {
+            urls.push("https://images.wbstatic.net/c516x688/new/" + shard + "/" + digits + "-" + imageIndex + ".jpg");
+            urls.push("https://images.wbstatic.net/big/new/" + shard + "/" + digits + "-" + imageIndex + ".jpg");
+            urls.push("https://images.wbstatic.net/c516x688/new/" + shard + "/" + digits + "-" + imageIndex + ".webp");
+            urls.push("https://images.wbstatic.net/big/new/" + shard + "/" + digits + "-" + imageIndex + ".webp");
+        }
+        return uniqueUrls(urls);
+    }
+
+    function probeImageUrl(url, timeoutMs) {
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            let finished = false;
+            const timer = setTimeout(() => {
+                if (finished) return;
+                finished = true;
+                image.onload = null;
+                image.onerror = null;
+                reject(new Error("timeout"));
+            }, timeoutMs || 1300);
+            image.onload = () => {
+                if (finished) return;
+                finished = true;
+                clearTimeout(timer);
+                resolve(url);
+            };
+            image.onerror = () => {
+                if (finished) return;
+                finished = true;
+                clearTimeout(timer);
+                reject(new Error("load error"));
+            };
+            image.src = url;
+        });
+    }
+
+    function firstFulfilled(promises) {
+        return new Promise((resolve) => {
+            if (!promises.length) {
+                resolve("");
+                return;
+            }
+            let rejected = 0;
+            let done = false;
+            promises.forEach((promise) => {
+                promise.then((value) => {
+                    if (done) return;
+                    done = true;
+                    resolve(value);
+                }).catch(() => {
+                    rejected += 1;
+                    if (!done && rejected === promises.length) resolve("");
+                });
+            });
+        });
+    }
+
+    async function findFirstLoadableImage(urls) {
+        const batchSize = 16;
+        for (let i = 0; i < (urls || []).length; i += batchSize) {
+            const found = await firstFulfilled(urls.slice(i, i + batchSize).map((url) => probeImageUrl(url, 1300)));
+            if (found) return found;
+        }
+        return "";
+    }
+
     function taskItemFromSourceRow(row) {
         const shk = normalizeIdentifier(row && (row.product || row.shk));
         if (!shk) return null;
         return {
             shk,
             name: normalizeText(row && row.name),
+            nm: normalizeIdentifier(row && (row.nm || row.nm_id || row.nmId || row.nmID)),
             status: normalizeText(row && (row.product_status || row.last_status || row.status)),
             price: Number(row && row.price) || 0,
             mx: normalizeText(row && (row.mx || row.block)),
@@ -5099,7 +6716,10 @@
     function appendGroupedTasks(rows, options) {
         const tasks = [];
         const specialMap = options.specialMap || new Map();
-        const split = splitSpecialRows(rows, specialMap, "product");
+        const isOtherTasksColumn = normalizeText(options.column) === "Другие задачи";
+        const isLabelingTask = normalizeForMatch(options.module) === "labeling" || normalizeForMatch(options.taskType).includes("оклейка");
+        const forceTareGrouping = Boolean(options.forceTareGrouping || (isOtherTasksColumn && !isLabelingTask));
+        const split = forceTareGrouping ? { regular: rows || [], special: [] } : splitSpecialRows(rows, specialMap, "product");
         const byTare = new Map();
         const singles = [];
         let groupedTareCount = 0;
@@ -5110,7 +6730,7 @@
             byTare.set(row.transfer, group);
         });
         byTare.forEach((group, transfer) => {
-            if (group.length > 1 || options.forceTareGrouping) {
+            if (group.length > 1 || forceTareGrouping) {
                 groupedTareCount += 1;
                 const sorted = sortRowsByCreatedAt(group);
                 const price = rowsPrice(sorted, "price");
@@ -5544,7 +7164,9 @@
         return {
             ...now,
             inWindow,
+            waitMinutes,
             waitLabel: minuteLabel(waitMinutes),
+            waitDurationLabel: formatMinutesCountdown(waitMinutes),
             windowLabel: minuteLabel(PRESPISOK_START_MINUTE) + "-" + minuteLabel(PRESPISOK_END_MINUTE),
         };
     }
@@ -5924,9 +7546,15 @@
             + "</div>";
     }
 
+    function setPrespisokPlayMode(enabled) {
+        const target = $("prespisokWrap");
+        if (target) target.classList.toggle("is-playing", Boolean(enabled));
+    }
+
     function renderPrespisok() {
         const target = $("prespisokWrap");
         if (!target) return;
+        setPrespisokPlayMode(false);
         const info = prespisokWindowInfo();
         if (state.prespisok.progressOnly && state.prespisok.remoteRun) {
             renderPrespisokRemoteProgress();
@@ -5960,6 +7588,7 @@
     function renderPrespisokRemoteProgress() {
         const target = $("prespisokWrap");
         if (!target) return;
+        setPrespisokPlayMode(false);
         const run = state.prespisok.remoteRun || {};
         const payload = prespisokRunPayload(run);
         const actions = state.prespisok.actions || [];
@@ -6025,6 +7654,7 @@
     function renderPrespisokExitConfirm() {
         const target = $("prespisokWrap");
         if (!target) return;
+        setPrespisokPlayMode(false);
         if (state.prespisok.timerStartedAt) {
             state.prespisok.elapsedBeforeMs = prespisokElapsedMs();
             state.prespisok.timerStartedAt = 0;
@@ -6055,6 +7685,7 @@
     function renderPrespisokFileStep() {
         const target = $("prespisokWrap");
         if (!target) return;
+        setPrespisokPlayMode(false);
         target.innerHTML = prespisokTopHtml("Загрузи XLSX предсписка. Исключения из файла будут пропущены, но мы честно покажем сколько их было.")
             + "<section class='prespisok-file-panel'>"
             + "<div class='prespisok-file-drop'><div><label for='prespisokFileInput'>Загрузить XLSX</label><input id='prespisokFileInput' class='file-input' type='file' accept='.xlsx,.xls,.csv'><p id='prespisokFileName' class='prespisok-subtitle'>Файл пока не выбран. Даже товар уже нервничает.</p></div></div>"
@@ -6277,6 +7908,7 @@
     function renderPrespisokReady() {
         const target = $("prespisokWrap");
         if (!target) return;
+        setPrespisokPlayMode(false);
         const totalRows = state.prespisok.rows.length || 0;
         const totalItems = state.prespisok.items.length || 0;
         const totalMoney = (state.prespisok.items || []).reduce((sum, item) => sum + (Number(item.price) || 0), 0);
@@ -6297,6 +7929,7 @@
     function renderPrespisokCountdown(value) {
         const target = $("prespisokWrap");
         if (!target) return;
+        setPrespisokPlayMode(false);
         target.innerHTML = prespisokTopHtml("Файл принят. Сейчас будет короткий обратный отсчет, потому что даже хаосу нужен драматический вход.")
             + "<div class='prespisok-center'><div class='prespisok-wait'>" + escapeHtml(value > 0 ? String(value) : "Погнали") + "</div></div>";
         bindPrespisokClose();
@@ -6405,6 +8038,7 @@
         if (!target) return;
         const item = currentPrespisokItem();
         if (!item) {
+            setPrespisokPlayMode(false);
             if (hasUnfinishedPrespisokItems()) {
                 target.innerHTML = prespisokTopHtml("Все свободные цели сейчас заняты другим сотрудником. Да, коллективная работа иногда выглядит как очередь в столовую.")
                     + "<div class='prespisok-center'><div><div class='prespisok-wait'>Жду свободную цель</div><button id='refreshPrespisokFreeItem' class='prespisok-start prespisok-start-small' type='button'>Проверить еще раз</button></div></div>";
@@ -6416,6 +8050,7 @@
             renderPrespisokFinish();
             return;
         }
+        setPrespisokPlayMode(true);
         if (!state.prespisok.timerStartedAt) state.prespisok.timerStartedAt = Date.now();
         if (!state.prespisok.itemTimerStartedAt) state.prespisok.itemTimerStartedAt = Date.now();
         void reservePrespisokItem(item);
@@ -6688,10 +8323,11 @@
         };
         const rows = loadPrespisokLeaderboard().filter((row) => !(row.date === record.date && row.employee_id === record.employee_id));
         rows.push(record);
-        rows.sort((a, b) => (Number(b.actions) || 0) - (Number(a.actions) || 0) || (Number(a.elapsed_ms) || 0) - (Number(b.elapsed_ms) || 0));
+        rows.sort((a, b) => prespisokLeaderboardScore(a) - prespisokLeaderboardScore(b));
         const top = rows.slice(0, 25);
         try { localStorage.setItem(prespisokLeaderboardKey(), JSON.stringify(top)); } catch (_error) {}
         state.prespisok.leaderboard = top;
+        renderPrespisokHomeLeaderboard();
         return record;
     }
 
@@ -6703,17 +8339,19 @@
         savePrespisokRecord();
         persistPrespisokState();
         await upsertPrespisokRun("completed");
+        void refreshPrespisokLeaderboard();
     }
 
     function renderPrespisokFinish() {
         const target = $("prespisokWrap");
         if (!target) return;
+        setPrespisokPlayMode(false);
         const record = savePrespisokRecord();
         const moneyStats = prespisokMoneyStats();
         const leaderboard = state.prespisok.leaderboard.length ? state.prespisok.leaderboard : loadPrespisokLeaderboard();
         const personal = leaderboard.filter((row) => row.employee_id === record.employee_id || row.name === record.name);
-        const best = personal.slice().sort((a, b) => (Number(b.actions) || 0) - (Number(a.actions) || 0) || (Number(a.elapsed_ms) || 0) - (Number(b.elapsed_ms) || 0))[0] || record;
-        const topRows = leaderboard.slice(0, 5).map((row, index) => "<tr><td>" + (index + 1) + "</td><td>" + escapeHtml(row.name) + "</td><td>" + escapeHtml(row.actions + "/" + row.total) + "</td><td>" + escapeHtml(formatDuration(row.elapsed_ms)) + "</td></tr>").join("");
+        const best = personal.slice().sort((a, b) => prespisokLeaderboardScore(a) - prespisokLeaderboardScore(b))[0] || record;
+        const topRows = leaderboard.slice(0, 5).map((row, index) => "<tr><td>" + (index + 1) + "</td><td>" + escapeHtml(row.name) + "</td><td>" + escapeHtml(row.actions + "/" + row.total) + "</td><td>" + escapeHtml(formatPrespisokLeaderSpeed(row)) + "</td></tr>").join("");
         target.innerHTML = prespisokTopHtml("Готово. Предсписок пережил тебя, но только формально.")
             + "<section class='prespisok-finish-panel'>"
             + "<h3 class='prespisok-title'>Разбор завершен</h3>"
@@ -6729,7 +8367,7 @@
             + "<div class='prespisok-finish-stat writeoff'><span>Автосписание ШК</span><strong>" + moneyStats.autoWriteoffCount + "</strong></div>"
             + "<div class='prespisok-finish-stat writeoff'><span>Списано рублей</span><strong>" + escapeHtml(formatMoney(moneyStats.writeoff)) + "</strong></div>"
             + "</div>"
-            + "<div class='prespisok-file-panel'><h3>Таблица лидеров</h3><table class='sample-table'><thead><tr><th>#</th><th>Сотрудник</th><th>Разобрано</th><th>Время</th></tr></thead><tbody>" + topRows + "</tbody></table><div class='status-line good'>Личный рекорд: " + escapeHtml(best.actions + "/" + best.total + " за " + formatDuration(best.elapsed_ms)) + ".</div><button id='resetPrespisokFinished' class='btn btn-rect' type='button'>Закрыть и очистить прогресс</button></div>"
+            + "<div class='prespisok-file-panel'><h3>Таблица лидеров</h3><table class='sample-table'><thead><tr><th>#</th><th>Сотрудник</th><th>Разобрано</th><th>Скорость</th></tr></thead><tbody>" + topRows + "</tbody></table><div class='status-line good'>Личный рекорд: " + escapeHtml(best.actions + "/" + best.total + " · " + formatPrespisokLeaderSpeed(best)) + ".</div><button id='resetPrespisokFinished' class='btn btn-rect' type='button'>Закрыть и очистить прогресс</button></div>"
             + "</section>";
         bindPrespisokClose();
         $("resetPrespisokFinished").addEventListener("click", () => {
@@ -6779,6 +8417,18 @@
                     setStatus("Supabase не прожевал пачку из " + progress.chunkSize + " задач. Делю на части по " + progress.nextChunkSize + " и продолжаю: сохранено " + progress.saved + "/" + progress.totalTasks + "...");
                     return;
                 }
+                if (progress.phase === "verify") {
+                    setStatus("Проверяю, что все задачи реально попали в Supabase: " + progress.saved + "/" + progress.totalTasks + "...");
+                    return;
+                }
+                if (progress.phase === "repair") {
+                    setStatus("Нашёл недостающие задачи: " + progress.missing + ". Дозаливаю маленькими пачками...");
+                    return;
+                }
+                if (progress.phase === "repair_chunk") {
+                    setStatus("Дозаливаю недостающие задачи: пачка " + progress.chunk + "/" + progress.totalChunks + " (" + progress.chunkSize + " задач)...");
+                    return;
+                }
                 setStatus("Сохраняю в Supabase: пачка " + progress.chunk + "/" + progress.totalChunks + " (" + progress.chunkSize + " задач), сохранено " + progress.saved + "/" + progress.totalTasks + "...");
             });
             if (response && response.upload_run) mergeRun(response.upload_run);
@@ -6804,6 +8454,102 @@
     function rpcUpsertedCount(data, fallback) {
         const value = Number(data && data.upserted_count);
         return Number.isFinite(value) ? value : fallback;
+    }
+
+    function savedTaskKey(task) {
+        return [normalizeText(task && task.source_module), normalizeText(task && task.source_id), normalizeText(task && task.task_type)].join("\u001f");
+    }
+
+    async function fetchSavedTaskKeys(db, tasks) {
+        const keys = new Set();
+        const byModule = new Map();
+        (tasks || []).forEach((task) => {
+            const sourceModule = normalizeText(task && task.source_module);
+            const sourceId = normalizeText(task && task.source_id);
+            if (!sourceModule || !sourceId) return;
+            if (!byModule.has(sourceModule)) byModule.set(sourceModule, new Set());
+            byModule.get(sourceModule).add(sourceId);
+        });
+        for (const [sourceModule, sourceIds] of byModule.entries()) {
+            const chunks = chunkArray(Array.from(sourceIds), 80);
+            for (let i = 0; i < chunks.length; i += 1) {
+                const { data, error } = await db
+                    .from(WMS_TASKS_TABLE)
+                    .select("source_module,source_id,task_type")
+                    .eq("source_module", sourceModule)
+                    .in("source_id", chunks[i]);
+                if (error) throw error;
+                (data || []).forEach((row) => keys.add(savedTaskKey(row)));
+            }
+        }
+        return keys;
+    }
+
+    async function saveRepairTasks(db, tasks, context) {
+        const chunks = chunkArray(tasks || [], 3);
+        let repaired = 0;
+        for (let i = 0; i < chunks.length; i += 1) {
+            if (context.onProgress) {
+                context.onProgress({
+                    phase: "repair_chunk",
+                    chunk: i + 1,
+                    totalChunks: chunks.length,
+                    chunkSize: chunks[i].length,
+                    saved: context.saved + repaired,
+                    totalTasks: context.totalTasks,
+                });
+            }
+            const repairContext = {
+                onProgress: null,
+                initialTotalChunks: chunks.length,
+                totalTasks: context.totalTasks,
+                physicalBatch: context.physicalBatch,
+                saved: context.saved + repaired,
+                initialChunk: i + 1,
+            };
+            const result = await saveRpcChunkAdaptive(db, chunks[i], {}, repairContext);
+            context.physicalBatch = repairContext.physicalBatch;
+            repaired += result.upserted;
+        }
+        return repaired;
+    }
+
+    async function verifyAndRepairSavedTasks(db, payloadTasks, context) {
+        const expected = new Map();
+        (payloadTasks || []).forEach((task) => {
+            if (!normalizeText(task && task.source_module) || !normalizeText(task && task.source_id)) return;
+            const key = savedTaskKey(task);
+            expected.set(key, task);
+        });
+        if (!expected.size) return { expectedCount: 0, repairedCount: 0 };
+        let repairedCount = 0;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            if (context.onProgress) {
+                context.onProgress({
+                    phase: "verify",
+                    attempt,
+                    saved: context.saved + repairedCount,
+                    totalTasks: context.totalTasks,
+                    expectedCount: expected.size,
+                });
+            }
+            const saved = await fetchSavedTaskKeys(db, Array.from(expected.values()));
+            const missing = Array.from(expected.entries()).filter(([key]) => !saved.has(key)).map(([, task]) => task);
+            if (!missing.length) return { expectedCount: expected.size, repairedCount };
+            if (attempt >= 3) {
+                throw new Error("После контрольной сверки не сохранилось задач: " + missing.length + ". Попробуйте повторить выгрузку; WMS+ не будет делать вид, что всё ок.");
+            }
+            if (context.onProgress) {
+                context.onProgress({
+                    phase: "repair",
+                    missing: missing.length,
+                    saved: context.saved + repairedCount,
+                    totalTasks: context.totalTasks,
+                });
+            }
+            repairedCount += await saveRepairTasks(db, missing, context);
+        }
+        return { expectedCount: expected.size, repairedCount };
     }
 
     async function saveRpcChunkAdaptive(db, chunk, run, context) {
@@ -6892,17 +8638,19 @@
             progressContext.saved = totalUpserted;
             if (result.uploadRun) uploadRun = result.uploadRun;
         }
-        if (uploadRun && uploadRun.id && Number(uploadRun.upserted_count) !== totalUpserted) {
-            uploadRun = { ...uploadRun, upserted_count: totalUpserted };
+        const verified = await verifyAndRepairSavedTasks(db, payloadTasks, progressContext);
+        const finalUpserted = Math.max(totalUpserted, verified.expectedCount || payloadTasks.length);
+        if (uploadRun && uploadRun.id && Number(uploadRun.upserted_count) !== finalUpserted) {
+            uploadRun = { ...uploadRun, upserted_count: finalUpserted };
             const { data, error } = await db
                 .from(RUNS_TABLE)
-                .update({ upserted_count: totalUpserted })
+                .update({ upserted_count: finalUpserted })
                 .eq("id", uploadRun.id)
                 .select("*")
                 .single();
             if (!error && data) uploadRun = data;
         }
-        return { ok: true, upserted_count: totalUpserted, upload_run: uploadRun };
+        return { ok: true, upserted_count: finalUpserted, upload_run: uploadRun };
     }
 
     function mergeRun(run) {
@@ -7243,6 +8991,18 @@
                         setMasterStatus("Сохраняю: " + moduleDef(item.module).label + ". Пачка из " + progress.chunkSize + " задач оказалась тяжелой, делю на части по " + progress.nextChunkSize + ". В модуле сохранено " + progress.saved + "/" + progress.totalTasks + ", всего ранее: " + total + ".");
                         return;
                     }
+                    if (progress.phase === "verify") {
+                        setMasterStatus("Проверяю сохранение: " + moduleDef(item.module).label + ". В модуле записано " + progress.saved + "/" + progress.totalTasks + ", сверяю ключи задач в Supabase.");
+                        return;
+                    }
+                    if (progress.phase === "repair") {
+                        setMasterStatus("Проверяю сохранение: " + moduleDef(item.module).label + ". Не хватило " + progress.missing + " задач, дозаливаю малыми пачками.");
+                        return;
+                    }
+                    if (progress.phase === "repair_chunk") {
+                        setMasterStatus("Дозаливаю: " + moduleDef(item.module).label + ". Пачка " + progress.chunk + "/" + progress.totalChunks + " (" + progress.chunkSize + " задач).");
+                        return;
+                    }
                     setMasterStatus("Сохраняю: " + moduleDef(item.module).label + ". Пачка " + progress.chunk + "/" + progress.totalChunks + " (" + progress.chunkSize + " задач), в модуле сохранено " + progress.saved + "/" + progress.totalTasks + ". Уже сохранено всего: " + total + ".");
                 });
                 total += Number(response.upserted_count || tasks.length) || 0;
@@ -7280,9 +9040,12 @@
         $("openReview").addEventListener("click", showReviewPage);
         $("openRequests").addEventListener("click", showRequestsPage);
         $("openInactive").addEventListener("click", showInactivePage);
+        $("openQuickNoShkReview").addEventListener("click", () => { void openQuickNoShkModal(); });
         $("openPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("openPrespisokSecondLineHome").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
         $("openPrespisokJournal").addEventListener("click", () => { void openPrespisokJournalModal(); });
+        $("openPureLosses").addEventListener("click", () => { window.location.href = "pure_losses.html"; });
+        $("openNoShkReview").addEventListener("click", () => { void openQuickNoShkModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
             if ((state.taskSearch.rows || []).length) setTaskSearchResultsVisible(true);
@@ -7322,6 +9085,7 @@
         $("closeMaster").addEventListener("click", () => setFlowModalOpen("masterWork", false));
         $("closeBackfillCalendar").addEventListener("click", () => setFlowModalOpen("backfillCalendarModal", false));
         $("reviewViewSections").addEventListener("click", renderReview);
+        $("reviewViewCanvas").addEventListener("click", openReviewCanvasModal);
         $("requestsViewSections").addEventListener("click", renderRequests);
         $("openActualizeTasks").addEventListener("click", () => { void openActualizeTasksModal(); });
         $("closeActualizeTasks").addEventListener("click", closeActualizeTasksModal);
@@ -7348,6 +9112,7 @@
         $("confirmSplitShk").addEventListener("click", () => { void splitShkFromConfirm(); });
         $("specialInfoModal").addEventListener("click", (event) => { if (event.target === $("specialInfoModal")) closeSpecialInfoModal(); });
         $("prespisokModal").addEventListener("click", (event) => { if (event.target === $("prespisokModal")) requestPrespisokClose(); });
+        $("quickNoShkModal").addEventListener("click", (event) => { if (event.target === $("quickNoShkModal")) closeQuickNoShkModal(); });
         $("shiftOpeningModal").addEventListener("click", (event) => { if (event.target === $("shiftOpeningModal")) closeShiftOpeningModal(); });
         $("actualizeTasksModal").addEventListener("click", (event) => { if (event.target === $("actualizeTasksModal")) closeActualizeTasksModal(); });
         $("moduleChooser").addEventListener("click", (event) => { if (event.target === $("moduleChooser")) setFlowModalOpen("moduleChooser", false); });
@@ -7369,7 +9134,8 @@
                 || $("deferTaskModal").classList.contains("active")
                 || $("reopenConfirmModal").classList.contains("active")
                 || $("splitShkConfirmModal").classList.contains("active")) return;
-            if ($("prespisokModal").classList.contains("active")) requestPrespisokClose();
+            if ($("quickNoShkModal").classList.contains("active")) closeQuickNoShkModal();
+            else if ($("prespisokModal").classList.contains("active")) requestPrespisokClose();
             else if ($("prespisokSecondLineModal").classList.contains("active")) setFlowModalOpen("prespisokSecondLineModal", false);
             else if ($("prespisokJournalModal").classList.contains("active")) closePrespisokJournalModal();
             else if ($("inactiveTasksModal").classList.contains("active")) setFlowModalOpen("inactiveTasksModal", false);
@@ -7385,10 +9151,12 @@
 
     function init() {
         initEvents();
+        startPrespisokHomeTimer();
         renderCalendar();
         renderShiftGate();
         renderPrespisokHomeCard();
         void refreshPrespisokHomeState();
+        void refreshPrespisokLeaderboard();
         void loadShiftState();
     }
 
