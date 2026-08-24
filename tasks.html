@@ -9,7 +9,12 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" defer></script>
     <style>
-        .tasks-wrap { max-width: 1280px; gap: 16px; }
+        html, body { overflow: hidden; }
+        body { --tasks-page-pad: 28px; height: 100dvh; min-height: 100dvh; display: flex; background-attachment: fixed; }
+        .tasks-wrap { width: 100%; max-width: 1280px; gap: 16px; height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 8px; padding-bottom: 16px; scrollbar-gutter: stable; align-content: start; box-sizing: border-box; }
+        .tasks-wrap::-webkit-scrollbar { width: 8px; }
+        .tasks-wrap::-webkit-scrollbar-thumb { background: rgba(98,60,234,.26); border-radius: 999px; }
+        .tasks-wrap::-webkit-scrollbar-track { background: transparent; }
         .tasks-hero {
             position: relative;
             z-index: 60;
@@ -41,9 +46,26 @@
         .tasks-home-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
         .tasks-home-group-title { margin: 0; color: var(--accent-dark); font-size: 22px; line-height: 1; letter-spacing: -.02em; }
         .tasks-home-group-note { margin: 4px 0 0; color: #64748b; font-size: 13px; }
+        .tasks-home-timer { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; border-radius: 999px; padding: 0 12px; background: #f8fafc; border: 1px solid #e2e8f0; color: #475569; font-size: 12px; font-weight: 1000; white-space: nowrap; }
+        .tasks-home-timer.is-live { background: #ecfdf5; border-color: #bbf7d0; color: #166534; }
+        .tasks-home-timer.is-closed { background: #f1f5f9; color: #64748b; }
+        .tasks-home-timer.is-wait { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+        .prespisok-leader-card { min-height: 132px; padding: 14px 16px; cursor: default; }
+        .prespisok-leader-card:hover { transform: none; box-shadow: var(--shadow-sm); border-color: rgba(15,23,42,.08); }
+        .prespisok-leader-card .tasks-action-icon { width: 38px; height: 38px; border-radius: 12px; font-size: 18px; }
+        .prespisok-leader-card .tasks-action-title { margin: 10px 0 4px; font-size: 18px; }
+        .prespisok-leader-card .tasks-action-text { font-size: 12px; line-height: 1.25; }
+        .prespisok-leader-list { display: grid; gap: 5px; margin-top: 8px; }
+        .prespisok-leader-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #475569; font-size: 11px; line-height: 1.2; font-weight: 850; }
+        .prespisok-leader-row strong { color: #242038; font-size: 12px; }
         .tasks-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
         .tasks-home-group .tasks-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .tasks-card-stack { min-height: 180px; display: grid; grid-template-rows: 1fr 1fr; gap: 14px; }
         .tasks-action-card { min-height: 180px; padding: 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); text-align: left; color: #0f172a; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
+        .tasks-action-card.is-compact { min-height: 0; padding: 14px 16px; }
+        .tasks-action-card.is-compact .tasks-action-icon { width: 36px; height: 36px; border-radius: 12px; font-size: 17px; }
+        .tasks-action-card.is-compact .tasks-action-title { margin: 10px 0 5px; font-size: 19px; line-height: 1.05; }
+        .tasks-action-card.is-compact .tasks-action-text { font-size: 12px; line-height: 1.3; }
         .tasks-action-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
         .tasks-action-card.is-disabled { opacity: .42; filter: grayscale(.35); cursor: not-allowed; }
         .tasks-action-card.is-disabled:hover { transform: none; box-shadow: var(--shadow-sm); border-color: rgba(15,23,42,.08); }
@@ -254,6 +276,33 @@
         .review-tags { display: flex; flex-wrap: wrap; gap: 4px; max-width: 240px; }
         .review-sort-btn { border: 0; background: transparent; padding: 0; color: inherit; font: inherit; font-weight: 900; cursor: pointer; }
         .review-sort-btn:hover { color: var(--accent); }
+        .review-filter-dropdown { position: relative; z-index: 30; border-bottom: 1px solid #e2e8f0; background: #fff; padding: 12px 14px; }
+        .review-filter-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: start; }
+        .review-filter-block { position: relative; min-width: 0; }
+        .review-filter-title { display: block; margin: 0 0 5px; color: #475569; font-size: 12px; font-weight: 850; }
+        .review-filter-trigger { width: 100%; min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 0; border-radius: 14px; background: var(--accent); color: #fff; padding: 9px 12px; font: inherit; font-weight: 1000; cursor: pointer; box-shadow: 0 10px 24px rgba(98,60,234,.18); transition: transform .14s ease, box-shadow .14s ease, filter .14s ease; }
+        .review-filter-trigger:hover { transform: translateY(-1px); box-shadow: 0 16px 30px rgba(98,60,234,.24); filter: saturate(1.08); }
+        .review-filter-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .review-filter-chevron { flex: 0 0 auto; opacity: .9; transition: transform .16s ease; }
+        .review-filter-block.is-open .review-filter-chevron { transform: rotate(180deg); }
+        .review-filter-popover { display: none; position: absolute; top: calc(100% + 6px); left: 0; width: min(360px, 82vw); max-height: 340px; overflow: auto; z-index: 70; border: 1px solid #e2e8f0; border-radius: 0 0 16px 16px; background: #fff; box-shadow: 0 22px 50px rgba(36,32,56,.18); padding: 13px 14px; }
+        .review-filter-block.is-open .review-filter-popover { display: block; }
+        .review-filter-menu-title { margin: 0 0 10px; color: #475569; font-size: 13px; font-weight: 1000; }
+        .review-filter-calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+        .review-filter-weekday { color: #94a3b8; font-size: 10px; font-weight: 1000; text-align: center; }
+        .review-filter-day,
+        .review-filter-empty { min-height: 34px; border-radius: 10px; }
+        .review-filter-day { border: 1px solid #e2e8f0; background: #fff; color: #242038; font-size: 12px; font-weight: 900; cursor: pointer; }
+        .review-filter-day:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+        .review-filter-day.level-yellow { background: #fef3c7; border-color: #f59e0b; color: #713f12; }
+        .review-filter-day.level-red { background: #fee2e2; border-color: #ef4444; color: #7f1d1d; }
+        .review-filter-day.is-selected { outline: 2px solid var(--accent); box-shadow: 0 8px 20px rgba(98,60,234,.16); }
+        .review-filter-options { display: grid; gap: 9px; }
+        .review-filter-check { display: flex; align-items: center; gap: 9px; border: 0; border-radius: 9px; background: #fff; padding: 2px 0; color: #334155; font-size: 13px; font-weight: 750; cursor: pointer; }
+        .review-filter-check input { accent-color: var(--accent); }
+        .review-filter-check:hover { color: var(--accent-dark); }
+        .review-filter-reset { border: 0; background: transparent; color: var(--accent); font-size: 12px; font-weight: 900; cursor: pointer; }
+        .review-filter-empty-note { color: #94a3b8; font-size: 12px; line-height: 1.35; }
         .task-detail-card { width: min(860px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
         .task-detail-head { padding: 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
         .task-detail-title { margin: 0; color: #242038; font-size: 24px; line-height: 1.1; }
@@ -411,6 +460,42 @@
         .prespisok-submit-arcade:hover, .prespisok-submit:hover:not(:disabled) { transform: translateY(-5px) scale(1.03); box-shadow: 0 28px 70px rgba(22,163,74,.34); filter: saturate(1.18); }
         .prespisok-submit-arcade:active, .prespisok-submit:active:not(:disabled) { transform: translateY(3px) scale(.97); }
         .prespisok-submit:disabled { opacity: .45; cursor: not-allowed; }
+        .prespisok-wrap.is-playing { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+        .prespisok-wrap.is-playing .prespisok-top { flex: 0 0 auto; }
+        .prespisok-wrap.is-playing .prespisok-kicker { margin-bottom: 4px; font-size: 11px; }
+        .prespisok-wrap.is-playing .prespisok-title { font-size: clamp(28px, 4vw, 52px); }
+        .prespisok-wrap.is-playing .prespisok-subtitle { margin-top: 8px; max-width: 640px; font-size: 14px; line-height: 1.35; }
+        .prespisok-wrap.is-playing .prespisok-top-stat { min-width: 112px; padding: 8px 10px; border-radius: 14px; }
+        .prespisok-wrap.is-playing .prespisok-top-stat strong { font-size: 15px; }
+        .prespisok-wrap.is-playing .prespisok-play-panel { flex: 1 1 auto; min-height: 0; max-height: none; overflow: hidden; display: flex; flex-direction: column; margin-top: 14px; padding: 14px; border-radius: 22px; }
+        .prespisok-wrap.is-playing .prespisok-hud { flex: 0 0 auto; gap: 8px; margin-bottom: 10px; }
+        .prespisok-wrap.is-playing .prespisok-hud-card { padding: 9px 10px; border-radius: 14px; }
+        .prespisok-wrap.is-playing .prespisok-hud-card span { font-size: 10px; }
+        .prespisok-wrap.is-playing .prespisok-hud-card strong { font-size: 18px; }
+        .prespisok-wrap.is-playing .prespisok-item-timer-card strong { font-size: 22px; }
+        .prespisok-wrap.is-playing .prespisok-task-card { flex: 1 1 auto; min-height: 0; grid-template-columns: minmax(0, 1.05fr) minmax(260px, .78fr); gap: 12px; }
+        .prespisok-wrap.is-playing .prespisok-task-main, .prespisok-wrap.is-playing .prespisok-side { min-height: 0; padding: 14px; border-radius: 18px; }
+        .prespisok-wrap.is-playing .prespisok-task-main { overflow: auto; }
+        .prespisok-wrap.is-playing .prespisok-side { max-height: none; overflow: hidden; display: flex; flex-direction: column; }
+        .prespisok-wrap.is-playing .prespisok-task-main h3 { font-size: clamp(24px, 3vw, 38px); }
+        .prespisok-wrap.is-playing .prespisok-entity-subtitle { margin-top: 5px; font-size: 14px; }
+        .prespisok-wrap.is-playing .prespisok-badge-row { gap: 6px; margin: 8px 0; }
+        .prespisok-wrap.is-playing .prespisok-badge { padding: 5px 8px; font-size: 11px; }
+        .prespisok-wrap.is-playing .prespisok-info-grid { gap: 7px; margin-top: 8px; }
+        .prespisok-wrap.is-playing .prespisok-info { padding: 8px; border-radius: 12px; }
+        .prespisok-wrap.is-playing .prespisok-info span { font-size: 10px; }
+        .prespisok-wrap.is-playing .prespisok-items { max-height: 130px; margin-top: 8px; border-radius: 12px; }
+        .prespisok-wrap.is-playing .prespisok-item-line { padding: 6px 8px; }
+        .prespisok-wrap.is-playing .prespisok-history { margin-top: 8px; padding: 9px; border-radius: 12px; font-size: 12px; }
+        .prespisok-wrap.is-playing .prespisok-snark { padding: 12px; border-radius: 16px; font-size: 14px; line-height: 1.3; }
+        .prespisok-wrap.is-playing .status-line { margin-top: 8px; padding: 9px 10px; }
+        .prespisok-wrap.is-playing .prespisok-actions { flex: 1 1 auto; min-height: 0; overflow: auto; gap: 7px; margin-top: 9px; padding-right: 2px; }
+        .prespisok-wrap.is-playing .prespisok-action-btn { padding: 10px 12px; border-radius: 12px; font-size: 13px; }
+        .prespisok-wrap.is-playing .prespisok-action-btn:hover, .prespisok-wrap.is-playing .prespisok-action-btn.active { transform: translateY(-2px) scale(1.01); }
+        .prespisok-wrap.is-playing .prespisok-extra { flex: 0 0 auto; position: static; margin-top: 8px; padding-top: 8px; border-radius: 14px; }
+        .prespisok-wrap.is-playing .prespisok-extra input { padding: 9px 10px; border-radius: 12px; }
+        .prespisok-wrap.is-playing .prespisok-submit, .prespisok-wrap.is-playing .prespisok-submit-arcade { min-height: 48px; border-radius: 13px; }
+        .prespisok-wrap.is-playing .prespisok-submit:hover:not(:disabled), .prespisok-wrap.is-playing .prespisok-submit-arcade:hover { transform: translateY(-2px) scale(1.012); }
         .prespisok-history { margin-top: 14px; border-radius: 16px; background: #f8fafc; padding: 12px; color: #334155; font-size: 13px; line-height: 1.4; }
         .prespisok-finish-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
         .prespisok-finish-stat { border-radius: 18px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.14); padding: 16px; }
@@ -423,15 +508,46 @@
         .prespisok-exit-take { color: rgba(255,255,255,.78); font-size: 19px; font-weight: 900; }
         .prespisok-exit-actions { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; margin-top: 18px; }
         .prespisok-exit-btn { min-height: 66px; color: #fff; border-color: rgba(255,255,255,.32); }
+        #quickNoShkModal.quick-no-shk-modal { padding: 0; align-items: stretch; justify-content: stretch; background: #0f172a; backdrop-filter: none; }
+        .quick-no-shk-card { width: 100vw; height: 100dvh; max-height: none; border: 0; border-radius: 0; padding: 0; overflow: hidden; background: radial-gradient(circle at 18% 18%, rgba(98,60,234,.32), transparent 30%), radial-gradient(circle at 82% 14%, rgba(34,197,94,.18), transparent 28%), linear-gradient(135deg, #111827 0%, #242038 52%, #3e2e23 100%); color: #fff; }
+        .quick-no-shk-wrap { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: clamp(18px, 3vw, 36px); box-sizing: border-box; overflow: hidden; }
+        .quick-no-shk-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; position: relative; z-index: 1; }
+        .quick-no-shk-kicker { margin: 0 0 8px; color: #86efac; font-weight: 1000; letter-spacing: .13em; text-transform: uppercase; }
+        .quick-no-shk-title { margin: 0; font-size: clamp(34px, 6vw, 76px); line-height: .9; letter-spacing: -.06em; }
+        .quick-no-shk-subtitle { margin: 12px 0 0; max-width: 760px; color: rgba(255,255,255,.72); font-size: 16px; line-height: 1.45; }
+        .quick-no-shk-panel { position: relative; z-index: 1; flex: 1; min-height: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 28px; background: rgba(255,255,255,.1); box-shadow: 0 26px 80px rgba(0,0,0,.24); padding: clamp(16px, 2.4vw, 28px); backdrop-filter: blur(14px); overflow: hidden; display: flex; flex-direction: column; }
+        .quick-no-shk-center { flex: 1; display: grid; place-items: center; text-align: center; }
+        .quick-no-shk-start { min-width: min(460px, 86vw); min-height: 88px; border: 0; border-radius: 26px; background: #86efac; color: #102018; font-size: clamp(26px, 4vw, 48px); font-weight: 1000; cursor: pointer; box-shadow: 0 28px 80px rgba(34,197,94,.28); transition: transform .16s ease, box-shadow .16s ease; }
+        .quick-no-shk-start:hover { transform: translateY(-6px) scale(1.035); box-shadow: 0 34px 100px rgba(34,197,94,.38); }
+        .quick-no-shk-file { display: grid; gap: 14px; max-width: 760px; margin: auto; }
+        .quick-no-shk-game { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 1.2fr) minmax(280px, .8fr); gap: 18px; }
+        .quick-no-shk-photo-wrap { min-height: 0; border-radius: 28px; background: rgba(255,255,255,.95); display: grid; place-items: center; overflow: hidden; }
+        .quick-no-shk-photo { width: 100%; height: 100%; max-height: calc(100dvh - 250px); object-fit: contain; background: #fff; }
+        .quick-no-shk-photo-empty { color: #64748b; font-weight: 1000; text-align: center; padding: 22px; }
+        .quick-no-shk-side { min-height: 0; display: flex; flex-direction: column; gap: 12px; border-radius: 24px; background: rgba(255,255,255,.95); color: #242038; padding: 18px; overflow: hidden; }
+        .quick-no-shk-side h3 { margin: 0; font-size: clamp(28px, 3.8vw, 48px); line-height: .95; letter-spacing: -.04em; overflow-wrap: anywhere; }
+        .quick-no-shk-name { margin: 0; color: #475569; font-weight: 900; line-height: 1.35; }
+        .quick-no-shk-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .quick-no-shk-info div { border-radius: 14px; background: #f8fafc; padding: 10px; }
+        .quick-no-shk-info span { display: block; color: #64748b; font-size: 11px; font-weight: 900; }
+        .quick-no-shk-info strong { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+        .quick-no-shk-actions { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .quick-no-shk-action { min-height: 72px; border: 0; border-radius: 20px; color: #fff; font-size: 21px; font-weight: 1000; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, filter .14s ease; }
+        .quick-no-shk-action:hover { transform: translateY(-5px) scale(1.025); filter: saturate(1.12); }
+        .quick-no-shk-action:disabled { opacity: .55; cursor: wait; transform: none; }
+        .quick-no-shk-action.not-found { background: #dc2626; box-shadow: 0 18px 46px rgba(220,38,38,.25); }
+        .quick-no-shk-action.found { background: #16a34a; box-shadow: 0 18px 46px rgba(22,163,74,.25); }
+        .quick-no-shk-finish-list { margin-top: 16px; max-height: 42dvh; overflow: auto; display: grid; gap: 8px; }
+        .quick-no-shk-finish-row { border-radius: 14px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.14); padding: 10px 12px; color: #fff; }
         @keyframes prespisokShake { 0%,100% { transform: scale(1.07) translateX(0); } 25% { transform: scale(1.08) translateX(-2px); } 75% { transform: scale(1.08) translateX(2px); } }
         @keyframes prespisokPanic { 0%,100% { transform: scale(1.13) translate(0,0) rotate(0deg); } 25% { transform: scale(1.15) translate(-3px,1px) rotate(-1deg); } 50% { transform: scale(1.14) translate(3px,-1px) rotate(1deg); } 75% { transform: scale(1.16) translate(-1px,3px) rotate(-.5deg); } }
         @keyframes prespisokKick { 0% { transform: scale(.7) rotate(-6deg); opacity: .4; } 55% { transform: scale(1.22) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
-        @media (max-width: 980px) { .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .quick-no-shk-game { grid-template-columns: 1fr; } .quick-no-shk-wrap { overflow: auto; } .quick-no-shk-panel { overflow: visible; } .quick-no-shk-photo { max-height: 42dvh; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 1120px) { .journal-action-list { max-height: none; } }
-        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
-        @media (max-width: 760px) { body { padding: 14px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
+        @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
     </style>
 </head>
 <body>
@@ -495,11 +611,18 @@
                     <h2 class="tasks-action-title">Запросы</h2>
                     <p class="tasks-action-text">Запросы входящего потока, списания AWH и коробки на входе отдельно от предразбора.</p>
                 </button>
-                <button id="openInactive" class="tasks-action-card" type="button">
-                    <span class="tasks-action-icon">◌</span>
-                    <h2 class="tasks-action-title">Неактивные задачи</h2>
-                    <p class="tasks-action-text">Завершенные задачи и задания, которые ждут даты переоткрытия.</p>
-                </button>
+                <div class="tasks-card-stack">
+                    <button id="openQuickNoShkReview" class="tasks-action-card is-compact" type="button">
+                        <span class="tasks-action-icon">∅</span>
+                        <h2 class="tasks-action-title">Быстрая проверка “Без ШК”</h2>
+                        <p class="tasks-action-text">Фото по НМ и быстрый вердикт по дешевым ШК предсортировки.</p>
+                    </button>
+                    <button id="openInactive" class="tasks-action-card is-compact" type="button">
+                        <span class="tasks-action-icon">◌</span>
+                        <h2 class="tasks-action-title">Неактивные задачи</h2>
+                        <p class="tasks-action-text">Завершенные задачи и ожидание переоткрытия.</p>
+                    </button>
+                </div>
             </div>
         </div>
         <div class="tasks-home-group">
@@ -508,8 +631,14 @@
                     <h2 class="tasks-home-group-title">Предсписок</h2>
                     <p class="tasks-home-group-note">Финальная проверка перед списанием. Боевой интервал: 14:30-20:00.</p>
                 </div>
+                <div id="prespisokCountdownBadge" class="tasks-home-timer">Проверяю окно</div>
             </div>
             <div class="tasks-actions">
+                <div id="prespisokLeaderboardCard" class="tasks-action-card prespisok-leader-card hidden">
+                    <span class="tasks-action-icon">♕</span>
+                    <h2 class="tasks-action-title">Лидеры</h2>
+                    <p class="tasks-action-text">Скорость прохождения предсписка.</p>
+                </div>
                 <button id="openPrespisok" class="tasks-action-card prespisok-entry" type="button">
                     <span class="tasks-action-icon">⚡</span>
                     <h2 class="tasks-action-title">Предсписок</h2>
@@ -531,10 +660,31 @@
             <div class="tasks-home-group-head">
                 <div>
                     <h2 class="tasks-home-group-title">Чистые списания</h2>
-                    <p class="tasks-home-group-note">Место под следующий блок. Пока просто держим парковку для будущей красоты.</p>
+                    <p class="tasks-home-group-note">Отдельный экран аналитики и контроля чистых списаний.</p>
                 </div>
             </div>
-            <div class="empty-state">Раздел пока без кнопок.</div>
+            <div class="tasks-actions">
+                <button id="openPureLosses" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">₽</span>
+                    <h2 class="tasks-action-title">Открыть чистые списания</h2>
+                    <p class="tasks-action-text">Переход на текущий экран pure_losses.html со статистикой, детализацией и таблицами.</p>
+                </button>
+            </div>
+        </div>
+        <div class="tasks-home-group">
+            <div class="tasks-home-group-head">
+                <div>
+                    <h2 class="tasks-home-group-title">Другое</h2>
+                    <p class="tasks-home-group-note">Дополнительные разборы и сервисные процессы ОПП.</p>
+                </div>
+            </div>
+            <div class="tasks-actions">
+                <button id="openNoShkReview" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">∅</span>
+                    <h2 class="tasks-action-title">Разбор “Без ШК”</h2>
+                    <p class="tasks-action-text">Заготовка под отдельный процесс разбора товаров без ШК.</p>
+                </button>
+            </div>
         </div>
     </section>
 
@@ -579,6 +729,7 @@
                         <span class="review-tool-divider" aria-hidden="true"></span>
                         <div class="review-view-tabs" aria-label="Вид разбора">
                             <button id="reviewViewSections" class="review-view-tab active" type="button">Участки</button>
+                            <button id="reviewViewCanvas" class="review-view-tab" type="button">Полотно</button>
                         </div>
                     </div>
                 </div>
@@ -674,6 +825,12 @@
             <div id="actualizeStatus" class="status-line">Сначала скопируйте список активных ШК.</div>
             <div id="actualizeResults"></div>
         </div>
+    </div>
+</section>
+
+<section id="quickNoShkModal" class="tasks-flow-modal upload-work quick-no-shk-modal" aria-hidden="true">
+    <div class="quick-no-shk-card">
+        <div id="quickNoShkWrap" class="quick-no-shk-wrap"></div>
     </div>
 </section>
 
