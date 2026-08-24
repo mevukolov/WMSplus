@@ -40,6 +40,9 @@
     const SYSTEM_NO_SHK_NOT_FOUND_VERDICT = "Система - Не найден Без ШК";
     const SYSTEM_NO_SHK_FOUND_VERDICT = "Система - Обнаружен Без ШК";
     const QUICK_NO_SHK_PURE_NOT_FOUND_MARKER = "[WMS+ Без ШК: не найден]";
+    const QUICK_NO_SHK_SUPERSET_CACHE_KEY = "wms_quick_no_shk_superset_cache_v1";
+    const QUICK_NO_SHK_SUPERSET_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+    const QUICK_NO_SHK_PRELOAD_AHEAD = 4;
     const MOVEMENT_AUTO_CLOSE_MINUTES = 10;
     const MOVEMENT_AUTO_CLOSE_MIN_MS = MOVEMENT_AUTO_CLOSE_MINUTES * 60 * 1000;
     const PRESPISOK_STORAGE_KEY = "wms_prespisok_progress_v1";
@@ -486,6 +489,8 @@
             missingNm: 0,
             needsSuperset: false,
             fileName: "",
+            lastSupersetMessage: "",
+            lastSupersetTone: "",
         },
         taskSearch: {
             rows: [],
@@ -1800,11 +1805,49 @@
         };
     }
 
+    function mergeSupersetRowDetails(primary, fallback) {
+        if (!primary) return fallback || null;
+        if (!fallback) return primary;
+        const merged = { ...primary };
+        [
+            "brand",
+            "name",
+            "article",
+            "size",
+            "nm",
+            "supplier",
+            "currency",
+            "price_source",
+            "srid",
+            "last_office",
+            "last_mx",
+            "place",
+            "last_tare",
+            "previous_tare",
+            "last_status",
+            "last_status_at",
+            "last_status_iso",
+        ].forEach((key) => {
+            if (!normalizeText(merged[key]) && normalizeText(fallback[key])) merged[key] = fallback[key];
+        });
+        if (!(Number(merged.price) > 0) && Number(fallback.price) > 0) merged.price = fallback.price;
+        if (!(Number(merged.last_status_ts) > 0) && Number(fallback.last_status_ts) > 0) merged.last_status_ts = fallback.last_status_ts;
+        return merged;
+    }
+
     function latestSupersetByShk(rows) {
         const map = new Map();
         (rows || []).forEach((row) => {
             const previous = map.get(row.shk);
-            if (!previous || (row.last_status_ts || 0) >= (previous.last_status_ts || 0)) map.set(row.shk, row);
+            if (!previous) {
+                map.set(row.shk, row);
+                return;
+            }
+            const rowTs = Number(row.last_status_ts) || 0;
+            const previousTs = Number(previous.last_status_ts) || 0;
+            const latest = rowTs >= previousTs ? row : previous;
+            const fallback = latest === row ? previous : row;
+            map.set(row.shk, mergeSupersetRowDetails(latest, fallback));
         });
         return map;
     }
@@ -1934,9 +1977,9 @@
         return { nm, name };
     }
 
-    function applySupersetNomenclatureToItem(row, item, supersetRow) {
+    function applySupersetNomenclatureToItem(row, item, supersetRow, options) {
         if (!item || !supersetRow || !supersetRow.nm) return { item, changed: false };
-        if (hasConfirmedMovement(row, item, supersetRow)) return { item, changed: false };
+        if (!(options && options.allowMovementRows) && hasConfirmedMovement(row, item, supersetRow)) return { item, changed: false };
         const current = itemNomenclature(row, item);
         const nm = normalizeIdentifier(supersetRow.nm);
         const name = normalizeText(current.name || supersetRow.name);
@@ -1976,7 +2019,7 @@
                     if (!itemNomenclature(row, item).nm) missing += 1;
                     return item;
                 }
-                const applied = applySupersetNomenclatureToItem(row, item, supersetRow);
+                const applied = applySupersetNomenclatureToItem(row, item, supersetRow, options);
                 const nextItem = applied.item;
                 if (applied.changed) changed = true;
                 const info = itemNomenclature(row, nextItem);
@@ -2292,6 +2335,8 @@
     }
 
     function resetQuickNoShkState(keepPhotos) {
+        if (state.quickNoShk && state.quickNoShk.clockTimer) clearInterval(state.quickNoShk.clockTimer);
+        const cachedSupersetRows = loadQuickNoShkSupersetCache();
         state.quickNoShk = {
             loading: false,
             items: [],
@@ -2301,12 +2346,61 @@
             processing: false,
             photoCache: keepPhotos && state.quickNoShk ? (state.quickNoShk.photoCache || {}) : {},
             pureCandidates: [],
-            supersetRows: [],
-            supersetByShk: new Map(),
+            supersetRows: cachedSupersetRows,
+            supersetByShk: latestSupersetByShk(cachedSupersetRows),
             missingNm: 0,
             needsSuperset: false,
             fileName: "",
+            lastSupersetMessage: "",
+            lastSupersetTone: "",
+            timerStartedAt: 0,
+            itemTimerStartedAt: 0,
+            clockTimer: null,
+            preloading: false,
         };
+    }
+
+    function compactSupersetRowsForQuickNoShk(rows) {
+        return (rows || []).map((row) => ({
+            row_number: row.row_number || null,
+            shk: normalizeIdentifier(row.shk),
+            nm: normalizeIdentifier(row.nm),
+            name: normalizeText(row.name),
+            last_office: normalizeIdentifier(row.last_office),
+            last_status: normalizeText(row.last_status),
+            last_status_at: normalizeText(row.last_status_at),
+            last_status_ts: Number(row.last_status_ts) || 0,
+            price: Number(row.price) || 0,
+        })).filter((row) => row.shk);
+    }
+
+    function loadQuickNoShkSupersetCache() {
+        try {
+            const parsed = parseJsonSafe(localStorage.getItem(QUICK_NO_SHK_SUPERSET_CACHE_KEY), null);
+            if (!parsed || !Array.isArray(parsed.rows)) return [];
+            if (Date.now() - (Number(parsed.saved_at) || 0) > QUICK_NO_SHK_SUPERSET_CACHE_TTL_MS) {
+                localStorage.removeItem(QUICK_NO_SHK_SUPERSET_CACHE_KEY);
+                return [];
+            }
+            return compactSupersetRowsForQuickNoShk(parsed.rows);
+        } catch (_error) {
+            return [];
+        }
+    }
+
+    function saveQuickNoShkSupersetCache(rows) {
+        try {
+            localStorage.setItem(QUICK_NO_SHK_SUPERSET_CACHE_KEY, JSON.stringify({
+                saved_at: Date.now(),
+                rows: compactSupersetRowsForQuickNoShk(rows),
+            }));
+        } catch (error) {
+            console.warn("quick no shk superset cache skipped:", error);
+        }
+    }
+
+    function mergeQuickNoShkSupersetRows(existingRows, nextRows) {
+        return Array.from(latestSupersetByShk([...(existingRows || []), ...(nextRows || [])]).values());
     }
 
     function isQuickNoShkPureCandidate(row) {
@@ -2438,6 +2532,74 @@
         return items;
     }
 
+    function quickNoShkSupersetNeedStats() {
+        const missingNm = new Set();
+        (state.quickNoShk.items || []).forEach((item) => {
+            if (!item.nm && item.shk) missingNm.add(item.shk);
+        });
+        const hasSuperset = state.quickNoShk.supersetByShk instanceof Map && state.quickNoShk.supersetByShk.size > 0;
+        const pureOffice = new Set();
+        if (!hasSuperset) {
+            (state.quickNoShk.pureCandidates || []).forEach((row) => {
+                const shk = normalizeIdentifier(row && row.shk);
+                if (shk) pureOffice.add(shk);
+            });
+        }
+        const all = new Set([...missingNm, ...pureOffice]);
+        return {
+            missingNm: Array.from(missingNm).sort((a, b) => a.localeCompare(b, "ru", { numeric: true })),
+            pureOffice: Array.from(pureOffice).sort((a, b) => a.localeCompare(b, "ru", { numeric: true })),
+            all: Array.from(all).sort((a, b) => a.localeCompare(b, "ru", { numeric: true })),
+        };
+    }
+
+    function quickNoShkSupersetUploadMessage(beforeNeededIds, uploadedRows, afterNeedStats) {
+        const before = Array.isArray(beforeNeededIds) ? beforeNeededIds : [];
+        const uploadedByShk = latestSupersetByShk(uploadedRows || []);
+        let matched = 0;
+        let withNm = 0;
+        let withoutNm = 0;
+        before.forEach((shk) => {
+            const row = uploadedByShk.get(normalizeIdentifier(shk));
+            if (!row) return;
+            matched += 1;
+            if (normalizeIdentifier(row.nm)) withNm += 1;
+            else withoutNm += 1;
+        });
+        const missed = Math.max(before.length - matched, 0);
+        const left = afterNeedStats && Array.isArray(afterNeedStats.all) ? afterNeedStats.all.length : 0;
+        const parts = [
+            "Файл обработан: строк " + (uploadedRows || []).length,
+            "из запрошенных ШК совпало " + matched,
+            "Код НМ найден у " + withNm,
+        ];
+        if (withoutNm) parts.push("в файле без Код НМ: " + withoutNm);
+        if (missed) parts.push("не найдено в файле: " + missed);
+        parts.push(left ? "осталось дозагрузить: " + left : "можно начинать проверку");
+        return parts.join(" · ") + ".";
+    }
+
+    function quickNoShkElapsedMs() {
+        return state.quickNoShk && state.quickNoShk.timerStartedAt ? Date.now() - state.quickNoShk.timerStartedAt : 0;
+    }
+
+    function quickNoShkItemElapsedMs() {
+        return state.quickNoShk && state.quickNoShk.itemTimerStartedAt ? Date.now() - state.quickNoShk.itemTimerStartedAt : 0;
+    }
+
+    function updateQuickNoShkTimers() {
+        const total = $("quickNoShkTotalTimer");
+        if (total) total.textContent = formatDuration(quickNoShkElapsedMs());
+        const item = $("quickNoShkItemTimer");
+        if (item) item.textContent = formatDuration(quickNoShkItemElapsedMs());
+    }
+
+    function startQuickNoShkClock() {
+        if (state.quickNoShk.clockTimer) clearInterval(state.quickNoShk.clockTimer);
+        state.quickNoShk.clockTimer = setInterval(updateQuickNoShkTimers, 1000);
+        updateQuickNoShkTimers();
+    }
+
     function quickNoShkTopHtml(subtitle) {
         return "<div class='quick-no-shk-top'>"
             + "<div><p class='quick-no-shk-kicker'>ОПП // быстрый без ШК</p><h2 class='quick-no-shk-title'>Без ШК</h2><p class='quick-no-shk-subtitle'>" + escapeHtml(subtitle || "Фото, быстрый глазной контроль и безопасный системный вердикт.") + "</p></div>"
@@ -2459,6 +2621,10 @@
     }
 
     function closeQuickNoShkModal() {
+        if (state.quickNoShk && state.quickNoShk.clockTimer) {
+            clearInterval(state.quickNoShk.clockTimer);
+            state.quickNoShk.clockTimer = null;
+        }
         setFlowModalOpen("quickNoShkModal", false);
     }
 
@@ -2496,6 +2662,9 @@
             $("startQuickNoShk").addEventListener("click", () => {
                 state.quickNoShk.started = true;
                 state.quickNoShk.index = 0;
+                state.quickNoShk.timerStartedAt = Date.now();
+                state.quickNoShk.itemTimerStartedAt = Date.now();
+                startQuickNoShkClock();
                 renderQuickNoShkPlay();
             });
             return;
@@ -2504,18 +2673,7 @@
     }
 
     function quickNoShkSupersetNeededShks() {
-        const ids = new Set();
-        (state.quickNoShk.items || []).forEach((item) => {
-            if (!item.nm && item.shk) ids.add(item.shk);
-        });
-        const hasSuperset = state.quickNoShk.supersetByShk instanceof Map && state.quickNoShk.supersetByShk.size > 0;
-        if (!hasSuperset) {
-            (state.quickNoShk.pureCandidates || []).forEach((row) => {
-                const shk = normalizeIdentifier(row && row.shk);
-                if (shk) ids.add(shk);
-            });
-        }
-        return Array.from(ids).sort((a, b) => a.localeCompare(b, "ru", { numeric: true }));
+        return quickNoShkSupersetNeedStats().all;
     }
 
     async function copyQuickNoShkSupersetShks() {
@@ -2542,13 +2700,19 @@
         const target = $("quickNoShkWrap");
         if (!target) return;
         const pureCount = (state.quickNoShk.pureCandidates || []).length;
-        const copyCount = quickNoShkSupersetNeededShks().length;
+        const needStats = quickNoShkSupersetNeedStats();
+        const copyCount = needStats.all.length;
         const reasons = [];
         if (state.quickNoShk.missingNm > 0) reasons.push("у " + state.quickNoShk.missingNm + " целей нет Код НМ");
         if (pureCount > 0 && !(state.quickNoShk.supersetByShk instanceof Map && state.quickNoShk.supersetByShk.size > 0)) reasons.push("нужно проверить чистые списания SAS/SMC/EPR по офису последнего МХ");
         target.innerHTML = quickNoShkTopHtml((reasons.length ? reasons.join("; ") : "Нужна Superset-выгрузка") + ".")
             + "<section class='quick-no-shk-panel'><div class='quick-no-shk-file'>"
             + "<div class='status-line error'>Нужен файл Superset. Я беру из него “Код НМ”, наименование и “Офис последнего МХ” для чистых списаний.</div>"
+            + (state.quickNoShk.lastSupersetMessage ? "<div class='status-line " + escapeHtml(state.quickNoShk.lastSupersetTone || "") + "'>" + escapeHtml(state.quickNoShk.lastSupersetMessage) + "</div>" : "")
+            + "<div class='status-line'>К копированию: " + copyCount + " ШК"
+            + (needStats.missingNm.length ? " · без НМ: " + needStats.missingNm.length : "")
+            + (needStats.pureOffice.length ? " · чистые на проверку офиса: " + needStats.pureOffice.length : "")
+            + "</div>"
             + "<button id='copyQuickNoShkShks' class='btn btn-rect' type='button'>Скопировать ШК" + (copyCount ? " (" + copyCount + ")" : "") + "</button>"
             + "<div class='file-row'><label class='btn btn-rect' for='quickNoShkSupersetFile'>Добавить данные из Superset</label><input id='quickNoShkSupersetFile' class='file-input' type='file' accept='.xlsx,.xls,.csv'><span id='quickNoShkFileName' class='file-name'>Файл пока не выбран</span></div>"
             + "<div id='quickNoShkStatus' class='status-line'>После загрузки я дополню задачи номенклатурой и вернусь к старту режима.</div>"
@@ -2568,22 +2732,37 @@
         const status = $("quickNoShkStatus");
         if (status) status.textContent = "Читаю Superset и достаю Код НМ...";
         try {
+            const beforeNeedStats = quickNoShkSupersetNeedStats();
+            const beforeNeededIds = beforeNeedStats.all || [];
             const rows = await readSupersetRows(file);
-            state.quickNoShk.supersetRows = rows;
-            state.quickNoShk.supersetByShk = latestSupersetByShk(rows);
-            await enrichTaskNomenclatureFromSuperset(rows, { statusTarget: "quickNoShkStatus" });
-            state.actualize.rows = rows;
-            state.actualize.stats = actualizeSupersetStats(rows);
-            state.actualize.candidates = buildMovementCandidates(rows);
+            const mergedRows = mergeQuickNoShkSupersetRows(state.quickNoShk.supersetRows || [], rows);
+            state.quickNoShk.supersetRows = mergedRows;
+            state.quickNoShk.supersetByShk = latestSupersetByShk(mergedRows);
+            saveQuickNoShkSupersetCache(mergedRows);
+            await enrichTaskNomenclatureFromSuperset(mergedRows, { statusTarget: "quickNoShkStatus", allowMovementRows: true });
+            state.actualize.rows = mergedRows;
+            state.actualize.stats = actualizeSupersetStats(mergedRows);
+            state.actualize.candidates = buildMovementCandidates(mergedRows);
             buildQuickNoShkItems();
-            if (status) status.textContent = "НМ дополнены. Возвращаюсь к проверке.";
+            const afterNeedStats = quickNoShkSupersetNeedStats();
+            state.quickNoShk.lastSupersetMessage = quickNoShkSupersetUploadMessage(beforeNeededIds, rows, afterNeedStats);
+            state.quickNoShk.lastSupersetTone = afterNeedStats.all.length ? "error" : "good";
+            if (status) {
+                status.className = "status-line " + state.quickNoShk.lastSupersetTone;
+                status.textContent = state.quickNoShk.lastSupersetMessage;
+            }
             renderQuickNoShk();
         } catch (error) {
             console.error("quick no shk superset failed:", error);
+            state.quickNoShk.lastSupersetMessage = "Не удалось обработать файл: " + (error && error.message ? error.message : String(error));
+            state.quickNoShk.lastSupersetTone = "error";
             if (status) {
                 status.className = "status-line error";
-                status.textContent = "Не удалось обработать файл: " + (error && error.message ? error.message : String(error));
+                status.textContent = state.quickNoShk.lastSupersetMessage;
             }
+        } finally {
+            const input = $("quickNoShkSupersetFile");
+            if (input) input.value = "";
         }
     }
 
@@ -2614,6 +2793,27 @@
         if (current && current.key === item.key && $("quickNoShkModal") && $("quickNoShkModal").classList.contains("active")) renderQuickNoShkPlay();
     }
 
+    async function preloadQuickNoShkPhotos() {
+        if (state.quickNoShk.preloading) return;
+        state.quickNoShk.preloading = true;
+        try {
+            const done = new Set((state.quickNoShk.actions || []).map((action) => action.key));
+            const start = Math.max(Number(state.quickNoShk.index) || 0, 0) + 1;
+            const next = [];
+            for (let i = start; i < (state.quickNoShk.items || []).length && next.length < QUICK_NO_SHK_PRELOAD_AHEAD; i += 1) {
+                const item = state.quickNoShk.items[i];
+                const nm = normalizeIdentifier(item && item.nm);
+                if (!item || done.has(item.key) || !nm || Object.prototype.hasOwnProperty.call(state.quickNoShk.photoCache, nm)) continue;
+                next.push(item);
+            }
+            for (const item of next) {
+                await loadQuickNoShkPhoto(item);
+            }
+        } finally {
+            state.quickNoShk.preloading = false;
+        }
+    }
+
     function renderQuickNoShkPlay() {
         const target = $("quickNoShkWrap");
         if (!target) return;
@@ -2626,6 +2826,10 @@
         const total = (state.quickNoShk.items || []).length;
         target.innerHTML = quickNoShkTopHtml("Быстрый режим: " + progress + "/" + total + ". Смотри фото, сверяй глазами, жми без философского романа.")
             + "<section class='quick-no-shk-panel'>"
+            + "<div class='quick-no-shk-hud'>"
+            + "<div><span>Общее время</span><strong id='quickNoShkTotalTimer'>" + escapeHtml(formatDuration(quickNoShkElapsedMs())) + "</strong></div>"
+            + "<div><span>Текущая цель</span><strong id='quickNoShkItemTimer'>" + escapeHtml(formatDuration(quickNoShkItemElapsedMs())) + "</strong></div>"
+            + "</div>"
             + "<div class='quick-no-shk-game'>"
             + "<div class='quick-no-shk-photo-wrap'>" + quickNoShkPhotoHtml(item) + "</div>"
             + "<aside class='quick-no-shk-side'>"
@@ -2649,6 +2853,8 @@
             button.addEventListener("click", () => { void applyQuickNoShkAction(button.dataset.quickNoShk || ""); });
         });
         void loadQuickNoShkPhoto(item);
+        void preloadQuickNoShkPhotos();
+        updateQuickNoShkTimers();
     }
 
     async function completeTaskBySystemNoShk(row, item, verdict, note) {
@@ -2910,6 +3116,7 @@
                 at: new Date().toISOString(),
             });
             state.quickNoShk.index += 1;
+            state.quickNoShk.itemTimerStartedAt = Date.now();
             renderQuickNoShkPlay();
             refreshOpenSectionModal();
         } catch (error) {
