@@ -16,6 +16,7 @@
     const WMS_SHIFTS_TABLE = "wms_shifts";
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
+    const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
     const SUPABASE_FUNCTIONS_BASE_URL = ((typeof window !== "undefined" && window.SUPABASE_URL) || "https://bgphllmzmlwurfnbagho.supabase.co").replace(/\/$/, "") + "/functions/v1";
     const SUPABASE_PUBLIC_ANON_KEY = (typeof window !== "undefined" && window.SUPABASE_ANON_KEY) || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJncGhsbG16bWx3dXJmbmJhZ2hvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTQwNzIsImV4cCI6MjA3ODUzMDA3Mn0.a1_Wbtpbs9P-_UDqwjGqAIjvwK5WbT_M3B7g5BHtR2Q";
     const WMS_TASK_WRITEBACK_FUNCTION = "wms-task-writeback";
@@ -39,10 +40,33 @@
     const SYSTEM_MOVEMENT_VERDICT = "Система - Движение";
     const SYSTEM_NO_SHK_NOT_FOUND_VERDICT = "Система - Не найден Без ШК";
     const SYSTEM_NO_SHK_FOUND_VERDICT = "Система - Обнаружен Без ШК";
+    const SYSTEM_COMPLETION_VERDICT_KEYS = new Set([
+        SYSTEM_MOVEMENT_VERDICT,
+        SYSTEM_NO_SHK_NOT_FOUND_VERDICT,
+        SYSTEM_NO_SHK_FOUND_VERDICT,
+    ].map((item) => normalizeForMatch(item)));
     const QUICK_NO_SHK_PURE_NOT_FOUND_MARKER = "[WMS+ Без ШК: не найден]";
     const QUICK_NO_SHK_SUPERSET_CACHE_KEY = "wms_quick_no_shk_superset_cache_v1";
     const QUICK_NO_SHK_SUPERSET_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
     const QUICK_NO_SHK_PRELOAD_AHEAD = 4;
+    const NO_SHK_SEARCH_LIMIT = 120;
+    const NO_SHK_PHOTO_PREVIEW_LIMIT = 18;
+    const NO_SHK_FOUND_COMMENT = "Разбор Без ШК: товар опознан в WMS+.";
+    const NO_SHK_VISUAL_SIMILAR_MAP = {
+        A: "А", a: "а", B: "В", b: "в", C: "С", c: "с", E: "Е", e: "е", H: "Н", h: "н",
+        K: "К", k: "к", M: "М", m: "м", O: "О", o: "о", P: "Р", p: "р", T: "Т", t: "т",
+        X: "Х", x: "х", Y: "У", y: "у", А: "A", а: "a", В: "B", в: "b", С: "C", с: "c",
+        Е: "E", е: "e", Н: "H", н: "h", К: "K", к: "k", М: "M", м: "m", О: "O", о: "o",
+        Р: "P", р: "p", Т: "T", т: "t", Х: "X", х: "x", У: "Y", у: "y",
+    };
+    const NO_SHK_PURE_COLUMNS = {
+        nm: ["nm", "nm_id", "nmId"],
+        description: ["decription", "description"],
+        brand: ["brand", "brand_name", "brandName"],
+        decision: ["opp_deecision", "opp_decision", "decision"],
+        employee: ["opp_emp", "emp"],
+        comment: ["opp_comment", "comment"],
+    };
     const MOVEMENT_AUTO_CLOSE_MINUTES = 10;
     const MOVEMENT_AUTO_CLOSE_MIN_MS = MOVEMENT_AUTO_CLOSE_MINUTES * 60 * 1000;
     const PRESPISOK_STORAGE_KEY = "wms_prespisok_progress_v1";
@@ -96,6 +120,84 @@
     const MASTER_MAIN_MODULES = ["pm", "presort", "marketplace_pc", "wmi_mp_pc"];
     const MASTER_PACKAGING_MODULES = ["packaging", "rwp"];
     const MASTER_MODULES = ["pm", "presort", "marketplace_pc", "wmi_mp_pc", "no_order", "packaging", "rwp", "after_sale_movement"];
+    const ACHIEVEMENT_RARITIES = {
+        common: { label: "Обычная", marker: "⚪", icon: "✓" },
+        uncommon: { label: "Необычная", marker: "🟢", icon: "↗" },
+        rare: { label: "Редкая", marker: "🔵", icon: "◆" },
+        epic: { label: "Эпическая", marker: "🟣", icon: "✦" },
+        legendary: { label: "Легендарная", marker: "🟠", icon: "★" },
+    };
+    const ACHIEVEMENTS = [
+        { id: "shift_open_first", rarity: "common", emoji: "👋", title: "И снова здравствуйте", text: "Открыть смену." },
+        { id: "shift_open_10", rarity: "uncommon", emoji: "🏠", title: "Прописался", text: "Открыть 10 смен." },
+        { id: "prespisok_first", rarity: "common", emoji: "📋", title: "С почином", text: "Разобрать первый предсписок." },
+        { id: "prespisok_10", rarity: "uncommon", emoji: "🧾", title: "Предсписочник", text: "Разобрать 10 предсписков." },
+        { id: "prespisok_100", rarity: "epic", emoji: "👑", title: "Повелитель предсписка", text: "Разобрать 100 предсписков." },
+        { id: "prespisok_speedrun_60", rarity: "rare", emoji: "🏎️", title: "Спидран", text: "Разобрать предсписок менее чем за 60 минут." },
+        { id: "prespisok_7_days", rarity: "epic", emoji: "🔁", title: "День сурка", text: "Участвовать в разборе предсписка 7 дней подряд." },
+        { id: "prespisok_all_writeoff", rarity: "epic", emoji: "🕳️", title: "Фаталист", text: "Списать все ШК из предсписка.", hidden: true },
+        { id: "awh_first", rarity: "common", emoji: "📦", title: "AWH, вот оно что", text: "Разобрать первое списание AWH." },
+        { id: "awh_10", rarity: "uncommon", emoji: "🧮", title: "AWHторитет", text: "Разобрать 10 списаний AWH." },
+        { id: "awh_100", rarity: "rare", emoji: "⚙️", title: "AWHтомат", text: "Разобрать 100 списаний AWH." },
+        { id: "awh_1000", rarity: "legendary", emoji: "🏭", title: "AWHсолют", text: "Разобрать 1000 списаний AWH.", hidden: true },
+        { id: "boxes_first", rarity: "common", emoji: "🎁", title: "Что в коробке?", text: "Разобрать первую коробку на входе." },
+        { id: "boxes_10", rarity: "uncommon", emoji: "🧤", title: "Распаковщик", text: "Разобрать 10 коробок на входе." },
+        { id: "boxes_100", rarity: "rare", emoji: "🗃️", title: "Коробочный магнат", text: "Разобрать 100 коробок на входе." },
+        { id: "boxes_1000", rarity: "legendary", emoji: "🐉", title: "Властелин коробок", text: "Разобрать 1000 коробок на входе.", hidden: true },
+        { id: "requests_first", rarity: "common", emoji: "📞", title: "На связи", text: "Ответить на первый запрос." },
+        { id: "requests_100", rarity: "rare", emoji: "🎧", title: "Колл-центр", text: "Ответить на 100 запросов." },
+        { id: "tasks_10", rarity: "common", emoji: "💪", title: "Разминка", text: "Завершить 10 заданий." },
+        { id: "tasks_100", rarity: "uncommon", emoji: "💯", title: "Соточка", text: "Завершить 100 заданий." },
+        { id: "tasks_1000", rarity: "epic", emoji: "🏭", title: "Конвейер", text: "Завершить 1000 заданий." },
+        { id: "tasks_10000", rarity: "legendary", emoji: "🌱", title: "Потрогай траву", text: "Завершить 10 000 заданий.", hidden: true },
+        { id: "autoclose_half", rarity: "rare", emoji: "🤖", title: "Оно само", text: "Более половины активных задач закрылись автозакрытием.", hidden: true, soon: true },
+        { id: "dual_flow_shift", rarity: "rare", emoji: "🪓", title: "На два фронта", text: "Быть ответственным за оба потока в одну смену.", hidden: true },
+        { id: "no_shk_150_10", rarity: "legendary", emoji: "👻", title: "ШК? Не слышал", text: "Разобрать более 150 «Без ШК» менее чем за 10 минут." },
+        { id: "guilty_1034305", rarity: "epic", emoji: "🕵️", title: "Подозреваемый №1034305", text: "Попытаться указать 1034305 как виновного.", hidden: true },
+        { id: "first_task_5m", rarity: "uncommon", emoji: "🚀", title: "С места в карьер", text: "Выполнить первую задачу менее чем через 5 минут после открытия смены." },
+        { id: "tasks_first_hour_25", rarity: "rare", emoji: "🌅", title: "Доброе утро", text: "Выполнить 25 задач за первый час смены." },
+        { id: "task_after_20", rarity: "uncommon", emoji: "🌙", title: "Последний выключает свет", text: "Выполнить задачу после 20:00." },
+        { id: "zero_active_tasks", rarity: "epic", emoji: "🧹", title: "Всё. Вообще всё.", text: "Добиться момента, когда нет ни одной активной задачи." },
+        { id: "shift_100_tasks", rarity: "rare", emoji: "🥁", title: "Ударная смена", text: "Выполнить 100 задач за одну смену." },
+        { id: "shift_200_tasks", rarity: "epic", emoji: "⚡", title: "А ты точно сам?", text: "Выполнить 200 задач за одну смену." },
+        { id: "shift_300_tasks", rarity: "legendary", emoji: "🚨", title: "Подозрительная активность", text: "Выполнить 300 задач за одну смену." },
+        { id: "ten_task_types_shift", rarity: "rare", emoji: "🛠️", title: "Швейцарский нож", text: "Выполнить 10 разных типов задач за одну смену." },
+        { id: "triple_prespisok_awh_boxes", rarity: "epic", emoji: "🎛️", title: "Три в одном", text: "За одну смену поработать с предсписком, AWH и коробками на входе." },
+        { id: "excellent_shift", rarity: "uncommon", emoji: "🎓", title: "Отличник", text: "Закрыть смену на 5+.", hidden: true, soon: true },
+        { id: "excellent_shift_10", rarity: "epic", emoji: "🏅", title: "Красный диплом", text: "Закрыть 10 смен на 5+.", hidden: true, soon: true },
+        { id: "update_all_writeoff_dates", rarity: "uncommon", emoji: "⏳", title: "Ещё поживёт", text: "Обновить все сроки списания.", hidden: true, soon: true },
+        { id: "birthday_task", rarity: "rare", emoji: "🎂", title: "Работа — лучший подарок", text: "Выполнить задачу в свой день рождения.", hidden: true, soon: true },
+        { id: "clean_shift", rarity: "rare", emoji: "✨", title: "Чистая работа", text: "Закрыть смену без единой просроченной задачи.", hidden: true, soon: true },
+        { id: "clean_shift_5_streak", rarity: "epic", emoji: "🧵", title: "Ни единого разрыва", text: "Закрыть 5 смен подряд без просрочек.", hidden: true, soon: true },
+        { id: "excellent_shift_3_streak", rarity: "rare", emoji: "📈", title: "Стабильность — признак мастерства", text: "Закрыть 3 смены подряд на 5+.", hidden: true, soon: true },
+        { id: "excellent_shift_10_streak", rarity: "legendary", emoji: "🧨", title: "Без права на ошибку", text: "Закрыть 10 смен подряд на 5+.", hidden: true, soon: true },
+        { id: "last_minute_save", rarity: "rare", emoji: "⏱️", title: "На тоненького", text: "Найти товар в последнюю минуту перед списанием.", hidden: true, soon: true },
+        { id: "midnight_task", rarity: "rare", emoji: "🕛", title: "Между мирами", text: "Выполнить задачу ровно в 00:00.", hidden: true, soon: true },
+        { id: "new_year_first_task", rarity: "epic", emoji: "🎄", title: "Ну вот опять", text: "Выполнить первую задачу нового года.", hidden: true, soon: true },
+        { id: "first_minute_task", rarity: "rare", emoji: "🙋", title: "Мне только спросить", text: "Закрыть задачу в течение первой минуты после открытия смены.", hidden: true, soon: true },
+    ];
+    const ACHIEVEMENT_BY_ID = new Map(ACHIEVEMENTS.map((achievement) => [achievement.id, achievement]));
+    const RECOUNTABLE_TASK_ACHIEVEMENT_IDS = [
+        "tasks_10",
+        "tasks_100",
+        "tasks_1000",
+        "tasks_10000",
+        "awh_first",
+        "awh_10",
+        "awh_100",
+        "awh_1000",
+        "boxes_first",
+        "boxes_10",
+        "boxes_100",
+        "boxes_1000",
+        "requests_first",
+        "requests_100",
+        "shift_100_tasks",
+        "shift_200_tasks",
+        "shift_300_tasks",
+        "ten_task_types_shift",
+        "task_after_20",
+    ];
 
     const DEFAULT_MODULES = [
         {
@@ -492,6 +594,19 @@
             lastSupersetMessage: "",
             lastSupersetTone: "",
         },
+        noShkReview: {
+            query: "",
+            rows: [],
+            loading: false,
+            processing: false,
+            photoCache: {},
+            resolvedColumns: {},
+            status: "",
+            statusTone: "",
+            enlargedPhoto: "",
+            success: null,
+            token: 0,
+        },
         taskSearch: {
             rows: [],
             loading: false,
@@ -542,6 +657,13 @@
             actionsByRunId: {},
             selectedRunId: "",
             error: "",
+        },
+        achievements: {
+            earned: new Map(),
+            loading: false,
+            error: "",
+            syncDisabled: false,
+            cleaning: false,
         },
     };
 
@@ -696,6 +818,315 @@
     function toast(message, type) {
         if (window.MiniUI && typeof window.MiniUI.toast === "function") window.MiniUI.toast(message, { type: type || "info" });
         else console.log(message);
+    }
+
+    function achievementActor() {
+        const user = currentWmsUser();
+        const fallbackId = normalizeText(localStorage.getItem("wms_achievement_user_id")) || "local";
+        const id = normalizeText(user.id) || fallbackId;
+        if (!normalizeText(user.id) && !localStorage.getItem("wms_achievement_user_id")) {
+            try { localStorage.setItem("wms_achievement_user_id", id); } catch (_error) {}
+        }
+        return { id, name: normalizeText(user.name) || "Сотрудник ОПП" };
+    }
+
+    function achievementLocalKey(userId) {
+        return "wms_achievements_v1:" + WH_ID + ":" + (normalizeText(userId) || "local");
+    }
+
+    function localAchievementRows(userId) {
+        const rows = parseJsonSafe(localStorage.getItem(achievementLocalKey(userId)), []);
+        return Array.isArray(rows) ? rows : [];
+    }
+
+    function saveLocalAchievementRow(userId, row) {
+        try {
+            const rows = localAchievementRows(userId).filter((item) => item.achievement_id !== row.achievement_id);
+            rows.push(row);
+            localStorage.setItem(achievementLocalKey(userId), JSON.stringify(rows));
+        } catch (_error) {}
+    }
+
+    function removeLocalAchievementRows(userId, ids) {
+        try {
+            const blocked = new Set((ids || []).map(normalizeText).filter(Boolean));
+            const rows = localAchievementRows(userId).filter((item) => !blocked.has(normalizeText(item && item.achievement_id)));
+            localStorage.setItem(achievementLocalKey(userId), JSON.stringify(rows));
+        } catch (_error) {}
+    }
+
+    function applyAchievementRows(rows) {
+        (rows || []).forEach((row) => {
+            const id = normalizeText(row && (row.achievement_id || row.id));
+            if (!id || !ACHIEVEMENT_BY_ID.has(id)) return;
+            state.achievements.earned.set(id, {
+                achievement_id: id,
+                unlocked_at: normalizeText(row.unlocked_at) || new Date().toISOString(),
+                payload: row.payload && typeof row.payload === "object" ? row.payload : {},
+            });
+        });
+    }
+
+    async function syncLocalAchievementsToSupabase(actor, db, remoteRows) {
+        if (!actor || !db || state.achievements.syncDisabled) return;
+        const remoteIds = new Set((remoteRows || []).map((row) => normalizeText(row && row.achievement_id)).filter(Boolean));
+        const rows = localAchievementRows(actor.id)
+            .filter((row) => {
+                const id = normalizeText(row && row.achievement_id);
+                return id && ACHIEVEMENT_BY_ID.has(id) && !remoteIds.has(id);
+            })
+            .map((row) => ({
+                wh_id: WH_ID,
+                user_id: actor.id,
+                user_name: actor.name,
+                achievement_id: normalizeText(row.achievement_id),
+                unlocked_at: normalizeText(row.unlocked_at) || new Date().toISOString(),
+                payload: row.payload && typeof row.payload === "object" ? row.payload : {},
+            }));
+        if (!rows.length) return;
+        try {
+            const { error } = await db
+                .from(WMS_ACHIEVEMENTS_TABLE)
+                .upsert(rows, { onConflict: "wh_id,user_id,achievement_id" });
+            if (error) throw error;
+        } catch (error) {
+            console.warn("achievement restore skipped:", error);
+        }
+    }
+
+    async function forgetAchievements(ids) {
+        const cleanIds = Array.from(new Set((ids || []).map(normalizeText).filter(Boolean)));
+        if (!cleanIds.length) return;
+        const actor = achievementActor();
+        cleanIds.forEach((id) => state.achievements.earned.delete(id));
+        removeLocalAchievementRows(actor.id, cleanIds);
+        renderAchievementsModal();
+        const db = supabaseDb();
+        if (!db || state.achievements.syncDisabled) return;
+        try {
+            const { error } = await db
+                .from(WMS_ACHIEVEMENTS_TABLE)
+                .delete()
+                .eq("wh_id", WH_ID)
+                .eq("user_id", actor.id)
+                .in("achievement_id", cleanIds);
+            if (error) throw error;
+        } catch (error) {
+            console.warn("achievement cleanup skipped:", error);
+        }
+    }
+
+    async function loadAchievements() {
+        const actor = achievementActor();
+        state.achievements.loading = true;
+        state.achievements.error = "";
+        applyAchievementRows(localAchievementRows(actor.id));
+        const db = supabaseDb();
+        if (!db || state.achievements.syncDisabled) {
+            state.achievements.loading = false;
+            renderAchievementsModal();
+            return;
+        }
+        try {
+            const { data, error } = await db
+                .from(WMS_ACHIEVEMENTS_TABLE)
+                .select("achievement_id,unlocked_at,payload")
+                .eq("wh_id", WH_ID)
+                .eq("user_id", actor.id)
+                .order("unlocked_at", { ascending: false });
+            if (error) throw error;
+            applyAchievementRows(data || []);
+            await syncLocalAchievementsToSupabase(actor, db, data || []);
+        } catch (error) {
+            console.warn("achievements load skipped:", error);
+            state.achievements.syncDisabled = true;
+            state.achievements.error = "Достижения временно сохраняются локально. Примените миграцию wms_achievements для синхронизации.";
+        } finally {
+            state.achievements.loading = false;
+            renderAchievementsModal();
+            void cleanupIneligibleTaskAchievements();
+        }
+    }
+
+    function achievementExtraMarkup(rarity) {
+        if (rarity === "rare") return "<i class='rare-wave'></i>";
+        if (rarity === "epic") return "<i class='epic-orbit'></i>";
+        if (rarity === "legendary") return "<i class='legendary-flare'></i>";
+        return "";
+    }
+
+    function achievementParticles(count) {
+        return Array.from({ length: count }, (_item, index) => {
+            const angle = (Math.PI * 2 * index) / count;
+            const radius = 80 + Math.random() * 150;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius * .62;
+            const size = 4 + Math.random() * 8;
+            const delay = Math.random() * .22;
+            const rotation = Math.round(Math.random() * 520 - 260);
+            return "<i class='achievement-particle' style='--x:" + x.toFixed(1) + "px;--y:" + y.toFixed(1) + "px;--size:" + size.toFixed(1) + "px;--delay:" + delay.toFixed(2) + "s;--r:" + rotation + "deg'></i>";
+        }).join("");
+    }
+
+    function showAchievementToast(achievement) {
+        const layer = $("achievementLayer");
+        if (!layer || !achievement) return;
+        const rarity = ACHIEVEMENT_RARITIES[achievement.rarity] || ACHIEVEMENT_RARITIES.common;
+        const particleCount = achievement.rarity === "legendary" ? 42 : achievement.rarity === "epic" ? 28 : achievement.rarity === "rare" ? 20 : achievement.rarity === "uncommon" ? 16 : 10;
+        const toastEl = document.createElement("article");
+        toastEl.className = "achievement-toast rarity-" + escapeHtml(achievement.rarity || "common");
+        toastEl.setAttribute("role", "status");
+        toastEl.innerHTML = achievementExtraMarkup(achievement.rarity)
+            + achievementParticles(particleCount)
+            + "<div class='ach-icon'>" + escapeHtml(rarity.icon) + "</div>"
+            + "<div class='ach-body'>"
+            + "<div class='ach-rarity'>" + escapeHtml(rarity.marker + " " + rarity.label) + "</div>"
+            + "<h2 class='ach-title'>" + escapeHtml((achievement.emoji ? achievement.emoji + " " : "") + achievement.title) + "</h2>"
+            + "<p class='ach-text'>" + escapeHtml(achievement.text) + "</p>"
+            + "</div>";
+        layer.prepend(toastEl);
+        window.setTimeout(() => toastEl.remove(), achievement.rarity === "legendary" ? 6700 : 6200);
+    }
+
+    async function unlockAchievement(id, payload) {
+        const achievement = ACHIEVEMENT_BY_ID.get(id);
+        if (!achievement || achievement.soon || state.achievements.earned.has(id)) return false;
+        const actor = achievementActor();
+        const row = {
+            wh_id: WH_ID,
+            user_id: actor.id,
+            user_name: actor.name,
+            achievement_id: id,
+            unlocked_at: new Date().toISOString(),
+            payload: payload || {},
+        };
+        state.achievements.earned.set(id, row);
+        saveLocalAchievementRow(actor.id, row);
+        showAchievementToast(achievement);
+        renderAchievementsModal();
+        const db = supabaseDb();
+        if (!db || state.achievements.syncDisabled) return true;
+        try {
+            const { error } = await db
+                .from(WMS_ACHIEVEMENTS_TABLE)
+                .upsert(row, { onConflict: "wh_id,user_id,achievement_id" });
+            if (error) throw error;
+        } catch (error) {
+            console.warn("achievement sync skipped:", error);
+            state.achievements.syncDisabled = true;
+        }
+        return true;
+    }
+
+    function achievementCardHtml(achievement, earned) {
+        const rarity = ACHIEVEMENT_RARITIES[achievement.rarity] || ACHIEVEMENT_RARITIES.common;
+        const lockedSecret = (achievement.hidden || achievement.soon) && !earned;
+        const title = lockedSecret ? "???" : achievement.title;
+        const icon = earned ? achievement.emoji : "?";
+        return "<button type='button' class='achievement-card rarity-" + escapeHtml(achievement.rarity || "common") + " " + (earned ? "earned" : "locked") + (achievement.soon ? " soon" : "") + "' data-achievement-detail='" + escapeHtml(achievement.id) + "'>"
+            + "<div class='achievement-card-icon'>" + escapeHtml(icon || (earned ? "🏆" : "?")) + "</div>"
+            + "<div class='achievement-card-main'><h4 class='achievement-card-title'>" + escapeHtml(title) + "</h4>"
+            + "<span class='achievement-card-state'>" + escapeHtml(earned ? "Открыто" : achievement.soon ? "Скоро" : "Не открыто") + "</span></div>"
+            + "</button>";
+    }
+
+    function achievementDetailHtml(achievement, earned) {
+        const rarity = ACHIEVEMENT_RARITIES[achievement.rarity] || ACHIEVEMENT_RARITIES.common;
+        const lockedSecret = (achievement.hidden || achievement.soon) && !earned;
+        const title = lockedSecret ? "???" : achievement.title;
+        const text = lockedSecret ? "Секретное достижение. Оно смотрит на тебя из тумана и делает вид, что ничего не знает." : achievement.text;
+        const icon = earned ? achievement.emoji : "?";
+        const dateText = earned ? formatRuDateTime(earned.unlocked_at) : "Еще не получено";
+        const secretText = lockedSecret ? "<div class='achievement-detail-secret'>Секретка. Условие не показываю, иначе какой это тайный трофей.</div>" : "";
+        return "<article class='achievement-detail-card rarity-" + escapeHtml(achievement.rarity || "common") + " " + (earned ? "earned" : "locked") + "'>"
+            + achievementExtraMarkup(achievement.rarity)
+            + "<button id='closeAchievementDetail' class='btn btn-square achievement-detail-close' type='button' aria-label='Закрыть'>×</button>"
+            + "<div class='achievement-detail-orb'>" + escapeHtml(icon || (earned ? "🏆" : "?")) + "</div>"
+            + "<div class='achievement-detail-rarity'>" + escapeHtml(rarity.marker + " " + rarity.label) + "</div>"
+            + "<h3 class='achievement-detail-title'>" + escapeHtml(title) + "</h3>"
+            + "<p class='achievement-detail-text'>" + escapeHtml(text) + "</p>"
+            + secretText
+            + "<div class='achievement-detail-date'><span>Дата получения</span><strong>" + escapeHtml(dateText) + "</strong></div>"
+            + "</article>";
+    }
+
+    function renderAchievementsModal() {
+        const wrap = $("achievementsWrap");
+        if (!wrap) return;
+        const earnedCount = state.achievements.earned.size;
+        const available = ACHIEVEMENTS.filter((item) => !item.soon);
+        const soon = ACHIEVEMENTS.filter((item) => item.soon);
+        const subtitle = $("achievementsSubtitle");
+        if (subtitle) subtitle.textContent = "Открыто " + earnedCount + " из " + available.length + ". " + (state.achievements.error || "Секретные ачивки раскрываются только после получения.");
+        const summary = "<div class='achievements-summary'>"
+            + "<div class='mini-stat'><div class='mini-stat-label'>Открыто</div><div class='mini-stat-value'>" + earnedCount + "</div></div>"
+            + "<div class='mini-stat'><div class='mini-stat-label'>Доступно</div><div class='mini-stat-value'>" + available.length + "</div></div>"
+            + "<div class='mini-stat'><div class='mini-stat-label'>Скоро</div><div class='mini-stat-value'>" + soon.length + "</div></div>"
+            + "</div>";
+        const availableHtml = available.map((item) => achievementCardHtml(item, state.achievements.earned.get(item.id))).join("");
+        const soonHtml = soon.map((item) => achievementCardHtml(item, state.achievements.earned.get(item.id))).join("");
+        wrap.innerHTML = summary
+            + "<h4 class='achievement-section-title'>Доступные</h4><div class='achievements-list'>" + availableHtml + "</div>"
+            + "<h4 class='achievement-section-title'>Скоро...</h4><div class='achievements-list'>" + soonHtml + "</div>";
+    }
+
+    function openAchievementDetail(id) {
+        const achievement = ACHIEVEMENT_BY_ID.get(normalizeText(id));
+        const wrap = $("achievementDetailWrap");
+        if (!achievement || !wrap) return;
+        wrap.innerHTML = achievementDetailHtml(achievement, state.achievements.earned.get(achievement.id));
+        setFlowModalOpen("achievementDetailModal", true);
+        const closeBtn = $("closeAchievementDetail");
+        if (closeBtn) closeBtn.addEventListener("click", closeAchievementDetail);
+    }
+
+    function closeAchievementDetail() {
+        setFlowModalOpen("achievementDetailModal", false);
+    }
+
+    async function openAchievementsModal() {
+        closeFlowModals();
+        renderAchievementsModal();
+        setFlowModalOpen("achievementsModal", true);
+        void loadAchievements();
+    }
+
+    function closeAchievementsModal() {
+        closeAchievementDetail();
+        setFlowModalOpen("achievementsModal", false);
+    }
+
+    function installAchievementDebugHelpers() {
+        window.WMSAchievementsDebug = {
+            restoreCurrentUser: async () => {
+                const actor = achievementActor();
+                const db = supabaseDb();
+                if (!db) throw new Error("Supabase client is not ready");
+                await syncLocalAchievementsToSupabase(actor, db, []);
+                await loadAchievements();
+                return { ok: true, action: "restored", user_id: actor.id, local_count: localAchievementRows(actor.id).length };
+            },
+            resetCurrentUser: async () => {
+                const actor = achievementActor();
+                state.achievements.earned.clear();
+                removeLocalAchievementRows(actor.id, ACHIEVEMENTS.map((item) => item.id));
+                const db = supabaseDb();
+                if (db) {
+                    const { error } = await db
+                        .from(WMS_ACHIEVEMENTS_TABLE)
+                        .delete()
+                        .eq("wh_id", WH_ID)
+                        .eq("user_id", actor.id);
+                    if (error) throw error;
+                }
+                renderAchievementsModal();
+                return { ok: true, action: "reset", user_id: actor.id };
+            },
+            showCurrentUser: () => {
+                const actor = achievementActor();
+                return { user_id: actor.id, user_name: actor.name, local_key: achievementLocalKey(actor.id), local_count: localAchievementRows(actor.id).length, earned_count: state.achievements.earned.size };
+            },
+        };
     }
 
     function supabaseDb() {
@@ -867,6 +1298,7 @@
         setFlowModalOpen("shiftOpeningModal", false);
         setFlowModalOpen("actualizeTasksModal", false);
         setFlowModalOpen("quickNoShkModal", false);
+        setFlowModalOpen("noShkReviewModal", false);
         setFlowModalOpen("moduleChooser", false);
         setFlowModalOpen("uploadWork", false);
         setFlowModalOpen("masterWork", false);
@@ -880,6 +1312,8 @@
         setFlowModalOpen("inactiveTasksModal", false);
         setFlowModalOpen("prespisokSecondLineModal", false);
         setFlowModalOpen("prespisokJournalModal", false);
+        setFlowModalOpen("achievementDetailModal", false);
+        setFlowModalOpen("achievementsModal", false);
         setFlowModalOpen("specialInfoModal", false);
         setFlowModalOpen("prespisokModal", false);
         if (state.prespisok && state.prespisok.clockTimer) {
@@ -1416,6 +1850,7 @@
             renderShiftGate();
             closeShiftOpeningModal();
             toast("Смена открыта. Чистые списания обработаны: +" + pureImport.inserted_new + ", движение: " + pureImport.auto_marked_found + ".", "success");
+            void evaluateShiftAchievements(incomingId, outgoingId);
         } catch (error) {
             console.error("shift opening save failed:", error);
             setShiftOpeningStatus("Не удалось открыть смену: " + (error && error.message ? error.message : String(error)), "error");
@@ -2357,6 +2792,7 @@
             itemTimerStartedAt: 0,
             clockTimer: null,
             preloading: false,
+            achievementsChecked: false,
         };
     }
 
@@ -3134,6 +3570,10 @@
     function renderQuickNoShkFinish() {
         const target = $("quickNoShkWrap");
         if (!target) return;
+        if (!state.quickNoShk.achievementsChecked) {
+            state.quickNoShk.achievementsChecked = true;
+            void evaluateQuickNoShkAchievements();
+        }
         const actions = state.quickNoShk.actions || [];
         const found = actions.filter((action) => action.found);
         const notFound = actions.filter((action) => !action.found);
@@ -3153,6 +3593,472 @@
             + "</section>";
         bindQuickNoShkClose();
         $("closeQuickNoShkFinish").addEventListener("click", closeQuickNoShkModal);
+    }
+
+    function resetNoShkReviewState(keepPhotos) {
+        state.noShkReview = {
+            query: "",
+            rows: [],
+            loading: false,
+            processing: false,
+            photoCache: keepPhotos && state.noShkReview ? (state.noShkReview.photoCache || {}) : {},
+            resolvedColumns: state.noShkReview ? (state.noShkReview.resolvedColumns || {}) : {},
+            status: "Введите НМ, бренд или наименование товара. Ищем только в чистых списаниях.",
+            statusTone: "",
+            enlargedPhoto: "",
+            success: null,
+            token: 0,
+        };
+    }
+
+    function noShkPureValue(row, keys) {
+        for (const key of keys || []) {
+            const value = pureResolutionValue(row, [key]);
+            if (value) return value;
+        }
+        return "";
+    }
+
+    function noShkPureNm(row) {
+        return normalizeIdentifier(noShkPureValue(row, NO_SHK_PURE_COLUMNS.nm));
+    }
+
+    function noShkPureName(row) {
+        return noShkPureValue(row, NO_SHK_PURE_COLUMNS.description);
+    }
+
+    function noShkPureBrand(row) {
+        return noShkPureValue(row, NO_SHK_PURE_COLUMNS.brand);
+    }
+
+    function noShkPureShk(row) {
+        return normalizeIdentifier(row && row.shk);
+    }
+
+    function noShkPureDate(row) {
+        return normalizeText(row && (row.date_lost || row.date || row.created_at));
+    }
+
+    function noShkPureDecision(row) {
+        return noShkPureValue(row, NO_SHK_PURE_COLUMNS.decision);
+    }
+
+    function isNoShkPureAllowed(row) {
+        const decision = normalizeForMatch(noShkPureDecision(row));
+        return decision !== "найден" && decision !== "обнаружен без шк";
+    }
+
+    function noShkRowSignature(row) {
+        const id = normalizeText(row && (row.id || row.pure_id || row.uuid || row.pure_losses_id || row.row_id));
+        if (id) return "id:" + id;
+        return [
+            noShkPureShk(row),
+            noShkPureNm(row),
+            noShkPureName(row),
+            noShkPureBrand(row),
+            noShkPureDate(row),
+            normalizeIdentifier(row && row.wh_id),
+        ].join("|");
+    }
+
+    function dedupeNoShkPureRows(rows) {
+        const seen = new Set();
+        const out = [];
+        (rows || []).forEach((row) => {
+            const sig = noShkRowSignature(row);
+            if (!sig || seen.has(sig)) return;
+            seen.add(sig);
+            out.push(row);
+        });
+        return out;
+    }
+
+    function isUnknownColumnError(error) {
+        const code = normalizeText(error && error.code);
+        const message = normalizeForMatch((error && (error.message || error.details)) || "");
+        return code === "42703"
+            || code === "PGRST204"
+            || Boolean(extractMissingColumnName(error))
+            || (message.includes("column") && (message.includes("does not exist") || message.includes("could not find")));
+    }
+
+    function buildNoShkVisualVariants(queryText, maxVariants) {
+        const text = normalizeText(queryText);
+        if (!text) return [];
+        const chars = Array.from(text);
+        const positions = [];
+        chars.forEach((char, index) => {
+            if (NO_SHK_VISUAL_SIMILAR_MAP[char]) positions.push(index);
+        });
+        const out = new Set([text]);
+        if (!positions.length) return Array.from(out);
+        out.add(chars.map((char) => NO_SHK_VISUAL_SIMILAR_MAP[char] || char).join(""));
+        positions.slice(0, 8).forEach((position) => {
+            const cloned = chars.slice();
+            cloned[position] = NO_SHK_VISUAL_SIMILAR_MAP[cloned[position]] || cloned[position];
+            out.add(cloned.join(""));
+        });
+        return Array.from(out).slice(0, Math.max(1, Number(maxVariants) || 8));
+    }
+
+    async function queryNoShkPureColumn(cacheKey, columns, matcher, value) {
+        const db = supabaseDb();
+        if (!db) throw new Error("Supabase недоступен.");
+        const resolved = normalizeText(state.noShkReview.resolvedColumns[cacheKey]);
+        const ordered = [];
+        if (resolved) ordered.push(resolved);
+        (columns || []).forEach((column) => {
+            if (!ordered.includes(column)) ordered.push(column);
+        });
+        let lastError = null;
+        for (const column of ordered) {
+            let query = db.from(PURE_LOSSES_TABLE).select("*");
+            query = matcher === "eq" ? query.eq(column, value) : query.ilike(column, value);
+            const { data, error } = await query.limit(NO_SHK_SEARCH_LIMIT);
+            if (!error) {
+                state.noShkReview.resolvedColumns[cacheKey] = column;
+                return { rows: Array.isArray(data) ? data : [], error: null };
+            }
+            if (isUnknownColumnError(error)) {
+                if (state.noShkReview.resolvedColumns[cacheKey] === column) state.noShkReview.resolvedColumns[cacheKey] = "";
+                continue;
+            }
+            lastError = error;
+            break;
+        }
+        return { rows: [], error: lastError };
+    }
+
+    function sortNoShkPureRows(rows, queryText) {
+        const query = normalizeForMatch(queryText);
+        const nmQuery = normalizeIdentifier(queryText);
+        return [...(rows || [])].sort((a, b) => {
+            const aNmExact = nmQuery && noShkPureNm(a) === nmQuery ? 1 : 0;
+            const bNmExact = nmQuery && noShkPureNm(b) === nmQuery ? 1 : 0;
+            if (aNmExact !== bNmExact) return bNmExact - aNmExact;
+            const aText = normalizeForMatch([noShkPureBrand(a), noShkPureName(a)].join(" "));
+            const bText = normalizeForMatch([noShkPureBrand(b), noShkPureName(b)].join(" "));
+            const aStarts = query && aText.startsWith(query) ? 1 : 0;
+            const bStarts = query && bText.startsWith(query) ? 1 : 0;
+            if (aStarts !== bStarts) return bStarts - aStarts;
+            const aTs = parseDateTime(noShkPureDate(a)).ts || 0;
+            const bTs = parseDateTime(noShkPureDate(b)).ts || 0;
+            return bTs - aTs;
+        });
+    }
+
+    async function fetchNoShkPureRows(queryText) {
+        const query = normalizeText(queryText);
+        if (!query) return { rows: [], error: null };
+        const jobs = [];
+        if (/^\d+$/.test(query)) {
+            jobs.push(() => queryNoShkPureColumn("nm", NO_SHK_PURE_COLUMNS.nm, "eq", query));
+            jobs.push(() => queryNoShkPureColumn("shk", ["shk"], "eq", query));
+        } else {
+            buildNoShkVisualVariants(query, 10).forEach((variant) => {
+                jobs.push(() => queryNoShkPureColumn("description", NO_SHK_PURE_COLUMNS.description, "ilike", "%" + variant + "%"));
+                jobs.push(() => queryNoShkPureColumn("brand", NO_SHK_PURE_COLUMNS.brand, "ilike", "%" + variant + "%"));
+            });
+        }
+        const results = new Array(jobs.length);
+        await runLimitedPool(jobs, 4, async (job, index) => {
+            results[index] = await job();
+        });
+        let firstError = null;
+        const merged = [];
+        (results || []).forEach((result) => {
+            if (result && result.error && !firstError) firstError = result.error;
+            merged.push(...((result && result.rows) || []));
+        });
+        const rows = sortNoShkPureRows(dedupeNoShkPureRows(merged).filter(isNoShkPureAllowed), query).slice(0, NO_SHK_SEARCH_LIMIT);
+        return { rows, error: firstError };
+    }
+
+    function noShkReviewStatusHtml() {
+        const text = normalizeText(state.noShkReview.status);
+        if (!text) return "";
+        return "<div class='status-line " + escapeHtml(state.noShkReview.statusTone || "") + "'>" + escapeHtml(text) + "</div>";
+    }
+
+    function renderNoShkReviewModal() {
+        const target = $("noShkReviewWrap");
+        if (!target) return;
+        const success = state.noShkReview.success;
+        if (success) {
+            target.innerHTML = "<div class='work-head'>"
+                + "<div><h3 class='work-title'>Разбор “Без ШК”</h3><p class='work-subtitle'>Чистые списания, ручное опознание.</p></div>"
+                + "<button id='closeNoShkReview' class='btn btn-square' type='button' aria-label='Закрыть'>×</button>"
+                + "</div>"
+                + "<section class='no-shk-success'><div><h3>Товар опознан!</h3><p>ШК " + escapeHtml(success.shk || "-") + "<br>" + escapeHtml(success.name || "Наименование не найдено") + "</p><div class='file-row' style='justify-content:center;margin-top:20px'><button id='noShkReviewAgain' class='btn btn-rect' type='button'>Продолжить поиск</button></div></div></section>";
+            $("closeNoShkReview").addEventListener("click", closeNoShkReviewModal);
+            $("noShkReviewAgain").addEventListener("click", () => {
+                state.noShkReview.success = null;
+                state.noShkReview.query = "";
+                state.noShkReview.rows = [];
+                state.noShkReview.status = "Введите следующий запрос.";
+                state.noShkReview.statusTone = "";
+                renderNoShkReviewModal();
+            });
+            return;
+        }
+        const rows = state.noShkReview.rows || [];
+        target.innerHTML = "<div class='work-head'>"
+            + "<div><h3 class='work-title'>Разбор “Без ШК”</h3><p class='work-subtitle'>Ищем товар только в чистых списаниях: НМ, бренд или наименование.</p></div>"
+            + "<button id='closeNoShkReview' class='btn btn-square' type='button' aria-label='Закрыть'>×</button>"
+            + "</div>"
+            + "<div class='no-shk-search-row'>"
+            + "<input id='noShkSearchInput' class='no-shk-search-input' type='search' autocomplete='off' placeholder='Введите НМ, бренд или наименование' value='" + escapeHtml(state.noShkReview.query || "") + "'>"
+            + "<button id='noShkSearchBtn' class='btn btn-rect' type='button' " + (state.noShkReview.loading ? "disabled" : "") + ">" + (state.noShkReview.loading ? "Ищу..." : "Найти") + "</button>"
+            + "</div>"
+            + noShkReviewStatusHtml()
+            + "<div id='noShkResults' class='no-shk-results'>" + renderNoShkRowsHtml(rows) + "</div>";
+        $("closeNoShkReview").addEventListener("click", closeNoShkReviewModal);
+        $("noShkSearchInput").addEventListener("input", (event) => {
+            state.noShkReview.query = event.target.value || "";
+        });
+        $("noShkSearchInput").addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                void searchNoShkPureRows();
+            }
+        });
+        $("noShkSearchBtn").addEventListener("click", () => { void searchNoShkPureRows(); });
+        bindNoShkResultEvents();
+        preloadNoShkResultPhotos();
+        setTimeout(() => {
+            const input = $("noShkSearchInput");
+            if (input) input.focus();
+        }, 0);
+    }
+
+    function renderNoShkRowsHtml(rows) {
+        if (state.noShkReview.loading) return "<div class='no-shk-empty'>Ищу в чистых списаниях...</div>";
+        if (!normalizeText(state.noShkReview.query)) return "<div class='no-shk-empty'>Введите запрос и нажмите “Найти”. Поиск не запускается на каждый символ, чтобы страница не превращалась в кипящий чайник.</div>";
+        if (!rows.length) return "<div class='no-shk-empty'>Совпадений не найдено.</div>";
+        return rows.map((row, index) => {
+            const nm = noShkPureNm(row);
+            const imageUrl = nm && state.noShkReview.photoCache[nm] ? state.noShkReview.photoCache[nm] : "";
+            const photo = imageUrl
+                ? "<img src='" + escapeHtml(imageUrl) + "' alt='Фото товара'>"
+                : "<span>" + (nm ? "Фото" : "Нет НМ") + "</span>";
+            return "<article class='no-shk-result-card' data-index='" + index + "'>"
+                + "<button class='no-shk-photo-thumb' type='button' data-no-shk-photo='" + index + "' data-no-shk-nm='" + escapeHtml(nm || "") + "' " + (!imageUrl ? "disabled" : "") + ">" + photo + "</button>"
+                + "<div class='no-shk-result-main'>"
+                + "<div class='no-shk-result-title'>" + escapeHtml(noShkPureName(row) || "Наименование не найдено") + "</div>"
+                + "<div class='no-shk-result-meta'>" + escapeHtml(noShkPureBrand(row) || "Бренд не указан") + "</div>"
+                + "<div class='no-shk-result-pills'>"
+                + "<span class='no-shk-pill'>ШК " + escapeHtml(noShkPureShk(row) || "-") + "</span>"
+                + "<span class='no-shk-pill'>НМ " + escapeHtml(nm || "-") + "</span>"
+                + "<span class='no-shk-pill'>" + escapeHtml(formatRuDate(parseDateTime(noShkPureDate(row)).date) || "-") + "</span>"
+                + "</div></div>"
+                + "<button class='btn btn-rect no-shk-found-btn' data-no-shk-found='" + index + "' type='button' " + (state.noShkReview.processing ? "disabled" : "") + ">Опознать</button>"
+                + "</article>";
+        }).join("");
+    }
+
+    function bindNoShkResultEvents() {
+        document.querySelectorAll("[data-no-shk-found]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const row = (state.noShkReview.rows || [])[Number(button.dataset.noShkFound)];
+                if (row) void markNoShkPureAsFound(row);
+            });
+        });
+        document.querySelectorAll("[data-no-shk-photo]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const row = (state.noShkReview.rows || [])[Number(button.dataset.noShkPhoto)];
+                const url = row ? state.noShkReview.photoCache[noShkPureNm(row)] : "";
+                if (url) openNoShkPhotoPreview(row, url);
+            });
+        });
+    }
+
+    async function searchNoShkPureRows() {
+        const query = normalizeText(state.noShkReview.query);
+        if (!query) {
+            state.noShkReview.status = "Введите НМ, бренд или наименование товара.";
+            state.noShkReview.statusTone = "error";
+            renderNoShkReviewModal();
+            return;
+        }
+        const token = ++state.noShkReview.token;
+        state.noShkReview.loading = true;
+        state.noShkReview.status = "Ищу в чистых списаниях...";
+        state.noShkReview.statusTone = "";
+        renderNoShkReviewModal();
+        try {
+            const result = await fetchNoShkPureRows(query);
+            if (token !== state.noShkReview.token) return;
+            state.noShkReview.rows = result.rows || [];
+            state.noShkReview.status = result.error
+                ? "Часть колонок не прочиталась, но найденные варианты показал. Если пусто — проверь название поля в pure_losses_rep."
+                : "Найдено вариантов: " + state.noShkReview.rows.length + ".";
+            state.noShkReview.statusTone = result.error ? "error" : (state.noShkReview.rows.length ? "good" : "");
+        } catch (error) {
+            if (token !== state.noShkReview.token) return;
+            state.noShkReview.rows = [];
+            state.noShkReview.status = "Не удалось выполнить поиск: " + (error && error.message ? error.message : String(error));
+            state.noShkReview.statusTone = "error";
+        } finally {
+            if (token === state.noShkReview.token) {
+                state.noShkReview.loading = false;
+                renderNoShkReviewModal();
+            }
+        }
+    }
+
+    async function loadNoShkResultPhoto(row) {
+        const nm = noShkPureNm(row);
+        if (!nm || Object.prototype.hasOwnProperty.call(state.noShkReview.photoCache, nm)) return;
+        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 1, maxHosts: 18 });
+        const found = await findFirstLoadableImage(urls);
+        state.noShkReview.photoCache[nm] = found || "";
+        if (!$("noShkReviewModal") || !$("noShkReviewModal").classList.contains("active")) return;
+        document.querySelectorAll("[data-no-shk-photo]").forEach((button) => {
+            if (normalizeIdentifier(button.dataset.noShkNm) !== nm) return;
+            if (found) {
+                button.disabled = false;
+                button.innerHTML = "<img src='" + escapeHtml(found) + "' alt='Фото товара'>";
+            } else {
+                button.disabled = true;
+                button.innerHTML = "<span>Нет фото</span>";
+            }
+        });
+    }
+
+    function preloadNoShkResultPhotos() {
+        const rows = (state.noShkReview.rows || []).slice(0, NO_SHK_PHOTO_PREVIEW_LIMIT);
+        rows.forEach((row) => { void loadNoShkResultPhoto(row); });
+    }
+
+    function openNoShkPhotoPreview(row, imageUrl) {
+        $("specialInfoWrap").innerHTML = "<div class='work-head'>"
+            + "<div><h3 class='work-title'>Фото товара</h3><p class='work-subtitle'>" + escapeHtml(noShkPureName(row) || "Наименование не найдено") + "</p></div>"
+            + "<button id='closeNoShkPhotoPreview' class='btn btn-square' type='button' aria-label='Закрыть'>×</button>"
+            + "</div>"
+            + "<img class='no-shk-photo-preview' src='" + escapeHtml(imageUrl) + "' alt='Фото товара'>"
+            + "<div class='status-line'>ШК " + escapeHtml(noShkPureShk(row) || "-") + " · НМ " + escapeHtml(noShkPureNm(row) || "-") + "</div>";
+        setFlowModalOpen("specialInfoModal", true);
+        $("closeNoShkPhotoPreview").addEventListener("click", closeSpecialInfoModal);
+    }
+
+    function buildNoShkPureUpdateFilters(row) {
+        const filters = [];
+        const push = (obj) => {
+            const entries = Object.entries(obj || {}).filter(([, value]) => normalizeText(value));
+            if (entries.length) filters.push(Object.fromEntries(entries));
+        };
+        push({ id: row && row.id });
+        push({ pure_id: row && row.pure_id });
+        push({ uuid: row && row.uuid });
+        push({ pure_losses_id: row && row.pure_losses_id });
+        push({ row_id: row && row.row_id });
+        const shk = noShkPureShk(row);
+        const nm = noShkPureNm(row);
+        const name = noShkPureName(row);
+        const dateLost = normalizeText(row && row.date_lost);
+        const whId = normalizeIdentifier(row && row.wh_id);
+        if (shk && nm && dateLost && whId) push({ shk, nm, date_lost: dateLost, wh_id: whId });
+        if (shk && dateLost && whId) push({ shk, date_lost: dateLost, wh_id: whId });
+        if (shk && nm && dateLost) push({ shk, nm, date_lost: dateLost });
+        if (shk && dateLost) push({ shk, date_lost: dateLost });
+        if (shk && nm) push({ shk, nm });
+        if (shk) push({ shk });
+        if (nm && name) {
+            push({ nm, decription: name });
+            push({ nm, description: name });
+        }
+        if (nm) push({ nm });
+        const seen = new Set();
+        return filters.filter((filter) => {
+            const sig = Object.entries(filter).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => key + ":" + value).join("|");
+            if (!sig || seen.has(sig)) return false;
+            seen.add(sig);
+            return true;
+        });
+    }
+
+    async function updateNoShkPureRow(row, patch) {
+        const db = supabaseDb();
+        if (!db) throw new Error("Supabase недоступен.");
+        const filters = buildNoShkPureUpdateFilters(row);
+        let lastError = null;
+        for (const filter of filters) {
+            let query = db.from(PURE_LOSSES_TABLE).update(patch);
+            Object.entries(filter).forEach(([key, value]) => { query = query.eq(key, value); });
+            const { data, error } = await query.select("*").limit(1);
+            if (!error && Array.isArray(data) && data.length) return data[0];
+            if (error && isUnknownColumnError(error)) {
+                lastError = error;
+                continue;
+            }
+            if (error) {
+                lastError = error;
+                break;
+            }
+        }
+        throw lastError || new Error("Строка pure_losses_rep не обновилась.");
+    }
+
+    function noShkPurePatchVariants(row) {
+        const user = currentWmsUser();
+        const baseComment = NO_SHK_FOUND_COMMENT + " ШК: " + (noShkPureShk(row) || "-") + ".";
+        const variants = [];
+        NO_SHK_PURE_COLUMNS.decision.forEach((decisionCol) => {
+            NO_SHK_PURE_COLUMNS.employee.forEach((employeeCol) => {
+                NO_SHK_PURE_COLUMNS.comment.forEach((commentCol) => {
+                    variants.push({ [decisionCol]: AUTO_FOUND_DECISION, [employeeCol]: user.id || user.name || "", [commentCol]: baseComment });
+                });
+                variants.push({ [decisionCol]: AUTO_FOUND_DECISION, [employeeCol]: user.id || user.name || "" });
+            });
+            variants.push({ [decisionCol]: AUTO_FOUND_DECISION });
+        });
+        return variants;
+    }
+
+    async function markNoShkPureAsFound(row) {
+        if (state.noShkReview.processing) return;
+        state.noShkReview.processing = true;
+        state.noShkReview.status = "Сохраняю опознание...";
+        state.noShkReview.statusTone = "";
+        renderNoShkReviewModal();
+        let lastError = null;
+        try {
+            for (const patch of noShkPurePatchVariants(row)) {
+                try {
+                    await updateNoShkPureRow(row, patch);
+                    state.noShkReview.rows = (state.noShkReview.rows || []).filter((candidate) => noShkRowSignature(candidate) !== noShkRowSignature(row));
+                    state.noShkReview.success = {
+                        shk: noShkPureShk(row),
+                        nm: noShkPureNm(row),
+                        name: noShkPureName(row),
+                    };
+                    toast("Товар опознан", "success");
+                    renderNoShkReviewModal();
+                    return;
+                } catch (error) {
+                    lastError = error;
+                    if (!isUnknownColumnError(error)) break;
+                }
+            }
+            throw lastError || new Error("Не удалось записать вердикт.");
+        } catch (error) {
+            state.noShkReview.status = "Не удалось опознать товар: " + (error && error.message ? error.message : String(error));
+            state.noShkReview.statusTone = "error";
+        } finally {
+            state.noShkReview.processing = false;
+            if (!state.noShkReview.success) renderNoShkReviewModal();
+        }
+    }
+
+    function openNoShkReviewModal() {
+        closeFlowModals();
+        resetNoShkReviewState(true);
+        setFlowModalOpen("noShkReviewModal", true);
+        renderNoShkReviewModal();
+    }
+
+    function closeNoShkReviewModal() {
+        setFlowModalOpen("noShkReviewModal", false);
     }
 
     async function fetchWmsTaskRows(db, mode) {
@@ -3235,10 +4141,14 @@
 
     function requestSectionName(row) {
         const taskType = normalizeForMatch(row && row.task_type);
-        const title = normalizeForMatch(row && row.title);
         const sourceModule = normalizeForMatch(row && row.source_module);
-        const combined = [taskType, title, sourceModule, normalizeForMatch(row && row.upload_type)].join(" ");
-        if (combined.includes("запрос") && combined.includes("вход")) return "Запросы входящего потока";
+        const uploadType = normalizeForMatch(row && row.upload_type);
+        const title = normalizeForMatch(row && row.title);
+        const combined = [taskType, title, sourceModule, uploadType].join(" ");
+        if (sourceModule === "incoming_flow_requests"
+            || uploadType === "incoming_flow_requests"
+            || taskType === "запросы входящего потока"
+            || taskType === "запрос входящего потока") return "Запросы входящего потока";
         if (combined.includes("списания awh") || combined.includes("awh")) return "Списания AWH";
         if (combined.includes("короб") && combined.includes("вход")) return "Коробки на входе";
         return "";
@@ -4573,10 +5483,11 @@
                 + "<textarea id='taskCommentInput' placeholder='Что сделали по задаче'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
                 + "<label for='taskVerdictInput'>" + (incomingFlow ? "Вложение" : "Вердикт") + "</label>"
                 + "<select id='taskVerdictInput'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
-                + (incomingFlow ? "<label for='taskGuiltyIdInput'>ID виновного</label><input id='taskGuiltyIdInput' type='text' value='" + escapeHtml(savedReview.guilty_id || "") + "' placeholder='ID сотрудника'>" : "")
+                + (incomingFlow ? "<label for='taskGuiltyIdInput'>ID виновного</label><input id='taskGuiltyIdInput' type='text' inputmode='numeric' pattern='\\d{5,8}' maxlength='8' value='" + escapeHtml(savedReview.guilty_id || "") + "' placeholder='5-8 цифр'>" : "")
                 + "<div id='taskExtraFieldWrap' class='" + (extraLabel ? "" : "hidden") + "'><label id='taskExtraLabel' for='taskExtraInput'>" + escapeHtml(extraLabel) + "</label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
                 + "<button id='completeTaskBtn' class='btn btn-rect task-complete-btn' type='button' disabled>Завершить задачу</button>"
                 + "<div id='taskDetailStatus' class='review-status'></div>"
+                + "<div id='taskWritebackConflictActions' class='task-writeback-conflict hidden'></div>"
                 + "</div>";
         target.innerHTML = "<div class='task-detail-head'><div><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='review-table-subtitle'>" + escapeHtml(row.task_type || "-") + "</div></div>" + taskDetailActionButtons(row, readOnly) + "</div>"
             + "<div class='task-detail-body'>"
@@ -4624,7 +5535,12 @@
         if (deferBtn) deferBtn.addEventListener("click", () => openDeferTaskModal(row.id));
         ["taskCommentInput", "taskVerdictInput", "taskExtraInput", "taskGuiltyIdInput"].forEach((id) => {
             const el = $(id);
-            if (el) el.addEventListener(id === "taskVerdictInput" ? "change" : "input", updateTaskDetailForm);
+            if (el) {
+                el.addEventListener(id === "taskVerdictInput" ? "change" : "input", () => {
+                    if (id === "taskGuiltyIdInput") el.value = normalizeGuiltyId(el.value);
+                    updateTaskDetailForm();
+                });
+            }
         });
         $("completeTaskBtn").addEventListener("click", () => { void completeTaskFromDetail(row.id); });
         updateTaskDetailForm();
@@ -4891,11 +5807,11 @@
         if (extraLabelEl) extraLabelEl.textContent = extraLabel;
         const comment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
         const extra = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
-        const guiltyId = normalizeIdentifier($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value);
+        const guiltyIdError = incomingFlow ? incomingFlowGuiltyIdError($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value) : "";
         const missing = [];
         if (!comment) missing.push(incomingFlow ? "Комментарий ОПП" : "Комментарий");
         if (!verdict || verdict === "Не выбран") missing.push(incomingFlow ? "Вложение" : "Вердикт");
-        if (incomingFlow && !guiltyId) missing.push("ID виновного");
+        if (guiltyIdError) missing.push(guiltyIdError);
         if (verdict === SYSTEM_MOVEMENT_VERDICT) missing.push("доступный пользователю вердикт");
         if (extraLabel && !extra) missing.push(extraLabel);
         const ready = missing.length === 0;
@@ -4919,15 +5835,368 @@
         return { id, name };
     }
 
+    function moscowDateFromValue(value) {
+        const date = value ? new Date(value) : new Date();
+        if (!Number.isFinite(date.getTime())) return "";
+        const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+        const byType = {};
+        parts.forEach((part) => { byType[part.type] = part.value; });
+        return byType.year + "-" + byType.month + "-" + byType.day;
+    }
+
+    function moscowMinutesFromValue(value) {
+        const date = value ? new Date(value) : new Date();
+        if (!Number.isFinite(date.getTime())) return 0;
+        const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
+        const byType = {};
+        parts.forEach((part) => { byType[part.type] = part.value; });
+        return (Number(byType.hour) || 0) * 60 + (Number(byType.minute) || 0);
+    }
+
+    function userTaskQuery(query, user) {
+        const id = normalizeText(user && user.id);
+        const name = normalizeText(user && user.name);
+        if (id && id !== "local") return query.eq("assignee_employee_id", id);
+        if (name) return query.eq("assignee_name", name);
+        return query;
+    }
+
+    function isSystemCompletionVerdict(value) {
+        return SYSTEM_COMPLETION_VERDICT_KEYS.has(normalizeForMatch(value));
+    }
+
+    function isManualAchievementTask(row) {
+        if (!row || normalizeText(row.task_status) !== "Завершено") return false;
+        if (isTrueLike(row.is_deleted)) return false;
+        if (isSystemCompletionVerdict(row.opp_verdict)) return false;
+        const review = taskReviewPayload(row);
+        if (isTrueLike(review.system_closed) || isTrueLike(review.auto_closed)) return false;
+        return true;
+    }
+
+    async function fetchCompletedAchievementTasks() {
+        const db = supabaseDb();
+        if (!db) return [];
+        const user = achievementActor();
+        try {
+            let query = db
+                .from(WMS_TASKS_TABLE)
+                .select(WMS_TASK_SELECT_COLUMNS)
+                .eq("task_status", "Завершено")
+                .order("completed_at", { ascending: false, nullsFirst: false })
+                .limit(10000);
+            query = userTaskQuery(query, user);
+            const { data, error } = await query;
+            if (error) throw error;
+            return (data || []).filter(isManualAchievementTask);
+        } catch (error) {
+            console.warn("achievement completed tasks query skipped:", error);
+            return [];
+        }
+    }
+
+    function rowsCompletedOnDate(rows, isoDate) {
+        return (rows || []).filter((row) => moscowDateFromValue(row.completed_at || row.updated_at) === isoDate);
+    }
+
+    function taskSectionForAchievement(row) {
+        return requestSectionName(row) || taskSectionName(row);
+    }
+
+    function eligibleTaskAchievements(rows) {
+        const eligible = new Set();
+        const manualRows = (rows || []).filter(isManualAchievementTask);
+        const total = manualRows.length;
+        if (total >= 10) eligible.add("tasks_10");
+        if (total >= 100) eligible.add("tasks_100");
+        if (total >= 1000) eligible.add("tasks_1000");
+        if (total >= 10000) eligible.add("tasks_10000");
+
+        const countBySection = (section) => manualRows.filter((row) => taskSectionForAchievement(row) === section).length;
+        const awhCount = countBySection("Списания AWH");
+        const boxesCount = countBySection("Коробки на входе");
+        const requestCount = countBySection("Запросы входящего потока");
+        if (awhCount >= 1) eligible.add("awh_first");
+        if (awhCount >= 10) eligible.add("awh_10");
+        if (awhCount >= 100) eligible.add("awh_100");
+        if (awhCount >= 1000) eligible.add("awh_1000");
+        if (boxesCount >= 1) eligible.add("boxes_first");
+        if (boxesCount >= 10) eligible.add("boxes_10");
+        if (boxesCount >= 100) eligible.add("boxes_100");
+        if (boxesCount >= 1000) eligible.add("boxes_1000");
+        if (requestCount >= 1) eligible.add("requests_first");
+        if (requestCount >= 100) eligible.add("requests_100");
+        if (manualRows.some((row) => moscowMinutesFromValue(row.completed_at || row.updated_at) >= 20 * 60)) eligible.add("task_after_20");
+
+        const byDate = new Map();
+        manualRows.forEach((row) => {
+            const date = moscowDateFromValue(row.completed_at || row.updated_at);
+            if (!date) return;
+            if (!byDate.has(date)) byDate.set(date, { count: 0, types: new Set() });
+            const bucket = byDate.get(date);
+            bucket.count += 1;
+            const type = normalizeText(row.task_type);
+            if (type) bucket.types.add(type);
+        });
+        byDate.forEach((bucket) => {
+            if (bucket.count >= 100) eligible.add("shift_100_tasks");
+            if (bucket.count >= 200) eligible.add("shift_200_tasks");
+            if (bucket.count >= 300) eligible.add("shift_300_tasks");
+            if (bucket.types.size >= 10) eligible.add("ten_task_types_shift");
+        });
+        return eligible;
+    }
+
+    async function cleanupIneligibleTaskAchievements() {
+        if (state.achievements.cleaning) return;
+        const hasRecountable = RECOUNTABLE_TASK_ACHIEVEMENT_IDS.some((id) => state.achievements.earned.has(id));
+        if (!hasRecountable || !supabaseDb()) return;
+        state.achievements.cleaning = true;
+        try {
+            const rows = await fetchCompletedAchievementTasks();
+            const eligible = eligibleTaskAchievements(rows);
+            const invalid = RECOUNTABLE_TASK_ACHIEVEMENT_IDS.filter((id) => state.achievements.earned.has(id) && !eligible.has(id));
+            if (invalid.length) await forgetAchievements(invalid);
+        } catch (error) {
+            console.warn("achievement recount skipped:", error);
+        } finally {
+            state.achievements.cleaning = false;
+        }
+    }
+
+    async function countUserOpenedShifts() {
+        const db = supabaseDb();
+        const user = achievementActor();
+        if (!db) return 0;
+        try {
+            let query = db
+                .from(WMS_SHIFTS_TABLE)
+                .select("id", { count: "exact", head: true })
+                .eq("wh_id", WH_ID)
+                .neq("status", "cancelled");
+            if (user.id && user.id !== "local") query = query.ilike("opened_by", "%" + user.id + "%");
+            else if (user.name) query = query.ilike("opened_by", "%" + user.name + "%");
+            const { count, error } = await query;
+            if (error) throw error;
+            return Number(count) || 0;
+        } catch (error) {
+            console.warn("achievement shifts query skipped:", error);
+            return 0;
+        }
+    }
+
+    async function countCompletedPrespisokRuns() {
+        const db = supabaseDb();
+        const user = achievementActor();
+        if (!db) return 0;
+        try {
+            let query = db
+                .from(WMS_PRESPISOK_RUNS_TABLE)
+                .select("id", { count: "exact", head: true })
+                .eq("wh_id", WH_ID)
+                .eq("status", "completed");
+            if (user.id && user.id !== "local") query = query.eq("operator_id", user.id);
+            else if (user.name) query = query.eq("operator_name", user.name);
+            const { count, error } = await query;
+            if (error) throw error;
+            return Number(count) || 0;
+        } catch (error) {
+            console.warn("achievement prespisok count skipped:", error);
+            return 0;
+        }
+    }
+
+    async function hasPrespisokSevenDayStreak() {
+        const db = supabaseDb();
+        const user = achievementActor();
+        if (!db) return false;
+        try {
+            let query = db
+                .from(WMS_PRESPISOK_RUNS_TABLE)
+                .select("run_date")
+                .eq("wh_id", WH_ID)
+                .eq("status", "completed")
+                .gte("run_date", addDays(state.today, -13))
+                .order("run_date", { ascending: false });
+            if (user.id && user.id !== "local") query = query.eq("operator_id", user.id);
+            else if (user.name) query = query.eq("operator_name", user.name);
+            const { data, error } = await query;
+            if (error) throw error;
+            const dates = new Set((data || []).map((row) => normalizeText(row.run_date)).filter(Boolean));
+            for (let offset = 0; offset < 7; offset += 1) {
+                if (!dates.has(addDays(state.today, -offset))) return false;
+            }
+            return true;
+        } catch (error) {
+            console.warn("achievement prespisok streak skipped:", error);
+            return false;
+        }
+    }
+
+    async function evaluateShiftAchievements(incomingId, outgoingId) {
+        await unlockAchievement("shift_open_first", { shift_date: state.today });
+        if (incomingId && outgoingId && incomingId === outgoingId) await unlockAchievement("dual_flow_shift", { shift_date: state.today });
+        const count = await countUserOpenedShifts();
+        if (count >= 10) await unlockAchievement("shift_open_10", { count });
+    }
+
+    async function evaluatePrespisokAchievements(record) {
+        await unlockAchievement("prespisok_first", { run_date: state.today });
+        const count = await countCompletedPrespisokRuns();
+        if (count >= 10) await unlockAchievement("prespisok_10", { count });
+        if (count >= 100) await unlockAchievement("prespisok_100", { count });
+        const elapsed = Number(record && record.elapsed_ms) || prespisokElapsedMs();
+        if (elapsed > 0 && elapsed < 60 * 60 * 1000) await unlockAchievement("prespisok_speedrun_60", { elapsed_ms: Math.round(elapsed) });
+        if (await hasPrespisokSevenDayStreak()) await unlockAchievement("prespisok_7_days", { run_date: state.today });
+        const actions = state.prespisok.actions || [];
+        const allWriteoff = actions.length > 0 && actions.every((action) => normalizeForMatch(action.verdict || action.action_key).includes("автоспис"));
+        if (allWriteoff) await unlockAchievement("prespisok_all_writeoff", { actions: actions.length });
+        await evaluateTaskCompletionAchievements(null, { prespisokCompleted: true });
+    }
+
+    async function evaluateQuickNoShkAchievements() {
+        const actions = state.quickNoShk.actions || [];
+        const elapsed = quickNoShkElapsedMs();
+        if (actions.length >= 150 && elapsed > 0 && elapsed < 10 * 60 * 1000) {
+            await unlockAchievement("no_shk_150_10", { actions: actions.length, elapsed_ms: Math.round(elapsed) });
+        }
+    }
+
+    async function evaluateTaskCompletionAchievements(completedRow, options) {
+        if (completedRow && !isManualAchievementTask(completedRow)) return;
+        const rows = await fetchCompletedAchievementTasks();
+        const allRows = completedRow && !rows.some((row) => row.id === completedRow.id) ? [completedRow].concat(rows) : rows;
+        const total = allRows.length;
+        if (total >= 10) await unlockAchievement("tasks_10", { count: total });
+        if (total >= 100) await unlockAchievement("tasks_100", { count: total });
+        if (total >= 1000) await unlockAchievement("tasks_1000", { count: total });
+        if (total >= 10000) await unlockAchievement("tasks_10000", { count: total });
+
+        const countBySection = (section) => allRows.filter((row) => taskSectionForAchievement(row) === section).length;
+        const completedSection = completedRow ? taskSectionForAchievement(completedRow) : "";
+        if (completedSection === "Списания AWH") {
+            const awhCount = countBySection("Списания AWH");
+            if (awhCount >= 1) await unlockAchievement("awh_first", { count: awhCount });
+            if (awhCount >= 10) await unlockAchievement("awh_10", { count: awhCount });
+            if (awhCount >= 100) await unlockAchievement("awh_100", { count: awhCount });
+            if (awhCount >= 1000) await unlockAchievement("awh_1000", { count: awhCount });
+        }
+        if (completedSection === "Коробки на входе") {
+            const boxesCount = countBySection("Коробки на входе");
+            if (boxesCount >= 1) await unlockAchievement("boxes_first", { count: boxesCount });
+            if (boxesCount >= 10) await unlockAchievement("boxes_10", { count: boxesCount });
+            if (boxesCount >= 100) await unlockAchievement("boxes_100", { count: boxesCount });
+            if (boxesCount >= 1000) await unlockAchievement("boxes_1000", { count: boxesCount });
+        }
+        if (completedSection === "Запросы входящего потока") {
+            const requestCount = countBySection("Запросы входящего потока");
+            if (requestCount >= 1) await unlockAchievement("requests_first", { count: requestCount });
+            if (requestCount >= 100) await unlockAchievement("requests_100", { count: requestCount });
+        }
+
+        const shiftRows = rowsCompletedOnDate(allRows, state.today);
+        if (shiftRows.length >= 100) await unlockAchievement("shift_100_tasks", { count: shiftRows.length, shift_date: state.today });
+        if (shiftRows.length >= 200) await unlockAchievement("shift_200_tasks", { count: shiftRows.length, shift_date: state.today });
+        if (shiftRows.length >= 300) await unlockAchievement("shift_300_tasks", { count: shiftRows.length, shift_date: state.today });
+        const typeCount = new Set(shiftRows.map((row) => normalizeText(row.task_type)).filter(Boolean)).size;
+        if (typeCount >= 10) await unlockAchievement("ten_task_types_shift", { count: typeCount, shift_date: state.today });
+
+        const completedAt = completedRow && (completedRow.completed_at || completedRow.updated_at);
+        const shift = state.shift.current;
+        if (completedAt && moscowMinutesFromValue(completedAt) >= 20 * 60) await unlockAchievement("task_after_20", { completed_at: completedAt });
+        if (completedAt && shift && shift.opened_at) {
+            const delta = Date.parse(completedAt) - Date.parse(shift.opened_at);
+            if (delta >= 0 && delta < 5 * 60 * 1000) await unlockAchievement("first_task_5m", { delta_ms: delta });
+            const firstHour = shiftRows.filter((row) => {
+                const ts = Date.parse(row.completed_at || row.updated_at);
+                const opened = Date.parse(shift.opened_at);
+                return Number.isFinite(ts) && Number.isFinite(opened) && ts >= opened && ts <= opened + 60 * 60 * 1000;
+            }).length;
+            if (firstHour >= 25) await unlockAchievement("tasks_first_hour_25", { count: firstHour });
+        }
+
+        const hasPrespisok = Boolean(options && options.prespisokCompleted) || normalizeText(state.prespisokHome.run && state.prespisokHome.run.status) === "completed" || (state.prespisok.actions || []).length > 0;
+        if (hasPrespisok
+            && shiftRows.some((row) => taskSectionForAchievement(row) === "Списания AWH")
+            && shiftRows.some((row) => taskSectionForAchievement(row) === "Коробки на входе")) {
+            await unlockAchievement("triple_prespisok_awh_boxes", { shift_date: state.today });
+        }
+
+        if (state.review.loaded) {
+            const activeCount = (state.review.rows || []).filter(isActiveReviewTask).length;
+            if (activeCount === 0) await unlockAchievement("zero_active_tasks", { shift_date: state.today });
+        }
+    }
+
     function needsSourceWriteback(row) {
         return isIncomingFlowRequestTask(row);
+    }
+
+    function normalizeGuiltyId(value) {
+        return normalizeText(value).replace(/\D+/g, "").slice(0, 8);
+    }
+
+    function incomingFlowGuiltyIdError(value) {
+        const normalized = normalizeGuiltyId(value);
+        if (!normalized) return "ID виновного";
+        if (!/^\d{5,8}$/.test(normalized)) return "ID виновного: 5-8 цифр";
+        return "";
+    }
+
+    function sourceRowNumberForTask(row) {
+        const payload = taskPayload(row);
+        const direct = normalizeIdentifier(payload.source_row_number || payload.sourceRowNumber || payload.row_number || payload.row);
+        if (direct) return direct;
+        const sourceRowId = normalizeText(row && row.source_row_id);
+        const match = sourceRowId.match(/(\d+)\s*$/);
+        return match ? match[1] : "";
+    }
+
+    function incomingFlowSourceSheetUrl(row) {
+        const payload = taskPayload(row);
+        const spreadsheetId = normalizeText(payload.spreadsheet_id || payload.spreadsheetId || payload.source_spreadsheet_id);
+        if (!spreadsheetId) return "";
+        const rowNumber = sourceRowNumberForTask(row);
+        const gid = normalizeIdentifier(payload.gid || payload.sheet_gid || payload.source_gid || payload.source_sheet_gid);
+        const parts = [];
+        if (gid) parts.push("gid=" + encodeURIComponent(gid));
+        if (rowNumber) parts.push("range=" + encodeURIComponent("H" + rowNumber + ":I" + rowNumber));
+        return "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(spreadsheetId) + "/edit" + (parts.length ? "#" + parts.join("&") : "");
+    }
+
+    function isIncomingFlowWritebackConflict(error) {
+        const message = normalizeText(error && error.message ? error.message : error);
+        return /строка\s+\d+.*уже\s+заполн/i.test(message) || /уже\s+заполнен[аы]?.*столбц[еа]\s+h/i.test(message);
+    }
+
+    function showIncomingFlowWritebackConflict(row, error) {
+        const status = $("taskDetailStatus");
+        const actions = $("taskWritebackConflictActions");
+        const rowNumber = sourceRowNumberForTask(row);
+        const url = incomingFlowSourceSheetUrl(row);
+        if (status) {
+            status.textContent = "В исходной таблице строка " + (rowNumber || "") + " уже заполнена. Проверь H/I: если данные корректные, можно закрыть задачу без повторной записи. Если в таблице ошибка, перезапиши только H/I.";
+        }
+        if (!actions) return;
+        actions.classList.remove("hidden");
+        actions.innerHTML = "<div class='task-writeback-note'>"
+            + escapeHtml(error && error.message ? error.message : String(error))
+            + "</div><div class='file-row'>"
+            + (url ? "<a class='btn btn-outline' href='" + escapeHtml(url) + "' target='_blank' rel='noopener'>Проверить таблицу</a>" : "<button class='btn btn-outline' type='button' disabled>Проверить таблицу</button>")
+            + "<button id='completeTaskSkipWriteback' class='btn btn-outline' type='button'>Закрыть задачу</button>"
+            + "<button id='completeTaskOverwriteWriteback' class='btn btn-rect' type='button'>Перезаписать данные в таблице</button>"
+            + "</div>";
+        const skip = $("completeTaskSkipWriteback");
+        const overwrite = $("completeTaskOverwriteWriteback");
+        if (skip) skip.addEventListener("click", () => { void completeTaskFromDetail(row.id, { skipSourceWriteback: true }); });
+        if (overwrite) overwrite.addEventListener("click", () => { void completeTaskFromDetail(row.id, { overwriteSourceWriteback: true }); });
     }
 
     function wmsWritebackSecret() {
         return normalizeText(localStorage.getItem("wms_task_writeback_secret") || localStorage.getItem("WMS_TASK_WRITEBACK_SECRET"));
     }
 
-    async function writeBackTaskToSource(row, review) {
+    async function writeBackTaskToSource(row, review, options) {
         if (!needsSourceWriteback(row)) return null;
         const response = await fetch(SUPABASE_FUNCTIONS_BASE_URL + "/" + WMS_TASK_WRITEBACK_FUNCTION, {
             method: "POST",
@@ -4941,6 +6210,7 @@
                 task_id: row.id,
                 secret: wmsWritebackSecret() || undefined,
                 review,
+                allow_overwrite: Boolean(options && options.overwrite),
             }),
         });
         const text = await response.text();
@@ -4957,7 +6227,8 @@
         return payload;
     }
 
-    async function completeTaskFromDetail(id) {
+    async function completeTaskFromDetail(id, options) {
+        const opts = options || {};
         const db = supabaseDb();
         if (!db || !id) return;
         const row = findTaskRow(id);
@@ -4968,16 +6239,18 @@
         const comment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const extraValue = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
-        const guiltyId = incomingFlow ? normalizeIdentifier($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value) : "";
+        const guiltyId = incomingFlow ? normalizeGuiltyId($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value) : "";
+        const guiltyIdError = incomingFlow ? incomingFlowGuiltyIdError(guiltyId) : "";
         if (verdict === SYSTEM_MOVEMENT_VERDICT) {
             const status = $("taskDetailStatus");
             if (status) status.textContent = "Вердикт “" + SYSTEM_MOVEMENT_VERDICT + "” ставится только системой при актуализации движения.";
             return;
         }
-        if (!comment || verdict === "Не выбран" || (extraLabel && !extraValue) || (incomingFlow && !guiltyId)) {
+        if (incomingFlow && guiltyId === "1034305") void unlockAchievement("guilty_1034305", { task_id: id, source_id: row.source_id });
+        if (!comment || verdict === "Не выбран" || (extraLabel && !extraValue) || guiltyIdError) {
             const status = $("taskDetailStatus");
             if (status) status.textContent = incomingFlow
-                ? "Заполни Комментарий ОПП, Вложение и ID виновного."
+                ? "Заполни Комментарий ОПП, Вложение и ID виновного: только цифры, 5-8 символов."
                 : "Заполни комментарий, вердикт и обязательное поле по выбранному вердикту.";
             return;
         }
@@ -5001,12 +6274,19 @@
         if (button) button.disabled = true;
         let writebackResponse = null;
         try {
-            if (!isDeferred && needsSourceWriteback(row)) {
+            if (!isDeferred && needsSourceWriteback(row) && !opts.skipSourceWriteback) {
                 if (status) status.textContent = "Записываю результат в исходную таблицу...";
-                writebackResponse = await writeBackTaskToSource(row, reviewPayload);
+                writebackResponse = await writeBackTaskToSource(row, reviewPayload, { overwrite: opts.overwriteSourceWriteback });
+            } else if (opts.skipSourceWriteback) {
+                writebackResponse = { ok: true, skipped: true, reason: "source_checked_manually" };
             }
         } catch (error) {
             console.error("wms source writeback failed:", error);
+            if (incomingFlow && isIncomingFlowWritebackConflict(error)) {
+                showIncomingFlowWritebackConflict(row, error);
+                if (button) button.disabled = false;
+                return;
+            }
             if (status) status.textContent = error && error.message ? error.message : String(error);
             if (button) button.disabled = false;
             return;
@@ -5038,13 +6318,15 @@
                 .select("id,source_payload,task_status,opp_verdict,assignee_employee_id,assignee_name,completed_at,reopen_after,updated_at")
                 .single();
             if (error) throw error;
-            const row = (state.review.rows || []).find((item) => item.id === id);
-            if (row) Object.assign(row, data || payload);
+            const completedForAchievements = { ...row, ...payload, ...(data || {}) };
+            const stateRow = (state.review.rows || []).find((item) => item.id === id);
+            if (stateRow) Object.assign(stateRow, data || payload);
             state.review.rows = (state.review.rows || []).filter((item) => item.id !== id || isActiveReviewTask(item));
             setReviewStatus(isDeferred ? "Задача отложена до " + formatRuDateTime(reopenAfter) + "." : "Задача завершена.", "good");
             closeTaskDetail();
             renderReview();
             refreshOpenSectionModal();
+            if (!isDeferred) void evaluateTaskCompletionAchievements(completedForAchievements, { source: "manual_task_complete" });
         } catch (error) {
             console.error("wms task complete failed:", error);
             if (status) status.textContent = "Не удалось завершить задачу: " + (error && error.message ? error.message : String(error));
@@ -8543,9 +9825,10 @@
         state.prespisok.finished = true;
         state.prespisok.elapsedBeforeMs = prespisokElapsedMs();
         state.prespisok.timerStartedAt = 0;
-        savePrespisokRecord();
+        const record = savePrespisokRecord();
         persistPrespisokState();
         await upsertPrespisokRun("completed");
+        void evaluatePrespisokAchievements(record);
         void refreshPrespisokLeaderboard();
     }
 
@@ -9252,7 +10535,8 @@
         $("openPrespisokSecondLineHome").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
         $("openPrespisokJournal").addEventListener("click", () => { void openPrespisokJournalModal(); });
         $("openPureLosses").addEventListener("click", () => { window.location.href = "pure_losses.html"; });
-        $("openNoShkReview").addEventListener("click", () => { void openQuickNoShkModal(); });
+        $("openNoShkReview").addEventListener("click", openNoShkReviewModal);
+        $("openAchievements").addEventListener("click", () => { void openAchievementsModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
             if ((state.taskSearch.rows || []).length) setTaskSearchResultsVisible(true);
@@ -9318,8 +10602,16 @@
         $("cancelSplitShk").addEventListener("click", closeSplitShkConfirm);
         $("confirmSplitShk").addEventListener("click", () => { void splitShkFromConfirm(); });
         $("specialInfoModal").addEventListener("click", (event) => { if (event.target === $("specialInfoModal")) closeSpecialInfoModal(); });
+        $("closeAchievements").addEventListener("click", closeAchievementsModal);
+        $("achievementsWrap").addEventListener("click", (event) => {
+            const button = event.target.closest && event.target.closest("[data-achievement-detail]");
+            if (button) openAchievementDetail(button.dataset.achievementDetail);
+        });
+        $("achievementDetailModal").addEventListener("click", (event) => { if (event.target === $("achievementDetailModal")) closeAchievementDetail(); });
+        $("achievementsModal").addEventListener("click", (event) => { if (event.target === $("achievementsModal")) closeAchievementsModal(); });
         $("prespisokModal").addEventListener("click", (event) => { if (event.target === $("prespisokModal")) requestPrespisokClose(); });
         $("quickNoShkModal").addEventListener("click", (event) => { if (event.target === $("quickNoShkModal")) closeQuickNoShkModal(); });
+        $("noShkReviewModal").addEventListener("click", (event) => { if (event.target === $("noShkReviewModal")) closeNoShkReviewModal(); });
         $("shiftOpeningModal").addEventListener("click", (event) => { if (event.target === $("shiftOpeningModal")) closeShiftOpeningModal(); });
         $("actualizeTasksModal").addEventListener("click", (event) => { if (event.target === $("actualizeTasksModal")) closeActualizeTasksModal(); });
         $("moduleChooser").addEventListener("click", (event) => { if (event.target === $("moduleChooser")) setFlowModalOpen("moduleChooser", false); });
@@ -9336,12 +10628,21 @@
                 closeSpecialInfoModal();
                 return;
             }
+            if ($("achievementDetailModal").classList.contains("active")) {
+                closeAchievementDetail();
+                return;
+            }
+            if ($("achievementsModal").classList.contains("active")) {
+                closeAchievementsModal();
+                return;
+            }
             if ($("taskDetailModal").classList.contains("active")
                 || $("editTareTaskModal").classList.contains("active")
                 || $("deferTaskModal").classList.contains("active")
                 || $("reopenConfirmModal").classList.contains("active")
                 || $("splitShkConfirmModal").classList.contains("active")) return;
             if ($("quickNoShkModal").classList.contains("active")) closeQuickNoShkModal();
+            else if ($("noShkReviewModal").classList.contains("active")) closeNoShkReviewModal();
             else if ($("prespisokModal").classList.contains("active")) requestPrespisokClose();
             else if ($("prespisokSecondLineModal").classList.contains("active")) setFlowModalOpen("prespisokSecondLineModal", false);
             else if ($("prespisokJournalModal").classList.contains("active")) closePrespisokJournalModal();
@@ -9357,6 +10658,7 @@
     }
 
     function init() {
+        installAchievementDebugHelpers();
         initEvents();
         startPrespisokHomeTimer();
         renderCalendar();
@@ -9365,6 +10667,7 @@
         void refreshPrespisokHomeState();
         void refreshPrespisokLeaderboard();
         void loadShiftState();
+        void loadAchievements();
     }
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
