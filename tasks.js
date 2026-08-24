@@ -17,6 +17,8 @@
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
     const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
+    const FLOW_SETTINGS_TABLE = "wms_flow_score_settings";
+    const FLOW_HISTORY_TABLE = "wms_task_history";
     const SUPABASE_FUNCTIONS_BASE_URL = ((typeof window !== "undefined" && window.SUPABASE_URL) || "https://bgphllmzmlwurfnbagho.supabase.co").replace(/\/$/, "") + "/functions/v1";
     const SUPABASE_PUBLIC_ANON_KEY = (typeof window !== "undefined" && window.SUPABASE_ANON_KEY) || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJncGhsbG16bWx3dXJmbmJhZ2hvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTQwNzIsImV4cCI6MjA3ODUzMDA3Mn0.a1_Wbtpbs9P-_UDqwjGqAIjvwK5WbT_M3B7g5BHtR2Q";
     const WMS_TASK_WRITEBACK_FUNCTION = "wms-task-writeback";
@@ -428,6 +430,55 @@
         "Отправлен на релиз": "Вставьте ссылку на запрос релиза",
         "Отправлен на списание ревизией": "Вставьте ссылку",
     };
+    const FLOW_SKIP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+    const FLOW_SCORE_VERSION = "flow-mvp-2026-08-24";
+    const FLOW_ALLOWED_USER_IDS = new Set(["1034305"]);
+    const FLOW_STRICT_INCOMING_SECTIONS = new Set(["Запросы входящего потока", "Коробки на входе"]);
+    const FLOW_STRICT_OUTGOING_SECTIONS = new Set(["Списания AWH"]);
+    const DEFAULT_FLOW_SCORE_SETTINGS = {
+        lockTtlMinutes: 15,
+        weights: {
+            price: 1,
+            urgency: 1,
+            source: 1,
+            mass: 1,
+            age: 1,
+            reopen: 1,
+            tags: 1,
+            group: 1,
+            zone: 1,
+            skill: 1,
+        },
+        sourceBoosts: {
+            incomingFlowRequests: 60000,
+            awhWriteoffs: 18000,
+            incomingBoxes: 16000,
+            prespisokSecondLine: 22000,
+            afterSaleMovement: 14000,
+        },
+        zone: {
+            own: 1.18,
+            otherFlexible: 0.82,
+            overflowBonus: 0.22,
+            heavyLoadBonus: 0.14,
+            strictBonus: 0.08,
+        },
+        grouping: {
+            enabled: true,
+            minCount: 3,
+            windowMinutes: 120,
+            perExtraTask: 1800,
+            pricePercent: 0.08,
+            maxBonus: 42000,
+        },
+        skill: {
+            enabled: true,
+            lookbackDays: 14,
+            minCompleted: 5,
+            perCompletion: 0.008,
+            maxMultiplier: 1.16,
+        },
+    };
     const PRESPISOK_SNARK = {
         openers: [
             "Работаем.",
@@ -514,10 +565,31 @@
             rows: [],
             loading: false,
             loaded: false,
+            loadPromise: null,
             activeSection: "",
             modalMode: "",
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
+        },
+        flow: {
+            loading: false,
+            rows: [],
+            scored: [],
+            currentRowId: "",
+            currentScore: null,
+            status: "Флоу еще не запускался.",
+            statusTone: "",
+            claiming: false,
+            settings: JSON.parse(JSON.stringify(DEFAULT_FLOW_SCORE_SETTINGS)),
+            settingsLoaded: false,
+            settingsSaving: false,
+            employeeStats: { bySection: {}, loaded: false, note: "" },
+            groupIndex: new Map(),
+            taskCardRowId: "",
+            skipRowId: "",
+            skipSaving: false,
+            conflictRowId: "",
+            allowConflictOpenId: "",
         },
         requests: {
             activeSection: "",
@@ -558,6 +630,7 @@
         },
         shift: {
             loading: false,
+            loadPromise: null,
             employees: [],
             current: null,
             pureRows: [],
@@ -1305,6 +1378,10 @@
         setFlowModalOpen("backfillCalendarModal", false);
         setFlowModalOpen("reviewSectionModal", false);
         setFlowModalOpen("taskDetailModal", false);
+        setFlowModalOpen("flowTaskModal", false);
+        setFlowModalOpen("flowSkipModal", false);
+        setFlowModalOpen("flowConflictModal", false);
+        setFlowModalOpen("flowSettingsModal", false);
         setFlowModalOpen("editTareTaskModal", false);
         setFlowModalOpen("deferTaskModal", false);
         setFlowModalOpen("reopenConfirmModal", false);
@@ -1382,47 +1459,55 @@
     }
 
     async function loadShiftState() {
+        if (state.shift.loadPromise) return state.shift.loadPromise;
         const db = supabaseDb();
         if (!db) {
             renderShiftGate();
             return;
         }
-        state.shift.loading = true;
-        renderShiftGate();
-        try {
-            const [employeesResult, shiftsResult] = await Promise.all([
-                db.from(WMS_EMPLOYEES_TABLE).select("*").eq("is_active", true).order("full_name", { ascending: true }),
-                db.from(WMS_SHIFTS_TABLE).select("*").eq("wh_id", WH_ID).eq("shift_date", state.today).neq("status", "cancelled").order("opened_at", { ascending: false }).limit(1),
-            ]);
-            if (employeesResult.error) throw employeesResult.error;
-            if (shiftsResult.error) throw shiftsResult.error;
-            state.shift.error = "";
-            state.shift.employees = Array.isArray(employeesResult.data) ? employeesResult.data : [];
-            const shift = Array.isArray(shiftsResult.data) && shiftsResult.data.length ? shiftsResult.data[0] : null;
-            state.shift.current = shift ? {
-                ...shift,
-                incoming_name: employeeNameById(shift.incoming_employee_id),
-                outgoing_name: employeeNameById(shift.outgoing_employee_id),
-            } : null;
-        } catch (error) {
-            console.error("wms shift state failed:", error);
-            state.shift.current = null;
-            state.shift.error = (error && error.message ? error.message : String(error)) + ". Проверь, что миграция WMS shifts применена.";
-        } finally {
-            state.shift.loading = false;
+        state.shift.loadPromise = (async () => {
+            state.shift.loading = true;
             renderShiftGate();
-        }
+            try {
+                const [employeesResult, shiftsResult] = await Promise.all([
+                    db.from(WMS_EMPLOYEES_TABLE).select("*").eq("is_active", true).order("full_name", { ascending: true }),
+                    db.from(WMS_SHIFTS_TABLE).select("*").eq("wh_id", WH_ID).eq("shift_date", state.today).neq("status", "cancelled").order("opened_at", { ascending: false }).limit(1),
+                ]);
+                if (employeesResult.error) throw employeesResult.error;
+                if (shiftsResult.error) throw shiftsResult.error;
+                state.shift.error = "";
+                state.shift.employees = Array.isArray(employeesResult.data) ? employeesResult.data : [];
+                const shift = Array.isArray(shiftsResult.data) && shiftsResult.data.length ? shiftsResult.data[0] : null;
+                state.shift.current = shift ? {
+                    ...shift,
+                    incoming_name: employeeNameById(shift.incoming_employee_id),
+                    outgoing_name: employeeNameById(shift.outgoing_employee_id),
+                } : null;
+            } catch (error) {
+                console.error("wms shift state failed:", error);
+                state.shift.current = null;
+                state.shift.error = (error && error.message ? error.message : String(error)) + ". Проверь, что миграция WMS shifts применена.";
+            } finally {
+                state.shift.loading = false;
+                state.shift.loadPromise = null;
+                renderShiftGate();
+                if (state.view === "flow") renderFlowPage();
+            }
+        })();
+        return state.shift.loadPromise;
     }
 
     function showHome() {
         state.view = "home";
         closeFlowModals();
         $("tasksHome").style.display = "grid";
+        $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
         $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         renderPrespisokHomeCard();
+        renderFlowAccessGate();
         void refreshPrespisokHomeState();
         void refreshPrespisokLeaderboard();
     }
@@ -1637,6 +1722,47 @@
         }
     }
 
+    async function showFlowPage() {
+        if (!flowAccessAllowed()) {
+            toast("Флоу пока доступен только пользователю 1034305.", "error");
+            renderFlowAccessGate();
+            if (state.view !== "home") showHome();
+            return;
+        }
+        state.view = "flow";
+        closeFlowModals();
+        $("tasksHome").style.display = "none";
+        $("uploadsPage").classList.remove("active");
+        $("reviewPage").classList.remove("active");
+        $("requestsPage").classList.remove("active");
+        $("inactivePage").classList.remove("active");
+        $("flowPage").classList.add("active");
+        state.flow.loading = true;
+        state.flow.status = "Собираю активные задачи и считаю приоритеты...";
+        state.flow.statusTone = "";
+        renderFlowPage();
+        try {
+            await loadFlowSettings();
+            if (!state.shift.current) await loadShiftState();
+            await Promise.all([
+                ensureReviewTasksLoaded(),
+                loadFlowEmployeeStats(),
+            ]);
+            refreshFlowQueue();
+            state.flow.status = state.shift.current
+                ? "Очередь готова. WMS+ выберет следующую задачу по риску, зоне, срочности, загрузке и личной статистике."
+                : "Смена не открыта. Флоу сможет выдавать задачи после открытия смены.";
+            state.flow.statusTone = state.shift.current ? "good" : "error";
+        } catch (error) {
+            console.error("flow load failed:", error);
+            state.flow.status = "Не удалось собрать Флоу: " + (error && error.message ? error.message : String(error));
+            state.flow.statusTone = "error";
+        } finally {
+            state.flow.loading = false;
+            renderFlowPage();
+        }
+    }
+
     async function showUploads() {
         if (!state.shift.current) {
             toast("Сначала нужно открыть смену.", "error");
@@ -1646,6 +1772,7 @@
         state.view = "uploads";
         closeFlowModals();
         $("tasksHome").style.display = "none";
+        $("flowPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
         $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
@@ -1659,6 +1786,7 @@
         state.view = "review";
         closeFlowModals();
         $("tasksHome").style.display = "none";
+        $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
@@ -1671,6 +1799,7 @@
         state.view = "requests";
         closeFlowModals();
         $("tasksHome").style.display = "none";
+        $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
@@ -1683,6 +1812,7 @@
         state.view = "inactive";
         closeFlowModals();
         $("tasksHome").style.display = "none";
+        $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
         $("requestsPage").classList.remove("active");
@@ -1861,30 +1991,45 @@
     }
 
     async function loadReviewTasks() {
+        if (state.review.loadPromise) return state.review.loadPromise;
         const db = supabaseDb();
         if (!db) {
             setReviewStatus("Supabase SDK не загрузился.", "error");
             return;
         }
-        state.review.loading = true;
-        renderReview();
-        try {
-            state.review.rows = await fetchReviewTaskRows(db);
-            state.review.loaded = true;
-            const grouped = reviewGroupedRows();
-            if (!state.review.activeSection || !(grouped.get(state.review.activeSection) || []).length) {
-                state.review.activeSection = REVIEW_SECTIONS.find((section) => (grouped.get(section) || []).length) || REVIEW_SECTIONS[0];
-            }
-            setReviewStatus("Загружено активных задач: " + state.review.rows.length + ".");
-        } catch (error) {
-            console.error("wms review load failed:", error);
-            state.review.rows = [];
-            setReviewStatus("Не удалось загрузить задачи: " + (error && error.message ? error.message : String(error)), "error");
-        } finally {
-            state.review.loading = false;
+        state.review.loadPromise = (async () => {
+            state.review.loading = true;
             renderReview();
-            renderRequests();
-            refreshOpenSectionModal();
+            try {
+                state.review.rows = await fetchReviewTaskRows(db);
+                state.review.loaded = true;
+                const grouped = reviewGroupedRows();
+                if (!state.review.activeSection || !(grouped.get(state.review.activeSection) || []).length) {
+                    state.review.activeSection = REVIEW_SECTIONS.find((section) => (grouped.get(section) || []).length) || REVIEW_SECTIONS[0];
+                }
+                setReviewStatus("Загружено активных задач: " + state.review.rows.length + ".");
+            } catch (error) {
+                console.error("wms review load failed:", error);
+                state.review.rows = [];
+                setReviewStatus("Не удалось загрузить задачи: " + (error && error.message ? error.message : String(error)), "error");
+            } finally {
+                state.review.loading = false;
+                state.review.loadPromise = null;
+                renderReview();
+                renderRequests();
+                if (state.view === "flow") {
+                    refreshFlowQueue();
+                    renderFlowPage();
+                }
+                refreshOpenSectionModal();
+            }
+        })();
+        return state.review.loadPromise;
+    }
+
+    async function ensureReviewTasksLoaded() {
+        if (!state.review.loaded || state.review.loading || state.review.loadPromise) {
+            await loadReviewTasks();
         }
     }
 
@@ -2793,6 +2938,7 @@
             clockTimer: null,
             preloading: false,
             achievementsChecked: false,
+            loadToken: "",
         };
     }
 
@@ -3046,14 +3192,33 @@
     async function openQuickNoShkModal() {
         closeFlowModals();
         resetQuickNoShkState(true);
+        const loadToken = Date.now() + ":" + Math.random().toString(16).slice(2);
+        state.quickNoShk.loading = true;
+        state.quickNoShk.loadToken = loadToken;
         setFlowModalOpen("quickNoShkModal", true);
         renderQuickNoShkLoading();
-        await Promise.all([
-            (!state.review.loaded && !state.review.loading) ? loadReviewTasks() : Promise.resolve(),
-            fetchQuickNoShkPureCandidates().then((rows) => { state.quickNoShk.pureCandidates = rows; }),
-        ]);
-        buildQuickNoShkItems();
-        renderQuickNoShk();
+        try {
+            const [, pureRows] = await Promise.all([
+                ensureReviewTasksLoaded(),
+                fetchQuickNoShkPureCandidates(),
+            ]);
+            if (state.quickNoShk.loadToken !== loadToken || !$("quickNoShkModal").classList.contains("active")) return;
+            state.quickNoShk.pureCandidates = pureRows || [];
+            buildQuickNoShkItems();
+            state.quickNoShk.loading = false;
+            renderQuickNoShk();
+        } catch (error) {
+            if (state.quickNoShk.loadToken !== loadToken) return;
+            state.quickNoShk.loading = false;
+            const target = $("quickNoShkWrap");
+            if (target) {
+                target.innerHTML = quickNoShkTopHtml("Не удалось собрать цели для быстрой проверки.")
+                    + "<section class='quick-no-shk-panel'><div class='quick-no-shk-center'><div><div class='status-line error'>"
+                    + escapeHtml(error && error.message ? error.message : String(error))
+                    + "</div></div></div></section>";
+                bindQuickNoShkClose();
+            }
+        }
     }
 
     function closeQuickNoShkModal() {
@@ -3080,6 +3245,10 @@
     function renderQuickNoShk() {
         const target = $("quickNoShkWrap");
         if (!target) return;
+        if (state.quickNoShk.loading) {
+            renderQuickNoShkLoading();
+            return;
+        }
         const items = state.quickNoShk.items || [];
         if (state.quickNoShk.needsSuperset) {
             renderQuickNoShkNeedsNm();
@@ -4154,6 +4323,1106 @@
         return "";
     }
 
+    function cloneFlowSettings(value) {
+        return JSON.parse(JSON.stringify(value || DEFAULT_FLOW_SCORE_SETTINGS));
+    }
+
+    function deepMergeObject(base, extra) {
+        const output = { ...(base || {}) };
+        Object.entries(extra || {}).forEach(([key, value]) => {
+            if (value && typeof value === "object" && !Array.isArray(value) && output[key] && typeof output[key] === "object" && !Array.isArray(output[key])) {
+                output[key] = deepMergeObject(output[key], value);
+            } else if (value !== undefined) {
+                output[key] = value;
+            }
+        });
+        return output;
+    }
+
+    function flowSettings() {
+        return deepMergeObject(DEFAULT_FLOW_SCORE_SETTINGS, state.flow.settings || {});
+    }
+
+    function flowSettingNumber(path, fallback) {
+        const parts = String(path || "").split(".").filter(Boolean);
+        let value = flowSettings();
+        for (const part of parts) {
+            if (!value || typeof value !== "object") return fallback;
+            value = value[part];
+        }
+        return settingNumber(value, fallback);
+    }
+
+    function flowWeight(key) {
+        return Math.max(flowSettingNumber("weights." + key, 1), 0);
+    }
+
+    function flowSetNestedSetting(path, value) {
+        const parts = String(path || "").split(".").filter(Boolean);
+        if (!parts.length) return;
+        const next = cloneFlowSettings(flowSettings());
+        let cursor = next;
+        parts.slice(0, -1).forEach((part) => {
+            if (!cursor[part] || typeof cursor[part] !== "object" || Array.isArray(cursor[part])) cursor[part] = {};
+            cursor = cursor[part];
+        });
+        cursor[parts[parts.length - 1]] = value;
+        state.flow.settings = next;
+    }
+
+    function flowTaskSection(row) {
+        return requestSectionName(row) || taskSectionName(row);
+    }
+
+    function flowTaskZoneKey(row) {
+        const section = flowTaskSection(row);
+        if (FLOW_STRICT_INCOMING_SECTIONS.has(section)) return "incoming";
+        if (FLOW_STRICT_OUTGOING_SECTIONS.has(section)) return "outgoing";
+        const zone = normalizeForMatch(row && row.responsibility_zone);
+        if (zone.includes("вход")) return "incoming";
+        if (zone.includes("исход")) return "outgoing";
+        return "neutral";
+    }
+
+    function flowTaskZoneLabel(row) {
+        const key = flowTaskZoneKey(row);
+        if (key === "incoming") return "Входящий поток";
+        if (key === "outgoing") return "Исходящий поток";
+        return "Нет привязки";
+    }
+
+    function flowZonePolicy(row) {
+        const section = flowTaskSection(row);
+        if (FLOW_STRICT_INCOMING_SECTIONS.has(section) || FLOW_STRICT_OUTGOING_SECTIONS.has(section)) return "strict";
+        if (flowTaskZoneKey(row) === "neutral") return "neutral";
+        return "flexible";
+    }
+
+    function currentFlowEmployee() {
+        const user = currentWmsUser();
+        const shift = state.shift.current || {};
+        let id = normalizeIdentifier(user.id);
+        const nameKey = normalizeForMatch(user.name);
+        const incomingId = normalizeIdentifier(shift.incoming_employee_id);
+        const outgoingId = normalizeIdentifier(shift.outgoing_employee_id);
+        const incomingName = normalizeForMatch(shift.incoming_name);
+        const outgoingName = normalizeForMatch(shift.outgoing_name);
+        const zones = new Set();
+        if (id && incomingId && id === incomingId) zones.add("incoming");
+        if (id && outgoingId && id === outgoingId) zones.add("outgoing");
+        if (nameKey && incomingName && nameKey === incomingName) {
+            zones.add("incoming");
+            if (!id) id = incomingId;
+        }
+        if (nameKey && outgoingName && nameKey === outgoingName) {
+            zones.add("outgoing");
+            if (!id) id = outgoingId;
+        }
+        if (!id) id = nameKey;
+        return {
+            id,
+            name: user.name,
+            zones,
+            incomingId,
+            outgoingId,
+            inShift: zones.size > 0,
+        };
+    }
+
+    function flowActor() {
+        const user = currentWmsUser();
+        const context = currentFlowEmployee();
+        const actorId = (context.zones.has("incoming") ? context.incomingId : "")
+            || (context.zones.has("outgoing") ? context.outgoingId : "")
+            || normalizeIdentifier(user.id)
+            || normalizeIdentifier(context.id)
+            || "";
+        return { id: actorId, name: user.name || context.name || "" };
+    }
+
+    function flowPayload(row) {
+        const flow = taskPayload(row).wms_flow;
+        return flow && typeof flow === "object" && !Array.isArray(flow) ? flow : {};
+    }
+
+    function flowLockInfo(row) {
+        const flow = flowPayload(row);
+        const lockUntil = Date.parse(flow.lock_until || "");
+        const claimedById = normalizeIdentifier(flow.claimed_by_id);
+        const claimedByName = normalizeText(flow.claimed_by_name);
+        const active = Number.isFinite(lockUntil) && lockUntil > Date.now();
+        const expired = Number.isFinite(lockUntil) && lockUntil <= Date.now();
+        return { flow, lockUntil, claimedById, claimedByName, active, expired };
+    }
+
+    function flowRowIsLockedForOther(row, context) {
+        const lock = flowLockInfo(row);
+        return lock.active && lock.claimedById && context.id && lock.claimedById !== context.id;
+    }
+
+    function flowSkipCooldown(row, context) {
+        const actorId = normalizeIdentifier(context && context.id);
+        if (!actorId) return { active: false, until: 0, reason: "" };
+        const flow = flowPayload(row);
+        const cooldowns = flow.skip_cooldowns && typeof flow.skip_cooldowns === "object" && !Array.isArray(flow.skip_cooldowns) ? flow.skip_cooldowns : {};
+        const entry = cooldowns[actorId] || {};
+        const until = Date.parse(entry.until || "");
+        return {
+            active: Number.isFinite(until) && until > Date.now(),
+            until: Number.isFinite(until) ? until : 0,
+            reason: normalizeText(entry.reason),
+        };
+    }
+
+    function flowStrictMismatch(row, context) {
+        const policy = flowZonePolicy(row);
+        if (policy !== "strict") return false;
+        const zone = flowTaskZoneKey(row);
+        return !context.zones.has(zone);
+    }
+
+    function flowDateDiffDays(isoDate) {
+        const date = parseDateTime(isoDate).date;
+        if (!date) return null;
+        const today = state.today || todayIsoInMoscow();
+        const start = Date.parse(today + "T00:00:00Z");
+        const end = Date.parse(date + "T00:00:00Z");
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+        return Math.round((end - start) / 86400000);
+    }
+
+    function flowUrgencyComponent(row) {
+        const days = flowDateDiffDays(row && row.due_date);
+        if (days === null) return { value: 0, label: "Дедлайн не задан" };
+        if (days < 0) return { value: 32000 + Math.min(Math.abs(days) * 5500, 28000), label: "Просрочено на " + Math.abs(days) + " дн." };
+        if (days === 0) return { value: 24000, label: "Дедлайн сегодня" };
+        if (days === 1) return { value: 15000, label: "Дедлайн завтра" };
+        if (days <= 3) return { value: 9000, label: "До дедлайна " + days + " дн." };
+        return { value: Math.max(1200, 5000 - days * 500), label: "До дедлайна " + days + " дн." };
+    }
+
+    function flowSourceComponent(row) {
+        const section = flowTaskSection(row);
+        const boosts = flowSettings().sourceBoosts || {};
+        if (section === "Запросы входящего потока") return { value: settingNumber(boosts.incomingFlowRequests, 60000), label: "Входящий запрос другого ЛО" };
+        if (section === "Списания AWH") return { value: settingNumber(boosts.awhWriteoffs, 18000), label: "Списание AWH" };
+        if (section === "Коробки на входе") return { value: settingNumber(boosts.incomingBoxes, 16000), label: "Коробки на входе" };
+        if (isPrespisokTask(row)) return { value: settingNumber(boosts.prespisokSecondLine, 22000), label: "2-я линия предсписка" };
+        if (section === "Движение после продажи") return { value: settingNumber(boosts.afterSaleMovement, 14000), label: "Движение после продажи" };
+        return { value: 0, label: "Обычный предразбор" };
+    }
+
+    function flowZoneCounts(rows) {
+        const counts = { incoming: 0, outgoing: 0, neutral: 0 };
+        (rows || []).filter(isActiveReviewTask).forEach((row) => {
+            const key = flowTaskZoneKey(row);
+            counts[key] = (counts[key] || 0) + 1;
+        });
+        return counts;
+    }
+
+    function flowZoneMultiplier(row, context, counts) {
+        const policy = flowZonePolicy(row);
+        const zone = flowTaskZoneKey(row);
+        const zoneSettings = flowSettings().zone || {};
+        if (policy === "neutral") return { value: 1, label: "Без жесткой зоны" };
+        const own = context.zones.has(zone);
+        let raw = own ? settingNumber(zoneSettings.own, 1.18) : settingNumber(zoneSettings.otherFlexible, 0.82);
+        const currentCount = Number(counts[zone]) || 0;
+        const ownCounts = Array.from(context.zones).map((key) => Number(counts[key]) || 0);
+        const ownMax = ownCounts.length ? Math.max(...ownCounts) : 0;
+        if (!own && policy === "flexible" && currentCount >= Math.max(ownMax * 1.3, ownMax + 8)) raw += settingNumber(zoneSettings.overflowBonus, 0.22);
+        if (currentCount >= 50) raw += settingNumber(zoneSettings.heavyLoadBonus, 0.14);
+        if (policy === "strict") raw += settingNumber(zoneSettings.strictBonus, 0.08);
+        const weight = flowWeight("zone");
+        const value = 1 + (Math.max(raw, 0.55) - 1) * weight;
+        return {
+            value: Math.max(value, 0.35),
+            label: own ? "Своя зона" : policy === "flexible" ? "Чужая зона, но можно подхватить" : "Жесткая зона",
+        };
+    }
+
+    function flowGroupingCandidate(row) {
+        if (!row || requestSectionName(row)) return null;
+        const items = taskItems(row);
+        const first = items[0] || {};
+        const mx = normalizeText(first.mx || taskPayload(row).mx || taskPayload(row).route_label || taskRouteLabel(row));
+        const status = latinStatusCode(first.status || taskPayload(row).status || row.description || row.title);
+        const movement = parseDateTime(first.movement || row.source_last_movement_at || row.upload_effective_date || row.created_at);
+        const settings = flowSettings().grouping || {};
+        const windowMinutes = Math.max(settingNumber(settings.windowMinutes, 120), 15);
+        if (!mx || !status || !movement.ts) return null;
+        const bucket = Math.floor(movement.ts / (windowMinutes * 60 * 1000));
+        return {
+            key: [normalizeForMatch(mx), status, bucket].join("|"),
+            mx,
+            status,
+            bucket,
+            windowMinutes,
+            movementTs: movement.ts,
+        };
+    }
+
+    function buildFlowGroupIndex(rows) {
+        const settings = flowSettings().grouping || {};
+        if (settings.enabled === false) return new Map();
+        const raw = new Map();
+        (rows || []).forEach((row) => {
+            const candidate = flowGroupingCandidate(row);
+            if (!candidate) return;
+            if (!raw.has(candidate.key)) raw.set(candidate.key, { ...candidate, rows: [], totalPrice: 0 });
+            const bucket = raw.get(candidate.key);
+            bucket.rows.push(row);
+            bucket.totalPrice += reviewPrice(row);
+        });
+        const minCount = Math.max(Math.round(settingNumber(settings.minCount, 3)), 2);
+        const index = new Map();
+        raw.forEach((group, key) => {
+            if (group.rows.length < minCount) return;
+            const sample = group.rows.slice(0, 8).map((row) => ({
+                id: row.id,
+                title: displayTaskTitle(row),
+                price: reviewPrice(row),
+                section: flowTaskSection(row),
+                shk: (taskItems(row)[0] && taskItems(row)[0].shk) || normalizeIdentifier(row.source_id),
+            }));
+            const info = {
+                key,
+                mx: group.mx,
+                status: group.status,
+                count: group.rows.length,
+                totalPrice: group.totalPrice,
+                sample,
+                rowIds: group.rows.map((row) => row.id),
+            };
+            group.rows.forEach((row) => index.set(row.id, info));
+        });
+        return index;
+    }
+
+    function flowGroupComponent(row, groupIndex) {
+        const settings = flowSettings().grouping || {};
+        const group = groupIndex && groupIndex.get ? groupIndex.get(row && row.id) : null;
+        if (!group) return { value: 0, label: "", group: null };
+        const perExtra = settingNumber(settings.perExtraTask, 1800);
+        const pricePercent = settingNumber(settings.pricePercent, 0.08);
+        const maxBonus = settingNumber(settings.maxBonus, 42000);
+        const value = Math.round(Math.min((group.count - 1) * perExtra + group.totalPrice * pricePercent, maxBonus));
+        return {
+            value,
+            label: "Массовый паттерн: " + group.count + " задач · " + group.status + " · " + group.mx,
+            group,
+        };
+    }
+
+    function flowSkillMultiplier(row, context) {
+        const settings = flowSettings().skill || {};
+        if (settings.enabled === false) return { value: 1, label: "Навык не учитывается" };
+        const section = flowTaskSection(row);
+        const stat = state.flow.employeeStats.bySection && state.flow.employeeStats.bySection[section];
+        if (!stat || stat.count < Math.max(settingNumber(settings.minCompleted, 5), 1)) return { value: 1, label: "Личной статистики по участку мало" };
+        const max = Math.max(settingNumber(settings.maxMultiplier, 1.16), 1);
+        const raw = Math.min(max, 1 + stat.count * settingNumber(settings.perCompletion, 0.008));
+        const weighted = 1 + (raw - 1) * flowWeight("skill");
+        return { value: weighted, label: "Личный опыт: " + stat.count + " закрытий на участке" };
+    }
+
+    function flowLevelForScore(score) {
+        const value = Number(score) || 0;
+        if (value >= 90000) return { key: "critical", label: "Критично" };
+        if (value >= 55000) return { key: "high", label: "Высокий" };
+        if (value >= 26000) return { key: "medium", label: "Средний" };
+        return { key: "low", label: "Низкий" };
+    }
+
+    function weightedFlowComponent(value, key) {
+        return Math.round((Number(value) || 0) * flowWeight(key));
+    }
+
+    function flowScoreTask(row, context, counts, groupIndex) {
+        const items = taskItems(row);
+        const price = reviewPrice(row);
+        const priceComponent = weightedFlowComponent(Math.round(Math.min(price, 90000) + Math.sqrt(Math.max(price - 90000, 0)) * 80), "price");
+        const urgency = flowUrgencyComponent(row);
+        const urgencyComponent = weightedFlowComponent(urgency.value, "urgency");
+        const source = flowSourceComponent(row);
+        const sourceComponent = weightedFlowComponent(source.value, "source");
+        const itemCount = Math.max(items.length || (Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.length : 0), 1);
+        const massComponent = itemCount > 1 ? weightedFlowComponent(Math.round((itemCount - 1) * 900 + Math.min(price * 0.18, 26000)), "mass") : 0;
+        const createdTs = Date.parse(row && (row.created_at || row.updated_at) || "");
+        const ageHours = Number.isFinite(createdTs) ? Math.max((Date.now() - createdTs) / 3600000, 0) : 0;
+        const ageComponent = weightedFlowComponent(Math.round(Math.min(ageHours * 110, 14000)), "age");
+        const reopenComponent = weightedFlowComponent(isReopenedTask(row) ? 16000 : row && row.reopened_at ? 8000 : 0, "reopen");
+        const tags = reviewTags(row);
+        const tagComponent = weightedFlowComponent(tags.some(isSpecialTagLabel) ? 7000 : 0, "tags");
+        const lock = flowLockInfo(row);
+        const lockComponent = lock.expired ? 1800 : 0;
+        const group = flowGroupComponent(row, groupIndex || state.flow.groupIndex);
+        const groupComponent = weightedFlowComponent(group.value, "group");
+        const base = priceComponent + urgencyComponent + sourceComponent + massComponent + ageComponent + reopenComponent + tagComponent + lockComponent + groupComponent;
+        const zone = flowZoneMultiplier(row, context, counts);
+        const skill = flowSkillMultiplier(row, context);
+        const score = Math.max(Math.round(base * zone.value * skill.value), 0);
+        const level = flowLevelForScore(score);
+        const reasons = [
+            price ? "Риск: " + formatMoney(price) : "",
+            urgency.label,
+            source.value ? source.label : "",
+            itemCount > 1 ? "Массовость: " + itemCount + " ШК" : "",
+            group.label,
+            reopenComponent ? "Переоткрытая задача" : "",
+            tagComponent ? "Есть спец-тег: " + tags.filter(isSpecialTagLabel).join(", ") : "",
+            zone.label,
+            skill.value > 1 ? skill.label : "",
+            lock.expired && lock.claimedByName ? "Lock истек, раньше смотрел " + lock.claimedByName : "",
+        ].filter(Boolean);
+        return {
+            row,
+            score,
+            level,
+            breakdown: {
+                version: FLOW_SCORE_VERSION,
+                price: priceComponent,
+                urgency: urgencyComponent,
+                source: sourceComponent,
+                mass: massComponent,
+                age: ageComponent,
+                reopen: reopenComponent,
+                tags: tagComponent,
+                group: groupComponent,
+                expired_lock: lockComponent,
+                zone_multiplier: zone.value,
+                skill_multiplier: skill.value,
+                total: score,
+            },
+            group: group.group,
+            reasons,
+        };
+    }
+
+    function flowRowIsSkippedForCurrentUser(row, context) {
+        return flowSkipCooldown(row, context).active;
+    }
+
+    function refreshFlowQueue() {
+        const context = currentFlowEmployee();
+        const activeRows = (state.review.rows || []).filter((row) => isActiveReviewTask(row) && !row.is_deleted);
+        const counts = flowZoneCounts(activeRows);
+        const groupIndex = buildFlowGroupIndex(activeRows);
+        state.flow.groupIndex = groupIndex;
+        const scored = activeRows
+            .filter((row) => row.id !== state.flow.currentRowId)
+            .filter((row) => !row.__legacy_weeek)
+            .filter((row) => !flowRowIsLockedForOther(row, context))
+            .filter((row) => !flowStrictMismatch(row, context))
+            .filter((row) => !flowRowIsSkippedForCurrentUser(row, context))
+            .map((row) => flowScoreTask(row, context, counts, groupIndex))
+            .sort((a, b) => b.score - a.score || reviewPrice(b.row) - reviewPrice(a.row) || String(a.row.created_at || "").localeCompare(String(b.row.created_at || "")));
+        state.flow.rows = activeRows;
+        state.flow.scored = scored;
+        return scored;
+    }
+
+    function flowStats() {
+        const context = currentFlowEmployee();
+        const activeRows = state.flow.rows || [];
+        const scored = state.flow.scored || [];
+        const locked = activeRows.filter((row) => flowRowIsLockedForOther(row, context)).length;
+        const skipped = activeRows.filter((row) => flowRowIsSkippedForCurrentUser(row, context)).length;
+        const critical = scored.filter((item) => item.level.key === "critical").length;
+        const requests = scored.filter((item) => requestSectionName(item.row) === "Запросы входящего потока").length;
+        const reopened = scored.filter((item) => isReopenedTask(item.row)).length;
+        const groups = new Set(scored.map((item) => item.group && item.group.key).filter(Boolean)).size;
+        const bySection = new Map();
+        scored.forEach((item) => {
+            const section = flowTaskSection(item.row);
+            bySection.set(section, (bySection.get(section) || 0) + 1);
+        });
+        const hotSection = Array.from(bySection.entries()).sort((a, b) => b[1] - a[1])[0] || ["-", 0];
+        return { active: activeRows.length, available: scored.length, locked, skipped, critical, requests, reopened, groups, hotSection };
+    }
+
+    function renderFlowPage() {
+        if (!$("flowPage")) return;
+        const status = $("flowStatus");
+        if (status) {
+            status.textContent = state.flow.status || "";
+            status.style.color = state.flow.statusTone === "error" ? "#b91c1c" : state.flow.statusTone === "good" ? "#15803d" : "#64748b";
+        }
+        const stats = flowStats();
+        const context = currentFlowEmployee();
+        const hasShift = Boolean(state.shift.current);
+        const currentRow = state.flow.currentRowId ? findTaskRow(state.flow.currentRowId) : null;
+        const currentActive = Boolean(currentRow && isActiveReviewTask(currentRow));
+        if (state.flow.currentRowId && !currentActive) {
+            state.flow.currentRowId = "";
+            state.flow.currentScore = null;
+        }
+        const canIssue = hasShift && !state.flow.loading && !state.flow.claiming && (currentActive || (state.flow.scored || []).length > 0);
+        const note = $("flowCommandNote");
+        if (note) {
+            const zones = Array.from(context.zones).map((zone) => zone === "incoming" ? "входящий поток" : "исходящий поток");
+            const skillNote = state.flow.employeeStats.loaded ? " Личный коэффициент включен." : " Личная статистика пока не загружена.";
+            note.textContent = hasShift
+                ? "Сотрудник: " + (context.name || context.id || "не определен") + ". Зоны: " + (zones.join(", ") || "не найден в смене") + ". Доступно задач: " + stats.available + "." + skillNote
+                : "Сначала открой смену: Флоу должен знать ответственных за зоны.";
+        }
+        const next = $("flowNextTask");
+        if (next) {
+            next.disabled = !canIssue;
+            next.textContent = state.flow.claiming ? "Выдаю..." : state.flow.loading ? "Считаю..." : currentActive ? "Открыть текущую" : hasShift ? "Получить задачу" : "Нужна смена";
+        }
+        const statWrap = $("flowStats");
+        if (statWrap) {
+            statWrap.innerHTML = [
+                ["Доступно", stats.available + "/" + stats.active, "good"],
+                ["Критичных", stats.critical, "critical"],
+                ["Входящих запросов", stats.requests, ""],
+                ["Переоткрытых", stats.reopened, ""],
+                ["Групп", stats.groups, ""],
+                ["Lock у других", stats.locked, ""],
+                ["Скипнутых мной", stats.skipped, ""],
+            ].map(([label, value, tone]) => "<div class='flow-stat " + escapeHtml(tone) + "'><span>" + escapeHtml(label) + "</span><strong>" + escapeHtml(value) + "</strong></div>").join("");
+        }
+        renderFlowCurrent();
+        renderFlowQueuePreview();
+    }
+
+    function renderFlowCurrent() {
+        const target = $("flowCurrent");
+        if (!target) return;
+        const row = state.flow.currentRowId ? findTaskRow(state.flow.currentRowId) : null;
+        const scored = state.flow.currentScore;
+        target.classList.toggle("visible", Boolean(row));
+        if (!row) {
+            target.innerHTML = "";
+            return;
+        }
+        const score = scored || flowScoreTask(row, currentFlowEmployee(), flowZoneCounts(state.flow.rows || []), state.flow.groupIndex);
+        const route = taskRouteLabel(row);
+        target.innerHTML = "<div class='flow-current-head'>"
+            + "<div><h3 class='flow-current-title'>" + escapeHtml(displayTaskTitle(row)) + "</h3>"
+            + "<div class='flow-current-meta'>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route].filter(Boolean).join(" · ")) + "</div></div>"
+            + "<span class='flow-score-pill'>Score " + escapeHtml(String(score.score)) + "</span>"
+            + "</div>"
+            + "<div class='flow-reasons'>" + score.reasons.slice(0, 8).map((reason) => "<div class='flow-reason'>" + escapeHtml(reason) + "</div>").join("") + "</div>"
+            + "<div class='flow-actions'>"
+            + "<button id='openClaimedFlowTask' class='btn btn-rect task-complete-btn' type='button'>Открыть flow-карточку</button>"
+            + "<button id='skipClaimedFlowTask' class='btn btn-outline' type='button'>Скипнуть</button>"
+            + "<button id='refreshFlowQueue' class='btn btn-outline' type='button'>Обновить очередь</button>"
+            + "</div>";
+        $("openClaimedFlowTask").addEventListener("click", () => openFlowTaskCard(row.id));
+        $("skipClaimedFlowTask").addEventListener("click", () => openFlowSkipModal(row.id));
+        $("refreshFlowQueue").addEventListener("click", () => {
+            refreshFlowQueue();
+            state.flow.status = "Очередь пересчитана.";
+            state.flow.statusTone = "good";
+            renderFlowPage();
+        });
+    }
+
+    function renderFlowQueuePreview() {
+        const target = $("flowQueuePreview");
+        if (!target) return;
+        const rows = (state.flow.scored || []).slice(0, 7);
+        if (state.flow.loading) {
+            target.innerHTML = "<div class='task-search-empty'>Считаю очередь...</div>";
+            return;
+        }
+        if (!rows.length) {
+            target.innerHTML = "<div class='task-search-empty'>Доступных задач нет. Либо всё закрыто, либо strict-зона не подходит текущему сотруднику, либо задачи временно скипнуты.</div>";
+            return;
+        }
+        target.innerHTML = rows.map((item) => {
+            const row = item.row;
+            const route = taskRouteLabel(row);
+            const group = item.group ? "Группа " + item.group.count : "";
+            return "<div class='flow-queue-row'>"
+                + "<div><strong>" + escapeHtml(displayTaskTitle(row)) + "</strong>"
+                + "<span>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route, group, formatMoney(reviewPrice(row))].filter(Boolean).join(" · ")) + "</span></div>"
+                + "<span class='flow-level " + escapeHtml(item.level.key) + "'>" + escapeHtml(item.level.label + " · " + item.score) + "</span>"
+                + "</div>";
+        }).join("");
+    }
+
+    async function fetchFreshTaskRow(id) {
+        const db = supabaseDb();
+        if (!db || !id || String(id).startsWith("legacy-weeek:")) return findTaskRow(id);
+        const { data, error } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("id", id).single();
+        if (error) throw error;
+        refreshTaskRow(id, data);
+        return findTaskRow(id) || data;
+    }
+
+    async function writeTaskHistory(row, eventType, payload) {
+        const db = supabaseDb();
+        if (!db || !row || !row.id || String(row.id).startsWith("legacy-weeek:")) return;
+        const actor = flowActor();
+        try {
+            await db.from(FLOW_HISTORY_TABLE).insert({
+                task_id: row.id,
+                event_type: eventType,
+                actor_employee_id: actor.id || null,
+                actor_name: actor.name || null,
+                payload: payload || {},
+            });
+        } catch (error) {
+            console.warn("flow history write skipped:", error);
+        }
+    }
+
+    async function claimFlowTask(row, scored) {
+        const db = supabaseDb();
+        if (!db || !row) throw new Error("Supabase недоступен.");
+        const fresh = await fetchFreshTaskRow(row.id);
+        const context = currentFlowEmployee();
+        if (flowRowIsLockedForOther(fresh, context)) {
+            state.flow.conflictRowId = fresh.id;
+            renderFlowConflictModal(fresh);
+            setFlowModalOpen("flowConflictModal", true);
+            throw new Error("Задача уже открыта другим сотрудником.");
+        }
+        const actor = flowActor();
+        const now = new Date().toISOString();
+        const lockMinutes = Math.max(flowSettingNumber("lockTtlMinutes", 15), 1);
+        const lockUntil = new Date(Date.now() + lockMinutes * 60 * 1000).toISOString();
+        const previousFlow = flowPayload(fresh);
+        const claimEvent = {
+            claimed_by_id: actor.id,
+            claimed_by_name: actor.name || "",
+            claimed_at: now,
+            lock_until: lockUntil,
+            score: scored.score,
+        };
+        const nextPayload = {
+            ...taskPayload(fresh),
+            wms_flow: {
+                ...previousFlow,
+                status: "claimed",
+                claimed_by_id: actor.id,
+                claimed_by_name: actor.name || "",
+                claimed_at: now,
+                lock_until: lockUntil,
+                score: scored.score,
+                score_level: scored.level.label,
+                score_version: FLOW_SCORE_VERSION,
+                score_breakdown: scored.breakdown,
+                score_reasons: scored.reasons,
+                group: scored.group || null,
+                claim_history: [...(Array.isArray(previousFlow.claim_history) ? previousFlow.claim_history : []), claimEvent].slice(-20),
+            },
+        };
+        const patch = {
+            task_status: "В работе",
+            assignee_employee_id: actor.id || fresh.assignee_employee_id || null,
+            assignee_name: actor.name || fresh.assignee_name || null,
+            source_payload: nextPayload,
+            updated_at: now,
+        };
+        const { data, error } = await db
+            .from(WMS_TASKS_TABLE)
+            .update(patch)
+            .eq("id", fresh.id)
+            .select(WMS_TASK_SELECT_COLUMNS)
+            .single();
+        if (error) throw error;
+        refreshTaskRow(fresh.id, data || patch);
+        const updated = findTaskRow(fresh.id) || { ...fresh, ...(data || patch) };
+        void writeTaskHistory(updated, "flow_claimed", { score: scored.score, reasons: scored.reasons, group: scored.group || null, lock_until: lockUntil });
+        return updated;
+    }
+
+    async function issueNextFlowTask() {
+        if (state.flow.claiming) return;
+        if (!state.shift.current) {
+            toast("Сначала нужно открыть смену.", "error");
+            openShiftOpeningModal();
+            return;
+        }
+        const currentRow = state.flow.currentRowId ? findTaskRow(state.flow.currentRowId) : null;
+        if (currentRow && isActiveReviewTask(currentRow)) {
+            openFlowTaskCard(currentRow.id);
+            return;
+        }
+        state.flow.claiming = true;
+        state.flow.status = "Выбираю следующую задачу...";
+        state.flow.statusTone = "";
+        renderFlowPage();
+        try {
+            await ensureReviewTasksLoaded();
+            const scored = refreshFlowQueue();
+            const next = scored[0];
+            if (!next) {
+                state.flow.status = "Доступных задач для текущего сотрудника нет.";
+                state.flow.statusTone = "good";
+                return;
+            }
+            const row = await claimFlowTask(next.row, next);
+            state.flow.currentRowId = row.id;
+            state.flow.currentScore = next;
+            refreshFlowQueue();
+            state.flow.status = "Задача выдана и закреплена на " + flowSettingNumber("lockTtlMinutes", 15) + " минут: " + displayTaskTitle(row) + ".";
+            state.flow.statusTone = "good";
+            renderFlowPage();
+            openFlowTaskCard(row.id);
+        } catch (error) {
+            console.error("flow claim failed:", error);
+            if (normalizeText(error && error.message) !== "Задача уже открыта другим сотрудником.") {
+                state.flow.status = "Не удалось выдать задачу: " + (error && error.message ? error.message : String(error));
+                state.flow.statusTone = "error";
+            }
+        } finally {
+            state.flow.claiming = false;
+            renderFlowPage();
+        }
+    }
+
+    function flowGroupBoxHtml(group, currentId) {
+        if (!group) return "";
+        const rows = (group.sample || []).map((item) => "<div class='flow-group-row'>"
+            + escapeHtml(item.title || item.shk || "-")
+            + "<span>" + escapeHtml([item.section, item.shk ? "ШК " + item.shk : "", formatMoney(item.price)].filter(Boolean).join(" · ")) + "</span>"
+            + "</div>").join("");
+        return "<section class='flow-task-panel'>"
+            + "<h4>Похожая пачка</h4>"
+            + "<div class='flow-conflict-box'>Экспериментально: WMS+ видит общий паттерн по МХ, статусу и 2-часовому окну. Задачи не объединяются в базе, но Флоу поднимает приоритет пачки.</div>"
+            + "<div class='flow-group-list' style='margin-top:10px'>" + (rows || "<div class='task-search-empty'>Группа есть, но сэмпл пуст.</div>") + "</div>"
+            + "<div class='review-table-subtitle' style='margin-top:10px'>Всего в группе: " + escapeHtml(String(group.count || 0)) + " · " + escapeHtml(formatMoney(group.totalPrice || 0)) + (currentId ? "" : "") + "</div>"
+            + "</section>";
+    }
+
+    function bindFlowCopyEvents(target, row) {
+        target.querySelectorAll("[data-copy-value]").forEach((field) => {
+            field.addEventListener("click", async () => {
+                const text = field.dataset.copyValue || "";
+                if (!text) return;
+                const copied = await copyText(text);
+                toast(copied ? "Скопировано." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+            });
+        });
+        target.querySelectorAll("[data-copy-shk]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const text = button.dataset.copyShk || "";
+                if (!text) return;
+                const copied = await copyText(text);
+                toast(copied ? "Список ШК скопирован." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+            });
+        });
+        target.querySelectorAll("[data-copy-single-shk]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const text = normalizeIdentifier(button.dataset.copySingleShk);
+                if (!text) return;
+                const copied = await copyText(text);
+                toast(copied ? "ШК скопирован." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+            });
+        });
+        target.querySelectorAll("[data-special-tag]").forEach((button) => {
+            button.addEventListener("click", () => openSpecialInfoModal(row.id, button.dataset.specialTag || ""));
+        });
+    }
+
+    function renderFlowTaskCard(row) {
+        const target = $("flowTaskWrap");
+        if (!target || !row) return;
+        const context = currentFlowEmployee();
+        const score = state.flow.currentScore && state.flow.currentScore.row && state.flow.currentScore.row.id === row.id
+            ? state.flow.currentScore
+            : flowScoreTask(row, context, flowZoneCounts(state.flow.rows || []), state.flow.groupIndex);
+        const lock = flowLockInfo(row);
+        const conflict = flowRowIsLockedForOther(row, context);
+        const route = taskRouteLabel(row);
+        const lockText = lock.active
+            ? "Lock до " + formatRuDateTime(new Date(lock.lockUntil).toISOString()) + (lock.claimedByName ? " · " + lock.claimedByName : "")
+            : lock.expired
+            ? "Lock истек"
+            : "Lock свободен";
+        const conflictBox = conflict
+            ? "<div class='flow-conflict-box'>С этой задачей уже работает " + escapeHtml(lock.claimedByName || lock.claimedById || "другой сотрудник") + ". Можно открыть для сверки, но лучше взять другую, чтобы не бодаться лбами в одном проходе.</div>"
+            : "";
+        target.innerHTML = "<div class='flow-task-hero'>"
+            + "<div class='flow-task-head'><div><h3 class='flow-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</h3>"
+            + "<p class='flow-task-subtitle'>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route, lockText].filter(Boolean).join(" · ")) + "</p></div>"
+            + "<button id='closeFlowTaskCard' class='btn btn-square' type='button'>×</button></div>"
+            + "<div class='flow-task-score'>"
+            + "<span>Score " + escapeHtml(String(score.score)) + "</span>"
+            + "<span>" + escapeHtml(score.level.label) + "</span>"
+            + "<span>" + escapeHtml(formatMoney(reviewPrice(row))) + "</span>"
+            + "</div></div>"
+            + "<div class='flow-task-body'>"
+            + conflictBox
+            + "<div class='flow-task-grid'>"
+            + "<section class='flow-task-panel'><h4>Почему эта задача</h4><div class='flow-reasons'>" + score.reasons.slice(0, 10).map((reason) => "<div class='flow-reason'>" + escapeHtml(reason) + "</div>").join("") + "</div></section>"
+            + "<section class='flow-task-panel'><h4>Инфо по задаче</h4><div class='task-info-grid'>" + taskDetailInfo(row) + "</div>" + taskTagsBox(row) + "</section>"
+            + "</div>"
+            + incomingFlowShkInfoBox(row)
+            + taskTareInfoBox(row)
+            + taskHistoryBox(row)
+            + flowGroupBoxHtml(score.group, row.id)
+            + "<div class='flow-actions'>"
+            + (conflict ? "<button id='flowOpenAnyway' class='btn btn-outline' type='button'>Открыть всё равно</button><button id='flowTakeAnotherFromCard' class='btn btn-rect' type='button'>Взять другую</button>" : "<button id='flowStartReview' class='btn btn-rect task-complete-btn' type='button'>Начать разбор</button>")
+            + "<button id='flowSkipFromCard' class='btn btn-outline' type='button'>Скипнуть с причиной</button>"
+            + "</div>"
+            + "</div>";
+        $("closeFlowTaskCard").addEventListener("click", closeFlowTaskCard);
+        const start = $("flowStartReview");
+        if (start) start.addEventListener("click", () => openTaskDetailFromFlow(row.id));
+        const skip = $("flowSkipFromCard");
+        if (skip) skip.addEventListener("click", () => openFlowSkipModal(row.id));
+        const anyway = $("flowOpenAnyway");
+        if (anyway) anyway.addEventListener("click", () => {
+            state.flow.allowConflictOpenId = row.id;
+            openTaskDetailFromFlow(row.id);
+        });
+        const another = $("flowTakeAnotherFromCard");
+        if (another) another.addEventListener("click", () => {
+            closeFlowTaskCard();
+            if (state.flow.currentRowId === row.id) {
+                state.flow.currentRowId = "";
+                state.flow.currentScore = null;
+            }
+            refreshFlowQueue();
+            renderFlowPage();
+            void issueNextFlowTask();
+        });
+        bindFlowCopyEvents(target, row);
+    }
+
+    function openFlowTaskCard(id) {
+        const row = findTaskRow(id);
+        if (!row) return;
+        state.flow.taskCardRowId = id;
+        renderFlowTaskCard(row);
+        setFlowModalOpen("flowTaskModal", true);
+    }
+
+    function closeFlowTaskCard() {
+        state.flow.taskCardRowId = "";
+        setFlowModalOpen("flowTaskModal", false);
+    }
+
+    function openTaskDetailFromFlow(id) {
+        const row = findTaskRow(id);
+        if (!row) return;
+        if (flowRowIsLockedForOther(row, currentFlowEmployee()) && state.flow.allowConflictOpenId !== id) {
+            openFlowConflictModal(id);
+            return;
+        }
+        closeFlowTaskCard();
+        openTaskDetail(id, "review");
+        state.flow.allowConflictOpenId = "";
+    }
+
+    function openFlowSkipModal(id) {
+        const row = findTaskRow(id);
+        if (!row) return;
+        state.flow.skipRowId = id;
+        const reason = $("flowSkipReason");
+        const status = $("flowSkipStatus");
+        if (reason) reason.value = "";
+        if (status) status.textContent = "";
+        updateFlowSkipForm();
+        setFlowModalOpen("flowSkipModal", true);
+    }
+
+    function closeFlowSkipModal() {
+        state.flow.skipRowId = "";
+        setFlowModalOpen("flowSkipModal", false);
+    }
+
+    function updateFlowSkipForm() {
+        const reason = normalizeText($("flowSkipReason") && $("flowSkipReason").value);
+        const button = $("confirmFlowSkip");
+        if (button) {
+            button.disabled = reason.length < 3 || state.flow.skipSaving;
+            button.title = reason.length < 3 ? "Нужна причина скипа" : "";
+        }
+    }
+
+    async function skipFlowTaskFromModal() {
+        const id = state.flow.skipRowId;
+        const db = supabaseDb();
+        const row = findTaskRow(id);
+        const reason = normalizeText($("flowSkipReason") && $("flowSkipReason").value);
+        const status = $("flowSkipStatus");
+        if (!db || !row || !reason) return;
+        const actor = flowActor();
+        const lock = flowLockInfo(row);
+        const ownClaim = !lock.claimedById || (actor.id && lock.claimedById === actor.id);
+        const now = new Date().toISOString();
+        const cooldownUntil = new Date(Date.now() + FLOW_SKIP_COOLDOWN_MS).toISOString();
+        const previousFlow = flowPayload(row);
+        const skipEvent = {
+            skipped_by_id: actor.id || "",
+            skipped_by_name: actor.name || "",
+            skipped_at: now,
+            reason,
+            cooldown_until: cooldownUntil,
+            previous_score: previousFlow.score || null,
+        };
+        const cooldowns = previousFlow.skip_cooldowns && typeof previousFlow.skip_cooldowns === "object" && !Array.isArray(previousFlow.skip_cooldowns)
+            ? { ...previousFlow.skip_cooldowns }
+            : {};
+        if (actor.id) cooldowns[actor.id] = { until: cooldownUntil, reason, skipped_at: now };
+        const nextPayload = {
+            ...taskPayload(row),
+            wms_flow: {
+                ...previousFlow,
+                status: ownClaim ? "skipped" : previousFlow.status || "skipped_for_actor",
+                claimed_by_id: ownClaim ? "" : previousFlow.claimed_by_id,
+                claimed_by_name: ownClaim ? "" : previousFlow.claimed_by_name,
+                lock_until: ownClaim ? now : previousFlow.lock_until,
+                last_skip: skipEvent,
+                skip_cooldowns: cooldowns,
+                skip_history: [...(Array.isArray(previousFlow.skip_history) ? previousFlow.skip_history : []), skipEvent].slice(-50),
+            },
+        };
+        const sameAssignee = actor.id && normalizeIdentifier(row.assignee_employee_id) === actor.id;
+        const patch = {
+            task_status: ownClaim ? "Не начато" : taskStatus(row),
+            assignee_employee_id: ownClaim && sameAssignee ? null : row.assignee_employee_id || null,
+            assignee_name: ownClaim && sameAssignee ? null : row.assignee_name || null,
+            source_payload: nextPayload,
+            updated_at: now,
+        };
+        state.flow.skipSaving = true;
+        updateFlowSkipForm();
+        if (status) status.textContent = "Сохраняю скип...";
+        try {
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .update(patch)
+                .eq("id", id)
+                .select(WMS_TASK_SELECT_COLUMNS)
+                .single();
+            if (error) throw error;
+            refreshTaskRow(id, data || patch);
+            void writeTaskHistory(findTaskRow(id) || row, "flow_skipped", skipEvent);
+            if (state.flow.currentRowId === id) {
+                state.flow.currentRowId = "";
+                state.flow.currentScore = null;
+            }
+            closeFlowSkipModal();
+            closeFlowTaskCard();
+            refreshFlowQueue();
+            renderFlowPage();
+            toast("Скип записан. Беру следующую.", "success");
+            void issueNextFlowTask();
+        } catch (error) {
+            console.error("flow skip failed:", error);
+            if (status) status.textContent = "Не удалось скипнуть: " + (error && error.message ? error.message : String(error));
+        } finally {
+            state.flow.skipSaving = false;
+            updateFlowSkipForm();
+        }
+    }
+
+    function renderFlowConflictModal(row) {
+        const target = $("flowConflictWrap");
+        if (!target || !row) return;
+        const lock = flowLockInfo(row);
+        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>Задача уже в работе</h3>"
+            + "<p class='work-subtitle'>" + escapeHtml(displayTaskTitle(row)) + "</p></div>"
+            + "<button id='closeFlowConflict' class='btn btn-square' type='button'>×</button></div>"
+            + "<div class='flow-conflict-box'>Сейчас ее держит " + escapeHtml(lock.claimedByName || lock.claimedById || "другой сотрудник") + ". Lock до " + escapeHtml(lock.lockUntil ? formatRuDateTime(new Date(lock.lockUntil).toISOString()) : "-") + ". Если вы правда оба там, один может спокойно взять другую задачу.</div>"
+            + "<div class='file-row'>"
+            + "<button id='flowConflictTakeOther' class='btn btn-rect' type='button'>Взять другую</button>"
+            + "<button id='flowConflictOpenAnyway' class='btn btn-outline' type='button'>Открыть всё равно</button>"
+            + "</div>";
+        $("closeFlowConflict").addEventListener("click", closeFlowConflictModal);
+        $("flowConflictTakeOther").addEventListener("click", () => {
+            closeFlowConflictModal();
+            if (state.flow.currentRowId === row.id) {
+                state.flow.currentRowId = "";
+                state.flow.currentScore = null;
+            }
+            refreshFlowQueue();
+            renderFlowPage();
+            void issueNextFlowTask();
+        });
+        $("flowConflictOpenAnyway").addEventListener("click", () => {
+            state.flow.allowConflictOpenId = row.id;
+            closeFlowConflictModal();
+            openTaskDetail(row.id, "review");
+        });
+    }
+
+    function openFlowConflictModal(id) {
+        const row = findTaskRow(id);
+        if (!row) return;
+        state.flow.conflictRowId = id;
+        renderFlowConflictModal(row);
+        setFlowModalOpen("flowConflictModal", true);
+    }
+
+    function closeFlowConflictModal() {
+        state.flow.conflictRowId = "";
+        setFlowModalOpen("flowConflictModal", false);
+    }
+
+    function flowSettingFields() {
+        return [
+            { path: "lockTtlMinutes", label: "Lock задачи, минут", step: 1, min: 1 },
+            { path: "weights.price", label: "Вес стоимости", step: 0.1, min: 0 },
+            { path: "weights.urgency", label: "Вес срочности", step: 0.1, min: 0 },
+            { path: "weights.source", label: "Вес источника задачи", step: 0.1, min: 0 },
+            { path: "weights.mass", label: "Вес массовости", step: 0.1, min: 0 },
+            { path: "weights.age", label: "Вес возраста задачи", step: 0.1, min: 0 },
+            { path: "weights.reopen", label: "Вес переоткрытия", step: 0.1, min: 0 },
+            { path: "weights.group", label: "Вес группового паттерна", step: 0.1, min: 0 },
+            { path: "weights.skill", label: "Вес личного опыта", step: 0.1, min: 0 },
+            { path: "sourceBoosts.incomingFlowRequests", label: "Бонус: входящий запрос", step: 1000, min: 0 },
+            { path: "sourceBoosts.awhWriteoffs", label: "Бонус: AWH", step: 1000, min: 0 },
+            { path: "sourceBoosts.incomingBoxes", label: "Бонус: коробки на входе", step: 1000, min: 0 },
+            { path: "grouping.enabled", label: "Группировка MX + статус + 2ч", type: "checkbox" },
+            { path: "grouping.minCount", label: "Минимум задач в группе", step: 1, min: 2 },
+            { path: "grouping.windowMinutes", label: "Окно группировки, минут", step: 15, min: 15 },
+            { path: "skill.lookbackDays", label: "Личный опыт: дней назад", step: 1, min: 1 },
+        ];
+    }
+
+    function flowGetNestedSetting(path) {
+        const parts = String(path || "").split(".").filter(Boolean);
+        let value = flowSettings();
+        for (const part of parts) {
+            if (!value || typeof value !== "object") return undefined;
+            value = value[part];
+        }
+        return value;
+    }
+
+    function renderFlowSettingsModal() {
+        const target = $("flowSettingsWrap");
+        if (!target) return;
+        target.innerHTML = flowSettingFields().map((field) => {
+            const value = flowGetNestedSetting(field.path);
+            if (field.type === "checkbox") {
+                return "<div class='flow-setting-field checkbox'><label for='flowSetting_" + escapeHtml(field.path) + "'>" + escapeHtml(field.label) + "</label>"
+                    + "<input id='flowSetting_" + escapeHtml(field.path) + "' data-flow-setting='" + escapeHtml(field.path) + "' type='checkbox' " + (value !== false ? "checked" : "") + "></div>";
+            }
+            return "<div class='flow-setting-field'><label for='flowSetting_" + escapeHtml(field.path) + "'>" + escapeHtml(field.label) + "</label>"
+                + "<input id='flowSetting_" + escapeHtml(field.path) + "' data-flow-setting='" + escapeHtml(field.path) + "' type='number' min='" + escapeHtml(field.min ?? 0) + "' step='" + escapeHtml(field.step || 1) + "' value='" + escapeHtml(value) + "'></div>";
+        }).join("");
+        target.querySelectorAll("[data-flow-setting]").forEach((input) => {
+            input.addEventListener("input", () => {
+                const path = input.dataset.flowSetting;
+                const value = input.type === "checkbox" ? input.checked : settingNumber(input.value, flowGetNestedSetting(path));
+                flowSetNestedSetting(path, value);
+                refreshFlowQueue();
+                renderFlowPage();
+            });
+        });
+    }
+
+    function openFlowSettingsModal() {
+        const status = $("flowSettingsStatus");
+        if (status) status.textContent = state.flow.settingsLoaded ? "Настройки загружены." : "Работаю на дефолтных настройках. Если миграция применена, можно сохранить их в Supabase.";
+        renderFlowSettingsModal();
+        setFlowModalOpen("flowSettingsModal", true);
+    }
+
+    function closeFlowSettingsModal() {
+        setFlowModalOpen("flowSettingsModal", false);
+    }
+
+    function normalizeFlowSettingsPayload(raw) {
+        const input = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+        const converted = { ...input };
+        if (input.lock_ttl_minutes !== undefined && converted.lockTtlMinutes === undefined) converted.lockTtlMinutes = input.lock_ttl_minutes;
+        return deepMergeObject(DEFAULT_FLOW_SCORE_SETTINGS, converted);
+    }
+
+    async function loadFlowSettings() {
+        if (state.flow.settingsLoaded) return;
+        const db = supabaseDb();
+        if (!db) return;
+        try {
+            const read = await readOptionalRows(db, FLOW_SETTINGS_TABLE, (query) => query
+                .select("*")
+                .eq("is_active", true)
+                .order("updated_at", { ascending: false, nullsFirst: false })
+                .limit(1));
+            const row = read.ok && read.rows && read.rows[0] ? read.rows[0] : null;
+            if (row) state.flow.settings = normalizeFlowSettingsPayload(row.settings);
+            state.flow.settingsLoaded = true;
+        } catch (error) {
+            console.warn("flow settings load skipped:", error);
+        }
+    }
+
+    async function saveFlowSettingsFromModal() {
+        const db = supabaseDb();
+        const status = $("flowSettingsStatus");
+        const button = $("saveFlowSettings");
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен, настройки применены только на этой странице.";
+            return;
+        }
+        if (button) button.disabled = true;
+        if (status) status.textContent = "Сохраняю настройки...";
+        try {
+            const settings = flowSettings();
+            const { error } = await db.from(FLOW_SETTINGS_TABLE).upsert({
+                version: FLOW_SCORE_VERSION,
+                is_active: true,
+                settings: { ...settings, lock_ttl_minutes: settings.lockTtlMinutes },
+                updated_at: new Date().toISOString(),
+            }, { onConflict: "version" });
+            if (error) throw error;
+            state.flow.settingsLoaded = true;
+            refreshFlowQueue();
+            renderFlowPage();
+            if (status) status.textContent = "Настройки сохранены. Очередь пересчитана.";
+        } catch (error) {
+            if (status) status.textContent = "Не удалось сохранить: " + (error && error.message ? error.message : String(error));
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    function resetFlowSettingsFromModal() {
+        state.flow.settings = cloneFlowSettings(DEFAULT_FLOW_SCORE_SETTINGS);
+        refreshFlowQueue();
+        renderFlowPage();
+        renderFlowSettingsModal();
+        const status = $("flowSettingsStatus");
+        if (status) status.textContent = "Сброшено к дефолту. Нажми “Сохранить веса”, если нужно записать в Supabase.";
+    }
+
+    async function loadFlowEmployeeStats() {
+        const db = supabaseDb();
+        if (!db) return;
+        const actor = flowActor();
+        const settings = flowSettings().skill || {};
+        const lookback = Math.max(settingNumber(settings.lookbackDays, 14), 1);
+        if (!actor.id && !actor.name) return;
+        try {
+            let query = db
+                .from(WMS_TASKS_TABLE)
+                .select(WMS_TASK_SELECT_COLUMNS)
+                .eq("task_status", "Завершено")
+                .gte("completed_at", addDays(state.today, -lookback) + "T00:00:00Z")
+                .order("completed_at", { ascending: false, nullsFirst: false })
+                .limit(2000);
+            query = userTaskQuery(query, actor);
+            const { data, error } = await query;
+            if (error) throw error;
+            const bySection = {};
+            (data || []).filter(isManualAchievementTask).forEach((row) => {
+                const section = flowTaskSection(row);
+                if (!bySection[section]) bySection[section] = { count: 0 };
+                bySection[section].count += 1;
+            });
+            state.flow.employeeStats = {
+                bySection,
+                loaded: true,
+                note: "Учтены ручные закрытия за " + lookback + " дней.",
+            };
+        } catch (error) {
+            state.flow.employeeStats = { bySection: {}, loaded: false, note: "Личная статистика недоступна." };
+            console.warn("flow employee stats skipped:", error);
+        }
+    }
+
     function reviewGroupedRows() {
         const grouped = new Map(REVIEW_SECTIONS.map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
@@ -4989,6 +6258,11 @@
     function openTaskDetail(id, source) {
         const row = findTaskRow(id);
         if (!row) return;
+        if (source !== "inactive" && state.flow.allowConflictOpenId !== id && flowRowIsLockedForOther(row, currentFlowEmployee())) {
+            openFlowConflictModal(id);
+            return;
+        }
+        state.flow.allowConflictOpenId = "";
         state.taskDetail = { rowId: id, source: source || "review", editRowId: "", deferRowId: "", reopenRowId: "", splitRowId: "", splitShk: "" };
         renderTaskDetail(row);
         setFlowModalOpen("taskDetailModal", true);
@@ -5835,6 +7109,20 @@
         return { id, name };
     }
 
+    function flowAccessAllowed() {
+        const user = currentWmsUser();
+        return FLOW_ALLOWED_USER_IDS.has(normalizeIdentifier(user.id));
+    }
+
+    function renderFlowAccessGate() {
+        const card = $("openFlow");
+        if (!card) return;
+        const allowed = flowAccessAllowed();
+        card.classList.toggle("is-disabled", !allowed);
+        card.setAttribute("aria-disabled", allowed ? "false" : "true");
+        card.title = allowed ? "" : "Флоу пока доступен только пользователю 1034305.";
+    }
+
     function moscowDateFromValue(value) {
         const date = value ? new Date(value) : new Date();
         if (!Number.isFinite(date.getTime())) return "";
@@ -6322,10 +7610,30 @@
             const stateRow = (state.review.rows || []).find((item) => item.id === id);
             if (stateRow) Object.assign(stateRow, data || payload);
             state.review.rows = (state.review.rows || []).filter((item) => item.id !== id || isActiveReviewTask(item));
+            if (state.flow.currentRowId === id) {
+                state.flow.currentRowId = "";
+                state.flow.currentScore = null;
+            }
+            void writeTaskHistory(completedForAchievements, isDeferred ? "task_deferred" : "task_completed", {
+                verdict,
+                comment,
+                extra_label: extraLabel,
+                extra_value: extraValue,
+                reopen_after: reopenAfter,
+            });
+            if (!isDeferred && state.flow.employeeStats.loaded && isManualAchievementTask(completedForAchievements)) {
+                const section = flowTaskSection(completedForAchievements);
+                if (!state.flow.employeeStats.bySection[section]) state.flow.employeeStats.bySection[section] = { count: 0 };
+                state.flow.employeeStats.bySection[section].count += 1;
+            }
             setReviewStatus(isDeferred ? "Задача отложена до " + formatRuDateTime(reopenAfter) + "." : "Задача завершена.", "good");
             closeTaskDetail();
             renderReview();
             refreshOpenSectionModal();
+            if (state.view === "flow") {
+                refreshFlowQueue();
+                renderFlowPage();
+            }
             if (!isDeferred) void evaluateTaskCompletionAchievements(completedForAchievements, { source: "manual_task_complete" });
         } catch (error) {
             console.error("wms task complete failed:", error);
@@ -10526,6 +11834,7 @@
     }
 
     function initEvents() {
+        $("openFlow").addEventListener("click", () => { void showFlowPage(); });
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
         $("openRequests").addEventListener("click", showRequestsPage);
@@ -10562,6 +11871,16 @@
             if (file) void handleShiftPureLossesFile(file);
         });
         $("saveShiftOpening").addEventListener("click", () => { void saveShiftOpening(); });
+        $("homeFromFlow").addEventListener("click", showHome);
+        $("flowNextTask").addEventListener("click", () => { void issueNextFlowTask(); });
+        $("openFlowSettings").addEventListener("click", openFlowSettingsModal);
+        $("closeFlowSettings").addEventListener("click", closeFlowSettingsModal);
+        $("saveFlowSettings").addEventListener("click", () => { void saveFlowSettingsFromModal(); });
+        $("resetFlowSettings").addEventListener("click", resetFlowSettingsFromModal);
+        $("closeFlowSkip").addEventListener("click", closeFlowSkipModal);
+        $("cancelFlowSkip").addEventListener("click", closeFlowSkipModal);
+        $("flowSkipReason").addEventListener("input", updateFlowSkipForm);
+        $("confirmFlowSkip").addEventListener("click", () => { void skipFlowTaskFromModal(); });
         $("homeFromUploads").addEventListener("click", showHome);
         $("homeFromReview").addEventListener("click", showHome);
         $("homeFromRequests").addEventListener("click", showHome);
@@ -10614,6 +11933,10 @@
         $("noShkReviewModal").addEventListener("click", (event) => { if (event.target === $("noShkReviewModal")) closeNoShkReviewModal(); });
         $("shiftOpeningModal").addEventListener("click", (event) => { if (event.target === $("shiftOpeningModal")) closeShiftOpeningModal(); });
         $("actualizeTasksModal").addEventListener("click", (event) => { if (event.target === $("actualizeTasksModal")) closeActualizeTasksModal(); });
+        $("flowTaskModal").addEventListener("click", (event) => { if (event.target === $("flowTaskModal")) closeFlowTaskCard(); });
+        $("flowSkipModal").addEventListener("click", (event) => { if (event.target === $("flowSkipModal")) closeFlowSkipModal(); });
+        $("flowConflictModal").addEventListener("click", (event) => { if (event.target === $("flowConflictModal")) closeFlowConflictModal(); });
+        $("flowSettingsModal").addEventListener("click", (event) => { if (event.target === $("flowSettingsModal")) closeFlowSettingsModal(); });
         $("moduleChooser").addEventListener("click", (event) => { if (event.target === $("moduleChooser")) setFlowModalOpen("moduleChooser", false); });
         $("uploadWork").addEventListener("click", (event) => { if (event.target === $("uploadWork")) openChooser(state.manualDate); });
         $("masterWork").addEventListener("click", (event) => { if (event.target === $("masterWork")) setFlowModalOpen("masterWork", false); });
@@ -10637,6 +11960,10 @@
                 return;
             }
             if ($("taskDetailModal").classList.contains("active")
+                || $("flowTaskModal").classList.contains("active")
+                || $("flowSkipModal").classList.contains("active")
+                || $("flowConflictModal").classList.contains("active")
+                || $("flowSettingsModal").classList.contains("active")
                 || $("editTareTaskModal").classList.contains("active")
                 || $("deferTaskModal").classList.contains("active")
                 || $("reopenConfirmModal").classList.contains("active")
@@ -10663,6 +11990,7 @@
         startPrespisokHomeTimer();
         renderCalendar();
         renderShiftGate();
+        renderFlowAccessGate();
         renderPrespisokHomeCard();
         void refreshPrespisokHomeState();
         void refreshPrespisokLeaderboard();

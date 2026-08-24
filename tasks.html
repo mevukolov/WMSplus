@@ -74,6 +74,73 @@
         .tasks-action-icon { width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; background: rgba(98,60,234,.1); color: var(--accent); font-size: 22px; font-weight: 800; }
         .tasks-action-title { margin: 18px 0 8px; font-size: 24px; line-height: 1; color: var(--accent-dark); }
         .tasks-action-text { margin: 0; color: #64748b; line-height: 1.45; font-size: 14px; }
+        .flow-home-card { background: radial-gradient(circle 120px at 86% 18%, rgba(250,204,21,.24), transparent 70%), linear-gradient(135deg, #242038, #3e2e23); color: #fff; border-color: rgba(255,255,255,.18); }
+        .flow-home-card .tasks-action-icon { background: rgba(255,255,255,.14); color: #facc15; }
+        .flow-home-card .tasks-action-title { color: #fff; }
+        .flow-home-card .tasks-action-text { color: rgba(255,255,255,.75); }
+        .flow-shell { display: grid; gap: 14px; }
+        .flow-command-card { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: clamp(18px, 3vw, 28px); border-radius: 28px; background: radial-gradient(circle 220px at calc(100% + 70px) 0, rgba(250,204,21,.3), transparent 72%), linear-gradient(135deg, #242038 0%, #3e2e23 100%); color: #fff; box-shadow: 0 26px 70px rgba(36,32,56,.18); }
+        .flow-command-card::after { content: ""; position: absolute; right: -48px; bottom: -78px; width: 210px; height: 210px; border-radius: 44% 56% 50% 50%; background: rgba(255,255,255,.1); pointer-events: none; }
+        .flow-command-title { position: relative; z-index: 1; margin: 0; font-size: clamp(32px, 5vw, 62px); line-height: .9; letter-spacing: -.06em; }
+        .flow-command-note { position: relative; z-index: 1; max-width: 760px; margin: 12px 0 0; color: rgba(255,255,255,.76); line-height: 1.45; font-size: 15px; }
+        .flow-command-actions { position: relative; z-index: 1; display: grid; gap: 10px; justify-items: stretch; }
+        .flow-next-btn { min-height: 86px; min-width: min(360px, 44vw); border: 0; border-radius: 24px; background: #facc15; color: #24172c; font-size: clamp(22px, 3vw, 34px); font-weight: 1000; cursor: pointer; box-shadow: 0 22px 58px rgba(250,204,21,.28); transition: transform .14s ease, box-shadow .14s ease, filter .14s ease; }
+        .flow-next-btn:hover:not(:disabled) { transform: translateY(-5px) scale(1.025); box-shadow: 0 30px 78px rgba(250,204,21,.38); filter: saturate(1.16); }
+        .flow-next-btn:active:not(:disabled) { transform: translateY(2px) scale(.97); }
+        .flow-next-btn:disabled { opacity: .56; cursor: wait; }
+        .flow-settings-btn { border-color: rgba(255,255,255,.24); background: rgba(255,255,255,.1); color: #fff; }
+        .flow-settings-btn:hover { border-color: rgba(250,204,21,.55); background: rgba(250,204,21,.14); }
+        .flow-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+        .flow-stat { border-radius: 18px; border: 1px solid #e2e8f0; background: rgba(255,255,255,.88); padding: 14px; box-shadow: var(--shadow-sm); }
+        .flow-stat span { display: block; color: #64748b; font-size: 11px; font-weight: 1000; letter-spacing: .04em; text-transform: uppercase; }
+        .flow-stat strong { display: block; margin-top: 6px; color: #242038; font-size: 24px; line-height: 1; }
+        .flow-stat.critical strong { color: #991b1b; }
+        .flow-stat.good strong { color: #166534; }
+        .flow-current-card { display: none; border-radius: 24px; background: #fff; border: 1px solid rgba(15,23,42,.08); box-shadow: var(--shadow-sm); padding: 18px; animation: tasksRiseIn .22s ease-out both; }
+        .flow-current-card.visible { display: block; }
+        .flow-current-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+        .flow-current-title { margin: 0; color: #242038; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.04em; }
+        .flow-current-meta { margin-top: 6px; color: #64748b; line-height: 1.35; font-weight: 800; }
+        .flow-score-pill { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; border-radius: 999px; padding: 0 14px; background: #f5f3ff; color: #623cea; font-weight: 1000; white-space: nowrap; }
+        .flow-reasons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+        .flow-reason { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 11px 12px; color: #334155; font-weight: 850; line-height: 1.35; }
+        .flow-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+        .flow-queue-card { border-radius: 24px; background: rgba(255,255,255,.82); border: 1px solid rgba(15,23,42,.08); box-shadow: var(--shadow-sm); padding: 16px; }
+        .flow-queue-title { margin: 0; color: #242038; font-size: 20px; }
+        .flow-queue-list { display: grid; gap: 8px; margin-top: 12px; }
+        .flow-queue-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border-radius: 14px; background: #fff; border: 1px solid #e2e8f0; padding: 10px 12px; }
+        .flow-queue-row strong { color: #242038; overflow-wrap: anywhere; }
+        .flow-queue-row span { display: block; margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.35; }
+        .flow-level { border-radius: 999px; padding: 5px 9px; font-size: 11px; font-weight: 1000; white-space: nowrap; background: #f1f5f9; color: #475569; }
+        .flow-level.critical { background: #fee2e2; color: #991b1b; }
+        .flow-level.high { background: #ffedd5; color: #9a3412; }
+        .flow-level.medium { background: #fef3c7; color: #854d0e; }
+        .flow-level.low { background: #dcfce7; color: #166534; }
+        .flow-task-card { width: min(1040px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: hidden; padding: 0; display: flex; flex-direction: column; }
+        .flow-task-hero { position: relative; overflow: hidden; padding: 24px; color: #fff; background: radial-gradient(circle 280px at calc(100% + 90px) -30px, rgba(250,204,21,.34), transparent 72%), linear-gradient(135deg, #242038 0%, #3e2e23 100%); }
+        .flow-task-hero::after { content: ""; position: absolute; right: -70px; bottom: -96px; width: 260px; height: 260px; border-radius: 47% 53% 45% 55%; background: rgba(255,255,255,.1); }
+        .flow-task-head { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+        .flow-task-title { margin: 0; font-size: clamp(32px, 5vw, 58px); line-height: .9; letter-spacing: -.06em; overflow-wrap: anywhere; }
+        .flow-task-subtitle { margin: 10px 0 0; color: rgba(255,255,255,.74); font-weight: 850; line-height: 1.35; }
+        .flow-task-score { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+        .flow-task-score span { border-radius: 999px; padding: 7px 11px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.14); color: rgba(255,255,255,.88); font-size: 12px; font-weight: 1000; }
+        .flow-task-body { flex: 1; min-height: 0; overflow: auto; padding: 18px; display: grid; gap: 14px; background: #f8fafc; }
+        .flow-task-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(280px, .95fr); gap: 14px; }
+        .flow-task-panel { border-radius: 20px; border: 1px solid #e2e8f0; background: #fff; padding: 16px; box-shadow: var(--shadow-sm); }
+        .flow-task-panel h4 { margin: 0 0 10px; color: #242038; font-size: 18px; }
+        .flow-task-panel .task-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .flow-group-list { display: grid; gap: 8px; max-height: 260px; overflow: auto; }
+        .flow-group-row { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 10px 12px; color: #242038; font-weight: 900; }
+        .flow-group-row span { display: block; margin-top: 4px; color: #64748b; font-size: 12px; font-weight: 800; line-height: 1.35; }
+        .flow-conflict-box { border-radius: 18px; border: 1px solid #fed7aa; background: #fff7ed; color: #9a3412; padding: 14px; font-weight: 850; line-height: 1.45; }
+        .flow-skip-form, .flow-settings-grid { display: grid; gap: 12px; }
+        .flow-skip-form textarea { min-height: 110px; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; resize: vertical; font: inherit; color: #242038; }
+        .flow-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .flow-setting-field { border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; padding: 12px; }
+        .flow-setting-field label { display: block; color: #64748b; font-size: 12px; font-weight: 1000; line-height: 1.25; }
+        .flow-setting-field input { width: 100%; margin-top: 8px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; font: inherit; font-weight: 900; color: #242038; box-sizing: border-box; }
+        .flow-setting-field.checkbox { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .flow-setting-field.checkbox input { width: auto; margin: 0; transform: scale(1.15); }
         .shift-gate-banner { display: none; width: 100%; box-sizing: border-box; position: relative; z-index: 1; border-radius: 20px; border: 1px solid #fecaca; background: #fef2f2; color: #7f1d1d; padding: 16px 18px; box-shadow: var(--shadow-sm); align-items: center; justify-content: space-between; gap: 14px; animation: tasksRiseIn .22s ease-out both; }
         .shift-gate-banner.visible { display: flex; }
         .shift-gate-title { margin: 0; font-size: 18px; font-weight: 900; }
@@ -647,7 +714,7 @@
         @keyframes prespisokKick { 0% { transform: scale(.7) rotate(-6deg); opacity: .4; } 55% { transform: scale(1.22) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
         @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .quick-no-shk-game, .quick-no-shk-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; } .quick-no-shk-wrap { overflow: auto; } .quick-no-shk-panel { overflow: visible; } .quick-no-shk-photo { max-height: 42dvh; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }
         @media (max-width: 1120px) { .journal-action-list { max-height: none; } }
-        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
         @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
@@ -700,6 +767,11 @@
                 </div>
             </div>
             <div class="tasks-actions">
+                <button id="openFlow" class="tasks-action-card flow-home-card" type="button">
+                    <span class="tasks-action-icon">▶</span>
+                    <h2 class="tasks-action-title">Флоу</h2>
+                    <p class="tasks-action-text">Единая умная очередь: WMS+ сам выбирает следующую задачу по риску, зоне и срочности.</p>
+                </button>
                 <button id="openUploads" class="tasks-action-card" type="button">
                     <span class="tasks-action-icon">⇧</span>
                     <h2 class="tasks-action-title">Выгрузки</h2>
@@ -795,6 +867,34 @@
                 </button>
             </div>
         </div>
+    </section>
+
+    <section id="flowPage" class="tasks-page">
+        <div class="tasks-page-head">
+            <button id="homeFromFlow" class="btn btn-outline" type="button" aria-label="Назад">←</button>
+            <div>
+                <h2 class="tasks-page-title">Флоу</h2>
+                <p id="flowStatus" class="tasks-page-note">Единая очередь задач. Система выбирает, куда сейчас выгоднее направить внимание.</p>
+            </div>
+        </div>
+        <section class="flow-shell">
+            <div class="flow-command-card">
+                <div>
+                    <h3 class="flow-command-title">Дай мне задачу</h3>
+                    <p id="flowCommandNote" class="flow-command-note">WMS+ учитывает риск, срочность, массовость, источник, зону ответственности и текущую загрузку.</p>
+                </div>
+                <div class="flow-command-actions">
+                    <button id="flowNextTask" class="flow-next-btn" type="button">Получить задачу</button>
+                    <button id="openFlowSettings" class="btn btn-outline flow-settings-btn" type="button">Настроить веса</button>
+                </div>
+            </div>
+            <div id="flowStats" class="flow-stat-grid"></div>
+            <div id="flowCurrent" class="flow-current-card"></div>
+            <div class="flow-queue-card">
+                <h3 class="flow-queue-title">Что видит диспетчер</h3>
+                <div id="flowQueuePreview" class="flow-queue-list"></div>
+            </div>
+        </section>
     </section>
 
     <section id="uploadsPage" class="tasks-page">
@@ -1029,6 +1129,53 @@
 
 <section id="taskDetailModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div id="taskDetailWrap" class="tasks-flow-card task-detail-card"></div>
+</section>
+
+<section id="flowTaskModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div id="flowTaskWrap" class="tasks-flow-card flow-task-card"></div>
+</section>
+
+<section id="flowSkipModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Скипнуть задачу</h3>
+                <p class="work-subtitle">Причина обязательна. Флоу не будет подсовывать тебе эту задачу ближайшие 4 часа.</p>
+            </div>
+            <button id="closeFlowSkip" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="flow-skip-form">
+            <label for="flowSkipReason">Почему задача сейчас не подходит?</label>
+            <textarea id="flowSkipReason" placeholder="Например: нужен доступ, задача не по моей зоне, нет данных, физически занят другой сотрудник"></textarea>
+            <div class="file-row">
+                <button id="confirmFlowSkip" class="btn btn-rect" type="button" disabled>Скипнуть и взять следующую</button>
+                <button id="cancelFlowSkip" class="btn btn-outline" type="button">Отмена</button>
+            </div>
+            <div id="flowSkipStatus" class="review-status"></div>
+        </div>
+    </div>
+</section>
+
+<section id="flowConflictModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div id="flowConflictWrap" class="tasks-flow-card task-small-card"></div>
+</section>
+
+<section id="flowSettingsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Настройки Флоу</h3>
+                <p class="work-subtitle">Веса меняют только выдачу задач во Флоу. Сами выгрузки и карточки задач не меняются.</p>
+            </div>
+            <button id="closeFlowSettings" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="flowSettingsWrap" class="flow-settings-grid"></div>
+        <div class="file-row">
+            <button id="saveFlowSettings" class="btn btn-rect" type="button">Сохранить веса</button>
+            <button id="resetFlowSettings" class="btn btn-outline" type="button">Сбросить к дефолту</button>
+        </div>
+        <div id="flowSettingsStatus" class="review-status"></div>
+    </div>
 </section>
 
 <section id="specialInfoModal" class="tasks-flow-modal upload-work" aria-hidden="true">
