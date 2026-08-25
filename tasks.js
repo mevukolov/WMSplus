@@ -17,6 +17,7 @@
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
     const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
+    const WMS_WRITEOFF_TERMS_TABLE = "wms_writeoff_terms";
     const FLOW_SETTINGS_TABLE = "wms_flow_score_settings";
     const FLOW_HISTORY_TABLE = "wms_task_history";
     const SUPABASE_FUNCTIONS_BASE_URL = ((typeof window !== "undefined" && window.SUPABASE_URL) || "https://bgphllmzmlwurfnbagho.supabase.co").replace(/\/$/, "") + "/functions/v1";
@@ -119,9 +120,28 @@
     ]);
     const PM_BUFFER_STATUSES = new Set(["sms", "swt"]);
     const PRESORT_EXCLUDED_MX_PARTS = ["пред сортировка мп", "сортировка в сетки"];
-    const MASTER_MAIN_MODULES = ["pm", "presort", "marketplace_pc", "wmi_mp_pc"];
+    const MASTER_MAIN_MODULES = ["pm", "presort", "marketplace", "pc", "wmi_mp_pc"];
     const MASTER_PACKAGING_MODULES = ["packaging", "rwp"];
-    const MASTER_MODULES = ["pm", "presort", "marketplace_pc", "wmi_mp_pc", "no_order", "packaging", "rwp", "after_sale_movement"];
+    const MASTER_MODULES = ["pm", "presort", "marketplace", "pc", "marketplace_pc", "wmi_mp_pc", "no_order", "packaging", "rwp", "after_sale_movement"];
+    const DEFAULT_WRITEOFF_TERMS = [
+        { term_type: "status", term_key: "SGR", label: "SGR", days_without_movement: 8, sort_order: 10 },
+        { term_type: "status", term_key: "RWP", label: "RWP", days_without_movement: 5, sort_order: 20 },
+        { term_type: "status", term_key: "SMS", label: "SMS", days_without_movement: 2, sort_order: 30 },
+        { term_type: "status", term_key: "SWT", label: "SWT", days_without_movement: 2, sort_order: 40 },
+        { term_type: "status", term_key: "SPS", label: "SPS", days_without_movement: 1, sort_order: 50 },
+        { term_type: "status", term_key: "PWT", label: "PWT", days_without_movement: 1, sort_order: 60 },
+        { term_type: "status", term_key: "GWS", label: "GWS", days_without_movement: 1, sort_order: 70 },
+        { term_type: "status", term_key: "WMI", label: "WMI", days_without_movement: 1, sort_order: 80 },
+        { term_type: "status", term_key: "LGR", label: "LGR", days_without_movement: 1, sort_order: 90 },
+        { term_type: "status", term_key: "PAP", label: "PAP", days_without_movement: 1, sort_order: 100 },
+        { term_type: "status", term_key: "SMC", label: "SMC", days_without_movement: 1, sort_order: 110 },
+        { term_type: "status", term_key: "USD", label: "USD", days_without_movement: 1, sort_order: 120 },
+        { term_type: "status", term_key: "TMM", label: "TMM", days_without_movement: 1, sort_order: 130 },
+        { term_type: "status", term_key: "ORS", label: "ORS", days_without_movement: 1, sort_order: 140 },
+        { term_type: "status", term_key: "SAS", label: "SAS", days_without_movement: 1, sort_order: 150 },
+        { term_type: "status", term_key: "EPR", label: "EPR", days_without_movement: 1, sort_order: 160 },
+        { term_type: "lr", term_key: "26LR", label: "26LR", days_without_movement: 0, sort_order: 1000 },
+    ];
     const ACHIEVEMENT_RARITIES = {
         common: { label: "Обычная", marker: "⚪", icon: "✓" },
         uncommon: { label: "Необычная", marker: "🟢", icon: "↗" },
@@ -538,7 +558,7 @@
         ],
     };
     const MASTER_SLOTS = [
-        { key: "main", title: "Товары без движения - В заказе", kind: "pmPrimary", modules: ["pm", "presort", "marketplace_pc", "wmi_mp_pc"] },
+        { key: "main", title: "Товары без движения - В заказе", kind: "pmPrimary", modules: ["pm", "presort", "marketplace", "pc", "wmi_mp_pc"] },
         { key: "noOrder", title: "Без заказа", kind: "pmPrimary", modules: ["no_order"] },
         { key: "packaging", title: "Утерянные и обездвиженные товары", kind: "packaging", modules: ["packaging", "rwp"] },
         { key: "afterSale", title: "Движение после продажи", kind: "afterSaleMovement", modules: ["after_sale_movement"] },
@@ -550,6 +570,34 @@
         today: todayIsoInMoscow(),
         settings: new Map(DEFAULT_MODULES.map((item) => [item.module, { ...item }])),
         runs: [],
+        writeoffTerms: {
+            rows: DEFAULT_WRITEOFF_TERMS.map((item) => ({ ...item, is_active: true })),
+            loaded: false,
+            loading: false,
+            saving: false,
+            error: "",
+            recommendations: {
+                loading: false,
+                rows: [],
+                capacityRows: [],
+                problemSections: [],
+                statusPriorities: [],
+                summary: null,
+                error: "",
+                generatedAt: "",
+            },
+        },
+        staffStats: {
+            date: todayIsoInMoscow(),
+            loading: false,
+            loaded: false,
+            error: "",
+            summary: null,
+            employees: [],
+            selectedKey: "",
+            activeTab: "tasks",
+            taskRowsById: {},
+        },
         loadingStatus: false,
         calendarRange: null,
         manualDate: "",
@@ -1216,9 +1264,48 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     }
 
-    function uploadDateForModule(module) {
+    function configuredUploadDateForModule(module) {
         const def = moduleDef(module);
-        return state.manualDate || addDays(state.today, Number(def.offsetDays || 0));
+        return addDays(state.today, Number(def.offsetDays || 0));
+    }
+
+    function moduleRunDates(module) {
+        return (state.runs || [])
+            .filter((run) => runMatchesModuleBranch(run, module))
+            .map((run) => normalizeText(run.effective_date || run.business_date || run.upload_date))
+            .filter(Boolean)
+            .sort();
+    }
+
+    function firstMissingUploadDate(module, targetDate) {
+        const target = normalizeText(targetDate);
+        if (!target) return "";
+        const dates = Array.from(new Set(moduleRunDates(module)));
+        const latestAny = dates.length ? dates[dates.length - 1] : "";
+        if (!latestAny || latestAny > target) return target;
+        const beforeTarget = dates.filter((date) => date <= target);
+        if (!beforeTarget.length) return target;
+        let cursor = addDays(beforeTarget[beforeTarget.length - 1], 1);
+        while (cursor && cursor <= target) {
+            if (!runForUpload(module, cursor)) return cursor;
+            cursor = addDays(cursor, 1);
+        }
+        return target;
+    }
+
+    function uploadDateForModule(module) {
+        if (state.manualDate) return state.manualDate;
+        return firstMissingUploadDate(module, configuredUploadDateForModule(module));
+    }
+
+    function uploadDateGapInfo(module) {
+        const targetDate = configuredUploadDateForModule(module);
+        const actualDate = uploadDateForModule(module);
+        return {
+            targetDate,
+            actualDate,
+            hasGap: Boolean(actualDate && targetDate && actualDate !== targetDate),
+        };
     }
 
     function plannedUploadDateForBusinessDate(module, businessDate) {
@@ -1232,6 +1319,122 @@
         if (module === "pm" && variant === "mail") deadlineDays = settingNumber(def.mailDeadlineDays, deadlineDays);
         if (module === "pm" && variant === "pm") deadlineDays = settingNumber(def.pmDeadlineDays, deadlineDays);
         return addDays(plannedUploadDateForBusinessDate(module, businessDate), deadlineDays);
+    }
+
+    function defaultWriteoffTerms() {
+        return DEFAULT_WRITEOFF_TERMS.map((item) => ({ ...item, is_active: item.is_active !== false }));
+    }
+
+    function normalizeWriteoffTermType(value) {
+        const normalized = normalizeForMatch(value);
+        return normalized === "lr" || normalized === "26lr" ? "lr" : "status";
+    }
+
+    function normalizeWriteoffTermKey(value, type) {
+        const raw = normalizeText(value).toUpperCase();
+        if (!raw) return "";
+        if (normalizeWriteoffTermType(type) === "status") {
+            const code = latinStatusCode(raw);
+            return code || raw.replace(/\s+/g, "_");
+        }
+        return raw.replace(/\s+/g, "");
+    }
+
+    function writeoffTermSort(a, b) {
+        const aType = normalizeWriteoffTermType(a && a.term_type);
+        const bType = normalizeWriteoffTermType(b && b.term_type);
+        if (aType !== bType) return aType === "status" ? -1 : 1;
+        const aOrder = Number(a && a.sort_order) || 999;
+        const bOrder = Number(b && b.sort_order) || 999;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return normalizeText(a && a.term_key).localeCompare(normalizeText(b && b.term_key), "ru");
+    }
+
+    function applyWriteoffTerms(rows) {
+        const byKey = new Map();
+        defaultWriteoffTerms().forEach((item) => {
+            byKey.set(item.term_type + "|" + item.term_key, item);
+        });
+        (rows || []).forEach((row) => {
+            const termType = normalizeWriteoffTermType(row && row.term_type);
+            const termKey = normalizeWriteoffTermKey(row && (row.term_key || row.status_code), termType);
+            if (!termKey) return;
+            const current = byKey.get(termType + "|" + termKey) || {};
+            byKey.set(termType + "|" + termKey, {
+                ...current,
+                id: row.id || current.id,
+                wh_id: normalizeText(row.wh_id) || WH_ID,
+                term_type: termType,
+                term_key: termKey,
+                label: normalizeText(row.label || row.status_label) || current.label || termKey,
+                days_without_movement: settingNumber(row.days_without_movement, current.days_without_movement ?? 0),
+                is_active: row.is_active !== false,
+                sort_order: Number(row.sort_order) || current.sort_order || 999,
+                updated_at: normalizeText(row.updated_at || current.updated_at),
+            });
+        });
+        state.writeoffTerms.rows = Array.from(byKey.values()).sort(writeoffTermSort);
+    }
+
+    function activeWriteoffStatusTerms() {
+        const map = new Map();
+        (state.writeoffTerms.rows || []).forEach((row) => {
+            if (normalizeWriteoffTermType(row.term_type) !== "status" || row.is_active === false) return;
+            const key = normalizeWriteoffTermKey(row.term_key, "status");
+            if (!key) return;
+            map.set(key, row);
+        });
+        return map;
+    }
+
+    function rowStatusForWriteoff(row) {
+        return normalizeText(row && (row.product_status || row.last_status || row.status));
+    }
+
+    function rowMovementForWriteoff(row) {
+        return normalizeText(row && (row.last_movement || row.created_at || row.status_at));
+    }
+
+    function writeoffDateInfoForRow(row, termMap) {
+        const movement = parseDateTime(rowMovementForWriteoff(row));
+        const statusText = rowStatusForWriteoff(row);
+        const statusKey = normalizeWriteoffTermKey(statusText, "status");
+        const term = statusKey ? (termMap || activeWriteoffStatusTerms()).get(statusKey) : null;
+        const days = term ? settingNumber(term.days_without_movement, null) : null;
+        if (!movement.date || !term || !Number.isFinite(days)) return null;
+        return {
+            date: addDays(movement.date, days),
+            movement_date: movement.date,
+            movement_raw: rowMovementForWriteoff(row),
+            status_key: statusKey,
+            status_label: normalizeText(term.label) || statusText || statusKey,
+            status_raw: statusText,
+            days_without_movement: days,
+            shk: normalizeIdentifier(row && (row.product || row.shk)),
+        };
+    }
+
+    function writeoffDateInfoForRows(rows, fallbackDate) {
+        const termMap = activeWriteoffStatusTerms();
+        const candidates = (rows || []).map((row) => writeoffDateInfoForRow(row, termMap)).filter((item) => item && item.date);
+        if (!candidates.length) {
+            return {
+                date: fallbackDate || "",
+                source: "fallback",
+                basis: null,
+                candidates: [],
+            };
+        }
+        const sorted = candidates.slice().sort((a, b) => {
+            if (a.date !== b.date) return a.date.localeCompare(b.date);
+            return normalizeText(a.movement_date).localeCompare(normalizeText(b.movement_date));
+        });
+        return {
+            date: sorted[0].date,
+            source: "status_terms",
+            basis: sorted[0],
+            candidates: sorted,
+        };
     }
 
     function startOfWeekMonday(isoDate) {
@@ -1382,6 +1585,9 @@
         setFlowModalOpen("flowSkipModal", false);
         setFlowModalOpen("flowConflictModal", false);
         setFlowModalOpen("flowSettingsModal", false);
+        setFlowModalOpen("statusPilotModal", false);
+        setFlowModalOpen("staffStatsModal", false);
+        setFlowModalOpen("writeoffTermsModal", false);
         setFlowModalOpen("editTareTaskModal", false);
         setFlowModalOpen("deferTaskModal", false);
         setFlowModalOpen("reopenConfirmModal", false);
@@ -2787,8 +2993,6 @@
         const payload = {
             task_status: "Завершено",
             opp_verdict: SYSTEM_MOVEMENT_VERDICT,
-            assignee_employee_id: user.id || null,
-            assignee_name: user.name || null,
             completed_at: now,
             reopen_after: null,
             source_payload: nextPayload,
@@ -3510,8 +3714,6 @@
             Object.assign(splitTask, {
                 task_status: "Завершено",
                 opp_verdict: verdict,
-                assignee_employee_id: user.id || null,
-                assignee_name: user.name || null,
                 completed_at: now,
                 reopen_after: null,
                 source_payload: splitPayload,
@@ -3531,8 +3733,6 @@
         const payload = {
             task_status: "Завершено",
             opp_verdict: verdict,
-            assignee_employee_id: user.id || null,
-            assignee_name: user.name || null,
             completed_at: now,
             reopen_after: null,
             source_payload: nextPayload,
@@ -4493,12 +4693,12 @@
 
     function flowUrgencyComponent(row) {
         const days = flowDateDiffDays(row && row.due_date);
-        if (days === null) return { value: 0, label: "Дедлайн не задан" };
+        if (days === null) return { value: 0, label: "Дата списания не задана" };
         if (days < 0) return { value: 32000 + Math.min(Math.abs(days) * 5500, 28000), label: "Просрочено на " + Math.abs(days) + " дн." };
-        if (days === 0) return { value: 24000, label: "Дедлайн сегодня" };
-        if (days === 1) return { value: 15000, label: "Дедлайн завтра" };
-        if (days <= 3) return { value: 9000, label: "До дедлайна " + days + " дн." };
-        return { value: Math.max(1200, 5000 - days * 500), label: "До дедлайна " + days + " дн." };
+        if (days === 0) return { value: 24000, label: "Списание сегодня" };
+        if (days === 1) return { value: 15000, label: "Списание завтра" };
+        if (days <= 3) return { value: 9000, label: "До списания " + days + " дн." };
+        return { value: Math.max(1200, 5000 - days * 500), label: "До списания " + days + " дн." };
     }
 
     function flowSourceComponent(row) {
@@ -5403,11 +5603,10 @@
                 .gte("completed_at", addDays(state.today, -lookback) + "T00:00:00Z")
                 .order("completed_at", { ascending: false, nullsFirst: false })
                 .limit(2000);
-            query = userTaskQuery(query, actor);
             const { data, error } = await query;
             if (error) throw error;
             const bySection = {};
-            (data || []).filter(isManualAchievementTask).forEach((row) => {
+            (data || []).filter((row) => isManualAchievementTask(row) && taskCompletedByMatches(row, actor)).forEach((row) => {
                 const section = flowTaskSection(row);
                 if (!bySection[section]) bySection[section] = { count: 0 };
                 bySection[section].count += 1;
@@ -5518,9 +5717,9 @@
     }
 
     function taskFilterDate(row) {
-        return parseDateTime(row && row.upload_effective_date).date
+        return parseDateTime(row && row.due_date).date
+            || parseDateTime(row && row.upload_effective_date).date
             || parseDateTime(row && row.source_last_movement_at).date
-            || parseDateTime(row && row.due_date).date
             || parseDateTime(row && row.created_at).date;
     }
 
@@ -6120,6 +6319,27 @@
         return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
     }
 
+    function taskCompletionActor(row, historyRow) {
+        const review = taskReviewPayload(row);
+        return {
+            id: normalizeIdentifier(review.completed_by_id)
+                || normalizeIdentifier(historyRow && historyRow.actor_employee_id)
+                || normalizeIdentifier(row && row.assignee_employee_id),
+            name: normalizeText(review.completed_by_name)
+                || normalizeText(historyRow && historyRow.actor_name)
+                || normalizeText(row && row.assignee_name),
+        };
+    }
+
+    function taskCompletedByMatches(row, user, historyRow) {
+        const actor = taskCompletionActor(row, historyRow);
+        const userId = normalizeIdentifier(user && user.id);
+        const userName = normalizeForMatch(user && user.name);
+        if (userId && userId !== "local" && actor.id === userId) return true;
+        if (userName && normalizeForMatch(actor.name) === userName) return true;
+        return false;
+    }
+
     function normalizeTaskItem(value) {
         if (!value || typeof value !== "object") return null;
         const raw = value.raw && typeof value.raw === "object" ? value.raw : value;
@@ -6336,7 +6556,7 @@
             formatMoney(row.source_price_sum),
             isTareTask(row) ? "Тара: " + (normalizeIdentifier(row.source_tare_id) || "-") : "",
             shownIds ? "ШК: " + shownIds : "",
-            row.due_date ? "ДД: " + formatRuDate(row.due_date) : "",
+            row.due_date ? "Списание: " + formatRuDate(row.due_date) : "",
         ].filter(Boolean).join(" · ");
     }
 
@@ -6591,7 +6811,7 @@
             items.push(taskInfoItem("ЛО-отправитель", incomingFlowSender(row)));
             items.push(taskInfoItem("Дата запроса", incomingFlowRequestDate(row)));
         } else {
-            items.push(taskInfoItem("Дедлайн", formatRuDate(row.due_date)));
+            items.push(taskInfoItem("Дата списания", formatRuDate(row.due_date)));
             items.push(taskInfoItem("Дата выгрузки", formatRuDate(row.upload_effective_date)));
         }
         items.push(taskInfoItem("Последнее движение", formatRuDateTime(row.source_last_movement_at)));
@@ -6704,6 +6924,13 @@
     function taskHistoryBox(row) {
         const review = taskReviewPayload(row);
         const lines = [];
+        const verdict = normalizeText(review.verdict || review.attachment || row.opp_verdict);
+        if (verdict && verdict !== "Не выбран") {
+            const actor = taskCompletionActor(row);
+            lines.push((isIncomingFlowRequestTask(row) ? "Вложение" : "Вердикт") + ": " + verdict);
+            if (review.completed_at || row.completed_at) lines.push("Время вердикта: " + formatRuDateTime(review.completed_at || row.completed_at));
+            if (actor.name || actor.id) lines.push("Кто поставил вердикт: " + [actor.name, actor.id].filter(Boolean).join(" / "));
+        }
         if (review.defer_reason) {
             lines.push("Отложено: " + review.defer_reason);
             if (review.reopen_after) lines.push("Дата переоткрытия: " + formatRuDateTime(review.reopen_after));
@@ -6744,13 +6971,13 @@
         ];
         if (incomingFlow) readOnlyReviewLines.push("ID виновного: " + (savedReview.guilty_id || "-"));
         if (savedReview.extra_label || savedReview.extra_value) readOnlyReviewLines.push((savedReview.extra_label || "Доп. поле") + ": " + (savedReview.extra_value || "-"));
-        if (savedReview.completed_by_name || savedReview.completed_by_id) readOnlyReviewLines.push("Исполнитель: " + [savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / "));
+        if (savedReview.completed_by_name || savedReview.completed_by_id) readOnlyReviewLines.push("Кто поставил вердикт: " + [savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / "));
         const reviewBlock = readOnly
             ? "<div class='task-description-box copyable' data-copy-value='" + escapeHtml(readOnlyReviewLines.join("\n")) + "' title='Нажми, чтобы скопировать'><strong>Комментарий:</strong><br>" + escapeHtml(savedReview.comment || "-")
                 + "<br><br><strong>" + (incomingFlow ? "Вложение" : "Вердикт") + ":</strong><br>" + escapeHtml(verdict || "-")
                 + (incomingFlow ? "<br><br><strong>ID виновного:</strong><br>" + escapeHtml(savedReview.guilty_id || "-") : "")
                 + (savedReview.extra_label || savedReview.extra_value ? "<br><br><strong>" + escapeHtml(savedReview.extra_label || "Доп. поле") + ":</strong><br>" + escapeHtml(savedReview.extra_value || "-") : "")
-                + (savedReview.completed_by_name || savedReview.completed_by_id ? "<br><br><strong>Исполнитель:</strong><br>" + escapeHtml([savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / ")) : "")
+                + (savedReview.completed_by_name || savedReview.completed_by_id ? "<br><br><strong>Кто поставил вердикт:</strong><br>" + escapeHtml([savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / ")) : "")
                 + "</div>"
             : "<div class='task-form'>"
                 + "<label for='taskCommentInput'>" + (incomingFlow ? "Комментарий ОПП" : "Комментарий") + "</label>"
@@ -7114,13 +7341,21 @@
         return FLOW_ALLOWED_USER_IDS.has(normalizeIdentifier(user.id));
     }
 
+    function ensureDevelopmentAccess(featureName) {
+        if (flowAccessAllowed()) return true;
+        toast((featureName || "Этот режим") + " пока доступен только пользователю 1034305.", "error");
+        renderFlowAccessGate();
+        return false;
+    }
+
     function renderFlowAccessGate() {
-        const card = $("openFlow");
-        if (!card) return;
         const allowed = flowAccessAllowed();
-        card.classList.toggle("is-disabled", !allowed);
-        card.setAttribute("aria-disabled", allowed ? "false" : "true");
-        card.title = allowed ? "" : "Флоу пока доступен только пользователю 1034305.";
+        document.querySelectorAll("[data-dev-only]").forEach((card) => {
+            card.classList.toggle("is-disabled", !allowed);
+            card.setAttribute("aria-disabled", allowed ? "false" : "true");
+            if ("disabled" in card) card.disabled = !allowed;
+            card.title = allowed ? "" : "Раздел в разработке. Пока доступен только пользователю 1034305.";
+        });
     }
 
     function moscowDateFromValue(value) {
@@ -7173,10 +7408,9 @@
                 .eq("task_status", "Завершено")
                 .order("completed_at", { ascending: false, nullsFirst: false })
                 .limit(10000);
-            query = userTaskQuery(query, user);
             const { data, error } = await query;
             if (error) throw error;
-            return (data || []).filter(isManualAchievementTask);
+            return (data || []).filter((row) => isManualAchievementTask(row) && taskCompletedByMatches(row, user));
         } catch (error) {
             console.warn("achievement completed tasks query skipped:", error);
             return [];
@@ -7589,8 +7823,6 @@
         };
         const payload = {
             opp_verdict: verdict,
-            assignee_employee_id: user.id || null,
-            assignee_name: user.name || null,
             task_status: isDeferred ? "Отложено" : "Завершено",
             completed_at: now,
             reopen_after: reopenAfter,
@@ -7615,10 +7847,13 @@
                 state.flow.currentScore = null;
             }
             void writeTaskHistory(completedForAchievements, isDeferred ? "task_deferred" : "task_completed", {
+                title: displayTaskTitle(row),
                 verdict,
                 comment,
                 extra_label: extraLabel,
                 extra_value: extraValue,
+                completed_by_id: user.id || null,
+                completed_by_name: user.name || null,
                 reopen_after: reopenAfter,
             });
             if (!isDeferred && state.flow.employeeStats.loaded && isManualAchievementTask(completedForAchievements)) {
@@ -7733,6 +7968,11 @@
                 .select("id,source_payload,task_status,completed_at,reopen_after,updated_at")
                 .single();
             if (error) throw error;
+            void writeTaskHistory({ ...row, ...payload, ...(data || {}) }, "task_deferred", {
+                title: displayTaskTitle(row),
+                reason,
+                reopen_after: reopenAfter,
+            });
             const activeRow = (state.review.rows || []).find((item) => item.id === id);
             if (activeRow) Object.assign(activeRow, data || payload);
             state.review.rows = (state.review.rows || []).filter((item) => item.id !== id || isActiveReviewTask(item));
@@ -8207,6 +8447,7 @@
                 readOptionalRows(db, RUNS_TABLE, (query) => query.select("*").gte("effective_date", range.start).lte("effective_date", range.end).order("effective_date", { ascending: false })),
                 readOptionalRows(db, LEGACY_RUNS_TABLE, (query) => query.select("*").gte("effective_date", range.start).lte("effective_date", range.end).order("effective_date", { ascending: false })),
             ]);
+            await loadWriteoffTerms();
             if (wmsSettings.rows.length) applySettings(wmsSettings.rows);
             if (legacySettings.rows.length) applySettings(legacySettings.rows);
             if (!wmsRuns.ok && !legacyRuns.ok) throw wmsRuns.error || legacyRuns.error || new Error("Не удалось прочитать журналы выгрузок.");
@@ -8230,6 +8471,1349 @@
         } catch (error) {
             console.warn("optional table read failed:", table, error);
             return { ok: false, rows: [], error };
+        }
+    }
+
+    async function loadWriteoffTerms(force) {
+        if (state.writeoffTerms.loaded && !force) return true;
+        const db = supabaseDb();
+        state.writeoffTerms.loading = true;
+        state.writeoffTerms.error = "";
+        renderWriteoffTermsModal();
+        if (!db) {
+            state.writeoffTerms.loading = false;
+            state.writeoffTerms.error = "Supabase SDK недоступен. Использую дефолтные сроки на этой странице.";
+            applyWriteoffTerms([]);
+            renderWriteoffTermsModal();
+            return false;
+        }
+        try {
+            const read = await readOptionalRows(db, WMS_WRITEOFF_TERMS_TABLE, (query) => query
+                .select("*")
+                .eq("wh_id", WH_ID)
+                .order("term_type", { ascending: true })
+                .order("sort_order", { ascending: true })
+                .order("term_key", { ascending: true }));
+            if (!read.ok) throw read.error || new Error("Не удалось прочитать сроки списания.");
+            applyWriteoffTerms(read.rows);
+            state.writeoffTerms.loaded = true;
+            return true;
+        } catch (error) {
+            applyWriteoffTerms([]);
+            state.writeoffTerms.error = "Не удалось загрузить сроки из Supabase. Проверь миграцию wms_writeoff_terms. Сейчас используются дефолты.";
+            console.warn("writeoff terms load skipped:", error);
+            return false;
+        } finally {
+            state.writeoffTerms.loading = false;
+            renderWriteoffTermsModal();
+        }
+    }
+
+    function writeoffTermInputRows() {
+        return Array.from(document.querySelectorAll("[data-writeoff-term-row]")).map((row, index) => {
+            const typeInput = row.querySelector("[data-writeoff-term-type]");
+            const keyInput = row.querySelector("[data-writeoff-term-key]");
+            const labelInput = row.querySelector("[data-writeoff-term-label]");
+            const daysInput = row.querySelector("[data-writeoff-term-days]");
+            const activeInput = row.querySelector("[data-writeoff-term-active]");
+            const termType = normalizeWriteoffTermType(typeInput && typeInput.value);
+            const termKey = normalizeWriteoffTermKey(keyInput && keyInput.value, termType);
+            if (!termKey) return null;
+            return {
+                wh_id: WH_ID,
+                term_type: termType,
+                term_key: termKey,
+                label: normalizeText(labelInput && labelInput.value) || termKey,
+                days_without_movement: Math.max(0, Math.trunc(settingNumber(daysInput && daysInput.value, 0))),
+                is_active: activeInput ? activeInput.checked : true,
+                sort_order: index + 1,
+                updated_by: normalizeText(currentWmsUser().id) || null,
+                updated_at: new Date().toISOString(),
+            };
+        }).filter(Boolean);
+    }
+
+    function writeoffTermRowHtml(row, lockedType) {
+        const type = normalizeWriteoffTermType(row && row.term_type);
+        const key = normalizeWriteoffTermKey(row && row.term_key, type);
+        const days = row && row.days_without_movement !== undefined && row.days_without_movement !== null ? row.days_without_movement : 0;
+        return "<div class='writeoff-term-row' data-writeoff-term-row>"
+            + "<input data-writeoff-term-type type='hidden' value='" + escapeHtml(type) + "'>"
+            + "<input data-writeoff-term-key type='text' value='" + escapeHtml(key) + "' placeholder='Статус' " + (lockedType ? "" : "") + ">"
+            + "<input data-writeoff-term-label type='text' value='" + escapeHtml(row && row.label || key) + "' placeholder='Название'>"
+            + "<input data-writeoff-term-days type='number' min='0' step='1' value='" + escapeHtml(days) + "'>"
+            + "<label class='writeoff-term-active'><input data-writeoff-term-active type='checkbox' " + (row && row.is_active === false ? "" : "checked") + "> активен</label>"
+            + "</div>";
+    }
+
+    function renderWriteoffRecommendationsHtml() {
+        const reco = state.writeoffTerms.recommendations || {};
+        const summary = reco.summary || {};
+        const rows = Array.isArray(reco.rows) ? reco.rows : [];
+        const capacityRows = Array.isArray(reco.capacityRows) ? reco.capacityRows : [];
+        const problemSections = Array.isArray(reco.problemSections) ? reco.problemSections : [];
+        const statusPriorities = Array.isArray(reco.statusPriorities) ? reco.statusPriorities : [];
+        const summaryHtml = summary.activeTasks !== undefined
+            ? "<div class='writeoff-reco-summary'>"
+                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.priorityStatusCount || 0) + "</strong><span>Приоритетных статусов</span></div>"
+                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.ruleCount) + "</strong><span>Правил в расчете</span></div>"
+                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.moveOnlineCount) + "</strong><span>Можно вернуть ближе к онлайну</span></div>"
+                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.deferCount) + "</strong><span>Стоит отодвинуть из-за нагрузки</span></div>"
+                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.riskCount) + "</strong><span>Есть риск по безопасному окну</span></div>"
+            + "</div>"
+            : "";
+        const capacityHtml = capacityRows.length
+            ? "<div class='writeoff-reco-capacity'>" + capacityRows.map((row) => {
+                const source = row.source === "history" ? "среднее" : "оценка";
+                return "<span class='writeoff-reco-pill'>" + escapeHtml(row.moduleLabel) + ": " + escapeHtml(row.capacity) + " ШК/день, " + escapeHtml(source) + "</span>";
+            }).join("") + "</div>"
+            : "";
+        const statusHtml = statusPriorities.length
+            ? "<div class='writeoff-reco-statuses'>" + statusPriorities.slice(0, 12).map((row) => "<article class='writeoff-reco-status " + escapeHtml(row.tierClass || "") + "'>"
+                + "<strong>#" + escapeHtml(row.rank) + " " + escapeHtml(row.status) + " · " + escapeHtml(row.tierLabel) + "</strong>"
+                + "<span>" + escapeHtml(row.reason) + "</span>"
+                + "<span>Где лежит: " + escapeHtml((row.moduleLabels || []).join("; ") || "участки не выделены") + "</span>"
+            + "</article>").join("") + "</div>"
+            : "";
+        const tableHtml = rows.length
+            ? "<div class='writeoff-reco-table-wrap'><table class='writeoff-reco-table'><thead><tr>"
+                + "<th>Участок</th><th>Статус</th><th>Списание</th><th>Сейчас</th><th>Рекомендую</th><th>Сегодня брать дату</th><th>Нагрузка</th><th>Упор</th><th>Причина</th>"
+            + "</tr></thead><tbody>"
+            + rows.map((row) => "<tr class='" + (row.risk ? "writeoff-reco-row-risk" : "") + "'>"
+                + "<td><strong>" + escapeHtml(row.moduleLabel) + "</strong></td>"
+                + "<td>" + escapeHtml(row.driverStatus || "Без статуса") + "</td>"
+                + "<td>" + escapeHtml(row.writeoffTermLabel) + "</td>"
+                + "<td>" + escapeHtml(row.currentLabel) + "</td>"
+                + "<td><strong>" + escapeHtml(row.recommendedLabel) + "</strong><br><span class='writeoff-reco-note'>" + escapeHtml(row.changeLabel) + "</span></td>"
+                + "<td>" + escapeHtml(formatRuDate(row.recommendedBusinessDate)) + (row.gapLabel ? "<span class='writeoff-reco-gap'>" + escapeHtml(row.gapLabel) + "</span>" : "") + "</td>"
+                + "<td>" + escapeHtml(row.loadLabel) + "</td>"
+                + "<td class='writeoff-reco-focus'>" + escapeHtml(row.focusLabel || "Без отдельного упора") + "</td>"
+                + "<td class='writeoff-reco-note'>" + escapeHtml(row.note) + "</td>"
+            + "</tr>").join("")
+            + "</tbody></table></div>"
+            : reco.loading ? "" : "<div class='status-line'>" + (summary.activeTasks !== undefined ? "Нет активных задач для планирования." : "Рекомендации еще не рассчитаны. Нажмите “Рассчитать рекомендации”.") + "</div>";
+        return "<section class='writeoff-term-section'><h4>Рекомендованные сроки выгрузок</h4>"
+            + "<p>Это не план разбора уже созданных задач. Это подсказка, какой срез данных брать сегодня: ближе к онлайну в спокойные дни и глубже в прошлое, если участок перегружен или есть риск списания.</p>"
+            + (reco.loading ? "<div class='status-line'>Считаю рекомендации по текущим срокам, хвостам задач, журналу выгрузок и ручной мощности за последние 14 дней...</div>" : "")
+            + (reco.error ? "<div class='status-line error'>" + escapeHtml(reco.error) + "</div>" : "")
+            + summaryHtml
+            + capacityHtml
+            + statusHtml
+            + tableHtml
+            + (reco.generatedAt ? "<p>Обновлено: " + escapeHtml(formatRuDateTime(reco.generatedAt)) + "</p>" : "")
+            + "</section>";
+    }
+
+    function renderWriteoffTermsModal() {
+        const target = $("writeoffTermsWrap");
+        if (!target) return;
+        const rows = state.writeoffTerms.rows || defaultWriteoffTerms();
+        const statusRows = rows.filter((row) => normalizeWriteoffTermType(row.term_type) === "status");
+        const lrRows = rows.filter((row) => normalizeWriteoffTermType(row.term_type) === "lr");
+        const statusHtml = statusRows.map((row) => writeoffTermRowHtml(row, true)).join("");
+        const lrHtml = lrRows.map((row) => writeoffTermRowHtml(row, true)).join("");
+        target.innerHTML = (state.writeoffTerms.error ? "<div class='status-line error'>" + escapeHtml(state.writeoffTerms.error) + "</div>" : "")
+            + (state.writeoffTerms.loading ? "<div class='status-line'>Загружаю сроки списания...</div>" : "")
+            + "<section class='writeoff-term-section'><h4>Статусы WMS</h4><p>Дата списания = дата последнего движения ШК + срок статуса. Для тары берется самая ранняя дата списания среди ШК.</p>"
+            + "<div class='writeoff-term-head'><span>Код</span><span>Название</span><span>Дней</span><span>Вкл.</span></div>"
+            + "<div class='writeoff-term-list'>" + statusHtml + "</div></section>"
+            + "<section class='writeoff-term-section'><h4>Дополнительно</h4><p>Срок 26LR пока просто хранится здесь, без влияния на задачи.</p>"
+            + "<div class='writeoff-term-head'><span>Ключ</span><span>Название</span><span>Дней</span><span>Вкл.</span></div>"
+            + "<div class='writeoff-term-list'>" + (lrHtml || writeoffTermRowHtml({ term_type: "lr", term_key: "26LR", label: "26LR", days_without_movement: 0, is_active: true }, true)) + "</div></section>"
+            + "<section class='writeoff-term-section'><h4>Добавить статус</h4>"
+            + "<div class='writeoff-term-add'><input id='newWriteoffStatusKey' type='text' placeholder='Например: ABC'><input id='newWriteoffStatusDays' type='number' min='0' step='1' placeholder='Дней'><button id='addWriteoffStatus' class='btn btn-outline' type='button'>Добавить</button></div></section>"
+            + renderWriteoffRecommendationsHtml();
+        const add = $("addWriteoffStatus");
+        if (add) add.addEventListener("click", addWriteoffStatusDraft);
+    }
+
+    function addWriteoffStatusDraft() {
+        const keyInput = $("newWriteoffStatusKey");
+        const daysInput = $("newWriteoffStatusDays");
+        const key = normalizeWriteoffTermKey(keyInput && keyInput.value, "status");
+        if (!key) {
+            toast("Укажите код статуса.", "error");
+            return;
+        }
+        const rows = writeoffTermInputRows();
+        const exists = rows.some((row) => row.term_type === "status" && row.term_key === key);
+        if (exists) {
+            toast("Такой статус уже есть в списке.", "error");
+            return;
+        }
+        state.writeoffTerms.rows = rows.concat({
+            wh_id: WH_ID,
+            term_type: "status",
+            term_key: key,
+            label: key,
+            days_without_movement: Math.max(0, Math.trunc(settingNumber(daysInput && daysInput.value, 0))),
+            is_active: true,
+            sort_order: rows.length + 1,
+        }).sort(writeoffTermSort);
+        renderWriteoffTermsModal();
+    }
+
+    function openStatusPilotModal() {
+        if (!ensureDevelopmentAccess("Статусный штурман")) return;
+        closeFlowModals();
+        setFlowModalOpen("statusPilotModal", true);
+    }
+
+    function closeStatusPilotModal() {
+        setFlowModalOpen("statusPilotModal", false);
+    }
+
+    function moscowDayBoundsUtc(isoDate) {
+        const date = normalizeText(isoDate) || state.today || todayIsoInMoscow();
+        const start = new Date(date + "T00:00:00+03:00");
+        const safeStart = Number.isFinite(start.getTime()) ? start : new Date((state.today || todayIsoInMoscow()) + "T00:00:00+03:00");
+        const end = new Date(safeStart.getTime() + 24 * 60 * 60 * 1000);
+        return { start: safeStart.toISOString(), end: end.toISOString() };
+    }
+
+    function staffStatsKey(id, name) {
+        return normalizeIdentifier(id) || normalizeForMatch(name) || "unknown";
+    }
+
+    function createStaffStatsRow(id, name) {
+        const cleanId = normalizeIdentifier(id);
+        const cleanName = normalizeText(name) || (cleanId ? "Сотрудник " + cleanId : "Не определено");
+        return {
+            key: staffStatsKey(cleanId, cleanName),
+            id: cleanId,
+            name: cleanName,
+            tasksCompleted: 0,
+            requestsCompleted: 0,
+            prespisokTargets: 0,
+            prespisokShk: 0,
+            noShkFound: 0,
+            noShkChecked: 0,
+            deferred: 0,
+            verdicts: {},
+            sections: {},
+            details: {
+                tasks: [],
+                requests: [],
+                prespisok: [],
+                noShk: [],
+                deferred: [],
+            },
+        };
+    }
+
+    function ensureStaffStatsRow(map, id, name) {
+        const key = staffStatsKey(id, name);
+        if (!map.has(key)) map.set(key, createStaffStatsRow(id, name));
+        const row = map.get(key);
+        if (!row.id && normalizeIdentifier(id)) row.id = normalizeIdentifier(id);
+        if ((!row.name || row.name === "Не определено" || row.name.startsWith("Сотрудник ")) && normalizeText(name)) row.name = normalizeText(name);
+        return row;
+    }
+
+    function incrementCounter(target, key, amount) {
+        const cleanKey = normalizeText(key) || "Не указано";
+        target[cleanKey] = (Number(target[cleanKey]) || 0) + (Number(amount) || 1);
+    }
+
+    function staffStatsTaskActor(row, historyRow) {
+        return taskCompletionActor(row, historyRow);
+    }
+
+    function staffStatsNoShkActor(row) {
+        const payload = taskPayload(row);
+        const review = taskReviewPayload(row);
+        const noShk = payload.no_shk_review && typeof payload.no_shk_review === "object" && !Array.isArray(payload.no_shk_review) ? payload.no_shk_review : {};
+        return {
+            id: normalizeIdentifier(noShk.checked_by_id) || normalizeIdentifier(review.completed_by_id) || normalizeIdentifier(row && row.assignee_employee_id),
+            name: normalizeText(noShk.checked_by_name) || normalizeText(review.completed_by_name) || normalizeText(row && row.assignee_name),
+        };
+    }
+
+    function staffStatsPrespisokActor(row) {
+        const payload = row && row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : {};
+        const actor = payload.actor && typeof payload.actor === "object" && !Array.isArray(payload.actor) ? payload.actor : {};
+        return {
+            id: normalizeIdentifier(actor.id) || normalizeIdentifier(row && row.operator_id),
+            name: normalizeText(actor.name) || normalizeText(row && row.operator_name),
+        };
+    }
+
+    function staffStatsHistoryActor(row) {
+        return {
+            id: normalizeIdentifier(row && row.actor_employee_id),
+            name: normalizeText(row && row.actor_name),
+        };
+    }
+
+    function sourceShkCountFromPrespisokAction(row) {
+        const payload = row && row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : {};
+        const ids = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : Array.isArray(payload.source_shk_ids) ? payload.source_shk_ids : [];
+        return ids.map(normalizeIdentifier).filter(Boolean).length || 1;
+    }
+
+    function staffStatsActivityScore(row) {
+        return row.tasksCompleted + row.requestsCompleted + row.prespisokShk + row.noShkChecked + row.deferred;
+    }
+
+    function isQuickNoShkVerdict(value) {
+        const normalized = normalizeForMatch(value);
+        return normalized === normalizeForMatch(SYSTEM_NO_SHK_NOT_FOUND_VERDICT)
+            || normalized === normalizeForMatch(SYSTEM_NO_SHK_FOUND_VERDICT);
+    }
+
+    function isQuickNoShkFoundResult(value) {
+        const normalized = normalizeForMatch(value);
+        if (!normalized || normalized.includes("не найден")) return false;
+        return normalized === normalizeForMatch(SYSTEM_NO_SHK_FOUND_VERDICT)
+            || normalized.includes("обнаружен")
+            || normalized === "найден";
+    }
+
+    function staffStatsSummaryFromEmployees(employees) {
+        const summary = {
+            employees: 0,
+            tasksCompleted: 0,
+            requestsCompleted: 0,
+            prespisokShk: 0,
+            noShkFound: 0,
+            deferred: 0,
+            verdicts: 0,
+        };
+        (employees || []).forEach((row) => {
+            if (staffStatsActivityScore(row) > 0) summary.employees += 1;
+            summary.tasksCompleted += row.tasksCompleted;
+            summary.requestsCompleted += row.requestsCompleted;
+            summary.prespisokShk += row.prespisokShk;
+            summary.noShkFound += row.noShkFound;
+            summary.deferred += row.deferred;
+            summary.verdicts += Object.values(row.verdicts || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+        });
+        return summary;
+    }
+
+    function buildStaffStats(tasks, historyRows, prespisokActions, employees, date) {
+        const byEmployee = new Map();
+        (employees || []).forEach((employee) => {
+            ensureStaffStatsRow(byEmployee, employee.employee_id || employee.id, employee.full_name || employee.name);
+        });
+        const historyDeferredTaskIds = new Set();
+        const completedHistoryByTaskId = new Map();
+        (historyRows || []).filter((row) => normalizeText(row.event_type) === "task_completed" && moscowDateFromValue(row.created_at) === date).forEach((row) => {
+            const taskId = normalizeText(row.task_id);
+            if (taskId && !completedHistoryByTaskId.has(taskId)) completedHistoryByTaskId.set(taskId, row);
+        });
+        (historyRows || []).filter((row) => normalizeText(row.event_type) === "task_deferred" && moscowDateFromValue(row.created_at) === date).forEach((row) => {
+            const actor = staffStatsHistoryActor(row);
+            const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
+            const payload = row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : {};
+            employee.deferred += 1;
+            if (payload.verdict) incrementCounter(employee.verdicts, payload.verdict, 1);
+            historyDeferredTaskIds.add(normalizeText(row.task_id));
+            employee.details.deferred.push({
+                title: normalizeText(payload.title) || "Отложенная задача",
+                meta: [payload.verdict ? "Вердикт: " + payload.verdict : "", payload.reopen_after ? "Переоткрытие: " + formatRuDateTime(payload.reopen_after) : "", formatRuDateTime(row.created_at)].filter(Boolean).join(" · "),
+            });
+        });
+        (tasks || []).forEach((row) => {
+            const completedDate = moscowDateFromValue(row.completed_at);
+            const manualCompleted = completedDate === date && isManualAchievementTask(row);
+            if (manualCompleted) {
+                const actor = staffStatsTaskActor(row, completedHistoryByTaskId.get(normalizeText(row.id)));
+                const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
+                const requestSection = requestSectionName(row);
+                const section = requestSection || taskSectionName(row);
+                const verdict = normalizeText(row.opp_verdict) || "Не выбран";
+                employee.tasksCompleted += 1;
+                if (requestSection === "Запросы входящего потока") employee.requestsCompleted += 1;
+                incrementCounter(employee.verdicts, verdict, 1);
+                incrementCounter(employee.sections, section, 1);
+                const detail = {
+                    id: row.id,
+                    title: displayTaskTitle(row),
+                    meta: [section, verdict, formatMoney(reviewPrice(row)), formatRuDateTime(row.completed_at || row.updated_at)].filter(Boolean).join(" · "),
+                };
+                employee.details.tasks.push(detail);
+                if (requestSection === "Запросы входящего потока") employee.details.requests.push(detail);
+            }
+            const review = taskReviewPayload(row);
+            const payload = taskPayload(row);
+            const noShk = payload.no_shk_review && typeof payload.no_shk_review === "object" && !Array.isArray(payload.no_shk_review) ? payload.no_shk_review : {};
+            const noShkAt = normalizeText(noShk.checked_at) || normalizeText(review.no_shk_checked_at) || (isQuickNoShkVerdict(row.opp_verdict) ? row.completed_at : "");
+            if (moscowDateFromValue(noShkAt) === date && (noShk.result || isQuickNoShkVerdict(row.opp_verdict))) {
+                const actor = staffStatsNoShkActor(row);
+                const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
+                const result = normalizeText(noShk.result) || normalizeText(row.opp_verdict);
+                employee.noShkChecked += 1;
+                if (isQuickNoShkFoundResult(result)) employee.noShkFound += 1;
+                incrementCounter(employee.verdicts, result, 1);
+                employee.details.noShk.push({
+                    id: row.id,
+                    title: displayTaskTitle(row),
+                    meta: [result, noShk.shk ? "ШК " + noShk.shk : "", noShk.name || taskItemName(row), formatRuDateTime(noShkAt)].filter(Boolean).join(" · "),
+                });
+            }
+            const deferredAt = normalizeText(review.deferred_at);
+            if (deferredAt && moscowDateFromValue(deferredAt) === date && !historyDeferredTaskIds.has(normalizeText(row.id))) {
+                const employee = ensureStaffStatsRow(byEmployee, review.deferred_by_id, review.deferred_by_name);
+                employee.deferred += 1;
+                employee.details.deferred.push({
+                    id: row.id,
+                    title: displayTaskTitle(row),
+                    meta: [review.defer_reason ? "Причина: " + review.defer_reason : "", review.reopen_after ? "Переоткрытие: " + formatRuDateTime(review.reopen_after) : "", formatRuDateTime(deferredAt)].filter(Boolean).join(" · "),
+                });
+            }
+        });
+        (prespisokActions || []).filter((row) => moscowDateFromValue(row.created_at) === date).forEach((row) => {
+            const actor = staffStatsPrespisokActor(row);
+            const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
+            const shkCount = sourceShkCountFromPrespisokAction(row);
+            const verdict = normalizeText(row.verdict) || "Не указан";
+            employee.prespisokTargets += 1;
+            employee.prespisokShk += shkCount;
+            incrementCounter(employee.verdicts, verdict, 1);
+            employee.details.prespisok.push({
+                title: normalizeText(row.entity_type) === "tare" ? "Тара " + normalizeText(row.entity_id) : "ШК " + normalizeText(row.entity_id),
+                meta: [verdict, shkCount + " ШК", formatMoney(row.price), formatRuDateTime(row.created_at)].filter(Boolean).join(" · "),
+            });
+        });
+        const rows = Array.from(byEmployee.values())
+            .filter((row) => staffStatsActivityScore(row) > 0)
+            .sort((a, b) => staffStatsActivityScore(b) - staffStatsActivityScore(a) || a.name.localeCompare(b.name, "ru"));
+        return { employees: rows, summary: staffStatsSummaryFromEmployees(rows) };
+    }
+
+    function renderStaffStatsModal() {
+        const dateInput = $("staffStatsDate");
+        if (dateInput && dateInput.value !== state.staffStats.date) dateInput.value = state.staffStats.date;
+        const status = $("staffStatsStatus");
+        const summaryWrap = $("staffStatsSummary");
+        const grid = $("staffStatsGrid");
+        const detail = $("staffStatsDetail");
+        if (status) {
+            status.textContent = state.staffStats.loading
+                ? "Собираю пульс смены. Считаю руками, без бухгалтерской магии."
+                : state.staffStats.error || (state.staffStats.loaded ? "Статистика за " + formatRuDate(state.staffStats.date) + "." : "");
+            status.style.color = state.staffStats.error ? "#b91c1c" : "#64748b";
+        }
+        if (!summaryWrap || !grid || !detail) return;
+        if (state.staffStats.loading) {
+            summaryWrap.innerHTML = "";
+            grid.innerHTML = "<div class='staff-stats-empty'>Загружаю события смены...</div>";
+            detail.innerHTML = "";
+            return;
+        }
+        const summary = state.staffStats.summary || {};
+        summaryWrap.innerHTML = [
+            ["Сотрудников", summary.employees || 0],
+            ["Ручных задач", summary.tasksCompleted || 0],
+            ["Запросов", summary.requestsCompleted || 0],
+            ["ШК предсписка", summary.prespisokShk || 0],
+            ["Без ШК найдено", summary.noShkFound || 0],
+            ["Отложено", summary.deferred || 0],
+        ].map((item) => "<div class='staff-stat-tile'><span>" + escapeHtml(item[0]) + "</span><strong>" + escapeHtml(item[1]) + "</strong></div>").join("");
+        if (!state.staffStats.employees.length) {
+            grid.innerHTML = "<div class='staff-stats-empty'>За эту дату пока нет действий. Тишина подозрительная, но статистически допустимая.</div>";
+            detail.innerHTML = "";
+            return;
+        }
+        if (!state.staffStats.selectedKey || !state.staffStats.employees.some((row) => row.key === state.staffStats.selectedKey)) {
+            state.staffStats.selectedKey = state.staffStats.employees[0].key;
+        }
+        grid.innerHTML = state.staffStats.employees.map((employee) => {
+            const topVerdicts = Object.entries(employee.verdicts || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+            return "<button class='staff-card" + (employee.key === state.staffStats.selectedKey ? " active" : "") + "' type='button' data-staff-stats-key='" + escapeHtml(employee.key) + "'>"
+                + "<h4>" + escapeHtml(employee.name) + "</h4>"
+                + "<p>" + escapeHtml(employee.id ? "ID " + employee.id : "ID не указан") + "</p>"
+                + "<div class='staff-card-stats'>"
+                + "<div class='staff-card-stat'><span>Задачи</span><strong>" + employee.tasksCompleted + "</strong></div>"
+                + "<div class='staff-card-stat'><span>Запросы</span><strong>" + employee.requestsCompleted + "</strong></div>"
+                + "<div class='staff-card-stat'><span>Предсписок</span><strong>" + employee.prespisokShk + "</strong></div>"
+                + "<div class='staff-card-stat'><span>Без ШК</span><strong>" + employee.noShkFound + "</strong></div>"
+                + "<div class='staff-card-stat'><span>Отложил</span><strong>" + employee.deferred + "</strong></div>"
+                + "<div class='staff-card-stat'><span>Вердикты</span><strong>" + Object.values(employee.verdicts || {}).reduce((sum, value) => sum + value, 0) + "</strong></div>"
+                + "</div>"
+                + "<div class='staff-verdict-strip'>" + (topVerdicts.length ? topVerdicts.map(([label, count]) => "<span class='staff-verdict-chip'>" + escapeHtml(label) + ": " + count + "</span>").join("") : "<span class='staff-verdict-chip'>Вердиктов нет</span>") + "</div>"
+                + "</button>";
+        }).join("");
+        grid.querySelectorAll("[data-staff-stats-key]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.staffStats.selectedKey = button.dataset.staffStatsKey || "";
+                state.staffStats.activeTab = "tasks";
+                renderStaffStatsModal();
+            });
+        });
+        renderStaffStatsDetail();
+    }
+
+    function staffStatsTabRows(employee, tab) {
+        if (!employee) return [];
+        if (tab === "verdicts") {
+            return Object.entries(employee.verdicts || {})
+                .sort((a, b) => b[1] - a[1])
+                .map(([label, count]) => ({ title: label, meta: count + " раз" }));
+        }
+        if (tab === "sections") {
+            return Object.entries(employee.sections || {})
+                .sort((a, b) => b[1] - a[1])
+                .map(([label, count]) => ({ title: label, meta: count + " задач" }));
+        }
+        return employee.details[tab] || [];
+    }
+
+    function renderStaffStatsDetail() {
+        const detail = $("staffStatsDetail");
+        if (!detail) return;
+        const employee = (state.staffStats.employees || []).find((row) => row.key === state.staffStats.selectedKey);
+        if (!employee) {
+            detail.innerHTML = "";
+            return;
+        }
+        const tabs = [
+            ["tasks", "Задачи", employee.details.tasks.length],
+            ["requests", "Запросы", employee.details.requests.length],
+            ["prespisok", "Предсписок", employee.details.prespisok.length],
+            ["noShk", "Без ШК", employee.details.noShk.length],
+            ["deferred", "Отложения", employee.details.deferred.length],
+            ["verdicts", "Вердикты", Object.keys(employee.verdicts || {}).length],
+            ["sections", "Участки", Object.keys(employee.sections || {}).length],
+        ];
+        const active = tabs.some(([key]) => key === state.staffStats.activeTab) ? state.staffStats.activeTab : "tasks";
+        state.staffStats.activeTab = active;
+        const rows = staffStatsTabRows(employee, active);
+        detail.innerHTML = "<div class='staff-stats-detail-head'><div><h4 class='staff-stats-detail-title'>" + escapeHtml(employee.name) + "</h4><p class='staff-stats-detail-sub'>" + escapeHtml([employee.id ? "ID " + employee.id : "", "дата " + formatRuDate(state.staffStats.date)].filter(Boolean).join(" · ")) + "</p></div></div>"
+            + "<div class='staff-detail-tabs'>" + tabs.map(([key, label, count]) => "<button class='staff-detail-tab" + (key === active ? " active" : "") + "' type='button' data-staff-stats-tab='" + escapeHtml(key) + "'>" + escapeHtml(label + " · " + count) + "</button>").join("") + "</div>"
+            + "<div class='staff-detail-list'>" + (rows.length ? rows.map((row) => "<div class='staff-detail-row" + (row.id ? " copyable" : "") + "' " + (row.id ? "data-staff-task-id='" + escapeHtml(row.id) + "'" : "") + "><strong>" + escapeHtml(row.title || "-") + "</strong><span>" + escapeHtml(row.meta || "-") + "</span></div>").join("") : "<div class='staff-stats-empty'>В этом разделе пусто.</div>") + "</div>";
+        detail.querySelectorAll("[data-staff-stats-tab]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.staffStats.activeTab = button.dataset.staffStatsTab || "tasks";
+                renderStaffStatsDetail();
+            });
+        });
+        detail.querySelectorAll("[data-staff-task-id]").forEach((row) => {
+            row.addEventListener("click", () => {
+                const id = row.dataset.staffTaskId;
+                if (!id) return;
+                const sourceRow = state.staffStats.taskRowsById && state.staffStats.taskRowsById[id];
+                if (sourceRow && !findTaskRow(id)) {
+                    state.taskSearch.rows = [sourceRow].concat(state.taskSearch.rows || []).slice(0, 25);
+                }
+                closeStaffStatsModal();
+                openTaskDetail(id, "inactive");
+            });
+        });
+    }
+
+    async function loadStaffStats() {
+        const db = supabaseDb();
+        if (!db) {
+            state.staffStats.error = "Supabase SDK недоступен.";
+            renderStaffStatsModal();
+            return;
+        }
+        const date = state.staffStats.date || state.today || todayIsoInMoscow();
+        const bounds = moscowDayBoundsUtc(date);
+        state.staffStats.loading = true;
+        state.staffStats.error = "";
+        renderStaffStatsModal();
+        try {
+            const [completedRead, updatedRead, historyRead, prespisokRead, employeesRead] = await Promise.all([
+                db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("completed_at", bounds.start).lt("completed_at", bounds.end).order("completed_at", { ascending: false, nullsFirst: false }).limit(10000),
+                db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("updated_at", bounds.start).lt("updated_at", bounds.end).order("updated_at", { ascending: false, nullsFirst: false }).limit(10000),
+                readOptionalRows(db, FLOW_HISTORY_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
+                readOptionalRows(db, WMS_PRESPISOK_ACTIONS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
+                readOptionalRows(db, WMS_EMPLOYEES_TABLE, (query) => query.select("*").eq("is_active", true).order("full_name", { ascending: true })),
+            ]);
+            if (completedRead.error) throw completedRead.error;
+            if (updatedRead.error) throw updatedRead.error;
+            const byId = new Map();
+            [...(completedRead.data || []), ...(updatedRead.data || [])].forEach((row) => {
+                if (row && row.id) byId.set(row.id, row);
+            });
+            state.staffStats.taskRowsById = Object.fromEntries(Array.from(byId.values()).filter((row) => row && row.id).map((row) => [row.id, row]));
+            const built = buildStaffStats(
+                Array.from(byId.values()),
+                historyRead.ok ? historyRead.rows : [],
+                prespisokRead.ok ? prespisokRead.rows : [],
+                employeesRead.ok ? employeesRead.rows : state.shift.employees,
+                date,
+            );
+            state.staffStats.employees = built.employees;
+            state.staffStats.summary = built.summary;
+            state.staffStats.loaded = true;
+            if (!state.staffStats.selectedKey && built.employees[0]) state.staffStats.selectedKey = built.employees[0].key;
+        } catch (error) {
+            console.error("staff stats failed:", error);
+            state.staffStats.error = "Не удалось собрать статистику: " + (error && error.message ? error.message : String(error));
+            state.staffStats.employees = [];
+            state.staffStats.summary = null;
+            state.staffStats.taskRowsById = {};
+        } finally {
+            state.staffStats.loading = false;
+            renderStaffStatsModal();
+        }
+    }
+
+    function openStaffStatsModal() {
+        if (!ensureDevelopmentAccess("Пульс смены")) return;
+        closeFlowModals();
+        state.staffStats.date = state.staffStats.date || state.today || todayIsoInMoscow();
+        setFlowModalOpen("staffStatsModal", true);
+        renderStaffStatsModal();
+        void loadStaffStats();
+    }
+
+    function closeStaffStatsModal() {
+        setFlowModalOpen("staffStatsModal", false);
+    }
+
+    async function openWriteoffTermsModal() {
+        if (!ensureDevelopmentAccess("Сроки списания")) return;
+        closeFlowModals();
+        setFlowModalOpen("writeoffTermsModal", true);
+        renderWriteoffTermsModal();
+        await loadWriteoffTerms(true);
+        if (!state.writeoffTerms.recommendations.summary && !state.writeoffTerms.recommendations.loading) {
+            void refreshWriteoffRecommendations();
+        }
+    }
+
+    function closeWriteoffTermsModal() {
+        setFlowModalOpen("writeoffTermsModal", false);
+    }
+
+    async function saveWriteoffTermsFromModal() {
+        const db = supabaseDb();
+        const status = $("writeoffTermsStatus");
+        const button = $("saveWriteoffTerms");
+        const rows = writeoffTermInputRows();
+        if (!rows.length) {
+            if (status) status.textContent = "Нет строк для сохранения.";
+            return;
+        }
+        state.writeoffTerms.rows = rows.sort(writeoffTermSort);
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен. На этой странице сроки применены, но не сохранены.";
+            return;
+        }
+        if (button) button.disabled = true;
+        state.writeoffTerms.saving = true;
+        if (status) status.textContent = "Сохраняю сроки списания...";
+        try {
+            const { error } = await db
+                .from(WMS_WRITEOFF_TERMS_TABLE)
+                .upsert(rows, { onConflict: "wh_id,term_type,term_key" });
+            if (error) throw error;
+            state.writeoffTerms.loaded = true;
+            state.writeoffTerms.error = "";
+            state.writeoffTerms.recommendations.rows = [];
+            state.writeoffTerms.recommendations.capacityRows = [];
+            state.writeoffTerms.recommendations.problemSections = [];
+            state.writeoffTerms.recommendations.statusPriorities = [];
+            state.writeoffTerms.recommendations.summary = null;
+            state.writeoffTerms.recommendations.generatedAt = "";
+            if (status) status.textContent = "Сроки сохранены. Новые выгрузки будут считать дату списания по этим значениям.";
+            toast("Сроки списания сохранены.", "success");
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            state.writeoffTerms.error = "Не удалось сохранить сроки: " + message;
+            if (status) status.textContent = state.writeoffTerms.error;
+        } finally {
+            state.writeoffTerms.saving = false;
+            if (button) button.disabled = false;
+            renderWriteoffTermsModal();
+        }
+    }
+
+    async function recalculateWriteoffDatesFromModal() {
+        const db = supabaseDb();
+        const status = $("writeoffTermsStatus");
+        const button = $("recalculateWriteoffDates");
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен, пересчитать активные задачи не получится.";
+            return;
+        }
+        if (button) button.disabled = true;
+        if (status) status.textContent = "Пересчитываю даты списания у активных задач...";
+        try {
+            const { data, error } = await db.rpc("recalculate_wms_task_writeoff_dates", { p_wh_id: WH_ID });
+            if (error) throw error;
+            const updated = Number(data && data.updated_count) || 0;
+            if (status) status.textContent = "Пересчет готов. Обновлено активных задач: " + updated + ".";
+            toast("Даты списания пересчитаны: " + updated + ".", "success");
+            state.review.loaded = false;
+            await loadReviewTasks();
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            if (status) status.textContent = "Не удалось пересчитать: " + message;
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    function planningTaskItemsCount(row) {
+        const items = taskItems(row);
+        const sourceIds = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
+        return Math.max(1, items.length, sourceIds.length);
+    }
+
+    function planningWriteoffInfo(row) {
+        const items = taskItems(row);
+        const computed = items.length
+            ? writeoffDateInfoForRows(items.map((item) => ({
+                product: item.shk,
+                status: item.status,
+                last_movement: item.movement,
+                status_at: item.movement,
+            })), "")
+            : null;
+        if (computed && computed.date) return computed;
+        const payload = taskPayload(row);
+        const payloadDate = normalizeText(payload.writeoff_date || row && row.due_date);
+        const parsed = parseDateTime(payloadDate);
+        return {
+            date: parsed.date || payloadDate || "",
+            source: payload.writeoff_date ? "stored" : "fallback",
+            basis: payload.writeoff_date_basis || null,
+            candidates: Array.isArray(payload.writeoff_date_candidates) ? payload.writeoff_date_candidates : [],
+        };
+    }
+
+    function planningTaskStatus(row, writeoffInfo) {
+        const basis = writeoffInfo && writeoffInfo.basis;
+        const fromBasis = normalizeWriteoffTermKey(basis && (basis.status_key || basis.status_raw || basis.status_label), "status");
+        if (fromBasis) return fromBasis;
+        const fromItems = taskItems(row).map((item) => normalizeWriteoffTermKey(item.status, "status")).filter(Boolean);
+        if (fromItems.length) return fromItems[0];
+        const fromPayload = normalizeWriteoffTermKey(taskPayload(row).status || taskPayload(row).last_status, "status");
+        return fromPayload || "Без статуса";
+    }
+
+    function planningTaskSection(row) {
+        return requestSectionName(row) || taskSectionName(row);
+    }
+
+    function planningModuleKey(row) {
+        if (!row || requestSectionName(row) || isPrespisokTask(row)) return "";
+        const sourceModule = normalizeForMatch(row.source_module);
+        const uploadType = normalizeForMatch(row.upload_type);
+        const taskType = normalizeForMatch(row.task_type);
+        if (sourceModule.includes("manual_packaging") || uploadType === "packaging") return taskType.includes("rwp") ? "rwp" : "packaging";
+        if (sourceModule.includes("manual_rwp") || uploadType === "rwp") return "rwp";
+        if (sourceModule.includes("manual_pm") || uploadType === "pm_buffer") return "pm";
+        if (sourceModule.includes("manual_presort") || uploadType === "presort") return taskType.includes("оклейка") ? "labeling" : "presort";
+        if (sourceModule.includes("manual_wmi") || uploadType === "wmi_mp_pc") return "wmi_mp_pc";
+        if (sourceModule.includes("manual_marketplace") || uploadType === "marketplace_pc") {
+            if (taskType.includes("пц")) return "pc";
+            if (taskType.includes("маркетплейс")) return "marketplace";
+            return "marketplace_pc";
+        }
+        if (sourceModule.includes("manual_no_order") || uploadType === "no_order") {
+            if (taskType.includes("usd")) return "usd";
+            if (taskType.includes("tmm")) return "tmm";
+            return "no_order";
+        }
+        if (sourceModule.includes("manual_after_sale") || uploadType === "after_sale_movement") return "after_sale_movement";
+        return "";
+    }
+
+    function uploadAgeFromOffset(offsetDays) {
+        return Math.max(0, Math.trunc(-settingNumber(offsetDays, 0)));
+    }
+
+    function uploadOffsetFromAge(ageDays) {
+        return -Math.max(0, Math.trunc(settingNumber(ageDays, 0)));
+    }
+
+    function uploadAgeLabel(ageDays, offsetDays) {
+        const age = Math.max(0, Math.trunc(settingNumber(ageDays, 0)));
+        const offset = uploadOffsetFromAge(age);
+        return "на " + age + "-й день без движения (" + offset + ")";
+    }
+
+    function branchSummaryCount(run, module) {
+        const summary = run && run.summary && typeof run.summary === "object" && !Array.isArray(run.summary) ? run.summary : parseJsonSafe(run && run.summary, {});
+        const tasksCount = Number(run && run.tasks_count) || 0;
+        const byModule = {
+            packaging: tasksCount,
+            rwp: tasksCount,
+            pm: tasksCount,
+            presort: Number(summary.presortTasks) || 0,
+            labeling: Number(summary.labelingTasks) || 0,
+            marketplace: Number(summary.marketplaceTasks) || 0,
+            pc: Number(summary.pcTasks) || 0,
+            marketplace_pc: tasksCount,
+            wmi_mp_pc: Number(summary.wmiTasks) || 0,
+            no_order: Number(summary.noOrderTasks) || 0,
+            usd: Number(summary.usdTasks) || 0,
+            tmm: Number(summary.tmmTasks) || 0,
+            after_sale_movement: Number(summary.afterSaleMovementTasks) || tasksCount,
+        };
+        return Number(byModule[module]) || 0;
+    }
+
+    function runMatchesModuleBranch(run, module) {
+        const def = moduleDef(module);
+        if (!def) return false;
+        return normalizeText(run && run.source_module) === normalizeText(def.sourceModule)
+            && normalizeText(run && run.upload_type) === normalizeText(def.uploadType);
+    }
+
+    function averageRunTasksForModule(module) {
+        const since = addDays(state.today, -21);
+        const matched = (state.runs || []).filter((run) => normalizeText(run.effective_date) >= since && runMatchesModuleBranch(run, module));
+        const counts = matched.map((run) => branchSummaryCount(run, module)).filter((value) => Number.isFinite(value) && value > 0);
+        if (!counts.length) return { average: 0, runs: 0, source: "none" };
+        const sum = counts.reduce((acc, value) => acc + value, 0);
+        return { average: Math.ceil(sum / counts.length), runs: counts.length, source: "history" };
+    }
+
+    async function fetchManualCompletedTasksForPlanning() {
+        const db = supabaseDb();
+        if (!db) return [];
+        const sinceDate = addDays(state.today, -14);
+        try {
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .select(WMS_TASK_SELECT_COLUMNS)
+                .eq("task_status", "Завершено")
+                .gte("completed_at", sinceDate + "T00:00:00+03:00")
+                .order("completed_at", { ascending: false, nullsFirst: false })
+                .limit(10000);
+            if (error) throw error;
+            return (data || []).filter(isManualAchievementTask);
+        } catch (error) {
+            console.warn("writeoff recommendation completed tasks query skipped:", error);
+            return [];
+        }
+    }
+
+    function buildPlanningCapacityRows(activePlanningRows, completedRows, modules) {
+        const activeByModule = new Map();
+        const completedByModule = new Map();
+        activePlanningRows.forEach((row) => {
+            const current = activeByModule.get(row.module) || 0;
+            activeByModule.set(row.module, current + row.shkCount);
+        });
+        (completedRows || []).forEach((row) => {
+            const module = planningModuleKey(row);
+            if (!module) return;
+            const current = completedByModule.get(module) || 0;
+            completedByModule.set(module, current + planningTaskItemsCount(row));
+        });
+        return Array.from(modules || []).map((module) => {
+            const activeCount = activeByModule.get(module) || 0;
+            const completedCount = completedByModule.get(module) || 0;
+            const historicalAverage = Math.ceil(completedCount / 14);
+            const fallbackCapacity = Math.max(20, Math.min(90, Math.ceil(activeCount / 3)));
+            const hasEnoughHistory = completedCount >= 14;
+            const capacity = hasEnoughHistory ? Math.max(1, historicalAverage) : fallbackCapacity;
+            return {
+                module,
+                moduleLabel: moduleDef(module).label || module,
+                activeCount,
+                completedCount,
+                historicalAverage,
+                capacity,
+                source: hasEnoughHistory ? "history" : "fallback",
+            };
+        }).sort((a, b) => a.moduleLabel.localeCompare(b.moduleLabel, "ru"));
+    }
+
+    function buildWriteoffRecommendations(activeRows, completedRows) {
+        const statusTerms = activeWriteoffStatusTerms();
+        const planningRows = (activeRows || []).map((row) => {
+            const module = planningModuleKey(row);
+            const info = planningWriteoffInfo(row);
+            const writeoffDate = normalizeText(info && info.date);
+            return {
+                row,
+                module,
+                section: planningTaskSection(row),
+                status: planningTaskStatus(row, info),
+                shkCount: planningTaskItemsCount(row),
+                price: reviewPrice(row),
+                writeoffDate,
+                safeReviewDate: writeoffDate ? addDays(writeoffDate, -2) : "",
+            };
+        }).filter((row) => row.module);
+        const moduleSet = new Set(["packaging", "rwp", "pm", "presort", "marketplace", "pc", "wmi_mp_pc", "no_order", "after_sale_movement"]);
+        planningRows.forEach((row) => moduleSet.add(row.module));
+        const capacityRows = buildPlanningCapacityRows(planningRows, completedRows, moduleSet);
+        const capacityByModule = new Map(capacityRows.map((row) => [row.module, row]));
+        const activeByModule = new Map();
+        planningRows.forEach((row) => {
+            const current = activeByModule.get(row.module) || { rows: [], byStatus: new Map(), activeTasks: 0, activeShk: 0, priceSum: 0, overdueSafe: 0 };
+            current.rows.push(row);
+            current.activeTasks += 1;
+            current.activeShk += row.shkCount;
+            current.priceSum += row.price;
+            if (row.safeReviewDate && row.safeReviewDate < state.today) current.overdueSafe += 1;
+            const status = row.status || "Без статуса";
+            const statusCurrent = current.byStatus.get(status) || { status, taskCount: 0, shkCount: 0, priceSum: 0, overdueSafeTasks: 0, overdueSafeShk: 0, minWriteoffDate: "", maxSafeAge: null, termDays: null, missingTerm: false };
+            statusCurrent.taskCount += 1;
+            statusCurrent.shkCount += row.shkCount;
+            statusCurrent.priceSum += row.price;
+            if (row.safeReviewDate && row.safeReviewDate < state.today) {
+                statusCurrent.overdueSafeTasks += 1;
+                statusCurrent.overdueSafeShk += row.shkCount;
+            }
+            if (row.writeoffDate && (!statusCurrent.minWriteoffDate || row.writeoffDate < statusCurrent.minWriteoffDate)) {
+                statusCurrent.minWriteoffDate = row.writeoffDate;
+            }
+            const term = statusTerms.get(status);
+            const termDays = term ? Math.max(0, Math.trunc(settingNumber(term.days_without_movement, 0))) : null;
+            statusCurrent.termDays = termDays;
+            statusCurrent.maxSafeAge = termDays === null ? null : Math.max(0, termDays - 2);
+            statusCurrent.missingTerm = !term;
+            current.byStatus.set(status, statusCurrent);
+            activeByModule.set(row.module, current);
+        });
+        const statusPlanMap = new Map();
+        planningRows.forEach((row) => {
+            const status = row.status || "Без статуса";
+            const term = statusTerms.get(status);
+            const termDays = term ? Math.max(0, Math.trunc(settingNumber(term.days_without_movement, 0))) : null;
+            const maxSafeAge = termDays === null ? null : Math.max(0, termDays - 2);
+            const current = statusPlanMap.get(status) || {
+                status,
+                termDays,
+                maxSafeAge,
+                missingTerm: !term,
+                taskCount: 0,
+                shkCount: 0,
+                priceSum: 0,
+                overdueSafeTasks: 0,
+                overdueSafeShk: 0,
+                minWriteoffDate: "",
+                modules: new Map(),
+            };
+            current.taskCount += 1;
+            current.shkCount += row.shkCount;
+            current.priceSum += row.price;
+            if (row.safeReviewDate && row.safeReviewDate < state.today) {
+                current.overdueSafeTasks += 1;
+                current.overdueSafeShk += row.shkCount;
+            }
+            if (row.writeoffDate && (!current.minWriteoffDate || row.writeoffDate < current.minWriteoffDate)) {
+                current.minWriteoffDate = row.writeoffDate;
+            }
+            const moduleRow = current.modules.get(row.module) || { module: row.module, shkCount: 0, taskCount: 0 };
+            moduleRow.shkCount += row.shkCount;
+            moduleRow.taskCount += 1;
+            current.modules.set(row.module, moduleRow);
+            statusPlanMap.set(status, current);
+        });
+        const statusTier = (plan) => {
+            if (plan.missingTerm || plan.overdueSafeShk > 0) return { label: "Критично", cls: "critical" };
+            if (Number.isFinite(plan.maxSafeAge) && plan.maxSafeAge <= 2) return { label: "Срочно", cls: "critical" };
+            if (Number.isFinite(plan.maxSafeAge) && plan.maxSafeAge <= 7) return { label: "Высоко", cls: "high" };
+            if (plan.shkCount >= 100) return { label: "Средне", cls: "medium" };
+            return { label: "Наблюдать", cls: "" };
+        };
+        const statusPriorities = Array.from(statusPlanMap.values()).sort((a, b) => {
+            if (a.missingTerm !== b.missingTerm) return a.missingTerm ? -1 : 1;
+            if (Boolean(a.overdueSafeShk) !== Boolean(b.overdueSafeShk)) return a.overdueSafeShk ? -1 : 1;
+            const aSafe = Number.isFinite(a.maxSafeAge) ? a.maxSafeAge : 999;
+            const bSafe = Number.isFinite(b.maxSafeAge) ? b.maxSafeAge : 999;
+            if (aSafe !== bSafe) return aSafe - bSafe;
+            if (a.overdueSafeShk !== b.overdueSafeShk) return b.overdueSafeShk - a.overdueSafeShk;
+            if (a.shkCount !== b.shkCount) return b.shkCount - a.shkCount;
+            return normalizeText(a.status).localeCompare(normalizeText(b.status), "ru");
+        }).map((plan, index) => {
+            const tier = statusTier(plan);
+            const moduleLabels = Array.from(plan.modules.values())
+                .sort((a, b) => b.shkCount - a.shkCount)
+                .slice(0, 4)
+                .map((row) => (moduleDef(row.module).label || row.module) + " — " + row.shkCount + " ШК");
+            const safeText = plan.missingTerm
+                ? "срок списания не задан"
+                : "безопасный максимум " + plan.maxSafeAge + " дн.";
+            const overdueText = plan.overdueSafeShk > 0 ? ", за безопасным окном " + plan.overdueSafeShk + " ШК" : "";
+            return {
+                ...plan,
+                rank: index + 1,
+                tierLabel: tier.label,
+                tierClass: tier.cls,
+                moduleLabels,
+                reason: safeText + "; хвост " + plan.shkCount + " ШК" + overdueText + ".",
+            };
+        });
+        const statusPriorityRank = new Map(statusPriorities.map((row) => [row.status, row.rank]));
+        const statusPriorityByStatus = new Map(statusPriorities.map((row) => [row.status, row]));
+        const modulePlans = new Map();
+        Array.from(moduleSet).forEach((module) => {
+            const def = moduleDef(module);
+            const currentAge = uploadAgeFromOffset(def.offsetDays);
+            const active = activeByModule.get(module) || { rows: [], byStatus: new Map(), activeTasks: 0, activeShk: 0, priceSum: 0, overdueSafe: 0 };
+            const statuses = Array.from(active.byStatus.values()).sort((a, b) => {
+                const aRank = statusPriorityRank.get(a.status) || 9999;
+                const bRank = statusPriorityRank.get(b.status) || 9999;
+                if (aRank !== bRank) return aRank - bRank;
+                const aSafe = a.maxSafeAge === null ? 999 : a.maxSafeAge;
+                const bSafe = b.maxSafeAge === null ? 999 : b.maxSafeAge;
+                if (aSafe !== bSafe) return aSafe - bSafe;
+                return b.shkCount - a.shkCount;
+            });
+            const runAverage = averageRunTasksForModule(module);
+            const capacity = capacityByModule.get(module) || { capacity: Math.max(20, Math.ceil(active.activeShk / 3)), source: "fallback" };
+            const expectedNew = runAverage.average || Math.max(0, Math.ceil(active.activeShk / 3));
+            const pressure = (active.activeShk + expectedNew) / Math.max(1, capacity.capacity);
+            const isProblem = Boolean(active.overdueSafe > 0 || pressure >= 1.5 || active.activeShk >= capacity.capacity);
+            const topStatusLabels = statuses
+                .slice(0, 3)
+                .map((row) => row.status + " — " + row.shkCount + " ШК")
+                .filter(Boolean);
+            const severity = (active.overdueSafe * 1000) + (pressure * 100) + active.activeShk;
+            const reason = active.overdueSafe > 0
+                ? "Есть задачи за безопасным окном: " + active.overdueSafe + ". Хвост: " + active.activeShk + " ШК; мощность: " + capacity.capacity + " ШК/день."
+                : pressure >= 1.5
+                    ? "Хвост + средняя выгрузка выше мощности в " + Math.round(pressure * 10) / 10 + " раза. Хвост: " + active.activeShk + " ШК; ожидается еще ~" + expectedNew + "."
+                    : active.activeShk >= capacity.capacity
+                        ? "Хвост уже равен или выше дневной мощности. Хвост: " + active.activeShk + " ШК; мощность: " + capacity.capacity + " ШК/день."
+                        : "Участок в рабочем режиме.";
+            modulePlans.set(module, {
+                module,
+                moduleLabel: def.label || module,
+                def,
+                currentAge,
+                active,
+                statuses,
+                focusStatusRow: statuses[0] || null,
+                runAverage,
+                capacity,
+                expectedNew,
+                pressure,
+                isProblem,
+                severity,
+                reason,
+                topStatusLabels,
+            });
+        });
+        const problemSections = Array.from(modulePlans.values())
+            .filter((plan) => plan.isProblem)
+            .sort((a, b) => b.severity - a.severity)
+            .slice(0, 6)
+            .map((plan) => ({
+                module: plan.module,
+                moduleLabel: plan.moduleLabel,
+                activeShk: plan.active.activeShk,
+                expectedNew: plan.expectedNew,
+                capacity: plan.capacity.capacity,
+                pressure: plan.pressure,
+                overdueSafe: plan.active.overdueSafe,
+                reason: plan.reason,
+                topStatusLabels: plan.topStatusLabels,
+            }));
+        const hasProblemOutsideModule = (module) => problemSections.some((target) => target.module !== module);
+        const recommendedAgeForStatusFocus = (plan, statusRow) => {
+            if (!statusRow) {
+                if (hasProblemOutsideModule(plan.module)) return Math.min(30, plan.currentAge + 1);
+                return plan.currentAge > 0 && plan.pressure <= 0.75 ? Math.max(0, plan.currentAge - 1) : plan.currentAge;
+            }
+            const maxSafeAge = Number.isFinite(statusRow.maxSafeAge) ? statusRow.maxSafeAge : Math.max(0, plan.currentAge);
+            const priority = statusPriorityByStatus.get(statusRow.status);
+            if (statusRow.missingTerm) return 0;
+            if (plan.currentAge > maxSafeAge) return maxSafeAge;
+            if (statusRow.overdueSafeShk > 0 || statusRow.overdueSafeTasks > 0) return maxSafeAge;
+            if (plan.isProblem && plan.pressure >= 2.4) return Math.min(maxSafeAge, Math.max(plan.currentAge, Math.ceil(maxSafeAge * 0.75), 1));
+            if (plan.isProblem || (priority && priority.rank <= 5)) return Math.min(maxSafeAge, Math.max(plan.currentAge, Math.ceil(maxSafeAge * 0.55), 1));
+            if (hasProblemOutsideModule(plan.module) && plan.pressure <= 1.1 && plan.currentAge < maxSafeAge) return Math.min(maxSafeAge, plan.currentAge + 1);
+            if (plan.pressure <= 0.75 && plan.currentAge > 0) return Math.max(0, plan.currentAge - 1);
+            return plan.currentAge;
+        };
+        const rows = [];
+        Array.from(moduleSet).forEach((module) => {
+            const plan = modulePlans.get(module);
+            const def = plan.def;
+            const currentAge = plan.currentAge;
+            const active = plan.active;
+            const statuses = plan.statuses;
+            const capacity = plan.capacity;
+            const expectedNew = plan.expectedNew;
+            const pressure = plan.pressure;
+            const focusStatusRow = plan.focusStatusRow;
+            const focusPriority = focusStatusRow ? statusPriorityByStatus.get(focusStatusRow.status) : null;
+            const focusRecommendedAge = recommendedAgeForStatusFocus(plan, focusStatusRow);
+            const rowsForModule = statuses.length ? statuses : [null];
+            rowsForModule.forEach((statusRow) => {
+                const hasStatus = Boolean(statusRow);
+                const maxSafeAge = hasStatus && Number.isFinite(statusRow.maxSafeAge) ? statusRow.maxSafeAge : Math.max(0, currentAge);
+                const missingTerm = hasStatus && statusRow.missingTerm;
+                const controlsDate = Boolean(hasStatus && focusStatusRow && normalizeText(statusRow.status) === normalizeText(focusStatusRow.status));
+                let recommendedAge = hasStatus ? focusRecommendedAge : recommendedAgeForStatusFocus(plan, null);
+                let note = "Оставить текущий срок: нагрузка похожа на нормальную.";
+                let risk = Boolean(controlsDate && (missingTerm || currentAge > maxSafeAge || statusRow.overdueSafeShk > 0 || statusRow.overdueSafeTasks > 0));
+                if (hasStatus && !controlsDate) {
+                    const focusLabel = focusStatusRow ? focusStatusRow.status + " (#" + (focusPriority ? focusPriority.rank : "-") + ")" : "нет фокусного статуса";
+                    note = "Этот статус не задает дату выгрузки. Срок участка сейчас задает более приоритетный статус: " + focusLabel + ".";
+                } else if (!hasStatus) {
+                    const hasOtherProblem = hasProblemOutsideModule(module);
+                    note = currentAge > recommendedAge
+                        ? "Активного хвоста нет. Можно на день вернуть выгрузку ближе к онлайну."
+                        : hasOtherProblem && recommendedAge > currentAge
+                            ? "Активного хвоста нет. Временно не открываем свежий срез, чтобы смена ушла в проблемные участки."
+                            : "Активного хвоста нет. Срок можно не трогать.";
+                } else if (missingTerm) {
+                    risk = true;
+                    note = "По статусу нет срока списания. Пока безопаснее выгружать максимально близко к онлайну.";
+                } else if (currentAge > maxSafeAge) {
+                    risk = true;
+                    note = "Текущий срок оставляет меньше 2 дней до списания. Нужно подтянуть ближе к безопасному максимуму.";
+                } else if (statusRow.overdueSafeShk > 0 || statusRow.overdueSafeTasks > 0) {
+                    risk = true;
+                    note = "Фокусный статус уже за безопасным окном. Берем срез по нему и не даем длинным статусам перетянуть дату.";
+                } else if (plan.isProblem && pressure >= 1.5) {
+                    note = "Участок перегружен, но дату задает не участок целиком, а фокусный статус по глобальному рейтингу.";
+                } else if (hasProblemOutsideModule(module) && pressure <= 1.1 && recommendedAge > currentAge) {
+                    note = "Участок не в красной зоне. Временно притормаживаем свежую выгрузку, чтобы отдать смену проблемным участкам.";
+                } else if (pressure <= 0.75 && currentAge > 0) {
+                    note = "Нагрузка ниже мощности. Можно на день вернуться ближе к онлайну.";
+                } else if (currentAge === 0) {
+                    note = "Онлайн-режим выдерживается: сегодня берем сегодняшнюю дату.";
+                }
+                recommendedAge = Math.max(0, hasStatus && controlsDate ? Math.min(recommendedAge, maxSafeAge) : recommendedAge);
+                const recommendedOffset = uploadOffsetFromAge(recommendedAge);
+                const diff = recommendedAge - currentAge;
+                const changeLabel = diff === 0
+                    ? "без изменения"
+                    : diff > 0
+                        ? "отодвинуть на " + diff + " дн."
+                        : "вернуть ближе на " + Math.abs(diff) + " дн.";
+                const driverTerm = hasStatus && Number.isFinite(statusRow.termDays) ? statusRow.termDays : null;
+                rows.push({
+                    module,
+                    moduleLabel: def.label || module,
+                    driverStatus: hasStatus ? statusRow.status : "Нет активного хвоста",
+                    writeoffTermLabel: !hasStatus ? "нет активного статуса" : driverTerm === null ? "срок не задан" : driverTerm + " дн.; безопасный максимум " + maxSafeAge + " дн.",
+                    currentAge,
+                    currentOffset: uploadOffsetFromAge(currentAge),
+                    currentLabel: uploadAgeLabel(currentAge),
+                    recommendedAge,
+                    recommendedOffset,
+                    recommendedLabel: uploadAgeLabel(recommendedAge),
+                    changeLabel,
+                    recommendedBusinessDate: addDays(state.today, -recommendedAge),
+                    currentBusinessDate: addDays(state.today, -currentAge),
+                    activeTasks: hasStatus ? statusRow.taskCount : 0,
+                    activeShk: hasStatus ? statusRow.shkCount : 0,
+                    expectedNew,
+                    capacity: capacity.capacity,
+                    pressure,
+                    loadLabel: active.activeShk + " в хвосте + ~" + expectedNew + " из выгрузки / " + capacity.capacity + " ШК/день",
+                    problemModule: plan.isProblem,
+                    moduleProblemReason: plan.reason,
+                    moduleTopStatusLabels: plan.topStatusLabels,
+                    controlsDate,
+                    statusPriorityRank: hasStatus ? statusPriorityRank.get(statusRow.status) || null : null,
+                    statusPriorityLabel: hasStatus && statusPriorityByStatus.get(statusRow.status) ? statusPriorityByStatus.get(statusRow.status).tierLabel : "",
+                    focusDriverStatus: focusStatusRow ? focusStatusRow.status : "",
+                    focusPriorityRank: focusPriority ? focusPriority.rank : null,
+                    risk,
+                    note,
+                });
+            });
+        });
+        rows.sort((a, b) => {
+            if (a.risk !== b.risk) return a.risk ? -1 : 1;
+            const aRank = a.statusPriorityRank || 9999;
+            const bRank = b.statusPriorityRank || 9999;
+            if (aRank !== bRank) return aRank - bRank;
+            if (a.moduleLabel !== b.moduleLabel) return a.moduleLabel.localeCompare(b.moduleLabel, "ru");
+            if (a.controlsDate !== b.controlsDate) return a.controlsDate ? -1 : 1;
+            if (a.recommendedAge !== b.recommendedAge) return b.recommendedAge - a.recommendedAge;
+            return normalizeText(a.driverStatus).localeCompare(normalizeText(b.driverStatus), "ru");
+        });
+        const focusCandidates = statusPriorities.slice(0, 5);
+        const focusName = (row) => "#" + row.rank + " " + row.status;
+        rows.forEach((row) => {
+            const targets = focusCandidates.filter((target) => normalizeText(target.status) !== normalizeText(row.driverStatus)).slice(0, 3);
+            if (row.recommendedAge > row.currentAge) {
+                if (row.controlsDate) {
+                    row.focusLabel = "Дату участка задает статус #" + (row.statusPriorityRank || "-") + " " + row.driverStatus + ".";
+                } else {
+                    row.focusLabel = "Не рулит датой: участок следует статусу #" + (row.focusPriorityRank || "-") + " " + (row.focusDriverStatus || "-") + ".";
+                }
+            } else if (row.recommendedAge < row.currentAge) {
+                row.focusLabel = targets.length
+                    ? "Возвращаем ближе к онлайну: это не мешает статусам " + targets.map(focusName).join("; ") + "."
+                    : "Возвращаем ближе к онлайну: кризисного упора рядом нет.";
+            } else if (targets.length) {
+                row.focusLabel = row.controlsDate
+                    ? "Статус держим в фокусе: #" + (row.statusPriorityRank || "-") + " " + row.driverStatus + "."
+                    : "Срок задает #" + (row.focusPriorityRank || "-") + " " + (row.focusDriverStatus || "-") + ".";
+            } else {
+                row.focusLabel = "Отдельного кризисного упора нет.";
+            }
+            const gapDate = firstMissingUploadDate(row.module, row.recommendedBusinessDate);
+            row.effectiveRecommendedBusinessDate = gapDate || row.recommendedBusinessDate;
+            row.gapLabel = gapDate && gapDate !== row.recommendedBusinessDate
+                ? "Сначала догоняем разрыв: " + formatRuDate(gapDate)
+                : "";
+        });
+        const summary = {
+            activeTasks: planningRows.length,
+            ruleCount: rows.length,
+            moveOnlineCount: rows.filter((row) => row.recommendedAge < row.currentAge).length,
+            deferCount: rows.filter((row) => row.recommendedAge > row.currentAge).length,
+            riskCount: rows.filter((row) => row.risk).length,
+            problemCount: problemSections.length,
+            priorityStatusCount: statusPriorities.length,
+        };
+        return { rows, capacityRows, problemSections, statusPriorities, summary };
+    }
+
+    async function refreshWriteoffRecommendations() {
+        const reco = state.writeoffTerms.recommendations;
+        const button = $("refreshWriteoffRecommendations");
+        const status = $("writeoffTermsStatus");
+        const applyButton = $("applyWriteoffRecommendations");
+        const inputRows = writeoffTermInputRows();
+        if (inputRows.length) state.writeoffTerms.rows = inputRows.sort(writeoffTermSort);
+        reco.loading = true;
+        reco.error = "";
+        reco.rows = [];
+        reco.capacityRows = [];
+        reco.problemSections = [];
+        reco.statusPriorities = [];
+        reco.summary = null;
+        if (button) button.disabled = true;
+        if (applyButton) applyButton.disabled = true;
+        if (status) status.textContent = "Считаю рекомендованные даты выгрузки и разбора...";
+        renderWriteoffTermsModal();
+        try {
+            await ensureReviewTasksLoaded();
+            const activeRows = (state.review.rows || []).filter(isActiveReviewTask);
+            const completedRows = await fetchManualCompletedTasksForPlanning();
+            const result = buildWriteoffRecommendations(activeRows, completedRows);
+            reco.rows = result.rows;
+            reco.capacityRows = result.capacityRows;
+            reco.problemSections = result.problemSections || [];
+            reco.statusPriorities = result.statusPriorities || [];
+            reco.summary = result.summary;
+            reco.generatedAt = new Date().toISOString();
+            if (status) status.textContent = "Рекомендации готовы. Это расчетный план: он ничего не меняет в задачах автоматически.";
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            reco.error = "Не удалось рассчитать рекомендации: " + message;
+            if (status) status.textContent = reco.error;
+        } finally {
+            reco.loading = false;
+            if (button) button.disabled = false;
+            if (applyButton) applyButton.disabled = false;
+            renderWriteoffTermsModal();
+        }
+    }
+
+    function buildWriteoffRecommendationApplyRows() {
+        const recoRows = Array.isArray(state.writeoffTerms.recommendations.rows) ? state.writeoffTerms.recommendations.rows : [];
+        const byModule = new Map();
+        recoRows.forEach((row) => {
+            if (!row || !row.module) return;
+            const current = byModule.get(row.module);
+            const recommendedAge = Math.max(0, Math.trunc(settingNumber(row.recommendedAge, 0)));
+            const recommendedOffset = uploadOffsetFromAge(recommendedAge);
+            const candidate = {
+                module: row.module,
+                recommendedAge,
+                recommendedOffset,
+                rows: [row],
+            };
+            if (!current) {
+                byModule.set(row.module, candidate);
+                return;
+            }
+            current.rows.push(row);
+            if (recommendedAge < current.recommendedAge) {
+                current.recommendedAge = recommendedAge;
+                current.recommendedOffset = recommendedOffset;
+            }
+        });
+        return Array.from(byModule.values()).map((item) => {
+            const def = moduleDef(item.module);
+            const targetDate = addDays(state.today, item.recommendedOffset);
+            const effectiveDate = firstMissingUploadDate(item.module, targetDate);
+            const uniqueAges = Array.from(new Set(item.rows.map((row) => row.recommendedAge))).sort((a, b) => a - b);
+            return {
+                module: item.module,
+                label: def.label || item.module,
+                source_module: def.sourceModule || item.module,
+                upload_type: def.uploadType || item.module,
+                upload_offset_days: item.recommendedOffset,
+                task_deadline_days: settingNumber(def.taskDeadlineDays, 1),
+                is_required: def.required !== false,
+                responsibility_zone: def.responsibilityZone || "Исходящий поток",
+                description: def.description || "",
+                sort_order: Number(def.sortOrder) || DEFAULT_MODULES.findIndex((row) => row.module === item.module) + 1 || 100,
+                current_offset_days: Number(def.offsetDays || 0),
+                recommended_age: item.recommendedAge,
+                target_date: targetDate,
+                effective_date: effectiveDate,
+                has_gap: Boolean(effectiveDate && targetDate && effectiveDate !== targetDate),
+                status_conflict: uniqueAges.length > 1,
+                reason: item.rows.map((row) => row.focusLabel || row.note || "").filter(Boolean).slice(0, 3).join(" "),
+            };
+        }).filter((row) => row.upload_offset_days !== row.current_offset_days);
+    }
+
+    function applyUploadSettingsToState(rows) {
+        (rows || []).forEach((row) => {
+            const current = moduleDef(row.module);
+            state.settings.set(row.module, {
+                ...current,
+                module: row.module,
+                label: normalizeText(row.label) || current.label,
+                sourceModule: normalizeText(row.source_module) || current.sourceModule,
+                uploadType: normalizeText(row.upload_type) || current.uploadType,
+                offsetDays: settingNumber(row.upload_offset_days, current.offsetDays),
+                taskDeadlineDays: settingNumber(row.task_deadline_days, current.taskDeadlineDays),
+                required: row.is_required !== false,
+                responsibilityZone: normalizeText(row.responsibility_zone) || current.responsibilityZone,
+                description: normalizeText(row.description) || current.description,
+                sortOrder: Number(row.sort_order) || current.sortOrder || 100,
+            });
+        });
+    }
+
+    async function applyWriteoffRecommendationsFromModal() {
+        const status = $("writeoffTermsStatus");
+        const button = $("applyWriteoffRecommendations");
+        const reco = state.writeoffTerms.recommendations || {};
+        if (!Array.isArray(reco.rows) || !reco.rows.length) {
+            if (status) status.textContent = "Сначала рассчитайте рекомендации.";
+            return;
+        }
+        const rows = buildWriteoffRecommendationApplyRows();
+        if (!rows.length) {
+            if (status) status.textContent = "Применять нечего: настройки уже совпадают с рекомендациями.";
+            return;
+        }
+        const db = supabaseDb();
+        if (button) button.disabled = true;
+        if (status) status.textContent = "Применяю рекомендации: обновляю сроки выгрузок и пересчитываю даты мастера...";
+        try {
+            if (!db) throw new Error("Supabase SDK недоступен.");
+            const { error } = await db.rpc("apply_wms_upload_offsets", { p_rows: rows });
+            if (error) throw error;
+            applyUploadSettingsToState(rows);
+            state.manualDate = "";
+            renderCalendar();
+            renderModuleChooser();
+            if ($("masterWork") && $("masterWork").classList.contains("active")) {
+                renderMasterSlots();
+            }
+            const gaps = rows.filter((row) => row.has_gap);
+            const conflicts = rows.filter((row) => row.status_conflict);
+            if (status) {
+                status.textContent = "Применено: " + rows.length + " модулей. Мастер выгрузок теперь берет новые даты."
+                    + (gaps.length ? "\nЕсть догонка разрывов: " + gaps.map((row) => row.label + " сначала за " + formatRuDate(row.effective_date)).join("; ") + "." : "")
+                    + (conflicts.length ? "\nВнутри некоторых участков были разные рекомендации по статусам, применен самый безопасный срок: " + conflicts.map((row) => row.label).join(", ") + "." : "");
+            }
+            toast("Рекомендации применены. Мастер выгрузок уже смотрит на новые даты.", "good");
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            if (status) status.textContent = "Не удалось применить рекомендации: " + message + "\nЕсли RPC еще не создана, примени новую SQL-миграцию apply_wms_upload_offsets.";
+        } finally {
+            if (button) button.disabled = false;
         }
     }
 
@@ -8266,16 +9850,51 @@
         });
     }
 
+    function chooserUploadDateInfo(module) {
+        if (module === "marketplace_pc") {
+            const marketplace = uploadDateGapInfo("marketplace");
+            const pc = uploadDateGapInfo("pc");
+            const sameActual = marketplace.actualDate === pc.actualDate;
+            const label = sameActual
+                ? "За " + formatRuDate(marketplace.actualDate)
+                : "МП: " + formatRuDate(marketplace.actualDate) + "; ПЦ: " + formatRuDate(pc.actualDate);
+            const targetLabel = marketplace.targetDate === pc.targetDate
+                ? formatRuDate(marketplace.targetDate)
+                : "МП " + formatRuDate(marketplace.targetDate) + ", ПЦ " + formatRuDate(pc.targetDate);
+            const hasGap = marketplace.hasGap || pc.hasGap;
+            return {
+                date: earliestDate([marketplace.actualDate, pc.actualDate]),
+                label,
+                hasGap,
+                gapLabel: hasGap ? "Догоняем разрыв; целевой срез: " + targetLabel : "",
+                run: runForUpload("marketplace", marketplace.actualDate) && runForUpload("pc", pc.actualDate),
+            };
+        }
+        const info = uploadDateGapInfo(module);
+        return {
+            date: info.actualDate,
+            label: "За " + formatRuDate(info.actualDate),
+            hasGap: info.hasGap,
+            gapLabel: info.hasGap ? "Догоняем разрыв: целевой срез " + formatRuDate(info.targetDate) : "",
+            run: runForUpload(module, info.actualDate),
+        };
+    }
+
     function renderModuleChooser() {
         $("chooserDateText").textContent = state.manualDate ? "Ручная догрузка за " + formatRuDate(state.manualDate) : "Плановые даты на сегодня.";
         $("moduleGrid").innerHTML = visibleDefs().map((def) => {
-            const run = runForUpload(def.module, uploadDateForModule(def.module));
+            const dateInfo = chooserUploadDateInfo(def.module);
+            const run = dateInfo.run;
             const cls = state.loadingStatus ? " loading" : run ? " done" : " missing";
             const badge = state.loadingStatus ? "Проверяю" : run ? "Есть" : "Нет";
+            const gapLine = !state.manualDate && dateInfo.hasGap && dateInfo.gapLabel
+                ? "<span class='writeoff-reco-gap'>" + escapeHtml(dateInfo.gapLabel) + "</span>"
+                : "";
             return "<button type='button' class='module-card" + cls + "' data-module='" + escapeHtml(def.module) + "' " + (state.loadingStatus ? "disabled" : "") + ">"
                 + "<p class='module-name'><span>" + escapeHtml(def.label) + "</span><span>" + badge + "</span></p>"
-                + "<div class='module-date'>За " + formatRuDate(uploadDateForModule(def.module)) + "</div>"
+                + "<div class='module-date'>" + escapeHtml(dateInfo.label) + "</div>"
                 + "<p class='module-desc'>" + escapeHtml(def.description) + "</p>"
+                + gapLine
                 + "</button>";
         }).join("");
         $("moduleGrid").querySelectorAll("[data-module]").forEach((button) => {
@@ -8299,7 +9918,7 @@
 
     function chooseModule(module) {
         state.activeModule = module;
-        state.activeDate = uploadDateForModule(module);
+        state.activeDate = module === "marketplace_pc" ? chooserUploadDateInfo(module).date : uploadDateForModule(module);
         state.repeatUploadUnlocked = false;
         state.preview = null;
         state.rows = {};
@@ -8313,9 +9932,7 @@
     function renderWorkShell(module) {
         const def = moduleDef(module);
         $("workTitle").textContent = def.label;
-        $("workSubtitle").textContent = module === "pm"
-            ? "Выгрузка за " + formatRuDate(state.activeDate) + ". Дедлайн ПМ: " + formatRuDate(dueDateForBusinessDate("pm", state.activeDate, "pm")) + ", Почта: " + formatRuDate(dueDateForBusinessDate("pm", state.activeDate, "mail")) + "."
-            : "Выгрузка за " + formatRuDate(state.activeDate) + ". Дедлайн задач: " + formatRuDate(dueDateForBusinessDate(module, state.activeDate)) + ".";
+        $("workSubtitle").textContent = "Выгрузка за " + formatRuDate(state.activeDate) + ". Дата списания считается по статусу каждого ШК.";
         $("workInstruction").innerHTML = instructionHtml(module, state.activeDate);
         $("doneBox").classList.remove("visible");
         $("saveUpload").disabled = true;
@@ -9364,11 +10981,16 @@
         const tags = mergeTags(options.tags || [], specialInfos);
         const taskItems = taskItemsFromSourceRows(options.rows);
         const itemName = itemNameFromRows(options.rows);
+        const writeoffInfo = writeoffDateInfoForRows(options.rows, options.dueDate);
         const sourcePayload = {
             ...(options.payload || {}),
             task_items: taskItems,
             item_name: itemName || (options.payload && options.payload.item_name) || "",
+            writeoff_date: writeoffInfo.date || "",
+            writeoff_date_source: writeoffInfo.source,
         };
+        if (writeoffInfo.basis) sourcePayload.writeoff_date_basis = writeoffInfo.basis;
+        if (writeoffInfo.candidates && writeoffInfo.candidates.length) sourcePayload.writeoff_date_candidates = writeoffInfo.candidates.slice(0, 80);
         if (specialInfos.length) sourcePayload.special_infos = specialInfos;
         return {
             module: options.module,
@@ -9390,7 +11012,7 @@
             description: descriptionLines(options.descriptionTaskType || options.taskType, options.infoLines || [], specialInfos),
             priority: priority.value,
             priority_label: priority.label,
-            due_date: options.dueDate,
+            due_date: writeoffInfo.date || options.dueDate,
             responsibility_zone: options.responsibilityZone || "Нет привязки",
             task_status: "Не начато",
             opp_verdict: "Не выбран",
@@ -11194,7 +12816,7 @@
         const rows = (preview.tasks || []).slice(0, 5).map((task) => "<tr><td>" + escapeHtml(task.title) + "</td><td>" + escapeHtml(taskEntityTypeLabel(task)) + "</td><td>" + escapeHtml(taskItemName(task) || "-") + "</td><td>" + escapeHtml(task.task_type) + "</td><td>" + escapeHtml(task.column) + "</td><td>" + escapeHtml(formatRuDate(task.due_date)) + "</td><td>" + escapeHtml(formatMoney(task.source_price_sum)) + "</td><td>" + escapeHtml(task.priority_label) + "</td></tr>").join("");
         const specialLine = specialStatusText(preview);
         $("sampleWrap").innerHTML = (specialLine ? "<div class='status-line'>" + escapeHtml(specialLine) + "</div>" : "")
-            + (rows ? "<table class='sample-table'><thead><tr><th>Название</th><th>Тип задачи</th><th>Наименование</th><th>Тип</th><th>Колонка</th><th>Дата</th><th>Стоимость</th><th>Приоритет</th></tr></thead><tbody>" + rows + "</tbody></table>" : "<div class='empty-state'>Нет задач к сохранению.</div>");
+            + (rows ? "<table class='sample-table'><thead><tr><th>Название</th><th>Тип задачи</th><th>Наименование</th><th>Тип</th><th>Колонка</th><th>Дата списания</th><th>Стоимость</th><th>Приоритет</th></tr></thead><tbody>" + rows + "</tbody></table>" : "<div class='empty-state'>Нет задач к сохранению.</div>");
     }
 
     async function saveCurrentUpload() {
@@ -11598,7 +13220,7 @@
         return [
             { module: "pm", date: dates.pm, rows: main, carrierRows: carrier },
             { module: "presort", date: dates.presort, rows: main, carrierRows: [] },
-            { module: "marketplace_pc", date: dates.marketplace_pc, rows: main, carrierRows: [] },
+            { module: "marketplace_pc", date: earliestDate([dates.marketplace, dates.pc, dates.marketplace_pc]), rows: main, carrierRows: [] },
             { module: "wmi_mp_pc", date: dates.wmi_mp_pc, rows: main, carrierRows: [] },
             { module: "no_order", date: dates.no_order, rows: noOrder, carrierRows: [] },
             { module: "packaging", date: dates.packaging, rows: packaging, carrierRows: [] },
@@ -11731,7 +13353,8 @@
             const date = rowDate(row);
             if (isPmBufferStatus(row.product_status) && date !== dates.pm) pushReject(list, "pm", row, "Нужна дата " + formatRuDate(dates.pm), date, "pm");
             if ((isPresortStatus(row) || isLabelingStatus(row)) && date !== dates.presort) pushReject(list, "presort", row, "Нужна дата " + formatRuDate(dates.presort), date, "presort");
-            if ((isMarketplaceStatus(row) || isPcStatus(row)) && date !== dates.marketplace_pc) pushReject(list, "marketplace_pc", row, "Нужна дата " + formatRuDate(dates.marketplace_pc), date, "marketplace_pc");
+            if (isMarketplaceStatus(row) && date !== dates.marketplace) pushReject(list, "marketplace_pc", row, "Нужна дата Маркетплейса " + formatRuDate(dates.marketplace), date, "marketplace");
+            if (isPcStatus(row) && !isMarketplaceStatus(row) && date !== dates.pc) pushReject(list, "marketplace_pc", row, "Нужна дата ПЦ " + formatRuDate(dates.pc), date, "pc");
             if (isWmiMpPcStatus(row) && date !== dates.wmi_mp_pc) pushReject(list, "wmi_mp_pc", row, "Нужна дата " + formatRuDate(dates.wmi_mp_pc), date, "wmi_mp_pc");
         });
         rows.noOrder.forEach((row) => { const date = rowDate(row); if (date !== dates.no_order) pushReject(list, "no_order", row, "Нужна дата " + formatRuDate(dates.no_order), date, "no_order"); });
@@ -11834,6 +13457,8 @@
     }
 
     function initEvents() {
+        $("openStatusPilotUploads").addEventListener("click", openStatusPilotModal);
+        $("openStaffStats").addEventListener("click", openStaffStatsModal);
         $("openFlow").addEventListener("click", () => { void showFlowPage(); });
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
@@ -11846,6 +13471,7 @@
         $("openPureLosses").addEventListener("click", () => { window.location.href = "pure_losses.html"; });
         $("openNoShkReview").addEventListener("click", openNoShkReviewModal);
         $("openAchievements").addEventListener("click", () => { void openAchievementsModal(); });
+        $("openWriteoffTerms").addEventListener("click", () => { void openWriteoffTermsModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
             if ((state.taskSearch.rows || []).length) setTaskSearchResultsVisible(true);
@@ -11877,6 +13503,20 @@
         $("closeFlowSettings").addEventListener("click", closeFlowSettingsModal);
         $("saveFlowSettings").addEventListener("click", () => { void saveFlowSettingsFromModal(); });
         $("resetFlowSettings").addEventListener("click", resetFlowSettingsFromModal);
+        $("closeStatusPilot").addEventListener("click", closeStatusPilotModal);
+        $("closeStaffStats").addEventListener("click", closeStaffStatsModal);
+        $("reloadStaffStats").addEventListener("click", () => { void loadStaffStats(); });
+        $("staffStatsDate").addEventListener("change", () => {
+            state.staffStats.date = normalizeText($("staffStatsDate").value) || state.today || todayIsoInMoscow();
+            state.staffStats.selectedKey = "";
+            void loadStaffStats();
+        });
+        $("closeWriteoffTerms").addEventListener("click", closeWriteoffTermsModal);
+        $("saveWriteoffTerms").addEventListener("click", () => { void saveWriteoffTermsFromModal(); });
+        $("reloadWriteoffTerms").addEventListener("click", () => { void loadWriteoffTerms(true); });
+        $("recalculateWriteoffDates").addEventListener("click", () => { void recalculateWriteoffDatesFromModal(); });
+        $("refreshWriteoffRecommendations").addEventListener("click", () => { void refreshWriteoffRecommendations(); });
+        $("applyWriteoffRecommendations").addEventListener("click", () => { void applyWriteoffRecommendationsFromModal(); });
         $("closeFlowSkip").addEventListener("click", closeFlowSkipModal);
         $("cancelFlowSkip").addEventListener("click", closeFlowSkipModal);
         $("flowSkipReason").addEventListener("input", updateFlowSkipForm);
@@ -11937,6 +13577,9 @@
         $("flowSkipModal").addEventListener("click", (event) => { if (event.target === $("flowSkipModal")) closeFlowSkipModal(); });
         $("flowConflictModal").addEventListener("click", (event) => { if (event.target === $("flowConflictModal")) closeFlowConflictModal(); });
         $("flowSettingsModal").addEventListener("click", (event) => { if (event.target === $("flowSettingsModal")) closeFlowSettingsModal(); });
+        $("statusPilotModal").addEventListener("click", (event) => { if (event.target === $("statusPilotModal")) closeStatusPilotModal(); });
+        $("staffStatsModal").addEventListener("click", (event) => { if (event.target === $("staffStatsModal")) closeStaffStatsModal(); });
+        $("writeoffTermsModal").addEventListener("click", (event) => { if (event.target === $("writeoffTermsModal")) closeWriteoffTermsModal(); });
         $("moduleChooser").addEventListener("click", (event) => { if (event.target === $("moduleChooser")) setFlowModalOpen("moduleChooser", false); });
         $("uploadWork").addEventListener("click", (event) => { if (event.target === $("uploadWork")) openChooser(state.manualDate); });
         $("masterWork").addEventListener("click", (event) => { if (event.target === $("masterWork")) setFlowModalOpen("masterWork", false); });
@@ -11959,11 +13602,20 @@
                 closeAchievementsModal();
                 return;
             }
+            if ($("statusPilotModal").classList.contains("active")) {
+                closeStatusPilotModal();
+                return;
+            }
+            if ($("staffStatsModal").classList.contains("active")) {
+                closeStaffStatsModal();
+                return;
+            }
             if ($("taskDetailModal").classList.contains("active")
                 || $("flowTaskModal").classList.contains("active")
                 || $("flowSkipModal").classList.contains("active")
                 || $("flowConflictModal").classList.contains("active")
                 || $("flowSettingsModal").classList.contains("active")
+                || $("writeoffTermsModal").classList.contains("active")
                 || $("editTareTaskModal").classList.contains("active")
                 || $("deferTaskModal").classList.contains("active")
                 || $("reopenConfirmModal").classList.contains("active")
