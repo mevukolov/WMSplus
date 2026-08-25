@@ -78,6 +78,47 @@
         .flow-home-card .tasks-action-icon { background: rgba(255,255,255,.14); color: #facc15; }
         .flow-home-card .tasks-action-title { color: #fff; }
         .flow-home-card .tasks-action-text { color: rgba(255,255,255,.75); }
+        .tasks-home-group-dev { background: linear-gradient(135deg, rgba(36,32,56,.08), rgba(255,255,255,.74)); border-color: rgba(98,60,234,.14); }
+        .status-pilot-home-card { background: radial-gradient(circle 130px at 82% 18%, rgba(59,130,246,.18), transparent 72%), linear-gradient(135deg, #ffffff 0%, #f8fbff 100%); }
+        .status-pilot-home-card .tasks-action-icon { background: rgba(59,130,246,.12); color: #2563eb; }
+        .status-pilot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+        .status-pilot-card { border-radius: 18px; border: 1px solid #e2e8f0; background: #fff; box-shadow: var(--shadow-sm); padding: 14px; }
+        .status-pilot-card strong { display: block; color: #242038; font-size: 17px; line-height: 1.12; }
+        .status-pilot-card span { display: block; margin-top: 7px; color: #64748b; font-size: 13px; line-height: 1.4; font-weight: 800; }
+        .status-pilot-note { margin-top: 14px; border-radius: 16px; border: 1px solid #bfdbfe; background: #eff6ff; color: #1e3a8a; padding: 12px 14px; font-weight: 850; line-height: 1.42; }
+        .staff-stats-home-card { background: radial-gradient(circle 140px at 82% 16%, rgba(34,197,94,.18), transparent 72%), linear-gradient(135deg, #ffffff 0%, #f7fff9 100%); }
+        .staff-stats-home-card .tasks-action-icon { background: rgba(34,197,94,.12); color: #16a34a; }
+        .staff-stats-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 14px 0; }
+        .staff-stats-date { display: grid; gap: 6px; color: #64748b; font-size: 12px; font-weight: 1000; text-transform: uppercase; letter-spacing: .04em; }
+        .staff-stats-date input { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; color: #242038; padding: 11px 12px; font: inherit; font-weight: 900; text-transform: none; letter-spacing: 0; }
+        .staff-stats-summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+        .staff-stat-tile { border-radius: 18px; border: 1px solid #e2e8f0; background: #fff; box-shadow: var(--shadow-sm); padding: 12px; min-height: 86px; }
+        .staff-stat-tile span { display: block; color: #64748b; font-size: 11px; font-weight: 1000; line-height: 1.2; text-transform: uppercase; letter-spacing: .04em; }
+        .staff-stat-tile strong { display: block; margin-top: 8px; color: #242038; font-size: 26px; line-height: 1; letter-spacing: -.04em; }
+        .staff-stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+        .staff-card { width: 100%; border: 1px solid #e2e8f0; border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); padding: 14px; text-align: left; color: #242038; cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+        .staff-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
+        .staff-card.active { border-color: rgba(98,60,234,.46); box-shadow: 0 18px 44px rgba(98,60,234,.12); }
+        .staff-card h4 { margin: 0; font-size: 17px; line-height: 1.1; color: #242038; overflow-wrap: anywhere; }
+        .staff-card p { margin: 5px 0 0; color: #64748b; font-size: 12px; font-weight: 850; }
+        .staff-card-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }
+        .staff-card-stat { border-radius: 13px; background: #f8fafc; border: 1px solid #edf2f7; padding: 8px; }
+        .staff-card-stat span { display: block; color: #64748b; font-size: 10px; font-weight: 1000; text-transform: uppercase; line-height: 1.1; }
+        .staff-card-stat strong { display: block; margin-top: 4px; color: #242038; font-size: 18px; line-height: 1; }
+        .staff-verdict-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .staff-verdict-chip { border-radius: 999px; background: #f5f3ff; color: #623cea; padding: 5px 8px; font-size: 11px; font-weight: 900; }
+        .staff-stats-detail { margin-top: 14px; border-radius: 22px; border: 1px solid #e2e8f0; background: #f8fafc; padding: 14px; }
+        .staff-stats-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+        .staff-stats-detail-title { margin: 0; color: #242038; font-size: 22px; line-height: 1; letter-spacing: -.03em; }
+        .staff-stats-detail-sub { margin: 5px 0 0; color: #64748b; font-size: 13px; font-weight: 850; }
+        .staff-detail-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+        .staff-detail-tab { border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; color: #475569; padding: 8px 10px; font-size: 12px; font-weight: 1000; cursor: pointer; }
+        .staff-detail-tab.active { background: #623cea; border-color: #623cea; color: #fff; }
+        .staff-detail-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; padding-right: 4px; }
+        .staff-detail-row { border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; padding: 10px 12px; color: #242038; }
+        .staff-detail-row strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
+        .staff-detail-row span { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; font-weight: 850; overflow-wrap: anywhere; }
+        .staff-stats-empty { border-radius: 18px; background: #fff; border: 1px dashed #cbd5e1; color: #64748b; padding: 18px; text-align: center; font-weight: 850; }
         .flow-shell { display: grid; gap: 14px; }
         .flow-command-card { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: clamp(18px, 3vw, 28px); border-radius: 28px; background: radial-gradient(circle 220px at calc(100% + 70px) 0, rgba(250,204,21,.3), transparent 72%), linear-gradient(135deg, #242038 0%, #3e2e23 100%); color: #fff; box-shadow: 0 26px 70px rgba(36,32,56,.18); }
         .flow-command-card::after { content: ""; position: absolute; right: -48px; bottom: -78px; width: 210px; height: 210px; border-radius: 44% 56% 50% 50%; background: rgba(255,255,255,.1); pointer-events: none; }
@@ -141,6 +182,42 @@
         .flow-setting-field input { width: 100%; margin-top: 8px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; font: inherit; font-weight: 900; color: #242038; box-sizing: border-box; }
         .flow-setting-field.checkbox { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
         .flow-setting-field.checkbox input { width: auto; margin: 0; transform: scale(1.15); }
+        .writeoff-terms-wrap { display: grid; gap: 14px; }
+        .writeoff-term-section { border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 14px; box-shadow: var(--shadow-sm); }
+        .writeoff-term-section h4 { margin: 0; color: #242038; font-size: 18px; }
+        .writeoff-term-section p { margin: 6px 0 12px; color: #64748b; font-size: 13px; line-height: 1.4; }
+        .writeoff-term-head, .writeoff-term-row { display: grid; grid-template-columns: 110px minmax(160px, 1fr) 90px 94px; gap: 8px; align-items: center; }
+        .writeoff-term-head { color: #64748b; font-size: 11px; font-weight: 1000; text-transform: uppercase; letter-spacing: .04em; padding: 0 4px 8px; }
+        .writeoff-term-list { display: grid; gap: 8px; }
+        .writeoff-term-row { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 8px; }
+        .writeoff-term-row input[type="text"], .writeoff-term-row input[type="number"], .writeoff-term-add input { width: 100%; border: 1px solid #e2e8f0; border-radius: 11px; padding: 9px 10px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #fff; }
+        .writeoff-term-active { display: inline-flex; align-items: center; gap: 6px; color: #64748b; font-size: 12px; font-weight: 900; }
+        .writeoff-term-add { display: grid; grid-template-columns: minmax(140px, 1fr) 120px auto; gap: 8px; align-items: center; }
+        .writeoff-reco-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+        .writeoff-reco-card { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; }
+        .writeoff-reco-card strong { display: block; color: #242038; font-size: 20px; line-height: 1.05; }
+        .writeoff-reco-card span { display: block; margin-top: 5px; color: #64748b; font-size: 12px; font-weight: 900; }
+        .writeoff-reco-capacity { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .writeoff-reco-pill { border-radius: 999px; background: #f1f5f9; color: #334155; border: 1px solid #e2e8f0; padding: 7px 10px; font-size: 12px; font-weight: 900; }
+        .writeoff-reco-problems { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+        .writeoff-reco-problem { border-radius: 15px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; padding: 12px; }
+        .writeoff-reco-problem strong { display: block; color: #7c2d12; font-size: 15px; }
+        .writeoff-reco-problem span { display: block; margin-top: 5px; font-size: 12px; font-weight: 900; line-height: 1.35; }
+        .writeoff-reco-statuses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+        .writeoff-reco-status { border-radius: 15px; background: #f8fafc; border: 1px solid #e2e8f0; color: #334155; padding: 12px; }
+        .writeoff-reco-status.critical { background: #fef2f2; border-color: #fecaca; color: #7f1d1d; }
+        .writeoff-reco-status.high { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+        .writeoff-reco-status.medium { background: #eff6ff; border-color: #bfdbfe; color: #1e3a8a; }
+        .writeoff-reco-status strong { display: block; font-size: 15px; color: inherit; }
+        .writeoff-reco-status span { display: block; margin-top: 5px; font-size: 12px; font-weight: 900; line-height: 1.35; }
+        .writeoff-reco-table-wrap { margin-top: 12px; overflow: auto; max-height: 360px; border: 1px solid #e2e8f0; border-radius: 16px; }
+        .writeoff-reco-table { width: 100%; min-width: 1180px; border-collapse: collapse; font-size: 13px; background: #fff; }
+        .writeoff-reco-table th, .writeoff-reco-table td { padding: 10px 11px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
+        .writeoff-reco-table th { position: sticky; top: 0; z-index: 1; background: #f8fafc; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+        .writeoff-reco-row-risk td { background: #fef2f2; color: #7f1d1d; }
+        .writeoff-reco-note { color: #64748b; font-size: 12px; line-height: 1.35; }
+        .writeoff-reco-focus { color: #623cea; font-size: 12px; line-height: 1.35; font-weight: 900; }
+        .writeoff-reco-gap { display: block; margin-top: 5px; color: #b45309; font-size: 12px; font-weight: 900; line-height: 1.35; }
         .shift-gate-banner { display: none; width: 100%; box-sizing: border-box; position: relative; z-index: 1; border-radius: 20px; border: 1px solid #fecaca; background: #fef2f2; color: #7f1d1d; padding: 16px 18px; box-shadow: var(--shadow-sm); align-items: center; justify-content: space-between; gap: 14px; animation: tasksRiseIn .22s ease-out both; }
         .shift-gate-banner.visible { display: flex; }
         .shift-gate-title { margin: 0; font-size: 18px; font-weight: 900; }
@@ -714,7 +791,7 @@
         @keyframes prespisokKick { 0% { transform: scale(.7) rotate(-6deg); opacity: .4; } 55% { transform: scale(1.22) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
         @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .quick-no-shk-game, .quick-no-shk-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; } .quick-no-shk-wrap { overflow: auto; } .quick-no-shk-panel { overflow: visible; } .quick-no-shk-photo { max-height: 42dvh; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }
         @media (max-width: 1120px) { .journal-action-list { max-height: none; } }
-        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
+        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
         @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
@@ -767,11 +844,6 @@
                 </div>
             </div>
             <div class="tasks-actions">
-                <button id="openFlow" class="tasks-action-card flow-home-card" type="button">
-                    <span class="tasks-action-icon">▶</span>
-                    <h2 class="tasks-action-title">Флоу</h2>
-                    <p class="tasks-action-text">Единая умная очередь: WMS+ сам выбирает следующую задачу по риску, зоне и срочности.</p>
-                </button>
                 <button id="openUploads" class="tasks-action-card" type="button">
                     <span class="tasks-action-icon">⇧</span>
                     <h2 class="tasks-action-title">Выгрузки</h2>
@@ -864,6 +936,36 @@
                     <span class="tasks-action-icon">🏆</span>
                     <h2 class="tasks-action-title">Достижения</h2>
                     <p class="tasks-action-text">Личные ачивки WMS+: прогресс, секретные находки и будущие испытания.</p>
+                </button>
+            </div>
+        </div>
+        <div class="tasks-home-group tasks-home-group-dev">
+            <div class="tasks-home-group-head">
+                <div>
+                    <h2 class="tasks-home-group-title">В разработке</h2>
+                    <p class="tasks-home-group-note">Экспериментальные режимы. Пока доступны только пользователю 1034305.</p>
+                </div>
+            </div>
+            <div class="tasks-actions">
+                <button id="openStatusPilotUploads" class="tasks-action-card status-pilot-home-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">◈</span>
+                    <h2 class="tasks-action-title">Статусный штурман</h2>
+                    <p class="tasks-action-text">Новый контур выгрузок: тянем отдельные статусы по своим датам, а уже потом собираем их в участки.</p>
+                </button>
+                <button id="openFlow" class="tasks-action-card flow-home-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">▶</span>
+                    <h2 class="tasks-action-title">Флоу</h2>
+                    <p class="tasks-action-text">Единая умная очередь: WMS+ сам выбирает следующую задачу по риску, зоне и срочности.</p>
+                </button>
+                <button id="openWriteoffTerms" class="tasks-action-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">⌛</span>
+                    <h2 class="tasks-action-title">Сроки списания</h2>
+                    <p class="tasks-action-text">Статусы WMS, дни без движения до списания и отдельная настройка 26LR.</p>
+                </button>
+                <button id="openStaffStats" class="tasks-action-card staff-stats-home-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">▦</span>
+                    <h2 class="tasks-action-title">Пульс смены</h2>
+                    <p class="tasks-action-text">Кто сколько решил: задачи, запросы, предсписок, Без ШК, отложения и выбранные вердикты.</p>
                 </button>
             </div>
         </div>
@@ -1175,6 +1277,82 @@
             <button id="resetFlowSettings" class="btn btn-outline" type="button">Сбросить к дефолту</button>
         </div>
         <div id="flowSettingsStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="statusPilotModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Статусный штурман</h3>
+                <p class="work-subtitle">Новый экспериментальный контур выгрузок: сначала выбираем статусы и даты, потом WMS+ сам собирает задачи в участки.</p>
+            </div>
+            <button id="closeStatusPilot" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="status-pilot-grid">
+            <div class="status-pilot-card">
+                <strong>1. Читаем отчет как набор статусов</strong>
+                <span>Не “выгрузка Предсортировки целиком”, а отдельные статусы: например WMI за одну дату, SPS за другую, PWT за третью.</span>
+            </div>
+            <div class="status-pilot-card">
+                <strong>2. У каждого статуса свой срез</strong>
+                <span>Срез считается от сроков списания и рекомендаций контроллера, чтобы не тащить лишнее и не оставлять опасные хвосты.</span>
+            </div>
+            <div class="status-pilot-card">
+                <strong>3. Потом собираем в участки</strong>
+                <span>После отбора строки группируются в привычные зоны: Предсортировка, ПЦ, Маркетплейс, RWP и другие.</span>
+            </div>
+            <div class="status-pilot-card">
+                <strong>4. Боевой контур не трогаем</strong>
+                <span>Это отдельная логика и отдельный журнал. Существующие выгрузки продолжают работать как раньше, пока мы не решим мигрировать.</span>
+            </div>
+        </div>
+        <div class="status-pilot-note">Пока это концепт-кнопка под новый режим. Следующий шаг: описать матрицу “статус → участок → дата среза → группировка → правила исключений”.</div>
+    </div>
+</section>
+
+<section id="staffStatsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Пульс смены</h3>
+                <p class="work-subtitle">Статистика по сотрудникам за день: ручные задачи, запросы, предсписок, Без ШК, отложения и вердикты.</p>
+            </div>
+            <button id="closeStaffStats" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="staff-stats-toolbar">
+            <label class="staff-stats-date" for="staffStatsDate">Дата
+                <input id="staffStatsDate" type="date">
+            </label>
+            <div class="file-row" style="margin-top:0">
+                <button id="reloadStaffStats" class="btn btn-rect" type="button">Обновить статистику</button>
+            </div>
+        </div>
+        <div id="staffStatsStatus" class="review-status"></div>
+        <div id="staffStatsSummary" class="staff-stats-summary"></div>
+        <div id="staffStatsGrid" class="staff-stats-grid"></div>
+        <div id="staffStatsDetail" class="staff-stats-detail"></div>
+    </div>
+</section>
+
+<section id="writeoffTermsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Сроки списания</h3>
+                <p class="work-subtitle">Эти значения используются при создании новых задач: дата списания = последнее движение + срок статуса.</p>
+            </div>
+            <button id="closeWriteoffTerms" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="writeoffTermsWrap" class="writeoff-terms-wrap"></div>
+        <div class="file-row">
+            <button id="saveWriteoffTerms" class="btn btn-rect" type="button">Сохранить сроки</button>
+            <button id="reloadWriteoffTerms" class="btn btn-outline" type="button">Обновить из Supabase</button>
+            <button id="recalculateWriteoffDates" class="btn btn-outline" type="button">Пересчитать активные задачи</button>
+            <button id="refreshWriteoffRecommendations" class="btn btn-outline" type="button">Рассчитать рекомендации</button>
+            <button id="applyWriteoffRecommendations" class="btn btn-rect" type="button">Применить рекомендации</button>
+        </div>
+        <div id="writeoffTermsStatus" class="review-status"></div>
     </div>
 </section>
 
