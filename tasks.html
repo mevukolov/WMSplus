@@ -814,6 +814,23 @@
         .quick-no-shk-confetti-bit { position: absolute; top: -20px; left: var(--left); width: var(--size,8px); height: calc(var(--size,8px) * 1.6); background: var(--c,#86efac); border-radius: 2px; opacity: 0; animation: qnsConfettiFall var(--duration,2s) linear var(--delay,0s) forwards; }
         @keyframes qnsConfettiFall { 0% { opacity: 1; transform: translateY(0) rotate(0deg); } 100% { opacity: .9; transform: translateY(100dvh) rotate(var(--rotate,360deg)); } }
 
+        /* Quest-style setup screen ("Нужен файл Superset") */
+        .quick-no-shk-quest { max-width: 560px; margin: auto; text-align: center; display: grid; gap: 14px; justify-items: center; animation: qnsGameIn .34s cubic-bezier(.2,.9,.32,1.2); }
+        .quick-no-shk-steps { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        .quick-no-shk-steps span { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.2); color: rgba(255,255,255,.55); font-weight: 1000; font-size: 15px; transition: background .3s ease, border-color .3s ease, color .3s ease; }
+        .quick-no-shk-steps span.is-done { background: #86efac; border-color: #86efac; color: #102018; }
+        .quick-no-shk-steps span.is-current { box-shadow: 0 0 0 5px rgba(134,239,172,.22); animation: qnsPulseHot 1.2s ease-in-out infinite; }
+        .quick-no-shk-steps i { width: 40px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.18); font-style: normal; }
+        .quick-no-shk-quest-icon { font-size: 62px; line-height: 1; animation: qnsHeroDrop .55s cubic-bezier(.2,1.4,.3,1.15); }
+        .quick-no-shk-quest-title { margin: 0; font-size: clamp(24px,3.4vw,36px); letter-spacing: -.03em; }
+        .quick-no-shk-quest-text { margin: 0; color: rgba(255,255,255,.72); font-size: 15px; max-width: 420px; line-height: 1.4; }
+        .quick-no-shk-quest-hint { color: rgba(255,255,255,.6); font-size: 13px; }
+        .quick-no-shk-ghost-btn { background: none; border: none; color: rgba(255,255,255,.6); font-size: 13px; font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; padding: 4px; }
+        .quick-no-shk-ghost-btn:hover { color: #fff; }
+        .quick-no-shk-quest-status { margin: 0; font-size: 13px; padding: 8px 14px; border-radius: 12px; background: rgba(255,255,255,.1); color: rgba(255,255,255,.85); }
+        .quick-no-shk-quest-status.good { background: rgba(34,197,94,.18); color: #bbf7d0; }
+        .quick-no-shk-quest-status.error { background: rgba(248,113,113,.18); color: #fecaca; }
+
         .no-shk-review-card { width: min(1180px, calc(100vw - 32px)); max-height: calc(100dvh - 34px); overflow: hidden; display: flex; flex-direction: column; }
         .no-shk-search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 14px 0 10px; }
         .no-shk-search-input { min-height: 52px; border-radius: 16px; border: 1px solid rgba(98,60,234,.18); padding: 0 16px; font-size: 16px; font-weight: 800; color: var(--accent-dark); background: #fff; outline: none; box-shadow: inset 0 1px 0 rgba(255,255,255,.7); }

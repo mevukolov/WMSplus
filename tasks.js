@@ -3017,6 +3017,7 @@
             streak: 0,
             bestStreak: 0,
             lastActionKey: "",
+            setupPhase: "copy",
         };
     }
 
@@ -3441,51 +3442,75 @@
 
     async function copyQuickNoShkSupersetShks() {
         const ids = quickNoShkSupersetNeededShks();
-        const status = $("quickNoShkStatus");
         if (!ids.length) {
-            if (status) {
-                status.className = "status-line good";
-                status.textContent = "Копировать нечего: нужные ШК уже дополнены.";
-            }
+            state.quickNoShk.lastSupersetMessage = "Копировать нечего: нужные ШК уже дополнены.";
+            state.quickNoShk.lastSupersetTone = "good";
+            renderQuickNoShkNeedsNm();
             return;
         }
         const copied = await copyText(ids.join("\n"));
-        if (status) {
-            status.className = "status-line " + (copied ? "good" : "error");
-            status.textContent = copied
-                ? "Скопировано ШК: " + ids.length + ". Теперь выгрузите их из Superset и загрузите файл сюда."
-                : "Браузер заблокировал копирование. Можно выделить ШК вручную, но браузер, конечно, выбрал драму.";
-        }
+        state.quickNoShk.lastSupersetMessage = copied
+            ? "Скопировано ШК: " + ids.length + "."
+            : "Браузер заблокировал копирование. Можно выделить ШК вручную, но браузер, конечно, выбрал драму.";
+        state.quickNoShk.lastSupersetTone = copied ? "good" : "error";
+        if (copied) state.quickNoShk.setupPhase = "upload";
         toast(copied ? "Скопировано ШК: " + ids.length : "Браузер заблокировал копирование.", copied ? "success" : "error");
+        renderQuickNoShkNeedsNm();
     }
 
     function renderQuickNoShkNeedsNm() {
         const target = $("quickNoShkWrap");
         if (!target) return;
-        const pureCount = (state.quickNoShk.pureCandidates || []).length;
         const needStats = quickNoShkSupersetNeedStats();
         const copyCount = needStats.all.length;
-        const reasons = [];
-        if (state.quickNoShk.missingNm > 0) reasons.push("у " + state.quickNoShk.missingNm + " целей нет Код НМ");
-        if (pureCount > 0 && !(state.quickNoShk.supersetByShk instanceof Map && state.quickNoShk.supersetByShk.size > 0)) reasons.push("нужно проверить чистые списания SAS/SMC/EPR по офису последнего МХ");
-        target.innerHTML = quickNoShkTopHtml((reasons.length ? reasons.join("; ") : "Нужна Superset-выгрузка") + ".")
-            + "<section class='quick-no-shk-panel'><div class='quick-no-shk-file'>"
-            + "<div class='status-line error'>Нужен файл Superset. Я беру из него “Код НМ”, наименование и “Офис последнего МХ” для чистых списаний.</div>"
-            + (state.quickNoShk.lastSupersetMessage ? "<div class='status-line " + escapeHtml(state.quickNoShk.lastSupersetTone || "") + "'>" + escapeHtml(state.quickNoShk.lastSupersetMessage) + "</div>" : "")
-            + "<div class='status-line'>К копированию: " + copyCount + " ШК"
-            + (needStats.missingNm.length ? " · без НМ: " + needStats.missingNm.length : "")
-            + (needStats.pureOffice.length ? " · чистые на проверку офиса: " + needStats.pureOffice.length : "")
-            + "</div>"
-            + "<button id='copyQuickNoShkShks' class='btn btn-rect' type='button'>Скопировать ШК" + (copyCount ? " (" + copyCount + ")" : "") + "</button>"
-            + "<div class='file-row'><label class='btn btn-rect' for='quickNoShkSupersetFile'>Добавить данные из Superset</label><input id='quickNoShkSupersetFile' class='file-input' type='file' accept='.xlsx,.xls,.csv'><span id='quickNoShkFileName' class='file-name'>Файл пока не выбран</span></div>"
-            + "<div id='quickNoShkStatus' class='status-line'>После загрузки я дополню задачи номенклатурой и вернусь к старту режима.</div>"
-            + "</div></section>";
+        const phase = copyCount ? (state.quickNoShk.setupPhase || "copy") : "upload";
+        const step = phase === "copy" ? 1 : 2;
+        const steps = "<div class='quick-no-shk-steps'>"
+            + "<span class='" + (step >= 1 ? "is-done" : "") + (step === 1 ? " is-current" : "") + "'>1</span>"
+            + "<i></i>"
+            + "<span class='" + (step >= 2 ? "is-done" : "") + (step === 2 ? " is-current" : "") + "'>2</span>"
+            + "</div>";
+        const statusLine = state.quickNoShk.lastSupersetMessage
+            ? "<p class='quick-no-shk-quest-status " + escapeHtml(state.quickNoShk.lastSupersetTone || "") + "'>" + escapeHtml(state.quickNoShk.lastSupersetMessage) + "</p>"
+            : "";
+        let body;
+        if (phase === "copy") {
+            body = "<div class='quick-no-shk-quest-icon'>📋</div>"
+                + "<h2 class='quick-no-shk-quest-title'>Шаг 1 · Скопируй ШК</h2>"
+                + "<p class='quick-no-shk-quest-text'>" + copyCount + " ШК ждут выгрузки из Superset.</p>"
+                + "<button id='copyQuickNoShkShks' class='quick-no-shk-start' type='button'>📋 Скопировать (" + copyCount + ")</button>"
+                + "<button id='skipToUploadPhase' class='quick-no-shk-ghost-btn' type='button'>Уже скопировано → загрузить файл</button>"
+                + statusLine;
+        } else {
+            body = "<div class='quick-no-shk-quest-icon'>📤</div>"
+                + "<h2 class='quick-no-shk-quest-title'>Шаг 2 · Загрузи файл</h2>"
+                + "<p class='quick-no-shk-quest-text'>Выгрузку из Superset — сюда. Дополню НМ и вернусь к старту.</p>"
+                + "<label class='quick-no-shk-start' for='quickNoShkSupersetFile'>📤 Выбрать файл</label>"
+                + "<input id='quickNoShkSupersetFile' class='file-input' type='file' accept='.xlsx,.xls,.csv'>"
+                + "<span id='quickNoShkFileName' class='quick-no-shk-quest-hint'>Файл пока не выбран</span>"
+                + (copyCount ? "<button id='backToCopyPhase' class='quick-no-shk-ghost-btn' type='button'>← К списку ШК</button>" : "")
+                + "<div id='quickNoShkStatus'>" + statusLine + "</div>";
+        }
+        target.innerHTML = quickNoShkTopHtml("Быстрая настройка перед проверкой.")
+            + "<section class='quick-no-shk-panel'><div class='quick-no-shk-quest'>" + steps + body + "</div></section>";
         bindQuickNoShkClose();
-        $("copyQuickNoShkShks").addEventListener("click", () => { void copyQuickNoShkSupersetShks(); });
-        $("quickNoShkSupersetFile").addEventListener("change", () => {
-            const file = $("quickNoShkSupersetFile").files && $("quickNoShkSupersetFile").files[0];
-            if (file) void handleQuickNoShkSupersetFile(file);
-        });
+        if (phase === "copy") {
+            $("copyQuickNoShkShks").addEventListener("click", () => { void copyQuickNoShkSupersetShks(); });
+            $("skipToUploadPhase").addEventListener("click", () => {
+                state.quickNoShk.setupPhase = "upload";
+                renderQuickNoShkNeedsNm();
+            });
+        } else {
+            $("quickNoShkSupersetFile").addEventListener("change", () => {
+                const file = $("quickNoShkSupersetFile").files && $("quickNoShkSupersetFile").files[0];
+                if (file) void handleQuickNoShkSupersetFile(file);
+            });
+            const back = $("backToCopyPhase");
+            if (back) back.addEventListener("click", () => {
+                state.quickNoShk.setupPhase = "copy";
+                renderQuickNoShkNeedsNm();
+            });
+        }
     }
 
     async function handleQuickNoShkSupersetFile(file) {
@@ -3511,6 +3536,9 @@
             const afterNeedStats = quickNoShkSupersetNeedStats();
             state.quickNoShk.lastSupersetMessage = quickNoShkSupersetUploadMessage(beforeNeededIds, rows, afterNeedStats);
             state.quickNoShk.lastSupersetTone = afterNeedStats.all.length ? "error" : "good";
+            // Still missing some -- send the user back to copy the remaining
+            // ids instead of leaving them stuck on a stale upload step.
+            state.quickNoShk.setupPhase = afterNeedStats.all.length ? "copy" : "upload";
             if (status) {
                 status.className = "status-line " + state.quickNoShk.lastSupersetTone;
                 status.textContent = state.quickNoShk.lastSupersetMessage;
