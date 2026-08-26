@@ -4,14 +4,8 @@
     const WH_ID = "50144199";
     const RUNS_TABLE = "wms_manual_upload_runs";
     const SETTINGS_TABLE = "wms_manual_upload_settings";
-    const LEGACY_RUNS_TABLE = "weeek_manual_upload_runs";
-    const LEGACY_SETTINGS_TABLE = "weeek_manual_upload_settings";
     const WMS_TASKS_TABLE = "wms_tasks";
     const WMS_TASK_SELECT_COLUMNS = "id,source_module,source_id,source_row_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at";
-    const WEEEK_TASKS_TABLE = "weeek_tasks";
-    const WEEEK_TASKS_BASIC_TABLE = "weeek_tasks_basic";
-    const WEEEK_BASIC_SELECT_COLUMNS = "id,source_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,task_type,title,task_status,opp_verdict,updated_at,created_at";
-    const WEEEK_SIMPLE_SELECT_COLUMNS = "id,source_id,source_payload,task_type,title,task_status,opp_verdict,updated_at,created_at";
     const WMS_EMPLOYEES_TABLE = "wms_employees";
     const WMS_SHIFTS_TABLE = "wms_shifts";
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
@@ -2240,165 +2234,8 @@
     }
 
     async function fetchReviewTaskRows(db) {
-        let rows = await fetchWmsTaskRows(db, "active");
-        const legacyRows = await fetchLegacyWeeekRequestRows(db);
-        const migrated = await ensureLegacyWeeekRequestsInWms(db, rows, legacyRows);
-        if (migrated) rows = await fetchWmsTaskRows(db, "active");
-        else rows = mergeLegacyRowsForDisplay(rows, legacyRows);
+        const rows = await fetchWmsTaskRows(db, "active");
         return rows.filter(isActiveReviewTask);
-    }
-
-    function taskDedupeKey(row) {
-        return [
-            normalizeText(row && row.source_module),
-            normalizeText(row && row.source_id),
-            normalizeText(row && row.task_type),
-        ].join("\u001f");
-    }
-
-    function legacyRequestSourceModule(section) {
-        if (section === "Запросы входящего потока") return "incoming_flow_requests";
-        if (section === "Списания AWH") return "awh_writeoffs";
-        if (section === "Коробки на входе") return "incoming_boxes";
-        return "legacy_weeek_requests";
-    }
-
-    function legacyWeeekPayload(row) {
-        const payload = row && row.source_payload;
-        if (payload && typeof payload === "object" && !Array.isArray(payload)) return { ...payload };
-        if (typeof payload === "string") return parseJsonSafe(payload, {});
-        return {};
-    }
-
-    function normalizeLegacyWeeekTaskRow(row) {
-        const payload = legacyWeeekPayload(row);
-        const base = {
-            source_module: normalizeText(row && row.source_module),
-            upload_type: normalizeText(row && row.upload_type),
-            task_type: normalizeText(row && row.task_type),
-            title: normalizeText(row && (row.title || row.name)),
-            description: normalizeText(row && row.description),
-        };
-        const section = requestSectionName(base);
-        const sourceModule = base.source_module || legacyRequestSourceModule(section);
-        const idSources = [
-            row && row.source_shk_ids,
-            row && row.source_id,
-            base.title,
-            base.description,
-            JSON.stringify(payload),
-        ];
-        const sourceShkIds = Array.from(new Set(idSources.flatMap(extractIdsFromLooseText)));
-        const sourceId = normalizeText(row && row.source_id) || sourceShkIds.join(" ") || normalizeText(row && row.id);
-        const movementRaw = normalizeText(row && row.source_last_movement_at)
-            || normalizeText(payload.request_time || payload.requested_at || payload.last_movement || payload.created_at || payload.date)
-            || normalizeText(row && row.created_at);
-        const movement = parseDateTime(movementRaw);
-        const tagsRaw = row && row.tags;
-        const parsedTags = typeof tagsRaw === "string" ? parseJsonSafe(tagsRaw, tagsRaw.split(",")) : tagsRaw;
-        const tags = Array.isArray(parsedTags) ? parsedTags.map(normalizeText).filter(Boolean) : [];
-        return {
-            id: "legacy-weeek:" + normalizeText(row && row.id),
-            __legacy_weeek: true,
-            legacy_weeek_id: normalizeText(row && row.id),
-            source_module: sourceModule,
-            source_id: sourceId,
-            source_row_id: normalizeText(row && row.source_row_id),
-            source_payload: payload,
-            source_shk_ids: sourceShkIds,
-            source_tare_id: normalizeIdentifier(row && row.source_tare_id),
-            source_price_sum: Number(row && row.source_price_sum) || 0,
-            source_last_movement_at: movement.iso || normalizeText(row && row.created_at),
-            upload_type: base.upload_type || sourceModule,
-            upload_effective_date: normalizeText(row && row.upload_effective_date) || movement.date || normalizeText(row && row.created_at).slice(0, 10),
-            task_type: base.task_type || section,
-            title: base.title || sourceId || section,
-            description: base.description,
-            priority: Number(row && row.priority) || 0,
-            priority_label: normalizeText(row && row.priority_label),
-            due_date: normalizeText(row && row.due_date),
-            responsibility_zone: normalizeText(row && row.responsibility_zone),
-            task_status: normalizeText(row && row.task_status) || (row && row.weeek_completed ? "Завершено" : "Не начато"),
-            opp_verdict: normalizeText(row && row.opp_verdict) || "Не выбран",
-            assignee_employee_id: normalizeIdentifier(row && row.assignee_employee_id),
-            assignee_name: normalizeText(row && row.assignee_name),
-            tags,
-            is_deleted: Boolean(row && (row.is_deleted || row.weeek_deleted)),
-            weeek_completed: Boolean(row && row.weeek_completed),
-            completed_at: normalizeText(row && row.completed_at),
-            reopened_at: normalizeText(row && row.reopened_at),
-            reopen_after: normalizeText(row && row.reopen_after),
-            created_at: normalizeText(row && row.created_at),
-            updated_at: normalizeText(row && row.updated_at),
-        };
-    }
-
-    async function fetchLegacyWeeekRequestRows(db) {
-        const result = [];
-        const pageSize = 1000;
-        const maxRows = 5000;
-        for (let from = 0; from < maxRows; from += pageSize) {
-            const read = await readOptionalRows(db, WEEEK_TASKS_TABLE, (query) => query
-                .select("*")
-                .eq("weeek_deleted", false)
-                .or("weeek_completed.is.null,weeek_completed.eq.false")
-                .or("task_type.ilike.%Запрос%,title.ilike.%Запрос%,source_module.ilike.%incoming_flow%,task_type.ilike.%AWH%,title.ilike.%AWH%,source_module.ilike.%awh%,task_type.ilike.%Короб%,title.ilike.%Короб%,source_module.ilike.%incoming_boxes%")
-                .order("updated_at", { ascending: false, nullsFirst: false })
-                .range(from, from + pageSize - 1));
-            const fallback = read.ok ? null : await readOptionalRows(db, WEEEK_TASKS_TABLE, (query) => query
-                .select("*")
-                .order("updated_at", { ascending: false, nullsFirst: false })
-                .range(from, from + pageSize - 1));
-            const finalRead = read.ok ? read : fallback;
-            if (!finalRead || !finalRead.ok) return [];
-            const batch = finalRead.rows || [];
-            result.push(...batch);
-            if (batch.length < pageSize) break;
-        }
-        return result
-            .map(normalizeLegacyWeeekTaskRow)
-            .filter((row) => requestSectionName(row) && !row.is_deleted && !row.weeek_completed && taskStatus(row) !== "Завершено");
-    }
-
-    function mergeLegacyRowsForDisplay(wmsRows, legacyRows) {
-        const existing = new Set((wmsRows || []).map(taskDedupeKey));
-        const merged = (wmsRows || []).slice();
-        (legacyRows || []).forEach((row) => {
-            if (existing.has(taskDedupeKey(row))) return;
-            merged.push(row);
-        });
-        return merged;
-    }
-
-    async function ensureLegacyWeeekRequestsInWms(db, wmsRows, legacyRows) {
-        const existing = new Set((wmsRows || []).map(taskDedupeKey));
-        const missing = (legacyRows || []).filter((row) => !existing.has(taskDedupeKey(row)));
-        if (!missing.length) return false;
-        const payloads = missing.map((row) => {
-            const { id: _id, __legacy_weeek: _legacy, legacy_weeek_id: legacyId, weeek_completed: _weeekCompleted, ...task } = row;
-            return compactTaskForSave({
-                ...task,
-                source_payload: {
-                    ...(task.source_payload || {}),
-                    legacy_weeek_id: legacyId,
-                    migrated_from: "weeek_tasks",
-                    migrated_at: new Date().toISOString(),
-                },
-            });
-        });
-        try {
-            const chunks = chunkArray(payloads, 20);
-            const context = { onProgress: null, initialTotalChunks: chunks.length, totalTasks: payloads.length, physicalBatch: 0, saved: 0, initialChunk: 1 };
-            for (let i = 0; i < chunks.length; i += 1) {
-                context.initialChunk = i + 1;
-                await saveRpcChunkAdaptive(db, chunks[i], {}, context);
-                context.saved += chunks[i].length;
-            }
-            return true;
-        } catch (error) {
-            console.warn("legacy WEEEK request migration failed:", error);
-            return false;
-        }
     }
 
     function refreshOpenSectionModal() {
@@ -4948,7 +4785,6 @@
         state.flow.groupIndex = groupIndex;
         const scored = activeRows
             .filter((row) => row.id !== state.flow.currentRowId)
-            .filter((row) => !row.__legacy_weeek)
             .filter((row) => !flowRowIsLockedForOther(row, context))
             .filter((row) => !flowStrictMismatch(row, context))
             .filter((row) => !flowRowIsSkippedForCurrentUser(row, context))
@@ -5083,7 +4919,7 @@
 
     async function fetchFreshTaskRow(id) {
         const db = supabaseDb();
-        if (!db || !id || String(id).startsWith("legacy-weeek:")) return findTaskRow(id);
+        if (!db || !id) return findTaskRow(id);
         const { data, error } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("id", id).single();
         if (error) throw error;
         refreshTaskRow(id, data);
@@ -5092,7 +4928,7 @@
 
     async function writeTaskHistory(row, eventType, payload) {
         const db = supabaseDb();
-        if (!db || !row || !row.id || String(row.id).startsWith("legacy-weeek:")) return;
+        if (!db || !row || !row.id) return;
         const actor = flowActor();
         try {
             await db.from(FLOW_HISTORY_TABLE).insert({
@@ -8594,17 +8430,14 @@
         }
         try {
             const range = state.calendarRange || buildCalendarRange();
-            const [wmsSettings, legacySettings, wmsRuns, legacyRuns] = await Promise.all([
+            const [wmsSettings, wmsRuns] = await Promise.all([
                 readOptionalRows(db, SETTINGS_TABLE, (query) => query.select("*").order("sort_order", { ascending: true })),
-                readOptionalRows(db, LEGACY_SETTINGS_TABLE, (query) => query.select("*").order("sort_order", { ascending: true })),
                 readOptionalRows(db, RUNS_TABLE, (query) => query.select("*").gte("effective_date", range.start).lte("effective_date", range.end).order("effective_date", { ascending: false })),
-                readOptionalRows(db, LEGACY_RUNS_TABLE, (query) => query.select("*").gte("effective_date", range.start).lte("effective_date", range.end).order("effective_date", { ascending: false })),
             ]);
             await loadWriteoffTerms();
             if (wmsSettings.rows.length) applySettings(wmsSettings.rows);
-            if (legacySettings.rows.length) applySettings(legacySettings.rows);
-            if (!wmsRuns.ok && !legacyRuns.ok) throw wmsRuns.error || legacyRuns.error || new Error("Не удалось прочитать журналы выгрузок.");
-            state.runs = mergeUploadRuns((legacyRuns.rows || []).concat(wmsRuns.rows || []));
+            if (!wmsRuns.ok) throw wmsRuns.error || new Error("Не удалось прочитать журналы выгрузок.");
+            state.runs = mergeUploadRuns(wmsRuns.rows || []);
         } catch (error) {
             $("uploadsStatus").textContent = "Не удалось проверить журнал. Если это первый запуск, примени миграцию WMS tables. " + (error && error.message ? error.message : String(error));
             return false;
@@ -12431,25 +12264,12 @@
         }
     }
 
-    function addPrespisokHistoryFromSourceId(history, row, source, shkSet, tareSet) {
-        const sourceId = normalizeIdentifier(row && row.source_id);
-        if (!sourceId || (!shkSet.has(sourceId) && !tareSet.has(sourceId))) return;
-        addPrespisokHistory(history, {
-            ...row,
-            __history_source: source,
-            source_shk_ids: shkSet.has(sourceId) ? [sourceId] : [],
-            source_tare_id: tareSet.has(sourceId) ? sourceId : "",
-        });
-    }
-
     async function loadPrespisokHistory(items) {
         const db = supabaseDb();
         const history = { byShk: {}, byTare: {} };
         if (!db || !items || !items.length) return history;
         const shks = Array.from(new Set(items.flatMap((item) => item.rows.map((row) => row.shk)).map(normalizeIdentifier).filter(Boolean)));
         const tares = Array.from(new Set(items.filter((item) => item.type === "tare").map((item) => item.id).map(normalizeIdentifier).filter(Boolean)));
-        const shkSet = new Set(shks);
-        const tareSet = new Set(tares);
         try {
             for (const chunk of chunkArray(shks, 80)) {
                 const { data, error } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).overlaps("source_shk_ids", chunk).order("updated_at", { ascending: false }).limit(1000);
@@ -12458,18 +12278,6 @@
             for (const chunk of chunkArray(tares, 80)) {
                 const { data, error } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).in("source_tare_id", chunk).order("updated_at", { ascending: false }).limit(1000);
                 if (!error) (data || []).forEach((row) => addPrespisokHistory(history, { ...row, __history_source: "WMS+" }));
-            }
-            for (const chunk of chunkArray(shks, 80)) {
-                const { data, error } = await db.from(WEEEK_TASKS_BASIC_TABLE).select(WEEEK_BASIC_SELECT_COLUMNS).overlaps("source_shk_ids", chunk).order("updated_at", { ascending: false }).limit(1000);
-                if (!error) (data || []).forEach((row) => addPrespisokHistory(history, { ...row, __history_source: "WEEEK" }));
-            }
-            for (const chunk of chunkArray(tares, 80)) {
-                const { data, error } = await db.from(WEEEK_TASKS_BASIC_TABLE).select(WEEEK_BASIC_SELECT_COLUMNS).in("source_tare_id", chunk).order("updated_at", { ascending: false }).limit(1000);
-                if (!error) (data || []).forEach((row) => addPrespisokHistory(history, { ...row, __history_source: "WEEEK" }));
-            }
-            for (const chunk of chunkArray(shks.concat(tares), 80)) {
-                const { data, error } = await db.from(WEEEK_TASKS_TABLE).select(WEEEK_SIMPLE_SELECT_COLUMNS).in("source_id", chunk).order("updated_at", { ascending: false }).limit(1000);
-                if (!error) (data || []).forEach((row) => addPrespisokHistoryFromSourceId(history, row, "WEEEK", shkSet, tareSet));
             }
         } catch (error) {
             console.warn("prespisok history failed:", error);
