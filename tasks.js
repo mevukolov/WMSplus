@@ -1005,6 +1005,18 @@
         }
     }
 
+    // Only a structurally missing table/column should permanently switch a
+    // session to local-only mode. A timeout or network blip is transient --
+    // this table has genuinely timed out under load before (same as other
+    // large queries against wms_tasks), and permanently disabling sync over
+    // one bad request would silently strand every achievement earned for
+    // the rest of the session in localStorage only.
+    function isMissingAchievementsSchemaError(error) {
+        const code = normalizeText(error && error.code);
+        const message = normalizeForMatch(error && error.message);
+        return code === "42P01" || code === "PGRST205" || message.includes("does not exist") || message.includes("could not find the table") || message.includes("could not find the column");
+    }
+
     async function loadAchievements() {
         const actor = achievementActor();
         state.achievements.loading = true;
@@ -1028,8 +1040,10 @@
             await syncLocalAchievementsToSupabase(actor, db, data || []);
         } catch (error) {
             console.warn("achievements load skipped:", error);
-            state.achievements.syncDisabled = true;
-            state.achievements.error = "Достижения временно сохраняются локально. Примените миграцию wms_achievements для синхронизации.";
+            if (isMissingAchievementsSchemaError(error)) {
+                state.achievements.syncDisabled = true;
+                state.achievements.error = "Достижения временно сохраняются локально. Примените миграцию wms_achievements для синхронизации.";
+            }
         } finally {
             state.achievements.loading = false;
             renderAchievementsModal();
@@ -1102,7 +1116,7 @@
             if (error) throw error;
         } catch (error) {
             console.warn("achievement sync skipped:", error);
-            state.achievements.syncDisabled = true;
+            if (isMissingAchievementsSchemaError(error)) state.achievements.syncDisabled = true;
         }
         return true;
     }
@@ -7510,7 +7524,7 @@
 
     async function fetchCompletedAchievementTasks() {
         const db = supabaseDb();
-        if (!db) return [];
+        if (!db) return { ok: true, rows: [] };
         const user = achievementActor();
         try {
             let query = db
@@ -7521,10 +7535,14 @@
                 .limit(10000);
             const { data, error } = await query;
             if (error) throw error;
-            return (data || []).filter((row) => isManualAchievementTask(row) && taskCompletedByMatches(row, user));
+            return { ok: true, rows: (data || []).filter((row) => isManualAchievementTask(row) && taskCompletedByMatches(row, user)) };
         } catch (error) {
             console.warn("achievement completed tasks query skipped:", error);
-            return [];
+            // ok:false must never be treated as "zero eligible tasks" by a caller --
+            // cleanupIneligibleTaskAchievements() would otherwise read a transient
+            // query failure (this table is large and occasionally times out) as
+            // "user no longer qualifies for anything" and revoke real achievements.
+            return { ok: false, rows: [] };
         }
     }
 
@@ -7586,8 +7604,9 @@
         if (!hasRecountable || !supabaseDb()) return;
         state.achievements.cleaning = true;
         try {
-            const rows = await fetchCompletedAchievementTasks();
-            const eligible = eligibleTaskAchievements(rows);
+            const fetched = await fetchCompletedAchievementTasks();
+            if (!fetched.ok) return;
+            const eligible = eligibleTaskAchievements(fetched.rows);
             const invalid = RECOUNTABLE_TASK_ACHIEVEMENT_IDS.filter((id) => state.achievements.earned.has(id) && !eligible.has(id));
             if (invalid.length) await forgetAchievements(invalid);
         } catch (error) {
@@ -7697,7 +7716,7 @@
 
     async function evaluateTaskCompletionAchievements(completedRow, options) {
         if (completedRow && !isManualAchievementTask(completedRow)) return;
-        const rows = await fetchCompletedAchievementTasks();
+        const rows = (await fetchCompletedAchievementTasks()).rows;
         const allRows = completedRow && !rows.some((row) => row.id === completedRow.id) ? [completedRow].concat(rows) : rows;
         const total = allRows.length;
         if (total >= 10) await unlockAchievement("tasks_10", { count: total });
