@@ -3159,7 +3159,7 @@
         for (let from = 0; from < 10000; from += pageSize) {
             const { data, error } = await db
                 .from(PURE_LOSSES_TABLE)
-                .select("*")
+                .select("id,shk,nm,decription,date_lost,price,wh_id,opp_decision,opp_comment,shk_state_before_lost")
                 .eq("wh_id", WH_ID)
                 .or("shk_state_before_lost.ilike.SAS%,shk_state_before_lost.ilike.SMC%,shk_state_before_lost.ilike.EPR%")
                 .range(from, from + pageSize - 1);
@@ -12140,6 +12140,42 @@
         }
     }
 
+    // payload.items_full is the full candidate list (hundreds of rows, can run
+    // 100s of KB) and only changes when a run starts, not on every progress
+    // tick. The 15s poll in syncPrespisokRunActions used to re-pull it in full
+    // every time; this lean variant skips it and hydrateLeanPrespisokRun below
+    // reattaches the previously-fetched items_full so nothing downstream
+    // (joinPrespisokRun, canJoin) notices the difference.
+    async function fetchActivePrespisokRunLean() {
+        const db = supabaseDb();
+        if (!db) return null;
+        try {
+            const { data, error } = await db
+                .from(WMS_PRESPISOK_RUNS_TABLE)
+                .select("id,wh_id,run_date,status,file_name,total_items,completed_items,excluded_items,elapsed_ms,operator_id,operator_name,started_at,finished_at,created_at,updated_at,reservations:payload->reservations")
+                .eq("wh_id", WH_ID)
+                .eq("run_date", state.today)
+                .in("status", ["started", "in_progress"])
+                .order("updated_at", { ascending: false })
+                .limit(1);
+            if (error) throw error;
+            return Array.isArray(data) && data.length ? data[0] : null;
+        } catch (error) {
+            console.warn("active prespisok run (lean) failed:", error);
+            return null;
+        }
+    }
+
+    function hydrateLeanPrespisokRun(row, previousRun) {
+        if (!row) return null;
+        const previousPayload = previousRun && previousRun.id === row.id ? prespisokRunPayload(previousRun) : {};
+        const { reservations, ...rest } = row;
+        return {
+            ...rest,
+            payload: { ...previousPayload, reservations: reservations && typeof reservations === "object" ? reservations : {} },
+        };
+    }
+
     async function fetchPrespisokActions(runId) {
         const db = supabaseDb();
         if (!db || !runId) return [];
@@ -12182,7 +12218,11 @@
         if (!state.prespisok.runId) return;
         const actions = await fetchPrespisokActions(state.prespisok.runId);
         if (Array.isArray(actions)) state.prespisok.actions = actions;
-        const run = await fetchActivePrespisokRun();
+        const cached = state.prespisok.remoteRun;
+        const hasCachedItemsFull = cached && cached.id === state.prespisok.runId && Array.isArray(prespisokRunPayload(cached).items_full);
+        const run = hasCachedItemsFull
+            ? hydrateLeanPrespisokRun(await fetchActivePrespisokRunLean(), cached)
+            : await fetchActivePrespisokRun();
         if (run && run.id === state.prespisok.runId) {
             const payload = prespisokRunPayload(run);
             if (payload.reservations && typeof payload.reservations === "object") state.prespisok.reservations = payload.reservations;
