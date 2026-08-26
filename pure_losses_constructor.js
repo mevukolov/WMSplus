@@ -2,6 +2,7 @@ let rows = [];
 let currentModalItems = [];
 let currentSort = { key:null, dir:1 };
 let valueMode = 'sum'; // 'sum' | 'qty'
+let postedAnalysisMode = 'all'; // 'all' | 'posted' | 'unposted'
 
 const COL = {
     dtLost: 'Дата последнего списания',
@@ -62,17 +63,34 @@ const NO_BARCODE_MODAL_COLUMNS = [
     { key:'Подкатегория товара', title:'Подкатегория' },
     { key:'Бренд', title:'Бренд' }
 ];
+const POSTED_ANALYSIS_MODE_ORDER = ['all', 'posted', 'unposted'];
+const POSTED_ANALYSIS_MODE_META = {
+    all: {
+        icon: '○',
+        title: 'Фильтр оприхода: все'
+    },
+    posted: {
+        icon: '✓',
+        title: 'Фильтр оприхода: только оприходовано'
+    },
+    unposted: {
+        icon: '✕',
+        title: 'Фильтр оприхода: только не оприходовано'
+    }
+};
 
 const writeoffNameById = new Map();
 let writeoffNamesLoaded = false;
 let noBarcodeNmRepCache = { rowsRef:null, promise:null, result:null };
 let noBarcodeRenderToken = 0;
+let analysisRowsCache = { source:null, posted:null, unposted:null };
 
 /* ================= FILE ================= */
 
 document.getElementById('file-input').addEventListener('change', handleFile);
 document.getElementById('export-filtered').onclick = exportAll;
 initValueToggle();
+initPostedModeToggle();
 loadWriteoffNames();
 initPdfExport();
 
@@ -102,6 +120,75 @@ function initValueToggle(){
     };
 }
 
+function initPostedModeToggle(){
+    const btn = document.getElementById('posted-mode-toggle-btn');
+    if(!btn) return;
+
+    const sync = ()=>{
+        const modeMeta = POSTED_ANALYSIS_MODE_META[postedAnalysisMode] || POSTED_ANALYSIS_MODE_META.all;
+        btn.classList.toggle('active', postedAnalysisMode !== 'all');
+        btn.textContent = modeMeta.icon;
+        btn.title = modeMeta.title;
+    };
+
+    sync();
+    btn.onclick = ()=>{
+        const currentIndex = POSTED_ANALYSIS_MODE_ORDER.indexOf(postedAnalysisMode);
+        const nextIndex = (currentIndex + 1) % POSTED_ANALYSIS_MODE_ORDER.length;
+        postedAnalysisMode = POSTED_ANALYSIS_MODE_ORDER[nextIndex];
+        sync();
+
+        if(rows.length){
+            renderReport();
+        }
+        if(currentModalState){
+            renderModalState(getRefreshedModalState(currentModalState), { push:false });
+        }
+    };
+}
+
+function getAnalysisRows(){
+    if(postedAnalysisMode === 'all'){
+        return rows;
+    }
+
+    if(analysisRowsCache.source !== rows){
+        analysisRowsCache = { source:rows, posted:null, unposted:null };
+    }
+
+    if(postedAnalysisMode === 'posted'){
+        if(!analysisRowsCache.posted){
+            analysisRowsCache.posted = rows.filter(isOprihodRow);
+        }
+        return analysisRowsCache.posted;
+    }
+
+    if(!analysisRowsCache.unposted){
+        analysisRowsCache.unposted = rows.filter(r=>!isOprihodRow(r));
+    }
+    return analysisRowsCache.unposted;
+}
+
+function getRefreshedModalState(state){
+    if(!state || state.type !== 'lr' || !state.lrId){
+        return state;
+    }
+
+    const lrIdNum = Number(state.lrId);
+    const refreshedItems = getAnalysisRows().filter(r=>Number(r[COL.lossId]) === lrIdNum);
+    const statuses = getStatuses(refreshedItems);
+    const refreshedStatuses = Array.isArray(state.selectedStatuses)
+        ? state.selectedStatuses.filter(s=>statuses.includes(s))
+        : statuses.slice();
+
+    return {
+        ...state,
+        items: refreshedItems,
+        selectedStatuses: refreshedStatuses,
+        statusColors: buildStatusColorMap(statuses)
+    };
+}
+
 function handleFile(e){
     const file = e.target.files[0];
     if(!file) return;
@@ -110,6 +197,7 @@ function handleFile(e){
         const wb = XLSX.read(buf,{type:'array'});
         const sheet = wb.Sheets[wb.SheetNames[0]];
         rows = XLSX.utils.sheet_to_json(sheet,{defval:''});
+        resetAnalysisRowsCache();
         resetNoBarcodeCache();
 
         if(!rows.length){
@@ -122,6 +210,10 @@ function handleFile(e){
 
 function resetNoBarcodeCache(){
     noBarcodeNmRepCache = { rowsRef:null, promise:null, result:null };
+}
+
+function resetAnalysisRowsCache(){
+    analysisRowsCache = { source:rows, posted:null, unposted:null };
 }
 
 function exportAll(){
@@ -320,14 +412,15 @@ function loadImageCached(url){
 
 async function buildPdfSlides(opts){
     const { title, pageW, pageH, margin, theme } = opts;
+    const analysisRows = getAnalysisRows();
     const slides = [];
 
-    slides.push(await renderTitleSlideCanvas({ title, pageW, pageH, theme }));
-    slides.push(await renderStatsSlideCanvas({ pageW, pageH, margin, theme }));
-    slides.push(...await renderInsightsSlideCanvases({ pageW, pageH, margin, theme }));
+    slides.push(await renderTitleSlideCanvas({ title, pageW, pageH, theme, rows:analysisRows }));
+    slides.push(await renderStatsSlideCanvas({ pageW, pageH, margin, theme, rows:analysisRows }));
+    slides.push(...await renderInsightsSlideCanvases({ pageW, pageH, margin, theme, rows:analysisRows }));
 
-    const autoItems = rows.filter(r=>AUTO_IDS.has(Number(r[COL.lossId])));
-    slides.push(await renderAutoSlideCanvas({ pageW, pageH, margin, theme }));
+    const autoItems = analysisRows.filter(r=>AUTO_IDS.has(Number(r[COL.lossId])));
+    slides.push(await renderAutoSlideCanvas({ pageW, pageH, margin, theme, rows:analysisRows }));
 
     const topAuto = getTopWriteoffsBySum(autoItems, 3);
     for(const row of topAuto){
@@ -339,15 +432,16 @@ async function buildPdfSlides(opts){
         }));
     }
 
-    slides.push(await renderManualSlideCanvas({ pageW, pageH, margin, theme }));
+    slides.push(await renderManualSlideCanvas({ pageW, pageH, margin, theme, rows:analysisRows }));
 
     return slides;
 }
 
 async function renderTitleSlideCanvas(opts){
     const { title, pageW, pageH, theme } = opts;
+    const sourceRows = Array.isArray(opts.rows) ? opts.rows : getAnalysisRows();
     const { canvas, ctx } = createSlideCanvas(pageW, pageH);
-    const dateRange = getReportDateRange(rows);
+    const dateRange = getReportDateRange(sourceRows);
 
     drawSlideBackground(ctx, pageW, pageH);
     await drawSlideFooter(ctx, pageW, pageH, theme);
@@ -371,6 +465,7 @@ async function renderTitleSlideCanvas(opts){
 
 async function renderStatsSlideCanvas(opts){
     const { pageW, pageH, theme } = opts;
+    const sourceRows = Array.isArray(opts.rows) ? opts.rows : getAnalysisRows();
     const { canvas, ctx } = createSlideCanvas(pageW, pageH);
     const fx = (n)=>n * FIGMA_STATS_SCALE;
     const splitX = pageW / 2;
@@ -400,10 +495,10 @@ async function renderStatsSlideCanvas(opts){
         align:'left'
     });
 
-    const totalCount = countProducts(rows);
-    const autoItems = rows.filter(r=>AUTO_IDS.has(Number(r[COL.lossId])));
-    const manualItems = rows.filter(r=>!AUTO_IDS.has(Number(r[COL.lossId])));
-    const postedItems = rows.filter(isOprihodRow);
+    const totalCount = countProducts(sourceRows);
+    const autoItems = sourceRows.filter(r=>AUTO_IDS.has(Number(r[COL.lossId])));
+    const manualItems = sourceRows.filter(r=>!AUTO_IDS.has(Number(r[COL.lossId])));
+    const postedItems = sourceRows.filter(isOprihodRow);
     const autoCount = countProducts(autoItems);
     const manualCount = countProducts(manualItems);
     const postedCount = countProducts(postedItems);
@@ -533,7 +628,8 @@ async function renderStatsSlideCanvas(opts){
 
 async function renderInsightsSlideCanvases(opts){
     const { pageW, pageH, margin, theme } = opts;
-    const insights = buildInsights(rows);
+    const sourceRows = Array.isArray(opts.rows) ? opts.rows : getAnalysisRows();
+    const insights = buildInsights(sourceRows);
     const slides = [];
 
     const cardH = 110;
@@ -579,19 +675,21 @@ async function renderInsightsSlideCanvases(opts){
 }
 
 async function renderAutoSlideCanvas(opts){
+    const sourceRows = Array.isArray(opts.rows) ? opts.rows : getAnalysisRows();
     return renderWriteoffSlideCanvas({
         ...opts,
         title:'Автосписания',
-        items: rows.filter(r=>AUTO_IDS.has(Number(r[COL.lossId]))),
+        items: sourceRows.filter(r=>AUTO_IDS.has(Number(r[COL.lossId]))),
         totalLabel:'Автосписания'
     });
 }
 
 async function renderManualSlideCanvas(opts){
+    const sourceRows = Array.isArray(opts.rows) ? opts.rows : getAnalysisRows();
     return renderWriteoffSlideCanvas({
         ...opts,
         title:'Ручные списания',
-        items: rows.filter(r=>!AUTO_IDS.has(Number(r[COL.lossId]))),
+        items: sourceRows.filter(r=>!AUTO_IDS.has(Number(r[COL.lossId]))),
         totalLabel:'Ручные списания'
     });
 }
@@ -653,10 +751,11 @@ async function renderWriteoffSlideCanvas(opts){
 }
 
 function buildTimelineData(){
+    const sourceRows = getAnalysisRows();
     const byDate = {};
     const byPostedDate = {};
 
-    rows.forEach(r=>{
+    sourceRows.forEach(r=>{
         const d = normalizeDate(r[COL.dtLost]);
         if(d){
             byDate[d] ??= [];
@@ -1265,13 +1364,14 @@ async function createEmployeeBubbleImage(items, statusColors, width, height){
 /* ================= REPORT ================= */
 
 function renderReport(){
+    const sourceRows = getAnalysisRows();
     const container = document.getElementById('report');
     container.innerHTML = '';
 
-    renderTotalBlock(container);
+    renderTotalBlock(container, sourceRows);
 
     const groups = {};
-    rows.forEach(r=>{
+    sourceRows.forEach(r=>{
         const id = Number(r[COL.lossId]);
         if(!id) return;
         groups[id] ??= [];
@@ -1287,10 +1387,11 @@ function renderReport(){
 
     renderSection(container,'Автосписания',auto,'auto');
     renderSection(container,'Ручные списания',manual,'manual');
-    renderNoBarcodeSection(container);
+    renderNoBarcodeSection(container, sourceRows);
 }
 
-function renderNoBarcodeSection(container){
+function renderNoBarcodeSection(container, sourceRows){
+    const reportRows = Array.isArray(sourceRows) ? sourceRows : [];
     const box = document.createElement('section');
     box.className = 'status-box';
     container.appendChild(box);
@@ -1301,7 +1402,7 @@ function renderNoBarcodeSection(container){
         desc:'Загрузка данных из nm_rep...'
     });
 
-    getNoBarcodeNmRepMatches(rows).then(result=>{
+    getNoBarcodeNmRepMatches(reportRows).then(result=>{
         if(renderToken !== noBarcodeRenderToken) return;
 
         const errorText = String(result?.error || '').trim();
@@ -1458,10 +1559,11 @@ function renderGroupOverview(container, title, blocks, groupKey){
 
 /* ================= TOTAL BLOCK ================= */
 
-function renderTotalBlock(container){
-    const auto = rows.filter(r=>AUTO_IDS.has(Number(r[COL.lossId])));
-    const manual = rows.filter(r=>!AUTO_IDS.has(Number(r[COL.lossId])));
-    const posted = rows.filter(isOprihodRow);
+function renderTotalBlock(container, sourceRows){
+    const reportRows = Array.isArray(sourceRows) ? sourceRows : [];
+    const auto = reportRows.filter(r=>AUTO_IDS.has(Number(r[COL.lossId])));
+    const manual = reportRows.filter(r=>!AUTO_IDS.has(Number(r[COL.lossId])));
+    const posted = reportRows.filter(isOprihodRow);
 
     const box = document.createElement('section');
     box.className='status-box';
@@ -1471,11 +1573,11 @@ function renderTotalBlock(container){
     <div class="status-side status-side-inline clickable">
         <div class="status-inline-row">
             <div class="status-inline-item">
-                <div class="status-big">${countProducts(rows)}</div>
+                <div class="status-big">${countProducts(reportRows)}</div>
                 <div class="status-label">Товаров</div>
             </div>
             <div class="status-inline-item">
-                <div class="status-big">₽ ${format(sumField(rows, COL.sum))}</div>
+                <div class="status-big">₽ ${format(sumField(reportRows, COL.sum))}</div>
                 <div class="status-label">Сумма</div>
             </div>
         </div>
@@ -1532,11 +1634,11 @@ function renderTotalBlock(container){
             if(el.dataset.type==='auto') openModal(auto,'Автосписания');
             else if(el.dataset.type==='manual') openModal(manual,'Ручные списания');
             else if(el.dataset.type==='posted') openModal(posted,'Оприходовано');
-            else openModal(rows,'Все списания');
+            else openModal(reportRows,'Все списания');
         };
     });
 
-    renderTotalChart();
+    renderTotalChart(reportRows);
 }
 
 /* ================= CHART TOTAL ================= */
@@ -1547,11 +1649,12 @@ function normalizeDate(v){
     return formatDate(d);
 }
 
-function renderTotalChart(){
+function renderTotalChart(sourceRows){
+    const reportRows = Array.isArray(sourceRows) ? sourceRows : [];
     const byDate = {};
     const byPostedDate = {};
 
-    rows.forEach(r=>{
+    reportRows.forEach(r=>{
         const d = normalizeDate(r[COL.dtLost]);
         if(d){
             byDate[d] ??= [];

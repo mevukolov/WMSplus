@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --main: #83644D;
+      --deep: #3E2E23;
+      --paper: #FFF8EF;
+      --line: rgba(62, 46, 35, 0.18);
+      --muted: rgba(62, 46, 35, 0.68);
+      --green: #229954;
+      --yellow: #DCA319;
+      --red: #D33B31;
+      --track: rgba(62, 46, 35, 0.16);
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--deep);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+
+    body { padding: 6px; }
+
+    .strip {
+      width: 100%;
+      min-height: 94px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--paper);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 8px;
+    }
+
+    .shift-card {
+      flex: 0 0 228px;
+      min-height: 78px;
+      border-radius: 12px;
+      background: var(--deep);
+      color: var(--paper);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .shift-title {
+      font-size: 18px;
+      line-height: 1.05;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .shift-employees {
+      margin-top: 5px;
+      font-size: 12px;
+      line-height: 1.15;
+      color: rgba(255, 248, 239, 0.78);
+      max-height: 28px;
+      overflow: hidden;
+    }
+
+    .shift-meta {
+      margin-top: 4px;
+      font-size: 10px;
+      color: rgba(255, 248, 239, 0.58);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ring-card {
+      flex: 0 0 86px;
+      height: 78px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fffaf3;
+      display: grid;
+      grid-template-rows: 54px 1fr;
+      justify-items: center;
+      align-items: center;
+      padding: 5px 4px 4px;
+    }
+
+    .ring-card.overall {
+      flex-basis: 108px;
+      background: #fff6e8;
+      border-color: rgba(131, 100, 77, 0.34);
+    }
+
+    .ring-wrap {
+      width: 54px;
+      height: 54px;
+      position: relative;
+    }
+
+    .overall .ring-wrap {
+      width: 58px;
+      height: 58px;
+    }
+
+    .ring-svg {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+      display: block;
+    }
+
+    .ring-track,
+    .ring-value {
+      fill: none;
+      stroke-width: 5.2;
+    }
+
+    .ring-track { stroke: var(--track); }
+    .ring-value { stroke-linecap: round; }
+    .ring-value.good { stroke: var(--green); }
+    .ring-value.warn { stroke: var(--yellow); }
+    .ring-value.bad { stroke: var(--red); }
+
+    .ring-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 950;
+      letter-spacing: -0.06em;
+      color: var(--deep);
+    }
+
+    .ring-label {
+      width: 100%;
+      padding: 0 2px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1.05;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .state {
+      width: 100%;
+      min-height: 94px;
+      border: 1px dashed var(--line);
+      border-radius: 16px;
+      background: #fffaf3;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 12px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .error-state {
+      color: var(--red);
+      border-color: rgba(211, 59, 49, 0.32);
+    }
+
+    @media (max-width: 760px) {
+      .strip { min-height: 88px; }
+      .shift-card { flex-basis: 190px; }
+      .ring-card { flex-basis: 78px; }
+      .ring-card.overall { flex-basis: 94px; }
+    }
+  </style>
+</head>
+<body>
+  <main id="root"><div class="state">Загружаю прогресс ОПП...</div></main>
+
+  <script>
+    const INITIAL_CONFIG = <?!= JSON.stringify(initialConfig) ?>;
+
+    (function () {
+      "use strict";
+
+      const DEFAULT_OPTIONS = {
+        min_total_percent: 70,
+        warn_total_percent: 85,
+        min_sum_percent: 70,
+        warn_sum_percent: 85,
+        min_expensive_percent: 70,
+        warn_expensive_percent: 95,
+        include_warnings: true
+      };
+      const STATUS_LABELS = {
+        SPS_WMI: "SPS + WMI",
+        SMC: "SMC",
+        SMS: "SMS",
+        WMI_BZ: "WMI БЗ",
+        RWP: "RWP",
+        "24": "24",
+        ORS: "ORS",
+        REPACK: "Упаковка"
+      };
+      const STATUS_ORDER = ["24", "REPACK", "RWP", "SMC", "SMS", "SPS_WMI", "WMI_BZ", "ORS"];
+      const MAIN_EMPLOYEE_KEYS = new Set(["REPACK", "SPS_WMI", "WMI_BZ", "SMC", "SMS", "RWP"]);
+      const MSK_TIME_ZONE = "Europe/Moscow";
+      const root = document.getElementById("root");
+      let refreshTimer = null;
+
+      function text(value) { return String(value ?? "").trim(); }
+      function escapeHtml(value) {
+        return text(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+      function parseMaybeJson(value) {
+        if (typeof value !== "string") return value;
+        const raw = value.trim();
+        if (!raw || (!raw.startsWith("{") && !raw.startsWith("["))) return value;
+        try { return JSON.parse(raw); } catch (_) { return value; }
+      }
+      function num(value) {
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        const raw = text(value).replace(/\s+/g, "").replace(",", ".");
+        if (!raw) return 0;
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      function get(obj, keys) {
+        if (!obj || typeof obj !== "object") return undefined;
+        for (const key of keys) {
+          if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+        }
+        return undefined;
+      }
+      function getText(obj, keys) { return text(get(obj, keys)); }
+      function getNum(obj, keys) { return num(get(obj, keys)); }
+      function pct(part, total) {
+        const totalNum = num(total);
+        if (totalNum <= 0) return null;
+        return Math.max(0, Math.min(100, (num(part) / totalNum) * 100));
+      }
+      function fmtPct(value) {
+        if (value === null || !Number.isFinite(value)) return "-";
+        return String(Math.round(value));
+      }
+      function normalizeDeadlineKey(value) {
+        const raw = text(value).toUpperCase().replace(/\s+/g, "");
+        if (!raw) return "";
+        if (raw === "SPS+WMI" || raw === "SPS_WMI") return "SPS_WMI";
+        if (raw === "WMIБЕЗЗАКАЗА" || raw === "WMI_BZ") return "WMI_BZ";
+        if (raw === "УПАКОВКА") return "REPACK";
+        return raw;
+      }
+      function parseIsoDate(value) {
+        const raw = text(value);
+        const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+        const ru = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+        if (!ru) return "";
+        const year = ru[3].length === 2 ? `20${ru[3]}` : ru[3];
+        return `${year}-${String(ru[2]).padStart(2, "0")}-${String(ru[1]).padStart(2, "0")}`;
+      }
+      function shiftIsoDate(isoDate, daysDelta) {
+        const safe = parseIsoDate(isoDate);
+        if (!safe) return "";
+        const dt = new Date(`${safe}T00:00:00Z`);
+        if (!Number.isFinite(dt.getTime())) return "";
+        dt.setUTCDate(dt.getUTCDate() + Number(daysDelta || 0));
+        return dt.toISOString().slice(0, 10);
+      }
+      function formatDateRu(value) {
+        const iso = parseIsoDate(value);
+        if (!iso) return text(value);
+        const parts = iso.split("-");
+        return `${parts[2]}.${parts[1]}`;
+      }
+      function formatDateTimeRu(value) {
+        const raw = text(value);
+        if (!raw) return "—";
+        const dt = new Date(raw);
+        if (!Number.isFinite(dt.getTime())) return raw;
+        return new Intl.DateTimeFormat("ru-RU", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: MSK_TIME_ZONE
+        }).format(dt);
+      }
+      function moscowNowParts() {
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: MSK_TIME_ZONE,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          hourCycle: "h23"
+        }).formatToParts(new Date());
+        const out = {};
+        parts.forEach(function(part) { if (part.type !== "literal") out[part.type] = part.value; });
+        return out;
+      }
+      function currentOperationalDate() {
+        const parts = moscowNowParts();
+        const today = `${parts.year}-${parts.month}-${parts.day}`;
+        return Number(parts.hour || 0) < 8 ? shiftIsoDate(today, -1) : today;
+      }
+      function normalizeArray(value) {
+        return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
+      }
+      function normalizeDetail(raw) {
+        const key = normalizeDeadlineKey(getText(raw, ["key", "display_key", "displayKey"]));
+        const displayKey = STATUS_LABELS[key] || getText(raw, ["display_key", "displayKey", "key"]) || key || "Выгрузка";
+        const dueTotal = getNum(raw, ["due_total_unique_shk", "dueTotal", "due_total", "totalDue"]);
+        const analyzed = getNum(raw, ["analyzed_due_unique_shk", "analyzed", "analyzed_due", "analyzedDue"]);
+        return {
+          key: key,
+          displayKey: displayKey,
+          dueTotal: dueTotal,
+          analyzed: analyzed,
+          dueSum: getNum(raw, ["due_total_sum_price", "dueSumPrice", "due_sum_price"]),
+          analyzedSum: getNum(raw, ["analyzed_due_sum_price", "analyzedSumPrice", "analyzed_sum_price"]),
+          expensiveDue: getNum(raw, ["expensive_due_total_unique_shk", "expensiveDueTotal", "expensive_due_total"]),
+          expensiveAnalyzed: getNum(raw, ["expensive_analyzed_due_unique_shk", "expensiveAnalyzed", "expensive_analyzed"]),
+          uploadStatus: getText(raw, ["upload_status", "uploadStatus"]) || (dueTotal > 0 ? "Есть" : "Нет выгрузки"),
+          analyzerValues: normalizeArray(get(raw, ["analyzer_values", "analyzerValues", "employeeNames"]))
+        };
+      }
+      function normalizeShift(raw) {
+        const operationalDate = parseIsoDate(getText(raw, ["operational_date_key", "operationalDateKey", "date"]));
+        const shiftId = getText(raw, ["shift_id", "shiftId"]);
+        const idDate = (shiftId.match(/(?:day|night|shift):(\d{4}-\d{2}-\d{2})/) || [])[1] || "";
+        const date = operationalDate || idDate;
+        return {
+          shiftId: shiftId || (date ? `shift:${date}` : ""),
+          shiftName: getText(raw, ["shift_name", "shiftName"]) || "Смена",
+          shiftLabel: getText(raw, ["shift_label", "displayDate", "dateLabel", "operational_date_label"]) || formatDateRu(date),
+          date: date,
+          totalDue: getNum(raw, ["total_due_unique_shk", "totalDue", "dueTotal"]),
+          analyzed: getNum(raw, ["analyzed_due_unique_shk", "analyzed", "analyzedDue"]),
+          dueSum: getNum(raw, ["total_due_sum_price", "dueSumPrice"]),
+          analyzedSum: getNum(raw, ["analyzed_due_sum_price", "analyzedSumPrice"]),
+          expensiveDue: getNum(raw, ["expensive_due_total_unique_shk", "expensiveDueTotal"]),
+          expensiveAnalyzed: getNum(raw, ["expensive_analyzed_due_unique_shk", "expensiveAnalyzed"]),
+          analyzerValues: normalizeArray(get(raw, ["analyzer_values", "analyzerValues", "employeeNames"])),
+          details: (Array.isArray(raw && raw.details) ? raw.details : []).map(normalizeDetail).filter(Boolean)
+        };
+      }
+      function mergeDetails(details) {
+        const map = new Map();
+        details.forEach(function(item) {
+          const key = item.key || normalizeDeadlineKey(item.displayKey) || item.displayKey;
+          const existing = map.get(key);
+          if (!existing) {
+            map.set(key, Object.assign({}, item, { analyzerValues: item.analyzerValues.slice() }));
+            return;
+          }
+          existing.dueTotal += item.dueTotal;
+          existing.analyzed += item.analyzed;
+          existing.dueSum += item.dueSum;
+          existing.analyzedSum += item.analyzedSum;
+          existing.expensiveDue += item.expensiveDue;
+          existing.expensiveAnalyzed += item.expensiveAnalyzed;
+          existing.uploadStatus = /есть/i.test(existing.uploadStatus) || /есть/i.test(item.uploadStatus) || item.dueTotal > 0 ? "Есть" : "Нет выгрузки";
+          existing.analyzerValues = Array.from(new Set(existing.analyzerValues.concat(item.analyzerValues))).sort(function(a, b) { return a.localeCompare(b, "ru"); });
+        });
+        return Array.from(map.values()).sort(function(a, b) {
+          const left = STATUS_ORDER.indexOf(a.key);
+          const right = STATUS_ORDER.indexOf(b.key);
+          if (left !== -1 || right !== -1) return (left === -1 ? 999 : left) - (right === -1 ? 999 : right);
+          return a.displayKey.localeCompare(b.displayKey, "ru");
+        });
+      }
+      function mergeShiftsByDate(shifts, dateKey) {
+        const exact = shifts.find(function(shift) { return shift.shiftId === `shift:${dateKey}`; });
+        if (exact) return exact;
+        const sameDate = shifts.filter(function(shift) { return shift.date === dateKey; });
+        if (!sameDate.length) return null;
+        const details = mergeDetails(sameDate.flatMap(function(shift) { return shift.details; }));
+        const employees = new Set();
+        sameDate.forEach(function(shift) { shift.analyzerValues.forEach(function(name) { employees.add(name); }); });
+        details.forEach(function(detail) { detail.analyzerValues.forEach(function(name) { employees.add(name); }); });
+        return {
+          shiftId: `shift:${dateKey}`,
+          shiftName: "Смена",
+          shiftLabel: formatDateRu(dateKey),
+          date: dateKey,
+          totalDue: sameDate.reduce(function(sum, shift) { return sum + shift.totalDue; }, 0),
+          analyzed: sameDate.reduce(function(sum, shift) { return sum + shift.analyzed; }, 0),
+          dueSum: sameDate.reduce(function(sum, shift) { return sum + shift.dueSum; }, 0),
+          analyzedSum: sameDate.reduce(function(sum, shift) { return sum + shift.analyzedSum; }, 0),
+          expensiveDue: sameDate.reduce(function(sum, shift) { return sum + shift.expensiveDue; }, 0),
+          expensiveAnalyzed: sameDate.reduce(function(sum, shift) { return sum + shift.expensiveAnalyzed; }, 0),
+          analyzerValues: Array.from(employees).sort(function(a, b) { return a.localeCompare(b, "ru"); }),
+          details: details
+        };
+      }
+      function findTargetShift(payload) {
+        const shifts = (Array.isArray(payload && payload.shift_dynamics) ? payload.shift_dynamics : [])
+          .map(normalizeShift)
+          .filter(function(shift) { return shift.date || shift.shiftId; });
+        if (!shifts.length) return null;
+        if (INITIAL_CONFIG.shift_id) {
+          const exact = shifts.find(function(shift) { return shift.shiftId === INITIAL_CONFIG.shift_id; });
+          if (exact) return exact;
+        }
+        const requestedDate = parseIsoDate(INITIAL_CONFIG.date) || currentOperationalDate();
+        const merged = mergeShiftsByDate(shifts, requestedDate);
+        if (merged) return merged;
+        return shifts.sort(function(a, b) { return text(b.date).localeCompare(text(a.date)); })[0] || null;
+      }
+      function hasUpload(detail) { return detail.dueTotal > 0 || /есть/i.test(detail.uploadStatus); }
+      function assess(detail, options) {
+        const totalPct = pct(detail.analyzed, detail.dueTotal);
+        const sumPct = pct(detail.analyzedSum, detail.dueSum);
+        const expensivePct = pct(detail.expensiveAnalyzed, detail.expensiveDue);
+        if (!hasUpload(detail) || detail.dueTotal <= 0) return { level: "bad", percent: 0, title: "Нет выгрузки" };
+        const valueProtected = expensivePct !== null && expensivePct >= 100 && sumPct !== null && sumPct > 80;
+        let level = "good";
+        if (!valueProtected && totalPct !== null && totalPct < num(options.min_total_percent)) level = "bad";
+        else if (!valueProtected && options.include_warnings !== false && totalPct !== null && totalPct < num(options.warn_total_percent)) level = "warn";
+        if (!valueProtected && sumPct !== null && sumPct < num(options.min_sum_percent)) level = "bad";
+        else if (!valueProtected && options.include_warnings !== false && sumPct !== null && sumPct < num(options.warn_sum_percent) && level !== "bad") level = "warn";
+        if (expensivePct !== null && expensivePct < num(options.min_expensive_percent)) level = "bad";
+        else if (options.include_warnings !== false && expensivePct !== null && expensivePct < num(options.warn_expensive_percent) && level !== "bad") level = "warn";
+        return { level: level, percent: totalPct === null ? 0 : totalPct, title: `${detail.analyzed}/${detail.dueTotal}` };
+      }
+      function assessOverall(shift, options) {
+        const totalPct = pct(shift.analyzed, shift.totalDue);
+        const sumPct = pct(shift.analyzedSum, shift.dueSum);
+        const expensivePct = pct(shift.expensiveAnalyzed, shift.expensiveDue);
+        let level = "good";
+        if (totalPct !== null && totalPct < num(options.min_total_percent)) level = "bad";
+        else if (totalPct !== null && totalPct < num(options.warn_total_percent)) level = "warn";
+        if (sumPct !== null && sumPct < num(options.min_sum_percent)) level = "bad";
+        else if (sumPct !== null && sumPct < num(options.warn_sum_percent) && level !== "bad") level = "warn";
+        if (expensivePct !== null && expensivePct < 100) level = "bad";
+        return { level: level, percent: totalPct === null ? 0 : totalPct, title: `${shift.analyzed}/${shift.totalDue}` };
+      }
+      function renderRing(label, percent, level, title, isOverall) {
+        const safePct = Math.max(0, Math.min(100, Number(percent || 0)));
+        return `
+          <section class="ring-card ${isOverall ? "overall" : ""}" title="${escapeHtml(title || label)}">
+            <div class="ring-wrap">
+              <svg class="ring-svg" viewBox="0 0 42 42" aria-hidden="true">
+                <circle class="ring-track" cx="21" cy="21" r="15.9155"></circle>
+                <circle class="ring-value ${escapeHtml(level)}" cx="21" cy="21" r="15.9155" stroke-dasharray="${safePct} 100"></circle>
+              </svg>
+              <div class="ring-text">${escapeHtml(fmtPct(safePct))}</div>
+            </div>
+            <div class="ring-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
+          </section>
+        `;
+      }
+      function renderState(message, isError) {
+        root.innerHTML = `<div class="state ${isError ? "error-state" : ""}">${escapeHtml(message)}</div>`;
+      }
+      function render(data) {
+        if (!data || data.ok === false) {
+          renderState((data && data.error) || "Не удалось загрузить данные.", true);
+          return;
+        }
+        const payload = parseMaybeJson(data.payload);
+        const options = Object.assign({}, DEFAULT_OPTIONS, data.options || {});
+        const shift = findTargetShift(payload);
+        if (!shift) {
+          renderState("Смена не найдена в кэше opp_telegram_shift.", true);
+          return;
+        }
+        shift.details = mergeDetails(shift.details);
+        const mainEmployees = new Set(shift.analyzerValues);
+        shift.details.forEach(function(detail) {
+          if (!MAIN_EMPLOYEE_KEYS.has(detail.key)) return;
+          detail.analyzerValues.forEach(function(name) { mainEmployees.add(name); });
+        });
+        const employees = Array.from(mainEmployees).filter(Boolean).sort(function(a, b) { return a.localeCompare(b, "ru"); }).join(", ") || "—";
+        const actualText = formatDateTimeRu(getText(payload, ["generated_at", "generatedAt"]) || getText(payload && payload.today_deadline, ["as_of_label", "asOfText"]) || getText(data.cache_row, ["source_generated_at", "refreshed_at"]));
+        const overall = assessOverall(shift, options);
+        const rings = [renderRing("Смена", overall.percent, overall.level, overall.title, true)]
+          .concat(shift.details.map(function(detail) {
+            const a = assess(detail, options);
+            return renderRing(detail.displayKey, a.percent, a.level, a.title, false);
+          }))
+          .join("");
+
+        root.innerHTML = `
+          <section class="strip">
+            <aside class="shift-card">
+              <div class="shift-title">${escapeHtml(shift.shiftName)} ${escapeHtml(shift.shiftLabel)}</div>
+              <div class="shift-employees">${escapeHtml(employees)}</div>
+              <div class="shift-meta">Актуально: ${escapeHtml(actualText)}</div>
+            </aside>
+            ${rings}
+          </section>
+        `;
+      }
+      function load() {
+        google.script.run
+          .withSuccessHandler(render)
+          .withFailureHandler(function(error) {
+            renderState((error && error.message) || "Не удалось загрузить прогресс ОПП.", true);
+          })
+          .getOppFrameData(INITIAL_CONFIG);
+      }
+      function scheduleRefresh() {
+        const refreshSec = Math.max(30, num(INITIAL_CONFIG.refresh) || 60);
+        if (refreshTimer) clearInterval(refreshTimer);
+        refreshTimer = setInterval(load, refreshSec * 1000);
+      }
+      document.addEventListener("visibilitychange", function() {
+        if (!document.hidden) load();
+      });
+      load();
+      scheduleRefresh();
+    })();
+  </script>
+</body>
+</html>

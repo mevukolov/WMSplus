@@ -2460,9 +2460,12 @@
         setActualizeStatus("Читаю Superset...");
         try {
             const rows = await readSupersetRows(file);
+            setActualizeStatus("Проверяю движения и дубли с Движением после продажи...");
+            const afterSaleIndex = await loadAfterSaleDedupeIndexForTasks(supabaseDb(), state.review.rows || []);
             state.actualize.rows = rows;
             state.actualize.stats = actualizeSupersetStats(rows);
-            state.actualize.candidates = buildMovementCandidates(rows);
+            state.actualize.afterSaleDedupeIndex = afterSaleIndex;
+            state.actualize.candidates = buildMovementCandidates(rows, afterSaleIndex);
             state.actualize.removedShks = new Set();
             state.actualize.tareActions = {};
             renderActualizeResults();
@@ -2718,14 +2721,26 @@
         return movementTimeInfo(row, item, supersetRow).canAutoClose;
     }
 
-    function buildMovementCandidates(supersetRows) {
+    function buildMovementCandidates(supersetRows, afterSaleIndex) {
         const byShk = latestSupersetByShk(supersetRows);
         const candidates = [];
-        (state.review.rows || []).filter(isActiveReviewTask).forEach((row) => {
+        (state.review.rows || []).filter((row) => isActiveReviewTask(row) && canSystemActualizeMovement(row)).forEach((row) => {
             const items = taskItems(row);
-            const moved = items
-                .map((item) => ({ row, item, superset: byShk.get(item.shk) || null }))
-                .filter((entry) => hasConfirmedMovement(row, entry.item, entry.superset));
+            const byItem = new Map();
+            items.forEach((item) => {
+                const shk = normalizeIdentifier(item.shk);
+                const superset = byShk.get(shk) || null;
+                if (hasConfirmedMovement(row, item, superset)) byItem.set(shk, { row, item, superset, reason: "superset_movement" });
+            });
+            if (afterSaleIndex && afterSaleIndex.size) {
+                items.forEach((item) => {
+                    const shk = normalizeIdentifier(item.shk);
+                    if (!shk || byItem.has(shk)) return;
+                    const match = afterSaleDedupeMatch(row, item, afterSaleIndex);
+                    if (match) byItem.set(shk, { row, item, superset: null, reason: "after_sale_duplicate", afterSaleTask: match.task, afterSaleDate: match.date });
+                });
+            }
+            const moved = Array.from(byItem.values());
             if (!moved.length) return;
             const stationary = items.filter((item) => !moved.some((entry) => entry.item.shk === item.shk));
             candidates.push({
@@ -2886,11 +2901,14 @@
         const stats = state.actualize.stats;
         if (!stats) return "";
         const movedCount = (candidates || []).reduce((sum, candidate) => sum + (candidate.moved || []).length, 0);
+        const dedupeCount = (candidates || []).reduce((sum, candidate) => sum + (candidate.moved || []).filter((entry) => entry.reason === "after_sale_duplicate").length, 0);
+        const movementCount = Math.max(movedCount - dedupeCount, 0);
         const partialCount = (candidates || []).filter((candidate) => candidate.type === "tare_partial").length;
         return "<div class='actualize-summary'>"
             + "<div><strong>" + escapeHtml(String(stats.rows)) + "</strong><span>строк проверено</span></div>"
             + "<div><strong>" + escapeHtml(String(stats.matched_active)) + "</strong><span>активных ШК найдено</span></div>"
-            + "<div><strong>" + escapeHtml(String(movedCount)) + "</strong><span>ШК с движением +10 мин</span></div>"
+            + "<div><strong>" + escapeHtml(String(movementCount)) + "</strong><span>ШК с движением +10 мин</span></div>"
+            + "<div><strong>" + escapeHtml(String(dedupeCount)) + "</strong><span>дублей ORS</span></div>"
             + "<div><strong>" + escapeHtml(String(partialCount)) + "</strong><span>частичных тар</span></div>"
             + "</div>";
     }
@@ -2904,11 +2922,16 @@
     function movementRowHtml(entry) {
         const shk = normalizeIdentifier(entry.item.shk);
         const removed = state.actualize.removedShks.has(shk);
-        const changes = movementChangeList(entry.row, entry.item, entry.superset);
+        const isAfterSaleDuplicate = entry.reason === "after_sale_duplicate";
+        const changes = isAfterSaleDuplicate ? [] : movementChangeList(entry.row, entry.item, entry.superset);
         const changeHtml = changes.length
             ? changes.map((change) => "<div class='movement-change'><span>" + escapeHtml(change.label) + "</span><strong>" + escapeHtml(change.before) + " → " + escapeHtml(change.after) + "</strong></div>").join("")
+            : isAfterSaleDuplicate
+                ? "<div class='movement-change'><span>Схлопывание</span><strong>Уже есть задача “Движение после продажи” за " + escapeHtml(formatRuDate(entry.afterSaleDate)) + "</strong></div>"
             : "<div class='movement-change'><span>Изменение</span><strong>Не определено</strong></div>";
-        const meta = "МХ по Superset: " + ((entry.superset && entry.superset.last_mx) || "-");
+        const meta = isAfterSaleDuplicate
+            ? "ORS-задача: " + (entry.afterSaleTask && entry.afterSaleTask.title ? entry.afterSaleTask.title : "-")
+            : "МХ по Superset: " + ((entry.superset && entry.superset.last_mx) || "-");
         return "<div class='movement-row" + (removed ? " removed" : "") + "'>"
             + "<div class='movement-main'>" + escapeHtml(shk) + "<div class='movement-change-list'>" + changeHtml + "</div><div class='movement-meta'>" + escapeHtml(meta) + "</div></div>"
             + "<button class='btn btn-square' type='button' data-remove-movement='" + escapeHtml(shk) + "' title='Убрать из подтверждения'>−</button>"
@@ -2921,7 +2944,7 @@
         const candidates = state.actualize.candidates || [];
         const statsLine = actualizeStatsLine();
         if (!candidates.length) {
-            target.innerHTML = actualizeSummaryHtml(candidates) + "<div class='empty-state'>Активных задач с движением минимум на 10 минут позже исходных данных не найдено. " + escapeHtml(statsLine) + "</div>";
+            target.innerHTML = actualizeSummaryHtml(candidates) + "<div class='empty-state'>Активных задач с движением минимум на 10 минут позже исходных данных или дублем с “Движением после продажи” не найдено. " + escapeHtml(statsLine) + "</div>";
             setActualizeStatus("Superset прочитан. Кандидатов на закрытие нет.", "good");
             return;
         }
@@ -2943,7 +2966,7 @@
                 + movementActionButton(candidate.row.id, "split_remaining", "Создать задачи на оставшиеся ШК", action)
                 + "</div></div>";
         }).join("");
-        target.innerHTML = "<div class='status-line good'>Проверьте движения: в список попали только ШК, где время Superset минимум на 10 минут позже исходного времени задачи.</div>"
+        target.innerHTML = "<div class='status-line good'>Проверьте движения: в список попали ШК, где время Superset минимум на 10 минут позже исходного времени задачи, и ШК, которые уже есть в “Движении после продажи” за ту же дату.</div>"
             + actualizeSummaryHtml(candidates)
             + (fullHtml ? "<h4>Полное закрытие</h4>" + fullHtml : "")
             + (partialHtml ? "<h4>Частичное движение по тарам</h4>" + partialHtml : "")
@@ -2972,6 +2995,19 @@
 
     function selectedMovedEntries(candidate) {
         return (candidate.moved || []).filter((entry) => !state.actualize.removedShks.has(normalizeIdentifier(entry.item.shk)));
+    }
+
+    function movementPlanNote(prefix, entries) {
+        const selected = entries || [];
+        const shks = selected.map((entry) => normalizeIdentifier(entry.item && entry.item.shk)).filter(Boolean);
+        const afterSale = selected.filter((entry) => entry.reason === "after_sale_duplicate");
+        const superset = selected.length - afterSale.length;
+        const parts = [];
+        if (superset) parts.push(prefix + ": " + shks.join(", "));
+        if (afterSale.length) {
+            parts.push("Схлопнуто с задачей Движение после продажи: " + afterSale.map((entry) => normalizeIdentifier(entry.item && entry.item.shk)).filter(Boolean).join(", "));
+        }
+        return parts.join(". ") || prefix + ": " + shks.join(", ");
     }
 
     async function completeTaskBySystemMovement(row, note) {
@@ -3047,7 +3083,7 @@
                 if (!selected.length) continue;
                 const row = findTaskRow(candidate.row.id) || candidate.row;
                 if (!isTareTask(row)) {
-                    closePlans.push({ row, note: "Подтверждено движение ШК " + selected.map((entry) => entry.item.shk).join(", ") });
+                    closePlans.push({ row, note: movementPlanNote("Подтверждено движение ШК", selected) });
                     continue;
                 }
                 const selectedShks = new Set(selected.map((entry) => normalizeIdentifier(entry.item.shk)));
@@ -3055,14 +3091,14 @@
                 const rest = allItems.filter((item) => !selectedShks.has(normalizeIdentifier(item.shk)));
                 const action = candidate.type === "tare_partial" ? (state.actualize.tareActions[row.id] || "exclude") : (rest.length ? "exclude" : "close");
                 if (action === "close" || !rest.length) {
-                    closePlans.push({ row, note: "Подтверждено движение по таре: " + selected.map((entry) => entry.item.shk).join(", ") });
+                    closePlans.push({ row, note: movementPlanNote("Подтверждено движение по таре", selected) });
                 } else if (action === "split_remaining") {
                     splitTasks.push(...rest.map((item) => ({
                         ...splitTaskFromTare(row, item),
                         assignee_employee_id: row.assignee_employee_id || "",
                         assignee_name: row.assignee_name || "",
                     })));
-                    closePlans.push({ row, note: "По части тары подтверждено движение. Остаток вынесен в отдельные задачи." });
+                    closePlans.push({ row, note: movementPlanNote("По части тары подтверждено движение. Остаток вынесен в отдельные задачи", selected) });
                 } else {
                     updatePlans.push({ row, items: rest, extraPayload: {
                         movement_excluded_shks: Array.from(selectedShks),
@@ -5684,6 +5720,61 @@
         return !isAfterSaleMovementTask(row);
     }
 
+    function afterSaleDedupeDateForItem(row, item) {
+        return parseDateTime(item && item.movement).date
+            || parseDateTime(row && row.source_last_movement_at).date
+            || normalizeText(row && row.upload_effective_date).slice(0, 10)
+            || parseDateTime(row && row.created_at).date
+            || "";
+    }
+
+    function afterSaleDedupeKey(shk, date) {
+        const cleanShk = normalizeIdentifier(shk);
+        const cleanDate = normalizeText(date).slice(0, 10);
+        return cleanShk && cleanDate ? cleanShk + "|" + cleanDate : "";
+    }
+
+    function addAfterSaleTaskToDedupeIndex(index, row) {
+        if (!index || !isAfterSaleMovementTask(row)) return;
+        const items = taskItems(row);
+        const sourceIds = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
+        const rows = items.length ? items : sourceIds.map((shk) => ({ shk, movement: "" }));
+        rows.forEach((item) => {
+            const key = afterSaleDedupeKey(item.shk, afterSaleDedupeDateForItem(row, item));
+            if (key && !index.has(key)) index.set(key, row);
+        });
+    }
+
+    function buildAfterSaleDedupeIndex(rows) {
+        const index = new Map();
+        (rows || []).forEach((row) => addAfterSaleTaskToDedupeIndex(index, row));
+        return index;
+    }
+
+    function afterSaleDedupeMatch(row, item, index) {
+        const key = afterSaleDedupeKey(item && item.shk, afterSaleDedupeDateForItem(row, item));
+        const matchedTask = key && index ? index.get(key) : null;
+        return matchedTask ? { key, task: matchedTask, date: key.split("|")[1] || "" } : null;
+    }
+
+    async function loadAfterSaleDedupeIndexForTasks(db, tasks, extraAfterSaleRows) {
+        const index = buildAfterSaleDedupeIndex(extraAfterSaleRows || []);
+        const ids = productIdsFromTasks(tasks);
+        if (!db || !ids.length) return index;
+        for (const chunk of chunkArray(ids, 80)) {
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .select(WMS_TASK_SELECT_COLUMNS)
+                .eq("is_deleted", false)
+                .overlaps("source_shk_ids", chunk)
+                .order("updated_at", { ascending: false, nullsFirst: false })
+                .limit(10000);
+            if (error) throw error;
+            (data || []).filter(isAfterSaleMovementTask).forEach((row) => addAfterSaleTaskToDedupeIndex(index, row));
+        }
+        return index;
+    }
+
     function reviewSourceIds(row) {
         const ids = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
         const tare = normalizeIdentifier(row && row.source_tare_id);
@@ -7195,6 +7286,68 @@
         if (error) throw error;
         refreshTaskRow(row.id, data || payload);
         return data || payload;
+    }
+
+    function keepHighPriorityAfterTaskTrim(row) {
+        const taskType = normalizeForMatch(row && row.task_type);
+        const tags = reviewTags(row).map(normalizeForMatch);
+        return taskType.includes("оклейка")
+            || taskType.includes("usd")
+            || taskType.includes("tmm")
+            || tags.includes("идентификация из опп");
+    }
+
+    function trimTaskAfterSaleDuplicates(row, afterSaleIndex) {
+        if (!row || isAfterSaleMovementTask(row) || !afterSaleIndex || !afterSaleIndex.size) {
+            return { task: row, removed: [], dropped: false, trimmed: false };
+        }
+        const items = taskItems(row);
+        if (!items.length) return { task: row, removed: [], dropped: false, trimmed: false };
+        const removed = [];
+        const kept = [];
+        items.forEach((item) => {
+            const match = afterSaleDedupeMatch(row, item, afterSaleIndex);
+            if (match) removed.push({ shk: normalizeIdentifier(item.shk), date: match.date, task: match.task });
+            else kept.push(item);
+        });
+        if (!removed.length) return { task: row, removed: [], dropped: false, trimmed: false };
+        if (!kept.length) return { task: null, removed, dropped: true, trimmed: false };
+        const price = sumTaskItems(kept);
+        const priority = taskPriority(price, keepHighPriorityAfterTaskTrim(row));
+        const removedShks = removed.map((item) => item.shk).filter(Boolean);
+        const nextPayload = payloadWithItems(row, kept, {
+            after_sale_dedupe_removed_shks: removedShks,
+            after_sale_dedupe_removed_at: new Date().toISOString(),
+            after_sale_dedupe_reason: "Исключено из задачи: по этому ШК и дате уже есть задача Движение после продажи.",
+        });
+        const nextTask = {
+            ...row,
+            source_payload: nextPayload,
+            source_shk_ids: kept.map((item) => item.shk).filter(Boolean),
+            source_price_sum: price,
+            source_last_movement_at: sourceLastMovementFromItems(kept, row.source_last_movement_at),
+            priority: priority.value,
+            priority_label: priority.label,
+            search_text: [row.title, row.task_type, row.source_tare_id, ...kept.map((item) => item.shk), ...kept.map((item) => item.name)].filter(Boolean).join(" "),
+            description: normalizeText(row.description) + "\n\n-------------------------\nИсключено как дубль с Движением после продажи:\n" + removedShks.map((shk) => "- " + shk).join("\n"),
+        };
+        return { task: nextTask, removed, dropped: false, trimmed: true };
+    }
+
+    function filterTasksAfterSaleDuplicates(tasks, afterSaleIndex) {
+        const result = [];
+        const stats = { removedShkCount: 0, droppedTaskCount: 0, trimmedTaskCount: 0 };
+        (tasks || []).forEach((task) => {
+            const trimmed = trimTaskAfterSaleDuplicates(task, afterSaleIndex);
+            stats.removedShkCount += trimmed.removed.length;
+            if (trimmed.dropped) {
+                stats.droppedTaskCount += 1;
+                return;
+            }
+            if (trimmed.trimmed) stats.trimmedTaskCount += 1;
+            if (trimmed.task) result.push(trimmed.task);
+        });
+        return { tasks: result, stats };
     }
 
     function splitTaskFromTare(row, item) {
@@ -12833,6 +12986,16 @@
                 rowsCount: state.rows.primary ? state.rows.primary.length : 0,
                 summary: summarizePreview(state.preview),
             }, (progress) => {
+                if (progress.phase === "after_sale_dedupe_start") {
+                    setStatus("Проверяю дубли с Движением после продажи: " + progress.totalTasks + " задач...");
+                    return;
+                }
+                if (progress.phase === "after_sale_dedupe_done") {
+                    setStatus(progress.removedShkCount
+                        ? "ORS-защита: убрано ШК " + progress.removedShkCount + ", удалено задач " + progress.droppedTaskCount + ", подрезано тар " + progress.trimmedTaskCount + "."
+                        : "ORS-защита: дублей с Движением после продажи не найдено.");
+                    return;
+                }
                 if (progress.phase === "split") {
                     setStatus("Supabase не прожевал пачку из " + progress.chunkSize + " задач. Делю на части по " + progress.nextChunkSize + " и продолжаю: сохранено " + progress.saved + "/" + progress.totalTasks + "...");
                     return;
@@ -12972,6 +13135,36 @@
         return { expectedCount: expected.size, repairedCount };
     }
 
+    async function prepareTasksForAfterSaleDedupe(db, module, tasks, meta, onProgress) {
+        const sourceTasks = tasks || [];
+        const emptyStats = { removedShkCount: 0, droppedTaskCount: 0, trimmedTaskCount: 0 };
+        if (!sourceTasks.length || module === "after_sale_movement") return { tasks: sourceTasks, stats: emptyStats };
+        if (onProgress) onProgress({ phase: "after_sale_dedupe_start", totalTasks: sourceTasks.length });
+        const index = await loadAfterSaleDedupeIndexForTasks(db, sourceTasks, meta && meta.afterSaleDedupeRows);
+        const filtered = filterTasksAfterSaleDuplicates(sourceTasks, index);
+        if (onProgress) {
+            onProgress({
+                phase: "after_sale_dedupe_done",
+                originalTasks: sourceTasks.length,
+                totalTasks: filtered.tasks.length,
+                removedShkCount: filtered.stats.removedShkCount,
+                droppedTaskCount: filtered.stats.droppedTaskCount,
+                trimmedTaskCount: filtered.stats.trimmedTaskCount,
+            });
+        }
+        return filtered;
+    }
+
+    async function saveUploadRunOnly(db, run) {
+        const { data, error } = await db
+            .from(RUNS_TABLE)
+            .upsert(run, { onConflict: "effective_date,source_module,upload_type" })
+            .select("*")
+            .single();
+        if (error) throw error;
+        return data || run;
+    }
+
     async function saveRpcChunkAdaptive(db, chunk, run, context) {
         context.physicalBatch += 1;
         if (context.onProgress) {
@@ -13022,7 +13215,16 @@
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
         const def = moduleDef(module);
-        const payloadTasks = (tasks || []).map((task) => ({ ...compactTaskForSave(task), module: undefined, column: undefined }));
+        const prepared = await prepareTasksForAfterSaleDedupe(db, module, tasks || [], meta || {}, onProgress);
+        const payloadTasks = (prepared.tasks || []).map((task) => ({ ...compactTaskForSave(task), module: undefined, column: undefined }));
+        const summary = {
+            ...((meta && meta.summary) || {}),
+        };
+        if (prepared.stats && prepared.stats.removedShkCount) {
+            summary.after_sale_dedupe_removed_shks = prepared.stats.removedShkCount;
+            summary.after_sale_dedupe_dropped_tasks = prepared.stats.droppedTaskCount;
+            summary.after_sale_dedupe_trimmed_tasks = prepared.stats.trimmedTaskCount;
+        }
         const run = {
             upload_date: state.today,
             effective_date: businessDate,
@@ -13030,16 +13232,20 @@
             source_module: def.sourceModule,
             upload_type: def.uploadType,
             status: "completed",
-            file_name: meta.fileName || "",
-            secondary_file_name: meta.secondaryFileName || "",
-            rows_count: meta.rowsCount || 0,
+            file_name: meta && meta.fileName || "",
+            secondary_file_name: meta && meta.secondaryFileName || "",
+            rows_count: meta && meta.rowsCount || 0,
             tasks_count: payloadTasks.length,
-            summary: meta.summary || {},
+            upserted_count: 0,
+            summary,
         };
         const chunks = chunkTasksForSave(module, payloadTasks);
         let totalUpserted = 0;
         let uploadRun = null;
-        if (!chunks.length) return { ok: true, upserted_count: 0, upload_run: null };
+        if (!chunks.length) {
+            uploadRun = await saveUploadRunOnly(db, run);
+            return { ok: true, upserted_count: 0, upload_run: uploadRun, dedupe: prepared.stats };
+        }
         const progressContext = {
             onProgress,
             initialTotalChunks: chunks.length,
@@ -13070,7 +13276,7 @@
                 .single();
             if (!error && data) uploadRun = data;
         }
-        return { ok: true, upserted_count: finalUpserted, upload_run: uploadRun };
+        return { ok: true, upserted_count: finalUpserted, upload_run: uploadRun, dedupe: prepared.stats };
     }
 
     function mergeRun(run) {
@@ -13397,6 +13603,9 @@
         try {
             await waitForMasterSpecialBackground();
             preview = state.master.preview;
+            const masterAfterSaleTasks = (preview.modules || [])
+                .filter((item) => item.module === "after_sale_movement")
+                .flatMap((item) => item.preview && Array.isArray(item.preview.tasks) ? item.preview.tasks : []);
             for (const item of preview.modules) {
                 const tasks = item.preview.tasks || [];
                 if (!tasks.length) continue;
@@ -13407,7 +13616,18 @@
                     secondaryFileName: item.module === "pm" && state.master.fileNames.carrier ? state.master.fileNames.carrier : "",
                     rowsCount: sourceRowsCountForMasterModule(item.module),
                     summary: summarizePreview(item.preview),
+                    afterSaleDedupeRows: masterAfterSaleTasks,
                 }, (progress) => {
+                    if (progress.phase === "after_sale_dedupe_start") {
+                        setMasterStatus("Проверяю ORS-дубли: " + moduleDef(item.module).label + ". Задач: " + progress.totalTasks + ".");
+                        return;
+                    }
+                    if (progress.phase === "after_sale_dedupe_done") {
+                        setMasterStatus(progress.removedShkCount
+                            ? "ORS-защита: " + moduleDef(item.module).label + ". Убрано ШК " + progress.removedShkCount + ", удалено задач " + progress.droppedTaskCount + ", подрезано тар " + progress.trimmedTaskCount + "."
+                            : "ORS-защита: " + moduleDef(item.module).label + ". Дублей не найдено.");
+                        return;
+                    }
                     if (progress.phase === "split") {
                         setMasterStatus("Сохраняю: " + moduleDef(item.module).label + ". Пачка из " + progress.chunkSize + " задач оказалась тяжелой, делю на части по " + progress.nextChunkSize + ". В модуле сохранено " + progress.saved + "/" + progress.totalTasks + ", всего ранее: " + total + ".");
                         return;

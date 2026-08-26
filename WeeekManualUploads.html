@@ -1,0 +1,4531 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script>
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (params.get('theme') === 'wms') document.documentElement.classList.add('wms-theme');
+    } catch (_error) {}
+  </script>
+  <style>
+    :root {
+      --bg: #f3eee6;
+      --paper: #fffaf2;
+      --card: #ffffff;
+      --ink: #302219;
+      --muted: #7a6658;
+      --accent: #83644d;
+      --accent-dark: #3e2e23;
+      --line: rgba(62, 46, 35, 0.16);
+      --good: #247a4b;
+      --warn: #b7791f;
+      --bad: #b42318;
+      --soft: rgba(131, 100, 77, 0.11);
+      --shadow: 0 20px 54px rgba(62, 46, 35, 0.14);
+    }
+
+    html.wms-theme {
+      --bg: #DED4FF;
+      --paper: #f8f7ff;
+      --card: #ffffff;
+      --ink: #242038;
+      --muted: #64748b;
+      --accent: #623CEA;
+      --accent-dark: #242038;
+      --line: rgba(36, 32, 56, 0.14);
+      --good: #10b981;
+      --warn: #eab308;
+      --bad: #ef4444;
+      --soft: rgba(98, 60, 234, 0.1);
+      --shadow: 0 12px 34px rgba(36, 32, 56, 0.13);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: radial-gradient(circle at 12% 0%, rgba(131, 100, 77, 0.16), transparent 32%), var(--bg);
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+
+    html.wms-theme,
+    html.wms-theme body {
+      background: linear-gradient(180deg, var(--bg) 0%, #eceff6 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+
+    body { padding: 16px; }
+
+    .shell {
+      width: min(1060px, 100%);
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: rgba(255, 250, 242, 0.96);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .topbar {
+      padding: 20px;
+      background: var(--accent-dark);
+      color: #fff7ec;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .kicker {
+      margin: 0 0 6px;
+      color: rgba(255, 247, 236, 0.68);
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(27px, 4vw, 42px);
+      line-height: 0.98;
+      letter-spacing: -0.04em;
+    }
+
+    .top-note {
+      align-self: center;
+      max-width: 340px;
+      text-align: right;
+      color: rgba(255, 247, 236, 0.8);
+      line-height: 1.35;
+      font-weight: 850;
+    }
+
+    .content { padding: 18px; }
+
+    .calendar-shell {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.88);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .calendar-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-end;
+      margin-bottom: 12px;
+    }
+
+    .calendar-title {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .calendar-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-weight: 850;
+    }
+
+    .calendar-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #a8a29a;
+    }
+
+    .legend-dot.red { background: var(--bad); }
+    .legend-dot.yellow { background: var(--warn); }
+    .legend-dot.green { background: var(--good); }
+
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .weekday {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 950;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .calendar-day {
+      position: relative;
+      min-height: 72px;
+      border: 1px solid rgba(62, 46, 35, 0.11);
+      border-radius: 16px;
+      background: #f2efeb;
+      color: var(--ink);
+      padding: 9px;
+      box-shadow: none;
+      display: grid;
+      align-content: space-between;
+      text-align: left;
+      transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+    }
+
+    .calendar-day:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(62, 46, 35, 0.11);
+    }
+
+    .calendar-day.status-gray { background: #ece9e3; color: #7f776d; }
+    .calendar-day.status-red { background: rgba(180, 35, 24, 0.1); border-color: rgba(180, 35, 24, 0.28); }
+    .calendar-day.status-yellow {
+      background: #fff0b8;
+      border-color: rgba(183, 121, 31, 0.7);
+      box-shadow: inset 0 0 0 2px rgba(183, 121, 31, 0.18);
+    }
+    .calendar-day.status-green { background: rgba(36, 122, 75, 0.11); border-color: rgba(36, 122, 75, 0.32); }
+    .calendar-day.selected {
+      outline: 3px solid rgba(131, 100, 77, 0.34);
+      border-color: var(--accent);
+    }
+
+    .calendar-day.disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      transform: none;
+    }
+
+    .calendar-day.disabled:hover {
+      box-shadow: none;
+      transform: none;
+    }
+
+    .calendar-tooltip {
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 8px);
+      z-index: 20;
+      min-width: 230px;
+      transform: translateX(-50%) translateY(4px);
+      border: 1px solid rgba(62, 46, 35, 0.16);
+      border-radius: 16px;
+      background: #fffaf2;
+      box-shadow: 0 18px 42px rgba(62, 46, 35, 0.2);
+      padding: 10px;
+      color: var(--ink);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+
+    .calendar-day:hover .calendar-tooltip {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .tooltip-title {
+      margin-bottom: 7px;
+      color: var(--accent-dark);
+      font-size: 12px;
+      font-weight: 1000;
+    }
+
+    .tooltip-line {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      text-align: left;
+    }
+
+    .tooltip-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+      background: var(--bad);
+    }
+
+    .tooltip-line.done .tooltip-dot { background: var(--good); }
+
+    .day-number {
+      font-size: 20px;
+      font-weight: 1000;
+      line-height: 1;
+    }
+
+    .day-progress {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .calendar-action {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      align-items: center;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+
+    .calendar-tools {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .icon-button {
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--accent-dark);
+      box-shadow: none;
+      font-size: 21px;
+      line-height: 1;
+    }
+
+    .selected-date-note {
+      display: none;
+      color: var(--accent-dark);
+      font-weight: 950;
+    }
+
+    .switcher {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .switcher.hidden { display: none; }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(62, 46, 35, 0.48);
+      backdrop-filter: blur(5px);
+      overflow: auto;
+    }
+
+    .modal-overlay.visible { display: flex; }
+
+    .modal-card {
+      width: min(680px, 100%);
+      max-height: min(92vh, 980px);
+      overflow: auto;
+      border: 1px solid rgba(255, 250, 242, 0.42);
+      border-radius: 26px;
+      background: #fffaf2;
+      box-shadow: 0 28px 70px rgba(62, 46, 35, 0.28);
+      padding: 18px;
+    }
+
+    #uploadModalCard {
+      width: min(1040px, 100%);
+    }
+
+    .modal-card.wide {
+      width: min(1060px, 100%);
+    }
+
+    .modal-card.extra-wide {
+      width: min(1220px, 100%);
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+    }
+
+    .modal-title {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .modal-subtitle {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    .modal-close {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--accent-dark);
+      box-shadow: none;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .modal-switcher {
+      margin: 0;
+    }
+
+    .modal-module-host {
+      display: none;
+    }
+
+    .modal-module-host.visible {
+      display: block;
+    }
+
+    .modal-back-row {
+      display: none;
+      margin-bottom: 12px;
+    }
+
+    .modal-back-row.visible {
+      display: flex;
+    }
+
+    .choice {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 16px;
+      background: var(--card);
+      cursor: pointer;
+      text-align: left;
+      color: var(--ink);
+      box-shadow: none;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+
+    .choice:disabled {
+      cursor: wait;
+      opacity: 0.68;
+      transform: none;
+    }
+
+    .choice:hover, .choice.active {
+      transform: translateY(-1px);
+      border-color: rgba(131, 100, 77, 0.55);
+      background: #fff7ec;
+    }
+
+    .choice.status-missing {
+      border-color: rgba(180, 35, 24, 0.38);
+      background: rgba(180, 35, 24, 0.07);
+    }
+
+    .choice.status-done {
+      border-color: rgba(36, 122, 75, 0.38);
+      background: rgba(36, 122, 75, 0.08);
+    }
+
+    .choice-title {
+      display: block;
+      font-size: 18px;
+      font-weight: 1000;
+      margin-bottom: 6px;
+    }
+
+    .choice-note {
+      display: block;
+      color: var(--muted);
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    .choice-status {
+      display: inline-flex;
+      margin-top: 12px;
+      border-radius: 999px;
+      padding: 6px 9px;
+      font-size: 12px;
+      font-weight: 1000;
+      background: rgba(180, 35, 24, 0.12);
+      color: var(--bad);
+    }
+
+    .choice-date {
+      display: block;
+      margin-top: 9px;
+      color: var(--accent-dark);
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .choice.status-done .choice-status {
+      background: rgba(36, 122, 75, 0.13);
+      color: var(--good);
+    }
+
+    .module {
+      display: none;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.86);
+      overflow: hidden;
+    }
+
+    .module.active { display: block; }
+
+    .module-head {
+      padding: 18px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(131, 100, 77, 0.1), rgba(255, 255, 255, 0));
+    }
+
+    .module-title {
+      margin: 0;
+      font-size: clamp(24px, 3vw, 34px);
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .module-subtitle {
+      margin: 8px 0 0;
+      color: var(--accent);
+      font-size: 16px;
+      font-weight: 1000;
+    }
+
+    .module-body { padding: 18px; }
+
+    .checking-card {
+      display: none;
+      border: 1px solid rgba(131, 100, 77, 0.26);
+      border-radius: 24px;
+      background: rgba(131, 100, 77, 0.08);
+      padding: 24px;
+      text-align: center;
+      color: var(--accent-dark);
+      font-weight: 1000;
+      font-size: 20px;
+    }
+
+    .checking-card.visible {
+      display: block;
+    }
+
+    .status-pill {
+      align-self: flex-start;
+      border-radius: 999px;
+      padding: 9px 12px;
+      background: var(--soft);
+      color: var(--accent-dark);
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .status-pill.good {
+      color: var(--good);
+      background: rgba(36, 122, 75, 0.1);
+    }
+
+    .instructions {
+      display: grid;
+      gap: 12px;
+      border: 1px dashed rgba(131, 100, 77, 0.42);
+      border-radius: 20px;
+      padding: 16px;
+      background: #fffaf4;
+    }
+
+    .instructions h2 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+    }
+
+    .instructions ol {
+      margin: 0;
+      padding-left: 22px;
+      color: var(--ink);
+      line-height: 1.55;
+      font-weight: 820;
+    }
+
+    .instructions a {
+      color: var(--accent-dark);
+      font-weight: 1000;
+    }
+
+    input[type="file"] {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    button, .upload-button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      background: var(--accent);
+      color: #fff8ee;
+      font: inherit;
+      font-weight: 1000;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(131, 100, 77, 0.2);
+      transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    }
+
+    button:hover:not(:disabled), .upload-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px rgba(131, 100, 77, 0.27);
+    }
+
+    button.secondary {
+      color: var(--accent-dark);
+      background: var(--soft);
+      box-shadow: none;
+    }
+
+    button.top-home {
+      align-self: flex-start;
+      border: 1px solid rgba(255, 248, 238, 0.28);
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff8ee;
+      box-shadow: none;
+      white-space: nowrap;
+    }
+
+    button.good { background: var(--good); }
+    button.warn { background: var(--warn); }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .upload-row {
+      margin-top: 15px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .file-name {
+      color: var(--muted);
+      font-weight: 850;
+      word-break: break-word;
+    }
+
+    .alert {
+      display: none;
+      margin-top: 14px;
+      border-radius: 18px;
+      padding: 12px 14px;
+      border: 1px solid rgba(180, 35, 24, 0.18);
+      background: rgba(180, 35, 24, 0.08);
+      color: var(--bad);
+      font-weight: 850;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+
+    .alert.visible { display: block; }
+    .alert.info {
+      color: var(--accent-dark);
+      background: rgba(131, 100, 77, 0.1);
+      border-color: rgba(131, 100, 77, 0.22);
+    }
+    .alert.good {
+      color: var(--good);
+      background: rgba(36, 122, 75, 0.1);
+      border-color: rgba(36, 122, 75, 0.22);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .stats-grid.pm { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+
+    .stat-card {
+      min-height: 78px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--card);
+      padding: 12px;
+      display: grid;
+      align-content: center;
+      gap: 5px;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .stat-value {
+      font-size: 25px;
+      font-weight: 1000;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .stat-card.good .stat-value { color: var(--good); }
+    .stat-card.warn .stat-value { color: var(--warn); }
+    .stat-card.bad .stat-value { color: var(--bad); }
+
+    .calendar-action-buttons {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .master-file-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .master-file-card {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--card);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      min-height: 154px;
+    }
+
+    .master-file-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 1000;
+      color: var(--accent-dark);
+    }
+
+    .master-file-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+      font-weight: 850;
+    }
+
+    .master-file-card .upload-button {
+      justify-self: start;
+      margin-top: auto;
+    }
+
+    .copy-fallback {
+      display: none;
+      width: 100%;
+      min-height: 120px;
+      border: 1px solid rgba(131, 100, 77, 0.28);
+      border-radius: 14px;
+      background: #fffaf4;
+      color: var(--ink);
+      padding: 10px;
+      font: 800 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      resize: vertical;
+    }
+
+    .master-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .master-upload-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--card);
+      padding: 13px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .master-upload-card.good {
+      border-color: rgba(36, 122, 75, 0.3);
+      background: rgba(36, 122, 75, 0.08);
+    }
+
+    .master-upload-card.bad {
+      border-color: rgba(180, 35, 24, 0.28);
+      background: rgba(180, 35, 24, 0.08);
+    }
+
+    .master-upload-name {
+      color: var(--accent-dark);
+      font-weight: 1000;
+    }
+
+    .master-upload-date {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .master-upload-count {
+      font-size: 28px;
+      line-height: 1;
+      font-weight: 1000;
+      letter-spacing: -0.05em;
+    }
+
+    .master-upload-card.good .master-upload-count { color: var(--good); }
+    .master-upload-card.bad .master-upload-count { color: var(--bad); }
+
+    .master-actions {
+      display: none;
+      margin-top: 16px;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .master-actions.visible {
+      display: flex;
+    }
+
+    .reject-section {
+      margin-top: 16px;
+    }
+
+    .reject-section h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      color: var(--accent-dark);
+    }
+
+    .panel {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--card);
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 13px 15px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 1000;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      max-height: 280px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(62, 46, 35, 0.1);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: #fffaf4;
+    }
+
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+      font-weight: 850;
+    }
+
+    .progress {
+      display: none;
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: #fffaf4;
+      padding: 14px;
+    }
+
+    .progress.visible { display: block; }
+
+    .progress-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 0;
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(131, 100, 77, 0.25);
+    }
+
+    .progress-line.active .dot {
+      background: var(--warn);
+      animation: pulse 900ms infinite ease-in-out;
+    }
+
+    .progress-line.done {
+      color: var(--good);
+    }
+
+    .progress-line.done .dot {
+      background: var(--good);
+      animation: none;
+    }
+
+    .live-progress {
+      display: none;
+      margin-top: 12px;
+      border: 1px solid rgba(131, 100, 77, 0.24);
+      border-radius: 20px;
+      background: rgba(255, 250, 242, 0.92);
+      padding: 13px;
+    }
+
+    .live-progress.visible { display: block; }
+
+    .live-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+
+    .live-title {
+      color: var(--accent-dark);
+      font-size: 15px;
+      font-weight: 1000;
+    }
+
+    .live-sub {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      line-height: 1.35;
+    }
+
+    .live-percent {
+      color: var(--accent);
+      font-size: 22px;
+      font-weight: 1000;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .live-bar {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(131, 100, 77, 0.14);
+    }
+
+    .live-bar span {
+      display: block;
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+      transition: width 240ms ease;
+    }
+
+    .live-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .live-stat {
+      border: 1px solid rgba(62, 46, 35, 0.1);
+      border-radius: 14px;
+      background: #fff;
+      padding: 9px;
+    }
+
+    .live-stat-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .live-stat-value {
+      margin-top: 3px;
+      color: var(--accent-dark);
+      font-size: 18px;
+      font-weight: 1000;
+      line-height: 1;
+    }
+
+    .done-card {
+      display: none;
+      border: 1px solid rgba(36, 122, 75, 0.22);
+      border-radius: 24px;
+      background: rgba(36, 122, 75, 0.08);
+      padding: 24px;
+      text-align: center;
+    }
+
+    .done-card.visible { display: block; }
+
+    .done-title {
+      margin: 0 0 8px;
+      color: var(--good);
+      font-size: clamp(24px, 4vw, 36px);
+      letter-spacing: -0.04em;
+    }
+
+    .done-text {
+      margin: 0 0 16px;
+      color: var(--accent-dark);
+      font-weight: 950;
+      font-size: 17px;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(0.8); opacity: 0.55; }
+      50% { transform: scale(1.18); opacity: 1; }
+    }
+
+    @media (max-width: 900px) {
+      body { padding: 10px; }
+      .topbar, .module-head { display: block; }
+      .top-note { text-align: left; margin-top: 10px; }
+      .switcher { grid-template-columns: 1fr; }
+      .calendar-head { display: block; }
+      .calendar-legend { justify-content: flex-start; margin-top: 10px; }
+      .calendar-grid { gap: 6px; }
+      .calendar-day { min-height: 58px; padding: 7px; border-radius: 12px; }
+      .stats-grid, .stats-grid.pm { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .master-file-grid, .master-summary-grid { grid-template-columns: 1fr; }
+      .live-head { display: block; }
+      .live-percent { margin-top: 8px; }
+      .live-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="kicker">Выгрузка ОПП // СЦ Нижний Новгород Ларина</p>
+        <h1>Ручные выгрузки</h1>
+      </div>
+      <button id="homeButton" class="top-home" type="button">Домик</button>
+    </header>
+
+    <section class="content">
+      <section class="calendar-shell">
+        <div class="calendar-head">
+          <div>
+            <h2 class="calendar-title">Календарь выгрузок</h2>
+          </div>
+          <div class="calendar-tools">
+            <button id="openBackfillCalendarButton" class="icon-button" type="button" aria-label="Ручная выгрузка за прошлую дату">✎</button>
+          </div>
+        </div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+        <div class="calendar-action">
+          <div id="selectedDateNote" class="selected-date-note">Плановые даты рассчитываются...</div>
+          <div class="calendar-action-buttons">
+            <button id="openMasterUploadButton" class="secondary" type="button">Сделать Мастер-выгрузку</button>
+            <button id="openUploadMenuButton" type="button">Сделать выгрузку</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="uploadModal" class="modal-overlay" aria-hidden="true">
+        <div id="uploadModalCard" class="modal-card" role="dialog" aria-modal="true" aria-labelledby="uploadModalTitle">
+          <div class="modal-head">
+            <div>
+              <h2 id="uploadModalTitle" class="modal-title">Выберите выгрузку</h2>
+              <p id="uploadModalDate" class="modal-subtitle">Дата: --.--.----</p>
+            </div>
+            <button id="closeUploadMenuButton" class="modal-close" type="button" aria-label="Закрыть">×</button>
+          </div>
+          <div id="modalBackRow" class="modal-back-row">
+            <button id="backToUploadChoicesButton" class="secondary" type="button">Назад к выбору</button>
+          </div>
+          <div id="uploadMenu" class="switcher modal-switcher">
+            <button id="choosePackaging" class="choice status-missing" type="button">
+              <span class="choice-title">Переупаковка</span>
+              <span class="choice-note">Контроль зависшего товара и тар на участке "Переупаковка"</span>
+              <span id="packagingChoiceDate" class="choice-date">Дата выгрузки: --.--.----</span>
+              <span id="packagingChoiceStatus" class="choice-status">Нет выгрузки</span>
+            </button>
+            <button id="chooseRwp" class="choice status-missing" type="button">
+              <span class="choice-title">RWP</span>
+              <span class="choice-note">Контроль товара, поступившего на стол переупаковки, но не получившего корректной обработки.</span>
+              <span id="rwpChoiceDate" class="choice-date">Дата выгрузки: --.--.----</span>
+              <span id="rwpChoiceStatus" class="choice-status">Нет выгрузки</span>
+            </button>
+            <button id="choosePm" class="choice status-missing" type="button">
+              <span class="choice-title">ПМ / Почта</span>
+              <span class="choice-note">Контроль бессистемно отгруженных тар на буфере последней мили</span>
+              <span id="pmChoiceDate" class="choice-date">Дата выгрузки: --.--.----</span>
+              <span id="pmChoiceStatus" class="choice-status">Нет выгрузки</span>
+            </button>
+            <button id="choosePresort" class="choice status-missing" type="button">
+              <span class="choice-title">Предсортировка</span>
+              <span class="choice-note">Контроль товара, зависшего на этапе предсортировки.</span>
+              <span id="presortChoiceDate" class="choice-date">Дата выгрузки: --.--.----</span>
+              <span id="presortChoiceStatus" class="choice-status">Нет выгрузки</span>
+            </button>
+            <button id="chooseMarketplacePc" class="choice status-missing" type="button">
+              <span class="choice-title">Маркетплейс + ПЦ</span>
+              <span class="choice-note">Контроль товара, зависшего на участках сортировки для других ЛО</span>
+              <span id="marketplacePcChoiceDate" class="choice-date">Дата выгрузки: --.--.----</span>
+              <span id="marketplacePcChoiceStatus" class="choice-status">Нет выгрузки</span>
+            </button>
+            <button id="chooseWmiMpPc" class="choice status-missing" type="button">
+              <span class="choice-title">WMI (МП + ПЦ)</span>
+              <span class="choice-note">Контроль ошибок, не получивших корректного движения на участках сортировки для других ЛО</span>
+              <span id="wmiMpPcChoiceDate" class="choice-date">Дата выгрузки: --.--.----</span>
+              <span id="wmiMpPcChoiceStatus" class="choice-status">Нет выгрузки</span>
+            </button>
+            <button id="chooseNoOrder" class="choice status-missing" type="button">
+              <span class="choice-title">Без заказа</span>
+              <span class="choice-note">Контроль ошибок, возникающих при обработке товаров без активного заказа</span>
+              <span id="noOrderChoiceDate" class="choice-date">Дата выгрузки: --.--.----</span>
+              <span id="noOrderChoiceStatus" class="choice-status">Нет выгрузки</span>
+            </button>
+            <button id="chooseAfterSaleMovement" class="choice status-missing" type="button">
+              <span class="choice-title">Движение после продажи</span>
+              <span class="choice-note">Контроль товара, получившего движение после реализации</span>
+              <span id="afterSaleMovementChoiceDate" class="choice-date">Дата выгрузки: --.--.----</span>
+              <span id="afterSaleMovementChoiceStatus" class="choice-status">Нет выгрузки</span>
+            </button>
+          </div>
+          <div id="modalModuleHost" class="modal-module-host"></div>
+        </div>
+      </div>
+
+      <div id="backfillModal" class="modal-overlay" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="backfillModalTitle">
+          <div class="modal-head">
+            <div>
+              <h2 id="backfillModalTitle" class="modal-title">Ручная догрузка</h2>
+              <p class="modal-subtitle">Выберите прошлую дату, за которую нужно сделать выгрузку.</p>
+            </div>
+            <button id="closeBackfillModalButton" class="modal-close" type="button" aria-label="Закрыть">×</button>
+          </div>
+          <div id="backfillCalendarGrid" class="calendar-grid"></div>
+        </div>
+      </div>
+
+      <div id="masterModal" class="modal-overlay" aria-hidden="true">
+        <div class="modal-card extra-wide" role="dialog" aria-modal="true" aria-labelledby="masterModalTitle">
+          <div class="modal-head">
+            <div>
+              <h2 id="masterModalTitle" class="modal-title">Мастер-выгрузка</h2>
+              <p id="masterModalSubtitle" class="modal-subtitle">Загрузите файлы, а я сам разложу строки по нужным датам и типам задач.</p>
+            </div>
+            <button id="closeMasterModalButton" class="modal-close" type="button" aria-label="Закрыть">×</button>
+          </div>
+
+          <div class="master-file-grid">
+            <article class="master-file-card">
+              <h3 class="master-file-title">Товары без движения - В заказе</h3>
+              <p id="masterMainRangeText" class="master-file-note">Выгрузите файл с --.--.---- по сегодня.</p>
+              <p class="master-file-note">ПМ/Почта, Предсортировка, Маркетплейс + ПЦ, WMI (МП + ПЦ).</p>
+              <label class="upload-button" for="masterMainFileInput">Выбрать файл</label>
+              <input id="masterMainFileInput" type="file" accept=".xlsx,.xls,.csv">
+              <span id="masterMainFileName" class="file-name">Файл пока не выбран</span>
+            </article>
+            <article class="master-file-card">
+              <h3 class="master-file-title">Без заказа</h3>
+              <p id="masterNoOrderRangeText" class="master-file-note">Выгрузка за --.--.----.</p>
+              <p class="master-file-note">Отдельный файл для задач “Без заказа”.</p>
+              <label class="upload-button" for="masterNoOrderFileInput">Выбрать файл</label>
+              <input id="masterNoOrderFileInput" type="file" accept=".xlsx,.xls,.csv">
+              <span id="masterNoOrderFileName" class="file-name">Файл пока не выбран</span>
+            </article>
+            <article class="master-file-card">
+              <h3 class="master-file-title">Утерянные и обездвиженные товары</h3>
+              <p id="masterPackagingRangeText" class="master-file-note">Выгрузите файл с --.--.---- по сегодня.</p>
+              <p class="master-file-note">Переупаковка и RWP.</p>
+              <label class="upload-button" for="masterPackagingFileInput">Выбрать файл</label>
+              <input id="masterPackagingFileInput" type="file" accept=".xlsx,.xls,.csv">
+              <span id="masterPackagingFileName" class="file-name">Файл пока не выбран</span>
+            </article>
+            <article class="master-file-card">
+              <h3 class="master-file-title">Движение после продажи</h3>
+              <p id="masterAfterSaleRangeText" class="master-file-note">Выгрузка за --.--.----.</p>
+              <p class="master-file-note">Отдельный файл для движения после продажи.</p>
+              <label class="upload-button" for="masterAfterSaleFileInput">Выбрать файл</label>
+              <input id="masterAfterSaleFileInput" type="file" accept=".xlsx,.xls,.csv">
+              <span id="masterAfterSaleFileName" class="file-name">Файл пока не выбран</span>
+            </article>
+            <article class="master-file-card">
+              <h3 class="master-file-title">Проверить наличие отгрузки</h3>
+              <p id="masterCarrierRangeText" class="master-file-note">Проверка передач ПМ/Почты за --.--.----.</p>
+              <p class="master-file-note">Сначала загрузите основной файл, затем скопируйте передачи и проверьте их во втором отчете.</p>
+              <button id="masterCopyTransfersButton" class="secondary" type="button" disabled>Скопировать номера передач</button>
+              <textarea id="masterTransferFallback" class="copy-fallback" readonly></textarea>
+              <label class="upload-button" for="masterCarrierFileInput">Выбрать файл проверки</label>
+              <input id="masterCarrierFileInput" type="file" accept=".xlsx,.xls,.csv">
+              <span id="masterCarrierFileName" class="file-name">Файл пока не выбран</span>
+            </article>
+          </div>
+
+          <div id="masterAlert" class="alert"></div>
+
+          <div id="masterProgress" class="progress">
+            <div id="masterStepRead" class="progress-line"><span class="dot"></span>Читаю файлы</div>
+            <div id="masterStepCalc" class="progress-line"><span class="dot"></span>Раскладываю строки по выгрузкам и датам</div>
+            <div id="masterStepPreview" class="progress-line"><span class="dot"></span>Готовлю предпросмотр</div>
+            <div id="masterStepSave" class="progress-line"><span class="dot"></span>Сохраняю выгрузки в очередь</div>
+            <div id="masterStepDone" class="progress-line"><span class="dot"></span>Готово</div>
+          </div>
+
+          <div id="masterLiveProgress" class="live-progress" aria-live="polite">
+            <div class="live-head">
+              <div>
+                <div id="masterLiveTitle" class="live-title">Готовлю выгрузку</div>
+                <div id="masterLiveSub" class="live-sub">Пока нет активного этапа.</div>
+              </div>
+              <div id="masterLivePercent" class="live-percent">0%</div>
+            </div>
+            <div class="live-bar"><span id="masterLiveBar"></span></div>
+            <div class="live-stats">
+              <div class="live-stat">
+                <div class="live-stat-label">План</div>
+                <div id="masterLiveQueued" class="live-stat-value">0</div>
+              </div>
+              <div class="live-stat">
+                <div class="live-stat-label">В очереди</div>
+                <div id="masterLiveProcessed" class="live-stat-value">0</div>
+              </div>
+              <div class="live-stat">
+                <div class="live-stat-label">Ошибки</div>
+                <div id="masterLiveFailed" class="live-stat-value">0</div>
+              </div>
+              <div class="live-stat">
+                <div class="live-stat-label">Выгрузка</div>
+                <div id="masterLiveModule" class="live-stat-value">0/0</div>
+              </div>
+            </div>
+          </div>
+
+          <section id="masterPreviewPanel" class="panel" style="display:none">
+            <div class="panel-head">
+              <h3 class="panel-title">Что будет создано</h3>
+              <span class="mini">Красные карточки - задач не найдено</span>
+            </div>
+            <div style="padding: 14px;">
+              <div id="masterSummary" class="master-summary-grid"></div>
+              <div id="masterActions" class="master-actions">
+                <button id="saveMasterUploadButton" type="button">Сохранить выгрузку</button>
+                <button id="openMasterRejectsButton" class="secondary" type="button">Посмотреть неактуальные строки</button>
+              </div>
+            </div>
+          </section>
+
+          <div id="masterDone" class="done-card">
+            <h3 class="done-title">Мастер-выгрузка сохранена</h3>
+            <p id="masterDoneText" class="done-text">Создано задач: 0.</p>
+            <button id="repeatMasterUploadButton" class="secondary" type="button">Выгрузить повторно</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="masterRejectsModal" class="modal-overlay" aria-hidden="true">
+        <div class="modal-card extra-wide" role="dialog" aria-modal="true" aria-labelledby="masterRejectsTitle">
+          <div class="modal-head">
+            <div>
+              <h2 id="masterRejectsTitle" class="modal-title">Неактуальные строки</h2>
+              <p class="modal-subtitle">Сначала строки, отсеянные по датам, ниже - строки, отсеянные по другим условиям.</p>
+            </div>
+            <button id="closeMasterRejectsButton" class="modal-close" type="button" aria-label="Закрыть">×</button>
+          </div>
+          <section class="reject-section">
+            <h3>Отсеяно из-за даты</h3>
+            <div id="masterDateRejects" class="table-wrap"><div class="empty">Пока нет данных.</div></div>
+          </section>
+          <section class="reject-section">
+            <h3>Отсеяно по другим условиям</h3>
+            <div id="masterConditionRejects" class="table-wrap"><div class="empty">Пока нет данных.</div></div>
+          </section>
+        </div>
+      </div>
+
+      <section id="packagingModule" class="module">
+        <div class="module-head">
+          <div>
+            <h2 id="packagingModuleTitle" class="module-title">Контроль зависшего товара - переупаковка</h2>
+            <p id="packagingModuleSubtitle" class="module-subtitle">-7 дней от текущей даты</p>
+          </div>
+          <div id="packagingStatus" class="status-pill">Проверяю журнал...</div>
+        </div>
+        <div class="module-body">
+          <div id="packagingChecking" class="checking-card visible">Проверяю актуальность выгрузки</div>
+          <div id="packagingDone" class="done-card">
+            <h3 class="done-title">Выгрузка уже есть</h3>
+            <p id="packagingDoneText" class="done-text">Сегодняшняя выгрузка упаковки уже зафиксирована.</p>
+            <button id="packagingRepeatButton" class="secondary" type="button">Выгрузить повторно</button>
+          </div>
+
+          <div id="packagingWork" style="display:none">
+            <div class="instructions">
+              <h2 id="packagingInstructionTitle">Выгрузить зависший товар</h2>
+              <ol>
+                <li>Откройте отчет <a href="https://reports.wbwh.tech/reports/lost-and-non-movable-goods" target="_blank" rel="noopener">Утерянные и обездвиженные товары</a>.</li>
+                <li>Укажите склад "СЦ Нижний Новгород Ларина".</li>
+                <li>Укажите дату "<span id="packagingInstructionDate">--.--.----</span>".</li>
+                <li>Нажмите кнопку "Обновить".</li>
+                <li>Откройте вкладку "Обездвижено".</li>
+                <li>Сделайте выгрузку .xlsx файла.</li>
+                <li>Без изменений загрузите файл по кнопке ниже.</li>
+              </ol>
+            </div>
+
+            <div class="upload-row">
+              <label id="packagingUploadLabel" class="upload-button" for="packagingFileInput">Выбрать файл</label>
+              <input id="packagingFileInput" type="file" accept=".xlsx,.xls,.csv">
+              <span id="packagingFileName" class="file-name">Файл пока не выбран</span>
+            </div>
+
+            <div id="packagingAlert" class="alert"></div>
+
+            <section class="stats-grid" aria-label="Сводка упаковки">
+              <div class="stat-card"><div class="stat-label">ШК найдено</div><div id="packagingFoundShk" class="stat-value">0</div></div>
+              <div class="stat-card"><div class="stat-label">Тар найдено</div><div id="packagingTareCount" class="stat-value">0</div></div>
+              <div class="stat-card"><div class="stat-label">Тар в группировке</div><div id="packagingGroupedTareCount" class="stat-value">0</div></div>
+              <div class="stat-card good"><div class="stat-label">Задач будет создано</div><div id="packagingTaskCount" class="stat-value">0</div></div>
+              <div class="stat-card warn"><div class="stat-label">Пропущено до 1000</div><div id="packagingSkippedCheap" class="stat-value">0</div></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h3 class="panel-title">Пример будущих задач</h3>
+                <span class="mini">Показываем первые 3 задачи</span>
+              </div>
+              <div id="packagingSample" class="table-wrap">
+                <div class="empty">После выбора файла здесь появятся задачи.</div>
+              </div>
+            </section>
+
+            <div id="packagingProgress" class="progress">
+              <div id="packagingStepRead" class="progress-line"><span class="dot"></span><span>Читаю файл</span></div>
+              <div id="packagingStepCalc" class="progress-line"><span class="dot"></span><span>Считаю будущие задачи</span></div>
+              <div id="packagingStepUpload" class="progress-line"><span class="dot"></span><span>Заливаю очередь в Supabase</span></div>
+              <div id="packagingStepWeeek" class="progress-line"><span class="dot"></span><span>Task-master создаст задачи в фоне</span></div>
+              <div id="packagingStepLog" class="progress-line"><span class="dot"></span><span>Фиксирую выгрузку в журнале</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="pmModule" class="module">
+        <div class="module-head">
+          <div>
+            <h2 class="module-title">Буфер ПМ и Почта</h2>
+            <p class="module-subtitle">Основная выгрузка + проверка стороннего перевозчика</p>
+          </div>
+          <div id="pmStatus" class="status-pill">Проверяю журнал...</div>
+        </div>
+        <div class="module-body">
+          <div id="pmChecking" class="checking-card visible">Проверяю актуальность выгрузки</div>
+          <div id="pmDone" class="done-card">
+            <h3 class="done-title">Выгрузка уже есть</h3>
+            <p id="pmDoneText" class="done-text">Сегодняшняя выгрузка ПМ/Почты уже зафиксирована.</p>
+            <button id="pmRepeatButton" class="secondary" type="button">Выгрузить повторно</button>
+          </div>
+
+          <div id="pmWork" style="display:none">
+            <div class="instructions">
+              <h2>Выгрузить ПМ / Почту</h2>
+              <ol>
+                <li>Загрузите основную таблицу.</li>
+                <li>Нажмите "Скопировать номера передач".</li>
+                <li>Проверьте передачи во втором отчете и загрузите второй файл. Если второго файла нет - нажмите "Пропустить второй файл".</li>
+                <li>После второго файла или пропуска задачи поставятся автоматически.</li>
+              </ol>
+            </div>
+
+            <div class="upload-row">
+              <label id="pmPrimaryLabel" class="upload-button" for="pmPrimaryInput">Выбрать основную XLSX</label>
+              <label id="pmCarrierLabel" class="upload-button" for="pmCarrierInput" style="display:none">Выбрать второй XLSX</label>
+              <input id="pmPrimaryInput" type="file" accept=".xlsx,.xls,.csv">
+              <input id="pmCarrierInput" type="file" accept=".xlsx,.xls,.csv">
+              <button id="pmCopyButton" class="secondary" type="button" disabled>Скопировать номера передач</button>
+              <button id="pmSkipCarrierButton" class="secondary" type="button" disabled>Пропустить второй файл</button>
+            </div>
+            <div class="upload-row">
+              <span id="pmPrimaryFileName" class="file-name">Основной файл пока не выбран</span>
+              <span id="pmCarrierFileName" class="file-name" style="display:none">Второй файл пока не выбран</span>
+            </div>
+
+            <div id="pmAlert" class="alert"></div>
+
+            <section class="stats-grid pm" aria-label="Сводка ПМ">
+              <div class="stat-card"><div id="pmRowsLabel" class="stat-label">SMS/SWT строк</div><div id="pmSmsRows" class="stat-value">0</div></div>
+              <div class="stat-card"><div id="pmTransfersLabel" class="stat-label">SMS/SWT передач</div><div id="pmSmsTransfers" class="stat-value">0</div></div>
+              <div class="stat-card warn"><div id="pmCarrierExcludedLabel" class="stat-label">Сторонний перевозчик</div><div id="pmCarrierExcluded" class="stat-value">0</div></div>
+              <div class="stat-card warn"><div id="pmCheapTransfersLabel" class="stat-label">Дешевле 2000</div><div id="pmCheapTransfers" class="stat-value">0</div></div>
+              <div class="stat-card good"><div id="pmTasksTotalLabel" class="stat-label">К созданию</div><div id="pmTasksTotal" class="stat-value">0</div></div>
+              <div class="stat-card good"><div id="pmPmTasksLabel" class="stat-label">ПМ задач</div><div id="pmPmTasks" class="stat-value">0</div></div>
+              <div class="stat-card good"><div id="pmMailTasksLabel" class="stat-label">Почта задач</div><div id="pmMailTasks" class="stat-value">0</div></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h3 class="panel-title">Пример будущих задач</h3>
+                <span class="mini">Показываем первые 3 задачи</span>
+              </div>
+              <div id="pmSample" class="table-wrap">
+                <div class="empty">После загрузки файлов здесь появятся задачи.</div>
+              </div>
+            </section>
+
+            <div id="pmProgress" class="progress">
+              <div id="pmStepRead" class="progress-line"><span class="dot"></span><span>Читаю файлы</span></div>
+              <div id="pmStepCalc" class="progress-line"><span class="dot"></span><span>Считаю передачи и исключения</span></div>
+              <div id="pmStepUpload" class="progress-line"><span class="dot"></span><span>Заливаю очередь в Supabase</span></div>
+              <div id="pmStepWeeek" class="progress-line"><span class="dot"></span><span>Task-master создаст задачи в фоне</span></div>
+              <div id="pmStepLog" class="progress-line"><span class="dot"></span><span>Фиксирую выгрузку в журнале</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script id="initialConfigJson" type="application/json">{}</script>
+  <script>
+    function readInitialConfig() {
+      const node = document.getElementById('initialConfigJson');
+      const raw = node ? String(node.textContent || '').trim() : '';
+      if (raw && !(raw.charAt(0) === '<' && raw.charAt(1) === '?')) {
+        try {
+          return JSON.parse(raw);
+        } catch (_error) {
+          // If Apps Script did not template the file, keep the page alive and recover from URL params.
+        }
+      }
+      return {};
+    }
+
+    function todayIsoInMoscow() {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Moscow',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(new Date());
+      const byType = {};
+      parts.forEach((part) => {
+        byType[part.type] = part.value;
+      });
+      return byType.year + '-' + byType.month + '-' + byType.day;
+    }
+
+    const initialConfig = readInitialConfig();
+    const urlConfigParams = new URLSearchParams(window.location.search || '');
+    initialConfig.token = initialConfig.token || new URLSearchParams(window.location.search).get('token') || '';
+    initialConfig.today = initialConfig.today || todayIsoInMoscow();
+    initialConfig.selectedDate = initialConfig.selectedDate || addDays(initialConfig.today, -7);
+    initialConfig.requiredUploadsCount = Number(initialConfig.requiredUploadsCount || 3) || 3;
+    initialConfig.wmsOnly = initialConfig.wmsOnly
+      || urlConfigParams.get('target_system') === 'wms'
+      || urlConfigParams.get('wms_only') === '1'
+      || urlConfigParams.get('supabase_only') === '1'
+      || urlConfigParams.get('create_weeek_tasks') === '0';
+    const MAIL_ROUTES = new Set([
+      101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,
+      201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,
+      301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,
+      401,402,403,404,405,406,407,408,409,410,411,412,413,414,415,
+    ]);
+
+    let UPLOAD_TYPES = [
+      { module: 'packaging', uploadType: 'packaging', label: 'Переупаковка', offsetDays: -7 },
+      { module: 'rwp', uploadType: 'rwp', label: 'RWP', offsetDays: -4 },
+      { module: 'pm', uploadType: 'pm_buffer', label: 'ПМ / Почта', offsetDays: 0 },
+      { module: 'presort', uploadType: 'presort', label: 'Предсортировка', offsetDays: 0 },
+      { module: 'marketplace_pc', uploadType: 'marketplace_pc', label: 'Маркетплейс + ПЦ', offsetDays: 0 },
+      { module: 'wmi_mp_pc', uploadType: 'wmi_mp_pc', label: 'WMI (МП + ПЦ)', offsetDays: 0 },
+      { module: 'no_order', uploadType: 'no_order', label: 'Без заказа', offsetDays: 0 },
+      { module: 'after_sale_movement', uploadType: 'after_sale_movement', label: 'Движение после продажи', offsetDays: 0 },
+    ];
+
+    const RWP_STATUS = 'RWP – Ожидает упаковки на столе переупаковки';
+    const PM_BUFFER_STATUSES = new Set(['sms', 'swt']);
+    const PRESORT_STATUSES = new Set(['sps', 'pwt', 'gws', 'wmi']);
+    const LABELING_STATUS = 'lgr';
+    const PRESORT_EXCLUDED_MX_PARTS = ['пред сортировка мп', 'сортировка в сетки'];
+    const MASTER_MAIN_MODULES = ['pm', 'presort', 'marketplace_pc', 'wmi_mp_pc'];
+    const MASTER_NO_ORDER_MODULES = ['no_order'];
+    const MASTER_PACKAGING_MODULES = ['packaging', 'rwp'];
+    const MASTER_AFTER_SALE_MODULES = ['after_sale_movement'];
+    const MASTER_MODULES = MASTER_MAIN_MODULES.concat(MASTER_NO_ORDER_MODULES, MASTER_PACKAGING_MODULES, MASTER_AFTER_SALE_MODULES);
+    const MASTER_QUEUE_BATCH_SIZE = 20;
+
+    const state = {
+      config: initialConfig || {},
+      mode: '',
+      selectedDate: (initialConfig && initialConfig.selectedDate) || (initialConfig && initialConfig.today) || '',
+      manualUploadDate: '',
+      activeUploadDate: '',
+      requiredUploadsCount: Number((initialConfig && initialConfig.requiredUploadsCount) || 3) || 3,
+      calendarRuns: [],
+      calendarRange: null,
+      settings: [],
+      statusLoading: true,
+      runsByType: {
+        packaging: null,
+        rwp: null,
+        pm_buffer: null,
+        presort: null,
+        marketplace_pc: null,
+        wmi_mp_pc: null,
+        no_order: null,
+        after_sale_movement: null,
+      },
+      packaging: {
+        fileName: '',
+        rows: [],
+        preview: null,
+        completed: false,
+        forceRepeat: false,
+      },
+      rwp: {
+        fileName: '',
+        rows: [],
+        preview: null,
+        completed: false,
+        forceRepeat: false,
+      },
+      pm: {
+        primaryFileName: '',
+        carrierFileName: '',
+        primaryRows: [],
+        carrierRows: [],
+        carrierSkipped: false,
+        preview: null,
+        completed: false,
+        forceRepeat: false,
+      },
+      presort: {
+        primaryFileName: '',
+        primaryRows: [],
+        preview: null,
+        completed: false,
+        forceRepeat: false,
+      },
+      marketplacePc: {
+        primaryFileName: '',
+        primaryRows: [],
+        preview: null,
+        completed: false,
+        forceRepeat: false,
+      },
+      wmiMpPc: {
+        primaryFileName: '',
+        primaryRows: [],
+        preview: null,
+        completed: false,
+        forceRepeat: false,
+      },
+      noOrder: {
+        primaryFileName: '',
+        primaryRows: [],
+        preview: null,
+        completed: false,
+        forceRepeat: false,
+      },
+      afterSaleMovement: {
+        primaryFileName: '',
+        primaryRows: [],
+        preview: null,
+        completed: false,
+        forceRepeat: false,
+      },
+      master: {
+        files: {
+          main: null,
+          noOrder: null,
+          carrier: null,
+          packaging: null,
+          afterSale: null,
+        },
+        fileNames: {
+          main: '',
+          noOrder: '',
+          carrier: '',
+          packaging: '',
+          afterSale: '',
+        },
+        rows: {
+          main: [],
+          noOrder: [],
+          carrier: [],
+          packaging: [],
+          afterSale: [],
+        },
+        preview: null,
+        dateRejects: [],
+        conditionRejects: [],
+        buildId: 0,
+        saving: false,
+        watchTimer: null,
+        watchTotal: 0,
+        watchModules: [],
+      },
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function uploadDefByModule(module) {
+      const visibleDef = UPLOAD_TYPES.find((item) => item.module === module);
+      if (visibleDef) return visibleDef;
+      const setting = settingByModule(module);
+      if (setting && normalizeText(setting.module)) {
+        return {
+          module,
+          uploadType: normalizeText(setting.upload_type) || module,
+          label: normalizeText(setting.label) || module,
+          offsetDays: Number.isFinite(Number(setting.upload_offset_days)) ? Number(setting.upload_offset_days) : 0,
+          taskDeadlineDays: Number.isFinite(Number(setting.task_deadline_days)) ? Number(setting.task_deadline_days) : 2,
+          responsibilityZone: normalizeText(setting.responsibility_zone) || 'Нет привязки',
+        };
+      }
+      return UPLOAD_TYPES[0];
+    }
+
+    function settingByModule(module) {
+      const list = Array.isArray(state.settings) ? state.settings : [];
+      return list.find((item) => normalizeText(item.module) === module) || {};
+    }
+
+    function applyUploadSettings(settings) {
+      if (!Array.isArray(settings) || !settings.length) return;
+      state.settings = settings;
+      UPLOAD_TYPES = UPLOAD_TYPES.map((def) => {
+        const setting = settings.find((item) => normalizeText(item.module) === def.module);
+        if (!setting) return def;
+        return Object.assign({}, def, {
+          label: normalizeText(setting.label) || def.label,
+          uploadType: normalizeText(setting.upload_type) || def.uploadType,
+          offsetDays: Number.isFinite(Number(setting.upload_offset_days)) ? Number(setting.upload_offset_days) : def.offsetDays,
+          isRequired: setting.is_required !== false,
+	          taskDeadlineDays: Number.isFinite(Number(setting.task_deadline_days)) ? Number(setting.task_deadline_days) : def.taskDeadlineDays,
+	          pmDeadlineDays: Number.isFinite(Number(setting.pm_deadline_days)) ? Number(setting.pm_deadline_days) : def.pmDeadlineDays,
+	          mailDeadlineDays: Number.isFinite(Number(setting.mail_deadline_days)) ? Number(setting.mail_deadline_days) : def.mailDeadlineDays,
+	          responsibilityZone: normalizeText(setting.responsibility_zone) || def.responsibilityZone || 'Нет привязки',
+	        });
+	      });
+      const requiredCount = UPLOAD_TYPES.filter((item) => item.isRequired !== false).length;
+      state.requiredUploadsCount = requiredCount || state.requiredUploadsCount || 3;
+    }
+
+    function isPackagingLikeModule(module) {
+      return module === 'packaging' || module === 'rwp';
+    }
+
+    function isPmLikeModule(module) {
+      return module === 'pm' || module === 'presort' || module === 'marketplace_pc' || module === 'wmi_mp_pc' || module === 'no_order' || module === 'after_sale_movement';
+    }
+
+    function packagingLikeState(module) {
+      return module === 'rwp' ? state.rwp : state.packaging;
+    }
+
+    function pmLikeState(module) {
+      if (module === 'presort') return state.presort;
+      if (module === 'marketplace_pc') return state.marketplacePc;
+      if (module === 'wmi_mp_pc') return state.wmiMpPc;
+      if (module === 'no_order') return state.noOrder;
+      if (module === 'after_sale_movement') return state.afterSaleMovement;
+      return state.pm;
+    }
+
+    function moduleHumanLabel(module) {
+      if (module === 'rwp') return 'RWP';
+      if (module === 'pm') return 'ПМ/Почта';
+      if (module === 'presort') return 'предсортировки';
+      if (module === 'marketplace_pc') return 'маркетплейса + ПЦ';
+      if (module === 'wmi_mp_pc') return 'WMI (МП + ПЦ)';
+      if (module === 'no_order') return 'без заказа';
+      if (module === 'after_sale_movement') return 'движения после продажи';
+      return 'упаковки';
+    }
+
+    function defaultUploadDateForModule(module) {
+      const def = uploadDefByModule(module);
+      return addDays(state.config.today || todayIsoInMoscow(), def.offsetDays || 0);
+    }
+
+    function uploadDateForModule(module) {
+      return state.manualUploadDate || defaultUploadDateForModule(module);
+    }
+
+	    function plannedUploadDateForModule(module) {
+	      return defaultUploadDateForModule(module);
+	    }
+
+	    function plannedUploadDateForBusinessDate(module, businessDate) {
+	      const def = uploadDefByModule(module);
+	      return addDays(businessDate, -(Number(def.offsetDays || 0) || 0));
+	    }
+
+	    function dueDateForBusinessDate(module, businessDate) {
+	      return addDays(plannedUploadDateForBusinessDate(module, businessDate), 1);
+	    }
+
+    function masterDatePlan() {
+      const dates = {};
+      MASTER_MODULES.forEach((module) => {
+        dates[module] = plannedUploadDateForModule(module);
+      });
+      return dates;
+    }
+
+    function earliestIsoDate(dates) {
+      return (dates || []).filter(Boolean).sort()[0] || '';
+    }
+
+    function latestIsoDate(dates) {
+      const sorted = (dates || []).filter(Boolean).sort();
+      return sorted[sorted.length - 1] || '';
+    }
+
+    function uploadTypeKeyForModule(module) {
+      if (module === 'pm') return 'pm_buffer';
+      return module;
+    }
+
+    function activeUploadDate() {
+      return state.activeUploadDate || uploadDateForModule(state.mode || 'packaging');
+    }
+
+    function runForUpload(module, isoDate) {
+      const def = uploadDefByModule(module);
+      const targetDate = isoDate || uploadDateForModule(module);
+      return state.calendarRuns.find((run) => {
+        const runDate = normalizeText(run.effective_date || run.business_date || run.upload_date);
+        const runType = normalizeText(run.upload_type || run.source_module);
+        return runDate === targetDate && runType === def.uploadType;
+      }) || null;
+    }
+
+    function normalizeText(value) {
+      if (value === null || value === undefined) return '';
+      return String(value).trim();
+    }
+
+    function normalizeForMatch(value) {
+      return normalizeText(value).replace(/[–—−]/g, '-').replace(/ё/g, 'е').replace(/Ё/g, 'Е').replace(/\s+/g, ' ').toLowerCase();
+    }
+
+    function isRwpStatus(value) {
+      return normalizeForMatch(value) === normalizeForMatch(RWP_STATUS);
+    }
+
+	    function isPmBufferStatus(value) {
+	      return PM_BUFFER_STATUSES.has(normalizeForMatch(value));
+	    }
+
+	    function isMultiShipmentBufferMx(value) {
+	      return normalizeForMatch(value).includes('буфер мультиотгрузки');
+	    }
+
+	    function isGateMx(value) {
+	      return normalizeForMatch(value).includes('ворота');
+	    }
+
+    function mxHasPresortExclusion(mx) {
+      const normalized = normalizeForMatch(mx);
+      return PRESORT_EXCLUDED_MX_PARTS.some((part) => normalized.includes(part));
+    }
+
+    function isPresortStatus(row) {
+      const status = normalizeForMatch(row && row.product_status);
+      if (status === 'sps') return true;
+      if (status === 'pwt') return !mxHasPresortExclusion(row && row.mx);
+      if ((status === 'gws' || status === 'wmi') && !mxHasPresortExclusion(row && row.mx)) return true;
+      return false;
+    }
+
+    function isLabelingStatus(row) {
+      return normalizeForMatch(row && row.product_status) === LABELING_STATUS;
+    }
+
+    function mxIncludes(row, part) {
+      return normalizeForMatch(row && row.mx).includes(normalizeForMatch(part));
+    }
+
+    function isMarketplaceStatus(row) {
+      const status = normalizeForMatch(row && row.product_status);
+      if (status === 'pap') return true;
+      return (status === 'gws' || status === 'pwt') && mxIncludes(row, 'Пред сортировка МП');
+    }
+
+    function isPcStatus(row) {
+      const status = normalizeForMatch(row && row.product_status);
+      if (status === 'smc') return true;
+      return (status === 'gws' || status === 'pwt') && mxIncludes(row, 'Сортировка в сетки');
+    }
+
+    function mxHasBuffer(row) {
+      return normalizeForMatch(row && row.mx).includes('буфер');
+    }
+
+	    function isWmiMpPcStatus(row) {
+	      const status = normalizeForMatch(row && row.product_status);
+	      if (status !== 'wmi') return false;
+	      return mxIncludes(row, 'Пред сортировка МП') || mxIncludes(row, 'Сортировка в сетки');
+	    }
+
+	    function isNoOrderUsdStatus(row) {
+	      return normalizeForMatch(row && row.product_status) === 'usd';
+	    }
+
+	    function isNoOrderTmmStatus(row) {
+	      return normalizeForMatch(row && row.product_status) === 'tmm';
+	    }
+
+    function normalizeIdentifier(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value).toFixed(0);
+      const raw = normalizeText(value).replace(/\u00a0/g, '').replace(/\s+/g, '');
+      if (!raw) return '';
+      if (/^[+-]?\d+(?:\.\d+)?e[+-]?\d+$/i.test(raw)) {
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed)) return Math.trunc(parsed).toFixed(0);
+      }
+      if (/^\d+\.0+$/.test(raw)) return raw.replace(/\.0+$/, '');
+      return raw;
+    }
+
+    function isGroupableIdentifier(value) {
+      const normalized = normalizeIdentifier(value);
+      return Boolean(normalized) && normalized !== '0';
+    }
+
+    function normalizePrice(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      const raw = normalizeText(value).replace(/\u00a0/g, '').replace(/\s+/g, '').replace(',', '.').replace(/[^0-9.\-]/g, '');
+      if (!raw) return null;
+      const parsed = Number(raw.replace(/\.(?=.*\.)/g, ''));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function excelSerialToDate(value) {
+      if (!Number.isFinite(value)) return null;
+      const date = new Date(Math.round((value - 25569) * 86400 * 1000));
+      return Number.isFinite(date.getTime()) ? date : null;
+    }
+
+    function parseDateTime(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        const date = excelSerialToDate(value);
+        if (date) return { date: date.toISOString().slice(0, 10), ts: date.getTime() };
+      }
+      const raw = normalizeText(value);
+      if (!raw) return { date: '', ts: 0 };
+      let match = raw.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/);
+      if (match) {
+        const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)));
+        return { date: date.toISOString().slice(0, 10), ts: date.getTime() };
+      }
+      match = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+      if (match) {
+        let year = Number(match[3]);
+        if (year < 100) year += 2000;
+        const date = new Date(Date.UTC(year, Number(match[2]) - 1, Number(match[1]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)));
+        return { date: date.toISOString().slice(0, 10), ts: date.getTime() };
+      }
+      const parsed = new Date(raw.replace(' ', 'T'));
+      return Number.isFinite(parsed.getTime()) ? { date: parsed.toISOString().slice(0, 10), ts: parsed.getTime() } : { date: raw, ts: 0 };
+    }
+
+    function addDays(isoDate, days) {
+      if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return '';
+      const date = new Date(isoDate + 'T00:00:00Z');
+      date.setUTCDate(date.getUTCDate() + Number(days || 0));
+      return date.toISOString().slice(0, 10);
+    }
+
+    function formatRuDate(isoDate) {
+      const match = normalizeText(isoDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return match ? match[3] + '.' + match[2] + '.' + match[1] : isoDate || '-';
+    }
+
+    function formatMoney(value) {
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
+      return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(Number(value)) + ' ₽';
+    }
+
+    function escapeHtml(value) {
+      return normalizeText(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function appendItems(target, items) {
+      (items || []).forEach((item) => target.push(item));
+    }
+
+    function canUseAsyncClipboard() {
+      try {
+        return window.self === window.top && window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.writeText === 'function';
+      } catch (_error) {
+        return false;
+      }
+    }
+
+    function copyTextWithTextarea(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      let copied = false;
+      try {
+        copied = Boolean(document.execCommand && document.execCommand('copy'));
+      } catch (_error) {
+        copied = false;
+      }
+      document.body.removeChild(textarea);
+      return copied;
+    }
+
+    function goHome() {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ source: 'opp_manual_uploads', type: 'go_home' }, '*');
+        }
+      } catch (_error) {}
+    }
+
+    function wmsPayloadFlags() {
+      if (!state.config || !state.config.wmsOnly) return {};
+      return {
+        target_system: 'wms',
+        wms_only: true,
+        supabase_only: true,
+        create_weeek_tasks: false,
+      };
+    }
+
+    async function copyTextToClipboard(text) {
+      if (canUseAsyncClipboard()) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (_error) {
+          // Apps Script often runs inside an iframe where async clipboard is blocked.
+        }
+      }
+      return copyTextWithTextarea(text);
+    }
+
+    function showAlert(id, message, type = 'error') {
+      const el = $(id);
+      el.textContent = message || '';
+      el.className = 'alert visible' + (type === 'info' ? ' info' : type === 'good' ? ' good' : '');
+    }
+
+    function hideAlert(id) {
+      const el = $(id);
+      el.textContent = '';
+      el.className = 'alert';
+    }
+
+    function setText(id, value) {
+      $(id).textContent = String(value === null || value === undefined ? 0 : value);
+    }
+
+    function configurePackagingLikeModule(module) {
+      if (module === 'rwp') {
+        $('packagingModuleTitle').textContent = 'RWP';
+        $('packagingModuleSubtitle').textContent = '-4 дня от текущей даты';
+        $('packagingInstructionTitle').textContent = 'Выгрузить RWP';
+        return;
+      }
+      $('packagingModuleTitle').textContent = 'Контроль зависшего товара - переупаковка';
+      $('packagingModuleSubtitle').textContent = '-7 дней от текущей даты';
+      $('packagingInstructionTitle').textContent = 'Выгрузить зависший товар';
+    }
+
+    function configurePmLikeModule(module) {
+      const isPresort = module === 'presort';
+      const isMarketplacePc = module === 'marketplace_pc';
+      const isWmiMpPc = module === 'wmi_mp_pc';
+      const isNoOrder = module === 'no_order';
+      const isAfterSaleMovement = module === 'after_sale_movement';
+      const isSingleFile = isPresort || isMarketplacePc || isWmiMpPc || isNoOrder || isAfterSaleMovement;
+      $('pmModule').querySelector('.module-title').textContent = isAfterSaleMovement ? 'Движение после продажи' : isNoOrder ? 'Без заказа' : isWmiMpPc ? 'WMI (МП + ПЦ)' : isMarketplacePc ? 'Маркетплейс + ПЦ' : isPresort ? 'Предсортировка' : 'Буфер ПМ и Почта';
+      $('pmModule').querySelector('.module-subtitle').textContent = isSingleFile ? 'Основная выгрузка без второго файла' : 'Основная выгрузка + проверка стороннего перевозчика';
+      $('pmWork').querySelector('.instructions h2').textContent = isAfterSaleMovement ? 'Выгрузить Движение после продажи' : isNoOrder ? 'Выгрузить Без заказа' : isWmiMpPc ? 'Выгрузить WMI (МП + ПЦ)' : isMarketplacePc ? 'Выгрузить Маркетплейс + ПЦ' : isPresort ? 'Выгрузить предсортировку' : 'Выгрузить ПМ / Почту';
+      $('pmWork').querySelector('.instructions ol').innerHTML = isNoOrder
+        ? '<li>Загрузите отдельную таблицу Без заказа.</li><li>Скрипт возьмет все строки файла, сгруппирует их и автоматически поставит задачи.</li>'
+        : isAfterSaleMovement
+        ? '<li>Загрузите отдельную таблицу Движение после продажи.</li><li>Скрипт возьмет строки за нужную дату, создаст задачи по каждому товару и автоматически поставит их в WEEEK.</li>'
+        : isWmiMpPc
+        ? '<li>Загрузите основную таблицу.</li><li>Скрипт найдет строки WMI на участках МП/ПЦ, сгруппирует их и автоматически поставит задачи.</li>'
+        : isMarketplacePc
+        ? '<li>Загрузите основную таблицу.</li><li>Скрипт найдет строки Маркетплейса и ПЦ, сгруппирует их и автоматически поставит задачи.</li>'
+        : isPresort
+          ? '<li>Загрузите основную таблицу.</li><li>Скрипт найдет статусы предсортировки и автоматически поставит задачи.</li>'
+        : '<li>Загрузите основную таблицу.</li><li>Нажмите "Скопировать номера передач".</li><li>Проверьте передачи во втором отчете и загрузите второй файл. Если второго файла нет - нажмите "Пропустить второй файл".</li><li>После второго файла или пропуска задачи поставятся автоматически.</li>';
+      $('pmPrimaryLabel').textContent = isSingleFile ? 'Выбрать XLSX' : 'Выбрать основную XLSX';
+      $('pmCarrierLabel').style.display = 'none';
+      $('pmCarrierFileName').style.display = 'none';
+      $('pmCopyButton').style.display = isSingleFile ? 'none' : '';
+      $('pmSkipCarrierButton').style.display = isSingleFile ? 'none' : '';
+      $('pmRowsLabel').textContent = isAfterSaleMovement ? 'Строк' : isNoOrder ? 'Строк' : isWmiMpPc ? 'Строк WMI' : isMarketplacePc ? 'Строк Маркетплейс' : isPresort ? 'Строк предсортировки' : 'SMS/SWT строк';
+      $('pmTransfersLabel').textContent = isAfterSaleMovement ? 'Дублей' : isNoOrder ? 'Тар/МХ' : isWmiMpPc ? 'Тар/МХ' : isMarketplacePc ? 'Строк ПЦ' : isPresort ? 'Тар в выгрузке' : 'SMS/SWT передач';
+      $('pmCarrierExcludedLabel').textContent = isAfterSaleMovement ? 'Без даты' : isNoOrder ? 'Групп. тарами' : isWmiMpPc ? 'Групп. тарами' : isMarketplacePc ? 'Тар/МХ' : isPresort ? 'Оклейка' : 'Сторонний перевозчик';
+      $('pmCheapTransfersLabel').textContent = isAfterSaleMovement ? 'Задач по ШК' : isNoOrder ? 'Одиночные ШК' : isWmiMpPc ? 'Одиночные ШК' : isMarketplacePc ? 'Одиночные ШК' : isPresort ? 'Одиночные ШК' : 'Дешевле 2000';
+      $('pmTasksTotalLabel').textContent = 'К созданию';
+      $('pmPmTasksLabel').textContent = isAfterSaleMovement ? 'Движение' : isNoOrder ? 'Без заказа' : isWmiMpPc ? 'WMI задач' : isMarketplacePc ? 'Маркетплейс' : isPresort ? 'Предсортировка' : 'ПМ задач';
+      $('pmMailTasksLabel').textContent = isAfterSaleMovement ? 'Срок' : isNoOrder ? 'Групп. МХ' : isWmiMpPc ? 'Групп. МХ' : isMarketplacePc ? 'ПЦ' : isPresort ? 'Оклейка задач' : 'Почта задач';
+    }
+
+    function setMode(mode) {
+      state.mode = mode;
+      $('choosePackaging').classList.toggle('active', mode === 'packaging');
+      $('chooseRwp').classList.toggle('active', mode === 'rwp');
+      $('choosePm').classList.toggle('active', mode === 'pm');
+      $('choosePresort').classList.toggle('active', mode === 'presort');
+      $('chooseMarketplacePc').classList.toggle('active', mode === 'marketplace_pc');
+      $('chooseWmiMpPc').classList.toggle('active', mode === 'wmi_mp_pc');
+      $('chooseNoOrder').classList.toggle('active', mode === 'no_order');
+      $('chooseAfterSaleMovement').classList.toggle('active', mode === 'after_sale_movement');
+      $('packagingModule').classList.toggle('active', isPackagingLikeModule(mode));
+      $('pmModule').classList.toggle('active', isPmLikeModule(mode));
+      $('uploadMenu').classList.toggle('hidden', Boolean(mode));
+      $('modalModuleHost').classList.toggle('visible', Boolean(mode));
+      $('modalBackRow').classList.toggle('visible', Boolean(mode));
+      $('uploadModalCard').classList.toggle('wide', Boolean(mode));
+    }
+
+    function setModuleChecking(module, isChecking) {
+      const isPackaging = isPackagingLikeModule(module);
+      const checking = $(isPackaging ? 'packagingChecking' : 'pmChecking');
+      const done = $(isPackaging ? 'packagingDone' : 'pmDone');
+      const work = $(isPackaging ? 'packagingWork' : 'pmWork');
+      const status = $(isPackaging ? 'packagingStatus' : 'pmStatus');
+      checking.classList.toggle('visible', Boolean(isChecking));
+      if (isChecking) {
+        done.classList.remove('visible');
+        work.style.display = 'none';
+        status.textContent = 'Проверяю журнал...';
+        status.classList.remove('good');
+      }
+    }
+
+    function showModuleWork(module, label) {
+      const isPackaging = isPackagingLikeModule(module);
+      $(isPackaging ? 'packagingChecking' : 'pmChecking').classList.remove('visible');
+      $(isPackaging ? 'packagingDone' : 'pmDone').classList.remove('visible');
+      $(isPackaging ? 'packagingWork' : 'pmWork').style.display = 'block';
+      const status = $(isPackaging ? 'packagingStatus' : 'pmStatus');
+      status.textContent = label || 'Можно выгружать';
+      status.classList.remove('good');
+    }
+
+    function setChoiceStatus(module, hasRun, loading) {
+      const idsByModule = {
+        packaging: { choice: 'choosePackaging', status: 'packagingChoiceStatus', date: 'packagingChoiceDate' },
+        rwp: { choice: 'chooseRwp', status: 'rwpChoiceStatus', date: 'rwpChoiceDate' },
+        pm: { choice: 'choosePm', status: 'pmChoiceStatus', date: 'pmChoiceDate' },
+        presort: { choice: 'choosePresort', status: 'presortChoiceStatus', date: 'presortChoiceDate' },
+        marketplace_pc: { choice: 'chooseMarketplacePc', status: 'marketplacePcChoiceStatus', date: 'marketplacePcChoiceDate' },
+        wmi_mp_pc: { choice: 'chooseWmiMpPc', status: 'wmiMpPcChoiceStatus', date: 'wmiMpPcChoiceDate' },
+        no_order: { choice: 'chooseNoOrder', status: 'noOrderChoiceStatus', date: 'noOrderChoiceDate' },
+        after_sale_movement: { choice: 'chooseAfterSaleMovement', status: 'afterSaleMovementChoiceStatus', date: 'afterSaleMovementChoiceDate' },
+      };
+      const ids = idsByModule[module] || idsByModule.packaging;
+      const choice = $(ids.choice);
+      const status = $(ids.status);
+      const date = $(ids.date);
+      choice.classList.remove('status-done');
+      choice.classList.remove('status-missing');
+      choice.disabled = Boolean(loading);
+      date.textContent = 'Дата выгрузки: ' + formatRuDate(uploadDateForModule(module));
+      if (loading) {
+        status.textContent = 'Проверяю';
+        return;
+      }
+      choice.classList.add(hasRun ? 'status-done' : 'status-missing');
+      status.textContent = hasRun ? 'Есть выгрузка' : 'Нет выгрузки';
+    }
+
+    function updateChoiceStatuses() {
+      setChoiceStatus('packaging', Boolean(runForUpload('packaging')), state.statusLoading);
+      setChoiceStatus('rwp', Boolean(runForUpload('rwp')), state.statusLoading);
+      setChoiceStatus('pm', Boolean(runForUpload('pm')), state.statusLoading);
+      setChoiceStatus('presort', Boolean(runForUpload('presort')), state.statusLoading);
+      setChoiceStatus('marketplace_pc', Boolean(runForUpload('marketplace_pc')), state.statusLoading);
+      setChoiceStatus('wmi_mp_pc', Boolean(runForUpload('wmi_mp_pc')), state.statusLoading);
+      setChoiceStatus('no_order', Boolean(runForUpload('no_order')), state.statusLoading);
+      setChoiceStatus('after_sale_movement', Boolean(runForUpload('after_sale_movement')), state.statusLoading);
+      $('uploadModalDate').textContent = state.manualUploadDate
+        ? 'Ручная догрузка за ' + formatRuDate(state.manualUploadDate)
+        : 'Плановые даты на сегодня';
+    }
+
+    function openUploadMenu(manualMode) {
+      if (!manualMode) {
+        state.manualUploadDate = '';
+        state.packaging.forceRepeat = false;
+        state.rwp.forceRepeat = false;
+        state.pm.forceRepeat = false;
+        state.presort.forceRepeat = false;
+        state.marketplacePc.forceRepeat = false;
+        state.wmiMpPc.forceRepeat = false;
+        state.noOrder.forceRepeat = false;
+        state.afterSaleMovement.forceRepeat = false;
+      }
+      showUploadChoices();
+      updateChoiceStatuses();
+      $('uploadModal').classList.add('visible');
+      $('uploadModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closeUploadMenu() {
+      $('uploadModal').classList.remove('visible');
+      $('uploadModal').setAttribute('aria-hidden', 'true');
+    }
+
+    function showUploadChoices() {
+      state.mode = '';
+      state.activeUploadDate = '';
+      setMode('');
+      $('uploadModalTitle').textContent = 'Выберите выгрузку';
+      $('uploadMenu').classList.remove('hidden');
+      $('modalModuleHost').classList.remove('visible');
+      $('modalBackRow').classList.remove('visible');
+      $('uploadModalCard').classList.remove('wide');
+    }
+
+    function chooseUploadMode(mode) {
+      if (state.statusLoading) return;
+      state.activeUploadDate = uploadDateForModule(mode);
+      closeUploadMenu();
+      $('uploadModal').classList.add('visible');
+      $('uploadModal').setAttribute('aria-hidden', 'false');
+      $('uploadModalTitle').textContent = mode === 'rwp'
+        ? 'RWP'
+        : mode === 'packaging'
+          ? 'Контроль зависшего товара - переупаковка'
+          : mode === 'presort'
+            ? 'Предсортировка'
+            : mode === 'marketplace_pc'
+              ? 'Маркетплейс + ПЦ'
+              : mode === 'wmi_mp_pc'
+                ? 'WMI (МП + ПЦ)'
+              : mode === 'no_order'
+                ? 'Без заказа'
+                : mode === 'after_sale_movement'
+                  ? 'Движение после продажи'
+                  : 'Буфер ПМ и Почта';
+      $('uploadModalDate').textContent = 'Выгрузка за ' + formatRuDate(state.activeUploadDate);
+      if (isPackagingLikeModule(mode)) configurePackagingLikeModule(mode);
+      if (isPmLikeModule(mode)) configurePmLikeModule(mode);
+      setMode(mode);
+      const existingRun = runForUpload(mode, state.activeUploadDate);
+      const currentState = isPackagingLikeModule(mode) ? packagingLikeState(mode) : pmLikeState(mode);
+      if (existingRun && !currentState.forceRepeat) showDone(mode, existingRun, true);
+      else showModuleWork(mode, 'Можно выгружать');
+      $('packagingInstructionDate').textContent = formatRuDate(state.activeUploadDate);
+    }
+
+    function startOfWeekMonday(isoDate) {
+      const date = new Date((isoDate || state.config.today) + 'T00:00:00Z');
+      if (!Number.isFinite(date.getTime())) return '';
+      const day = date.getUTCDay() || 7;
+      date.setUTCDate(date.getUTCDate() - day + 1);
+      return date.toISOString().slice(0, 10);
+    }
+
+    function buildCalendarRange() {
+      const monday = startOfWeekMonday(state.config.today || state.selectedDate);
+      return {
+        start: addDays(monday, -28),
+        end: addDays(monday, 13),
+      };
+    }
+
+    function datesBetween(startDate, endDate) {
+      const result = [];
+      let current = startDate;
+      while (current && current <= endDate) {
+        result.push(current);
+        current = addDays(current, 1);
+      }
+      return result;
+    }
+
+    function uploadsByEffectiveDate() {
+      const map = new Map();
+      state.calendarRuns.forEach((run) => {
+        const date = normalizeText(run.effective_date || run.business_date || run.upload_date);
+        const type = normalizeText(run.upload_type || run.source_module);
+        if (!date || !type) return;
+        if (!map.has(date)) map.set(date, new Set());
+        map.get(date).add(type);
+      });
+      return map;
+    }
+
+    function dayStatusClass(doneCount) {
+      const required = Math.max(Number(state.requiredUploadsCount) || 3, 1);
+      if (doneCount <= 0) return 'status-gray';
+      if (doneCount >= required) return 'status-green';
+      if (doneCount >= required / 2) return 'status-yellow';
+      return 'status-red';
+    }
+
+    function calendarTooltipHtml(isoDate) {
+      const missing = [];
+      const done = [];
+      UPLOAD_TYPES.forEach((type) => {
+        if (runForUpload(type.module, isoDate)) done.push(type.label);
+        else missing.push(type.label);
+      });
+      const lines = missing.map((label) => ''
+        + '<span class="tooltip-line missing"><span class="tooltip-dot"></span>' + escapeHtml(label) + '</span>'
+      ).concat(done.map((label) => ''
+        + '<span class="tooltip-line done"><span class="tooltip-dot"></span>' + escapeHtml(label) + '</span>'
+      )).join('');
+      return ''
+        + '<span class="calendar-tooltip">'
+        + '<span class="tooltip-title">' + formatRuDate(isoDate) + '</span>'
+        + lines
+        + '</span>';
+    }
+
+    function renderCalendar() {
+      const range = state.calendarRange || buildCalendarRange();
+      state.calendarRange = range;
+      const byDate = uploadsByEffectiveDate();
+      const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+      const dayCells = datesBetween(range.start, range.end).map((isoDate) => {
+        const doneCount = byDate.has(isoDate) ? byDate.get(isoDate).size : 0;
+        const statusClass = dayStatusClass(doneCount);
+        return ''
+          + '<button type="button" class="calendar-day ' + statusClass + '" data-date="' + escapeHtml(isoDate) + '">'
+          + '<span class="day-number">' + Number(isoDate.slice(8, 10)) + '</span>'
+          + '<span class="day-progress">' + doneCount + '/' + state.requiredUploadsCount + '</span>'
+          + calendarTooltipHtml(isoDate)
+          + '</button>';
+      }).join('');
+      $('calendarGrid').innerHTML = weekdays.map((day) => '<div class="weekday">' + day + '</div>').join('') + dayCells;
+      $('selectedDateNote').textContent = '';
+    }
+
+    function renderBackfillCalendar() {
+      const range = state.calendarRange || buildCalendarRange();
+      state.calendarRange = range;
+      const byDate = uploadsByEffectiveDate();
+      const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+      const today = state.config.today || todayIsoInMoscow();
+      const dayCells = datesBetween(range.start, range.end).map((isoDate) => {
+        const doneCount = byDate.has(isoDate) ? byDate.get(isoDate).size : 0;
+        const statusClass = dayStatusClass(doneCount);
+        const disabled = isoDate > today ? ' disabled' : '';
+        return ''
+          + '<button type="button" class="calendar-day ' + statusClass + disabled + '" data-date="' + escapeHtml(isoDate) + '" ' + (disabled ? 'disabled' : '') + '>'
+          + '<span class="day-number">' + Number(isoDate.slice(8, 10)) + '</span>'
+          + '<span class="day-progress">' + doneCount + '/' + state.requiredUploadsCount + '</span>'
+          + calendarTooltipHtml(isoDate)
+          + '</button>';
+      }).join('');
+      $('backfillCalendarGrid').innerHTML = weekdays.map((day) => '<div class="weekday">' + day + '</div>').join('') + dayCells;
+      $('backfillCalendarGrid').querySelectorAll('.calendar-day:not(.disabled)').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.manualUploadDate = button.dataset.date || '';
+          state.packaging.forceRepeat = false;
+          state.rwp.forceRepeat = false;
+          state.pm.forceRepeat = false;
+          state.presort.forceRepeat = false;
+          state.marketplacePc.forceRepeat = false;
+          state.wmiMpPc.forceRepeat = false;
+          state.noOrder.forceRepeat = false;
+          state.afterSaleMovement.forceRepeat = false;
+          closeBackfillModal();
+          openUploadMenu(true);
+        });
+      });
+    }
+
+    function mergeCalendarRun(run) {
+      if (!run || !normalizeText(run.effective_date)) return;
+      const key = [
+        normalizeText(run.effective_date),
+        normalizeText(run.source_module),
+        normalizeText(run.upload_type),
+      ].join('|');
+      const filtered = state.calendarRuns.filter((item) => [
+        normalizeText(item.effective_date),
+        normalizeText(item.source_module),
+        normalizeText(item.upload_type),
+      ].join('|') !== key);
+      filtered.push(run);
+      state.calendarRuns = filtered;
+      renderCalendar();
+    }
+
+    function openBackfillModal() {
+      renderBackfillCalendar();
+      $('backfillModal').classList.add('visible');
+      $('backfillModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closeBackfillModal() {
+      $('backfillModal').classList.remove('visible');
+      $('backfillModal').setAttribute('aria-hidden', 'true');
+    }
+
+    function mountModulesInModal() {
+      const host = $('modalModuleHost');
+      host.appendChild($('packagingModule'));
+      host.appendChild($('pmModule'));
+    }
+
+    function callAppsScript(functionName, payload) {
+      return new Promise((resolve, reject) => {
+        if (!window.google || !google.script || !google.script.run) {
+          reject(new Error('google.script.run недоступен. Откройте iframe через опубликованный Apps Script.'));
+          return;
+        }
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler((error) => reject(error))
+          [functionName](payload);
+      });
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function isTransientAppsScriptError(error) {
+      const message = String(error && error.message ? error.message : error || '').toLowerCase();
+      return message.includes('networkerror')
+        || message.includes('http 429')
+        || message.includes('http 500')
+        || message.includes('http 502')
+        || message.includes('http 503')
+        || message.includes('http 504')
+        || message.includes('timeout')
+        || message.includes('timed out')
+        || message.includes('request failed')
+        || message.includes('service unavailable');
+    }
+
+    async function callAppsScriptWithRetry(functionName, payload, options) {
+      const settings = options || {};
+      const attempts = Math.max(Number(settings.attempts) || 3, 1);
+      const baseDelayMs = Math.max(Number(settings.baseDelayMs) || 1000, 0);
+      let lastError = null;
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+          return await callAppsScript(functionName, payload);
+        } catch (error) {
+          lastError = error;
+          if (attempt >= attempts || !isTransientAppsScriptError(error)) throw error;
+          const delay = baseDelayMs * attempt * attempt;
+          if (settings.alertId) {
+            showAlert(
+              settings.alertId,
+              'Связь временно просела. Повтор ' + attempt + '/' + attempts + ' через ' + Math.round(delay / 1000) + ' сек.',
+              'info'
+            );
+          }
+          await sleep(delay);
+        }
+      }
+      throw lastError || new Error('Не удалось выполнить запрос Apps Script.');
+    }
+
+    async function readWorkbookRows(file, kind) {
+      if (typeof XLSX === 'undefined') throw new Error('Не загрузилась библиотека XLSX. Обновите iframe и попробуйте еще раз.');
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) throw new Error('В файле не найдено листов.');
+      const sheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+      const headerIndex = findHeaderIndex(rows, kind);
+      return rows.slice(headerIndex + 1)
+        .map((row, index) => normalizeRowByKind(row, headerIndex + index + 2, kind))
+        .filter(Boolean);
+    }
+
+    function findHeaderIndex(rows, kind) {
+      const markersByKind = {
+        packaging: ['id товара', 'стоимость', 'id тары'],
+        pmPrimary: ['передача', 'товар', 'статус товара'],
+        pmCarrier: ['тара', 'мх'],
+        afterSaleMovement: ['товар', 'дата статуса', 'статус после реализации'],
+      };
+      const markers = markersByKind[kind] || [];
+      const max = Math.min(rows.length, 30);
+      for (let i = 0; i < max; i += 1) {
+        const line = rows[i].map(normalizeText).join(' ').toLowerCase();
+        if (markers.every((marker) => line.includes(marker))) return i;
+      }
+      return 0;
+    }
+
+    function normalizeRowByKind(row, rowNumber, kind) {
+      if (kind === 'packaging') return normalizePackagingRow(row, rowNumber);
+      if (kind === 'afterSaleMovement') return normalizeAfterSaleMovementRow(row, rowNumber);
+      if (kind === 'pmPrimary') return normalizePmPrimaryRow(row, rowNumber);
+      return normalizePmCarrierRow(row, rowNumber);
+    }
+
+    function normalizePackagingRow(row, rowNumber) {
+      const shk = normalizeIdentifier(row[2]);
+      if (!shk) return null;
+      return {
+        row_number: rowNumber,
+        warehouse: normalizeText(row[0]),
+        block: normalizeText(row[1]),
+        shk,
+        price: normalizePrice(row[3]),
+        tare_id: normalizeIdentifier(row[4]),
+        supplier_id: normalizeIdentifier(row[5]),
+        receiver_id: normalizeIdentifier(row[6]),
+        last_status: normalizeText(row[7]),
+        last_movement: normalizeText(row[8]),
+      };
+    }
+
+    function normalizePmPrimaryRow(row, rowNumber) {
+      const transfer = normalizeIdentifier(row[1]);
+      const product = normalizeIdentifier(row[2]);
+      if (!transfer || !product) return null;
+      return {
+        row_number: rowNumber,
+        corrugated: normalizeIdentifier(row[0]),
+        transfer,
+        product,
+        product_status: normalizeText(row[3]),
+        name: normalizeText(row[4]),
+        brand: normalizeText(row[5]),
+        supplier: normalizeText(row[6]),
+        price: normalizePrice(row[7]),
+        mx: normalizeText(row[8]),
+        previous_mx: normalizeText(row[9]),
+        created_at: normalizeText(row[10]),
+        previous_mx_date: normalizeText(row[11]),
+        responsible: normalizeText(row[12]),
+        responsible_id: normalizeIdentifier(row[13]),
+        shipment_block: normalizeText(row[14]),
+      };
+    }
+
+    function normalizePmCarrierRow(row, rowNumber) {
+      const transfer = normalizeIdentifier(row[1]);
+      if (!transfer) return null;
+      return {
+        row_number: rowNumber,
+        transfer,
+        office: normalizeText(row[2]),
+        time: normalizeText(row[3]),
+        mx: normalizeText(row[4]),
+        employee: normalizeText(row[5]),
+        carrier: normalizeText(row[6]),
+      };
+    }
+
+    function normalizeAfterSaleMovementRow(row, rowNumber) {
+      const product = normalizeIdentifier(row[2]);
+      if (!product) return null;
+      return {
+        row_number: rowNumber,
+        office: normalizeText(row[0]),
+        block: normalizeText(row[1]),
+        product,
+        realized_at: normalizeText(row[3]),
+        status_id: normalizeIdentifier(row[4]),
+        status: normalizeText(row[5]),
+        status_at: normalizeText(row[6]),
+        mx: normalizeText(row[7]),
+        tare: normalizeIdentifier(row[8]),
+        employee_id: normalizeIdentifier(row[9]),
+        employee: normalizeText(row[10]),
+      };
+    }
+
+    function buildPackagingPreview(rows, module, uploadDateOverride) {
+	      const isRwp = module === 'rwp';
+	      const uploadDate = uploadDateOverride || activeUploadDate();
+	      const dueDate = dueDateForBusinessDate(module, uploadDate);
+      const statusRows = rows.filter((row) => isRwp ? isRwpStatus(row.last_status) : !isRwpStatus(row.last_status));
+      const filteredRows = uploadDate ? statusRows.filter((row) => parseDateTime(row.last_movement).date === uploadDate) : statusRows;
+      const byShk = new Map();
+      let duplicateShkCount = 0;
+      filteredRows.forEach((row) => {
+        const previous = byShk.get(row.shk);
+        if (previous) {
+          duplicateShkCount += 1;
+          if (parseDateTime(row.last_movement).ts >= parseDateTime(previous.last_movement).ts) byShk.set(row.shk, row);
+          return;
+        }
+        byShk.set(row.shk, row);
+      });
+
+      const uniqueRows = Array.from(byShk.values());
+      const byTare = new Map();
+      const singles = [];
+      uniqueRows.forEach((row) => {
+        if (isRwp || !isGroupableIdentifier(row.tare_id)) {
+          singles.push(row);
+          return;
+        }
+        const group = byTare.get(row.tare_id) || [];
+        group.push(row);
+        byTare.set(row.tare_id, group);
+      });
+
+      const tasks = [];
+      let groupedTareCount = 0;
+      let skippedCheap = 0;
+      byTare.forEach((group, tareId) => {
+        if (group.length > 1) {
+          groupedTareCount += 1;
+          const sorted = group.slice().sort((a, b) => a.shk.localeCompare(b.shk, 'ru'));
+          const newest = sorted.slice().sort((a, b) => parseDateTime(b.last_movement).ts - parseDateTime(a.last_movement).ts)[0] || sorted[0];
+          const price = sorted.reduce((acc, item) => acc + (Number(item.price) || 0), 0);
+          tasks.push({
+            title: 'Упаковка | Тара ' + tareId,
+            kind: 'Тара',
+	            due_date: dueDate,
+            price,
+            shk_ids: sorted.map((item) => item.shk),
+            status: newest.last_status || '-',
+          });
+          return;
+        }
+        singles.push(group[0]);
+      });
+
+      singles.forEach((row) => {
+        const price = Number(row.price) || 0;
+        if (!isRwp && price < 1000) {
+          skippedCheap += 1;
+          return;
+        }
+        tasks.push({
+          title: (isRwp ? 'RWP | ' : 'Упаковка | ') + row.shk,
+          kind: 'ШК',
+	          due_date: dueDate,
+          price: row.price,
+          shk_ids: [row.shk],
+          status: row.last_status || '-',
+        });
+      });
+
+      return {
+        foundShk: uniqueRows.length,
+        duplicateShkCount,
+        filteredOut: rows.length - filteredRows.length,
+        dateFilteredOut: statusRows.length - filteredRows.length,
+        tareCount: Array.from(byTare.keys()).filter(Boolean).length,
+        groupedTareCount,
+        taskCount: tasks.length,
+        skippedCheap,
+        tasks,
+      };
+    }
+
+    function routeNumberFromMx(mx) {
+      const matches = normalizeText(mx).match(/\d{1,3}/g);
+      if (!matches || !matches.length) return null;
+      const value = Number(matches[matches.length - 1]);
+      return Number.isFinite(value) ? value : null;
+    }
+
+    function isMailRoute(routeNumber) {
+      return routeNumber !== null && MAIL_ROUTES.has(routeNumber);
+    }
+
+	    function buildPmPreview(primaryRowsOverride, carrierRowsOverride, uploadDateOverride) {
+	      const sourceRows = primaryRowsOverride || state.pm.primaryRows;
+	      const carrierRows = carrierRowsOverride || state.pm.carrierRows;
+	      const uploadDate = uploadDateOverride || activeUploadDate();
+	      const dueDate = dueDateForBusinessDate('pm', uploadDate);
+	      const primaryRows = uploadDate ? sourceRows.filter((row) => parseDateTime(row.created_at).date === uploadDate) : sourceRows;
+	      const smsRows = primaryRows.filter((row) => isPmBufferStatus(row.product_status));
+	      const smsTransfers = Array.from(new Set(smsRows.map((row) => row.transfer).filter(isGroupableIdentifier))).sort((a, b) => a.localeCompare(b, 'ru'));
+	      const excludedTransfers = new Set(carrierRows
+	        .filter((row) => normalizeForMatch(row.mx).includes('отгрузка сторонним перевозчиком'))
+	        .map((row) => row.transfer));
+	      const carrierGateMxByTransfer = new Map();
+	      carrierRows.forEach((row) => {
+	        if (!row.transfer || excludedTransfers.has(row.transfer) || !isGateMx(row.mx)) return;
+	        if (!carrierGateMxByTransfer.has(row.transfer)) carrierGateMxByTransfer.set(row.transfer, row.mx);
+	      });
+	      const byTransfer = new Map();
+	      primaryRows.forEach((row) => {
+	        const group = byTransfer.get(row.transfer) || [];
+	        group.push(row);
+	        byTransfer.set(row.transfer, group);
+	      });
+
+	      const tasks = [];
+			      let cheapTransfers = 0;
+	      let excludedByCarrier = 0;
+	      smsTransfers.forEach((transfer) => {
+	        if (excludedTransfers.has(transfer)) {
+	          excludedByCarrier += 1;
+	          return;
+	        }
+	        const rows = byTransfer.get(transfer) || [];
+		        const priceSum = rows.reduce((acc, row) => acc + (Number(row.price) || 0), 0);
+	        if (priceSum < 2000) {
+	          cheapTransfers += 1;
+	          return;
+	        }
+	        const smsGroupRows = rows.filter((row) => isPmBufferStatus(row.product_status));
+	        const primaryRow = smsGroupRows[0] || rows[0];
+	        const primaryMx = (primaryRow && primaryRow.mx) || '';
+	        const routeMx = isMultiShipmentBufferMx(primaryMx) ? (carrierGateMxByTransfer.get(transfer) || primaryMx) : primaryMx;
+	        const routeNumber = routeNumberFromMx(routeMx);
+	        const mail = isMailRoute(routeNumber);
+	        const routeLabel = routeNumber === null ? 'Парковка без номера' : 'Парковка ' + routeNumber;
+	        tasks.push({
+	          title: 'Буфер ПМ | ' + transfer + ' - ' + routeLabel,
+	          task_type: mail ? 'Разбор ОПП // Почта' : 'Разбор ОПП // ПМ',
+	          due_date: dueDate,
+	          column: mail ? 'Почта' : 'ПМ',
+	          transfers: [transfer],
+	          product_ids: rows.map((row) => row.product),
+	          price_sum: Math.round(priceSum * 100) / 100,
+	        });
+	      });
+
+	      return {
+	        smsRows: smsRows.length,
+	        sourceRows: sourceRows.length,
+	        dateFilteredOut: sourceRows.length - primaryRows.length,
+	        smsTransfers: smsTransfers.length,
+	        excludedByCarrier,
+	        cheapTransfers,
+	        parkingCount: 0,
+	        tasks,
+	        copiedTransferIds: smsTransfers,
+	        pmTasks: tasks.filter((task) => task.task_type === 'Разбор ОПП // ПМ').length,
+        mailTasks: tasks.filter((task) => task.task_type === 'Разбор ОПП // Почта').length,
+      };
+    }
+
+    function sortRowsByCreatedAt(rows) {
+      return rows.slice().sort((a, b) => {
+        const aTs = parseDateTime(a.created_at).ts || 0;
+        const bTs = parseDateTime(b.created_at).ts || 0;
+        if (aTs !== bTs) return aTs - bTs;
+        return (a.row_number || 0) - (b.row_number || 0);
+      });
+    }
+
+    function firstMeaningfulRow(rows) {
+      const sorted = sortRowsByCreatedAt(rows || []);
+      return sorted.find((row) => parseDateTime(row.created_at).date) || sorted[0] || null;
+    }
+
+    function appendGroupedPreviewTasks(rows, options) {
+      const tasks = [];
+      const usedRows = new Set();
+      const singleRows = [];
+      let groupedTareCount = 0;
+      let groupedMxCount = 0;
+      let singleCount = 0;
+
+      const byTare = new Map();
+      rows.forEach((row) => {
+        if (!isGroupableIdentifier(row.transfer)) return;
+        const group = byTare.get(row.transfer) || [];
+        group.push(row);
+        byTare.set(row.transfer, group);
+      });
+
+	      byTare.forEach((group, transfer) => {
+	        if (group.length <= 1 && !options.forceTareGrouping) return;
+	        groupedTareCount += 1;
+        group.forEach((row) => usedRows.add(row));
+        const primaryRow = firstMeaningfulRow(group) || group[0];
+        tasks.push({
+	          title: options.titlePrefix + ' | Тара ' + transfer,
+	          task_type: options.taskType,
+	          column: options.column,
+	          due_date: options.dueDate || addDays(parseDateTime(primaryRow.created_at).date, options.deadlineDays),
+	          product_ids: group.map((row) => row.product),
+          price_sum: group.reduce((acc, row) => acc + (Number(row.price) || 0), 0),
+        });
+      });
+
+      const byMx = new Map();
+      rows.filter((row) => !usedRows.has(row)).forEach((row) => {
+        const mx = normalizeText(row.mx);
+	        if (options.allowMxGrouping === false || !isGroupableIdentifier(mx)) {
+	          singleRows.push(row);
+	          return;
+	        }
+        const group = byMx.get(mx) || [];
+        group.push(row);
+        byMx.set(mx, group);
+      });
+
+      byMx.forEach((group, mx) => {
+        if (group.length <= 10) {
+          appendItems(singleRows, group);
+          return;
+        }
+        const sorted = sortRowsByCreatedAt(group);
+        let cluster = [];
+        let startTs = 0;
+        const flush = () => {
+          if (!cluster.length) return;
+          if (cluster.length > 10) {
+            groupedMxCount += 1;
+            const primaryRow = firstMeaningfulRow(cluster) || cluster[0];
+            tasks.push({
+	              title: options.titlePrefix + ' | ' + mx,
+	              task_type: options.taskType,
+	              column: options.column,
+	              due_date: options.dueDate || addDays(parseDateTime(primaryRow.created_at).date, options.deadlineDays),
+	              product_ids: cluster.map((row) => row.product),
+              price_sum: cluster.reduce((acc, row) => acc + (Number(row.price) || 0), 0),
+            });
+          } else {
+            appendItems(singleRows, cluster);
+          }
+          cluster = [];
+          startTs = 0;
+        };
+        sorted.forEach((row) => {
+          const ts = parseDateTime(row.created_at).ts;
+          if (!cluster.length) {
+            cluster = [row];
+            startTs = ts;
+            return;
+          }
+          if (ts && startTs && ts - startTs <= 4 * 60 * 60 * 1000) cluster.push(row);
+          else {
+            flush();
+            cluster = [row];
+            startTs = ts;
+          }
+        });
+        flush();
+      });
+
+      singleRows.forEach((row) => {
+        singleCount += 1;
+        tasks.push({
+	          title: options.titlePrefix + ' | ' + row.product,
+	          task_type: options.taskType,
+	          column: options.column,
+	          due_date: options.dueDate || addDays(parseDateTime(row.created_at).date, options.deadlineDays),
+	          product_ids: [row.product],
+          price_sum: Number(row.price) || 0,
+        });
+      });
+
+      return { tasks, groupedTareCount, groupedMxCount, singleCount };
+    }
+
+    function buildPresortPreview(sourceRowsOverride, uploadDateOverride) {
+      const sourceRows = sourceRowsOverride || state.presort.primaryRows || [];
+      const uploadDate = uploadDateOverride || activeUploadDate();
+      const rows = uploadDate ? sourceRows.filter((row) => parseDateTime(row.created_at).date === uploadDate) : sourceRows;
+      const presortRows = rows.filter(isPresortStatus);
+      const labelingRows = rows.filter(isLabelingStatus);
+	      const tasks = [];
+	      const usedRows = new Set();
+	      let groupedTareCount = 0;
+	      let groupedMxCount = 0;
+	      let singlePresortCount = 0;
+
+	      const presortDueDate = dueDateForBusinessDate('presort', uploadDate);
+	      const labelingDueDate = dueDateForBusinessDate('labeling', uploadDate);
+      const byTare = new Map();
+      presortRows.forEach((row) => {
+        if (!isGroupableIdentifier(row.transfer)) return;
+        const group = byTare.get(row.transfer) || [];
+        group.push(row);
+        byTare.set(row.transfer, group);
+      });
+
+      byTare.forEach((group, transfer) => {
+        if (group.length <= 1) return;
+        groupedTareCount += 1;
+        group.forEach((row) => usedRows.add(row));
+        const primaryRow = firstMeaningfulRow(group) || group[0];
+        tasks.push({
+	          title: 'Предсортировка | Тара ' + transfer,
+	          task_type: 'Разбор ОПП // Предсортировка',
+	          column: 'Предсортировка',
+	          due_date: presortDueDate,
+          product_ids: group.map((row) => row.product),
+          price_sum: group.reduce((acc, row) => acc + (Number(row.price) || 0), 0),
+        });
+      });
+
+      const singleRows = presortRows.filter((row) => !usedRows.has(row));
+
+      singleRows.forEach((row) => {
+        singlePresortCount += 1;
+        tasks.push({
+	          title: 'Предсортировка | ' + row.product,
+	          task_type: 'Разбор ОПП // Предсортировка',
+	          column: 'Предсортировка',
+	          due_date: presortDueDate,
+          product_ids: [row.product],
+          price_sum: Number(row.price) || 0,
+        });
+      });
+
+      labelingRows.forEach((row) => {
+        tasks.push({
+	          title: 'Оклейка | ' + row.product,
+	          task_type: 'Разбор ОПП // Оклейка',
+	          column: 'Другие задачи',
+	          due_date: labelingDueDate,
+          product_ids: [row.product],
+          price_sum: Number(row.price) || 0,
+        });
+      });
+
+      return {
+        mode: 'presort',
+        presortRows: presortRows.length,
+        sourceRows: sourceRows.length,
+        dateFilteredOut: sourceRows.length - rows.length,
+        labelingRows: labelingRows.length,
+        groupedTareCount,
+        groupedMxCount,
+        singlePresortCount,
+        tasks,
+        presortTasks: tasks.filter((task) => task.task_type === 'Разбор ОПП // Предсортировка').length,
+        labelingTasks: tasks.filter((task) => task.task_type === 'Разбор ОПП // Оклейка').length,
+      };
+    }
+
+    function buildMarketplacePcPreview(sourceRowsOverride, uploadDateOverride) {
+      const sourceRows = sourceRowsOverride || state.marketplacePc.primaryRows || [];
+      const uploadDate = uploadDateOverride || activeUploadDate();
+      const marketplaceDate = state.manualUploadDate
+        ? uploadDate
+        : (plannedUploadDateForModule('marketplace') || uploadDate);
+      const pcDate = state.manualUploadDate
+        ? uploadDate
+        : (plannedUploadDateForModule('pc') || uploadDate);
+	      const marketplaceDateRows = marketplaceDate ? sourceRows.filter((row) => parseDateTime(row.created_at).date === marketplaceDate) : sourceRows;
+	      const pcDateRows = pcDate ? sourceRows.filter((row) => parseDateTime(row.created_at).date === pcDate) : sourceRows;
+	      const rows = Array.from(new Set(marketplaceDateRows.concat(pcDateRows)));
+	      const bufferRejectedRows = rows.filter((row) => (isMarketplaceStatus(row) || isPcStatus(row)) && mxHasBuffer(row));
+	      const marketplaceRows = marketplaceDateRows.filter((row) => isMarketplaceStatus(row) && !mxHasBuffer(row));
+	      const pcRows = pcDateRows.filter((row) => isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row));
+	      const marketplaceDueDate = dueDateForBusinessDate('marketplace', marketplaceDate);
+	      const pcDueDate = dueDateForBusinessDate('pc', pcDate);
+	      const marketplace = appendGroupedPreviewTasks(marketplaceRows, {
+	        titlePrefix: 'Маркетплейс',
+	        taskType: 'Разбор ОПП // Маркетплейс',
+	        column: 'Маркетплейс',
+	        dueDate: marketplaceDueDate,
+	        allowMxGrouping: false,
+	      });
+	      const pc = appendGroupedPreviewTasks(pcRows, {
+	        titlePrefix: 'ПЦ',
+	        taskType: 'Разбор ОПП // ПЦ',
+	        column: 'ПЦ',
+	        dueDate: pcDueDate,
+	        allowMxGrouping: false,
+	      });
+      const tasks = marketplace.tasks.concat(pc.tasks);
+      return {
+        mode: 'marketplace_pc',
+        sourceRows: sourceRows.length,
+        dateFilteredOut: sourceRows.length - rows.length,
+        marketplaceDate,
+        pcDate,
+        marketplaceRows: marketplaceRows.length,
+        pcRows: pcRows.length,
+        mxBufferSkipped: bufferRejectedRows.length,
+        groupedTareCount: marketplace.groupedTareCount + pc.groupedTareCount,
+        groupedMxCount: marketplace.groupedMxCount + pc.groupedMxCount,
+        singleCount: marketplace.singleCount + pc.singleCount,
+        tasks,
+        marketplaceTasks: marketplace.tasks.length,
+        pcTasks: pc.tasks.length,
+      };
+    }
+
+    function buildWmiMpPcPreview(sourceRowsOverride, uploadDateOverride) {
+      const sourceRows = sourceRowsOverride || state.wmiMpPc.primaryRows || [];
+	      const uploadDate = uploadDateOverride || activeUploadDate();
+	      const rows = uploadDate ? sourceRows.filter((row) => parseDateTime(row.created_at).date === uploadDate) : sourceRows;
+	      const wmiRows = rows.filter(isWmiMpPcStatus);
+	      const dueDate = dueDateForBusinessDate('wmi_mp_pc', uploadDate);
+	      const grouped = appendGroupedPreviewTasks(wmiRows, {
+	        titlePrefix: 'WMI (МП + ПЦ)',
+	        taskType: 'Разбор ОПП // WMI (МП + ПЦ)',
+	        column: 'WMI (МП + ПЦ)',
+	        dueDate,
+	      });
+      return {
+        mode: 'wmi_mp_pc',
+        sourceRows: sourceRows.length,
+        dateFilteredOut: sourceRows.length - rows.length,
+        wmiRows: wmiRows.length,
+        groupedTareCount: grouped.groupedTareCount,
+        groupedMxCount: grouped.groupedMxCount,
+        singleCount: grouped.singleCount,
+        tasks: grouped.tasks,
+        wmiTasks: grouped.tasks.length,
+      };
+    }
+
+	    function buildNoOrderPreview(sourceRowsOverride, uploadDateOverride) {
+	      const sourceRows = sourceRowsOverride || state.noOrder.primaryRows || [];
+	      const rows = uploadDateOverride ? sourceRows.filter((row) => parseDateTime(row.created_at).date === uploadDateOverride) : sourceRows;
+	      const noOrderDueDate = dueDateForBusinessDate('no_order', uploadDateOverride || activeUploadDate());
+	      const usdDueDate = dueDateForBusinessDate('usd', uploadDateOverride || activeUploadDate());
+	      const tmmDueDate = dueDateForBusinessDate('tmm', uploadDateOverride || activeUploadDate());
+	      const usdRows = rows.filter(isNoOrderUsdStatus);
+	      const tmmRows = rows.filter(isNoOrderTmmStatus);
+	      const noOrderRows = rows.filter((row) => !isNoOrderUsdStatus(row) && !isNoOrderTmmStatus(row));
+	      const grouped = appendGroupedPreviewTasks(noOrderRows, {
+	        titlePrefix: 'Без заказа',
+	        taskType: 'Разбор ОПП // Без заказа',
+	        column: 'Без заказа',
+	        dueDate: noOrderDueDate,
+	      });
+	      const usd = appendGroupedPreviewTasks(usdRows, {
+	        titlePrefix: 'USD',
+	        taskType: 'Разбор ОПП // USD',
+	        column: 'Другие задачи',
+	        dueDate: usdDueDate,
+		        allowMxGrouping: false,
+		        forceTareGrouping: true,
+	      });
+	      const tmm = appendGroupedPreviewTasks(tmmRows, {
+	        titlePrefix: 'TMM',
+	        taskType: 'Разбор ОПП // TMM',
+	        column: 'Другие задачи',
+	        dueDate: tmmDueDate,
+		        allowMxGrouping: false,
+		        forceTareGrouping: true,
+	      });
+	      const tasks = grouped.tasks.concat(usd.tasks, tmm.tasks);
+	      return {
+	        mode: 'no_order',
+	        sourceRows: sourceRows.length,
+	        rowsCount: rows.length,
+	        dateFilteredOut: sourceRows.length - rows.length,
+	        groupedTareCount: grouped.groupedTareCount + usd.groupedTareCount + tmm.groupedTareCount,
+	        groupedMxCount: grouped.groupedMxCount,
+	        singleCount: grouped.singleCount + usd.singleCount + tmm.singleCount,
+	        usdRows: usdRows.length,
+	        tmmRows: tmmRows.length,
+	        tasks,
+	        noOrderTasks: grouped.tasks.length,
+	        usdTasks: usd.tasks.length,
+	        tmmTasks: tmm.tasks.length,
+	      };
+	    }
+
+    function buildAfterSaleMovementPreview(sourceRowsOverride, uploadDateOverride) {
+	      const sourceRows = sourceRowsOverride || state.afterSaleMovement.primaryRows || [];
+	      const uploadDate = uploadDateOverride || activeUploadDate();
+	      const rows = uploadDate ? sourceRows.filter((row) => parseDateTime(row.status_at).date === uploadDate) : sourceRows;
+	      const dueDate = dueDateForBusinessDate('after_sale_movement', uploadDate);
+      const seenProducts = new Set();
+      const tasks = [];
+      let duplicateProductCount = 0;
+      let missingStatusDateCount = 0;
+
+      rows.forEach((row) => {
+        if (seenProducts.has(row.product)) {
+          duplicateProductCount += 1;
+          return;
+        }
+        seenProducts.add(row.product);
+        const statusDate = parseDateTime(row.status_at).date;
+        if (!statusDate) missingStatusDateCount += 1;
+        tasks.push({
+	          title: 'Движение после продажи | ' + row.product,
+	          task_type: 'Разбор ОПП // Движение после продажи',
+	          column: 'Движение после продажи',
+	          due_date: dueDate,
+          product_ids: [row.product],
+          price_sum: 0,
+        });
+      });
+
+      return {
+        mode: 'after_sale_movement',
+        sourceRows: sourceRows.length,
+        rowsCount: rows.length,
+        dateFilteredOut: sourceRows.length - rows.length,
+        duplicateProductCount,
+        missingStatusDateCount,
+	        deadlineDays: 1,
+        tasks,
+        afterSaleMovementTasks: tasks.length,
+      };
+    }
+
+    function renderPackagingPreview(preview) {
+      setText('packagingFoundShk', preview ? preview.foundShk : 0);
+      setText('packagingTareCount', preview ? preview.tareCount : 0);
+      setText('packagingGroupedTareCount', preview ? preview.groupedTareCount : 0);
+      setText('packagingTaskCount', preview ? preview.taskCount : 0);
+      setText('packagingSkippedCheap', preview ? preview.skippedCheap : 0);
+      renderPackagingSample(preview ? preview.tasks : []);
+    }
+
+    function renderPackagingSample(tasks) {
+      if (!tasks || !tasks.length) {
+        $('packagingSample').innerHTML = '<div class="empty">Нет задач к созданию.</div>';
+        return;
+      }
+      const rows = tasks.slice(0, 3).map((task) => ''
+        + '<tr>'
+        + '<td>' + escapeHtml(task.title) + '</td>'
+        + '<td>' + escapeHtml(task.kind) + '</td>'
+        + '<td>' + escapeHtml(task.shk_ids.join(', ')) + '</td>'
+        + '<td>' + escapeHtml(formatMoney(task.price)) + '</td>'
+        + '<td>' + escapeHtml(formatRuDate(task.due_date)) + '</td>'
+        + '</tr>'
+      ).join('');
+      $('packagingSample').innerHTML = ''
+        + '<table>'
+        + '<thead><tr><th>Название</th><th>Тип</th><th>ШК</th><th>Стоимость</th><th>Дата</th></tr></thead>'
+        + '<tbody>' + rows + '</tbody>'
+        + '</table>';
+    }
+
+    function renderPmPreview(preview) {
+      const isPresort = preview && preview.mode === 'presort';
+      const isMarketplacePc = preview && preview.mode === 'marketplace_pc';
+      const isWmiMpPc = preview && preview.mode === 'wmi_mp_pc';
+      const isNoOrder = preview && preview.mode === 'no_order';
+      const isAfterSaleMovement = preview && preview.mode === 'after_sale_movement';
+      setText('pmSmsRows', isAfterSaleMovement ? preview.rowsCount : isNoOrder ? preview.rowsCount : isWmiMpPc ? preview.wmiRows : isMarketplacePc ? preview.marketplaceRows : isPresort ? preview.presortRows : preview ? preview.smsRows : 0);
+      setText('pmSmsTransfers', isAfterSaleMovement ? preview.duplicateProductCount : isNoOrder ? (preview.groupedTareCount + preview.groupedMxCount) : isWmiMpPc ? (preview.groupedTareCount + preview.groupedMxCount) : isMarketplacePc ? preview.pcRows : isPresort ? (preview.groupedTareCount + preview.groupedMxCount) : preview ? preview.smsTransfers : 0);
+      setText('pmCarrierExcluded', isAfterSaleMovement ? preview.missingStatusDateCount : isNoOrder ? preview.groupedTareCount : isWmiMpPc ? preview.groupedTareCount : isMarketplacePc ? (preview.groupedTareCount + preview.groupedMxCount) : isPresort ? preview.labelingRows : preview ? preview.excludedByCarrier : 0);
+      setText('pmCheapTransfers', isAfterSaleMovement ? preview.afterSaleMovementTasks : isNoOrder ? preview.singleCount : isWmiMpPc ? preview.singleCount : isMarketplacePc ? preview.singleCount : isPresort ? preview.singlePresortCount : preview ? preview.cheapTransfers : 0);
+      setText('pmTasksTotal', preview ? preview.tasks.length : 0);
+      setText('pmPmTasks', isAfterSaleMovement ? preview.afterSaleMovementTasks : isNoOrder ? preview.noOrderTasks : isWmiMpPc ? preview.wmiTasks : isMarketplacePc ? preview.marketplaceTasks : isPresort ? preview.presortTasks : preview ? preview.pmTasks : 0);
+      setText('pmMailTasks', isAfterSaleMovement ? preview.deadlineDays : isNoOrder ? preview.groupedMxCount : isWmiMpPc ? preview.groupedMxCount : isMarketplacePc ? preview.pcTasks : isPresort ? preview.labelingTasks : preview ? preview.mailTasks : 0);
+      $('pmCopyButton').disabled = !preview || isPresort || isMarketplacePc || isWmiMpPc || isNoOrder || isAfterSaleMovement || !preview.copiedTransferIds.length;
+      $('pmSkipCarrierButton').disabled = isPresort || isMarketplacePc || isWmiMpPc || isNoOrder || isAfterSaleMovement || !state.pm.primaryRows.length || Boolean(state.pm.carrierRows.length) || state.pm.carrierSkipped;
+      renderPmSample(preview ? preview.tasks : []);
+    }
+
+    function renderPmSample(tasks) {
+      if (!tasks || !tasks.length) {
+        $('pmSample').innerHTML = '<div class="empty">Нет задач к созданию.</div>';
+        return;
+      }
+      const rows = tasks.slice(0, 3).map((task) => ''
+        + '<tr>'
+        + '<td>' + escapeHtml(task.title) + '</td>'
+        + '<td>' + escapeHtml(task.task_type) + '</td>'
+        + '<td>' + escapeHtml(task.column) + '</td>'
+        + '<td>' + escapeHtml(formatRuDate(task.due_date)) + '</td>'
+        + '<td>' + escapeHtml(formatMoney(task.price_sum)) + '</td>'
+        + '</tr>'
+      ).join('');
+      $('pmSample').innerHTML = ''
+        + '<table>'
+        + '<thead><tr><th>Название</th><th>Тип</th><th>Колонка</th><th>Дата</th><th>Стоимость</th></tr></thead>'
+        + '<tbody>' + rows + '</tbody>'
+        + '</table>';
+    }
+
+    function setProgress(module, activeStep) {
+      const steps = isPackagingLikeModule(module)
+        ? ['Read', 'Calc', 'Upload', 'Weeek', 'Log'].map((suffix) => 'packagingStep' + suffix)
+        : ['Read', 'Calc', 'Upload', 'Weeek', 'Log'].map((suffix) => 'pmStep' + suffix);
+      $(isPackagingLikeModule(module) ? 'packagingProgress' : 'pmProgress').classList.add('visible');
+      let activeFound = false;
+      steps.forEach((id) => {
+        const el = $(id);
+        const isActive = id.endsWith(activeStep);
+        if (isActive) activeFound = true;
+        el.classList.toggle('active', isActive);
+        el.classList.toggle('done', !isActive && !activeFound);
+      });
+    }
+
+    function finishProgress(module) {
+      const steps = isPackagingLikeModule(module)
+        ? ['Read', 'Calc', 'Upload', 'Weeek', 'Log'].map((suffix) => 'packagingStep' + suffix)
+        : ['Read', 'Calc', 'Upload', 'Weeek', 'Log'].map((suffix) => 'pmStep' + suffix);
+      steps.forEach((id) => {
+        $(id).classList.remove('active');
+        $(id).classList.add('done');
+      });
+    }
+
+    function createdCountFromResponse(response) {
+      const master = response && response.master ? response.master : {};
+      if (master.processed_count !== null && master.processed_count !== undefined) return Number(master.processed_count);
+      if (response && response.summary && response.summary.tasks_to_create_count !== null && response.summary.tasks_to_create_count !== undefined) return Number(response.summary.tasks_to_create_count);
+      if (response && response.upserted_count !== null && response.upserted_count !== undefined) return Number(response.upserted_count);
+      return 0;
+    }
+
+    function masterModuleLabel(module) {
+      if (module === 'main_source') return 'Основной файл';
+      if (module === 'packaging_source') return 'Утерянные и обездвиженные';
+      const def = uploadDefByModule(module);
+      return def && def.label ? def.label : moduleHumanLabel(module);
+    }
+
+    function masterRequiredFilesReady() {
+      return Boolean(
+        state.master.files.main
+        && state.master.files.noOrder
+        && state.master.files.carrier
+        && state.master.files.packaging
+        && state.master.files.afterSale
+      );
+    }
+
+    function updateMasterInstructions() {
+      const dates = masterDatePlan();
+      const mainStart = earliestIsoDate(MASTER_MAIN_MODULES.map((module) => dates[module]));
+      const packagingStart = earliestIsoDate(MASTER_PACKAGING_MODULES.map((module) => dates[module]));
+      const today = state.config.today || todayIsoInMoscow();
+      $('masterMainRangeText').textContent = 'Выгрузите файл с ' + formatRuDate(mainStart) + ' по ' + formatRuDate(today) + '.';
+      $('masterNoOrderRangeText').textContent = 'Выгрузка за ' + formatRuDate(dates.no_order) + '.';
+      $('masterPackagingRangeText').textContent = 'Выгрузите файл с ' + formatRuDate(packagingStart) + ' по ' + formatRuDate(today) + '.';
+      $('masterAfterSaleRangeText').textContent = 'Выгрузка за ' + formatRuDate(dates.after_sale_movement) + '.';
+      $('masterCarrierRangeText').textContent = 'Проверка передач ПМ/Почты за ' + formatRuDate(dates.pm) + '.';
+    }
+
+    function resetMasterUpload(keepFiles) {
+      stopMasterQueueWatcher();
+      state.master.preview = null;
+      state.master.dateRejects = [];
+      state.master.conditionRejects = [];
+      state.master.saving = false;
+      $('masterPreviewPanel').style.display = 'none';
+      $('masterSummary').innerHTML = '';
+      $('masterActions').classList.remove('visible');
+      $('saveMasterUploadButton').disabled = true;
+      $('masterDone').classList.remove('visible');
+      $('masterProgress').classList.remove('visible');
+      $('masterLiveProgress').classList.remove('visible');
+      hideAlert('masterAlert');
+      if (keepFiles) return;
+      state.master.files = { main: null, noOrder: null, carrier: null, packaging: null, afterSale: null };
+      state.master.fileNames = { main: '', noOrder: '', carrier: '', packaging: '', afterSale: '' };
+      state.master.rows = { main: [], noOrder: [], carrier: [], packaging: [], afterSale: [] };
+      $('masterMainFileInput').value = '';
+      $('masterNoOrderFileInput').value = '';
+      $('masterCarrierFileInput').value = '';
+      $('masterPackagingFileInput').value = '';
+      $('masterAfterSaleFileInput').value = '';
+      $('masterMainFileName').textContent = 'Файл пока не выбран';
+      $('masterNoOrderFileName').textContent = 'Файл пока не выбран';
+      $('masterCarrierFileName').textContent = 'Файл пока не выбран';
+      $('masterPackagingFileName').textContent = 'Файл пока не выбран';
+      $('masterAfterSaleFileName').textContent = 'Файл пока не выбран';
+      $('masterCopyTransfersButton').disabled = true;
+    }
+
+    function openMasterModal() {
+      state.manualUploadDate = '';
+      state.activeUploadDate = '';
+      updateMasterInstructions();
+      resetMasterUpload(false);
+      showAlert('masterAlert', 'Загрузите все пять файлов. После этого я автоматически посчитаю будущие задачи.', 'info');
+      $('masterModal').classList.add('visible');
+      $('masterModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closeMasterModal() {
+      stopMasterQueueWatcher();
+      $('masterModal').classList.remove('visible');
+      $('masterModal').setAttribute('aria-hidden', 'true');
+    }
+
+    function setMasterProgress(activeStep) {
+      const steps = ['Read', 'Calc', 'Preview', 'Save', 'Done'].map((suffix) => 'masterStep' + suffix);
+      $('masterProgress').classList.add('visible');
+      let activeFound = false;
+      steps.forEach((id) => {
+        const el = $(id);
+        const isActive = id.endsWith(activeStep);
+        if (isActive) activeFound = true;
+        el.classList.toggle('active', isActive);
+        el.classList.toggle('done', !isActive && !activeFound);
+      });
+    }
+
+    function finishMasterProgress() {
+      ['Read', 'Calc', 'Preview', 'Save', 'Done'].forEach((suffix) => {
+        const el = $('masterStep' + suffix);
+        el.classList.remove('active');
+        el.classList.add('done');
+      });
+    }
+
+    function updateMasterLiveProgress(progress) {
+      const data = progress || {};
+      const total = Math.max(Number(data.totalTasks || (state.master.preview && state.master.preview.totalTasks) || 0) || 0, 0);
+      const processed = Math.max(Number(data.processed || 0) || 0, 0);
+      const failed = Math.max(Number(data.failed || 0) || 0, 0);
+      const queued = Math.max(Number(data.queued || 0) || 0, 0);
+      const current = total ? Math.min(processed + failed, total) : processed + failed;
+      const queuePart = total ? Math.min(queued, total) * 0.25 : 0;
+      const processPart = total ? current * 0.75 : 0;
+      const percent = data.done ? 100 : total ? Math.min(Math.round(((queuePart + processPart) / total) * 100), 100) : 0;
+      const explicitPercent = Number(data.percent);
+      const displayPercent = data.done ? 100 : Number.isFinite(explicitPercent) ? Math.max(Math.min(Math.round(explicitPercent), 100), 0) : percent;
+      const moduleIndex = Math.max(Number(data.moduleIndex || 0) || 0, 0);
+      const moduleTotal = Math.max(Number(data.moduleTotal || 0) || 0, 0);
+      $('masterLiveProgress').classList.add('visible');
+      $('masterLiveTitle').textContent = data.title || 'Сохраняю выгрузки в очередь';
+      $('masterLiveSub').textContent = data.subtitle || 'Работаю с очередью.';
+      $('masterLivePercent').textContent = displayPercent + '%';
+      $('masterLiveBar').style.width = displayPercent + '%';
+      $('masterLiveQueued').textContent = total || 0;
+      $('masterLiveProcessed').textContent = queued + (total ? ' / ' + total : '');
+      $('masterLiveFailed').textContent = failed;
+      $('masterLiveModule').textContent = moduleTotal ? moduleIndex + '/' + moduleTotal : '0/0';
+    }
+
+    function stopMasterQueueWatcher() {
+      if (state.master.watchTimer) {
+        clearInterval(state.master.watchTimer);
+        state.master.watchTimer = null;
+      }
+    }
+
+    function masterSourceModulesFromItems(items) {
+      return Array.from(new Set((items || []).map((item) => masterSourceModuleForModule(item.module)).filter(Boolean)));
+    }
+
+    function queueSummaryTotals(response) {
+      const totals = response && response.totals ? response.totals : {};
+      return {
+        queued: Number(totals.queued || 0) || 0,
+        processing: Number(totals.processing || 0) || 0,
+        failed: Number(totals.failed || 0) || 0,
+        remaining: Number(totals.remaining || 0) || 0,
+      };
+    }
+
+    function startMasterQueueWatcher(totalQueued, sourceModules) {
+      stopMasterQueueWatcher();
+      state.master.watchTotal = Number(totalQueued || 0) || 0;
+      state.master.watchModules = sourceModules || [];
+      if (!state.master.watchTotal || !state.master.watchModules.length) return;
+
+      const poll = async () => {
+        try {
+          const response = await callAppsScriptWithRetry('getManualUploadQueueSummary', {
+            token: state.config.token || '',
+            source_modules: state.master.watchModules,
+            retry_attempts: 3,
+          }, {
+            attempts: 2,
+            baseDelayMs: 1200,
+          });
+          const totals = queueSummaryTotals(response);
+          const cappedRemaining = Math.min(totals.remaining, state.master.watchTotal);
+          const doneApprox = Math.max(state.master.watchTotal - cappedRemaining, 0);
+          const percent = state.master.watchTotal ? (doneApprox / state.master.watchTotal) * 100 : 100;
+          const subtitle = totals.remaining
+            ? 'Фон работает. Осталось в очереди: ' + totals.queued + ', сейчас обрабатывается: ' + totals.processing + ', ошибок: ' + totals.failed + '. Можно закрыть окно.'
+            : 'Фоновая очередь по этим выгрузкам пустая. Если cron включен, задачи уже созданы или обработаны.';
+          updateMasterLiveProgress({
+            title: totals.remaining ? 'Фоновое создание задач в WEEEK' : 'Фоновая очередь обработана',
+            subtitle,
+            moduleIndex: state.master.watchModules.length,
+            moduleTotal: state.master.watchModules.length,
+            queued: cappedRemaining,
+            processed: doneApprox,
+            failed: totals.failed,
+            totalTasks: state.master.watchTotal,
+            percent,
+            done: totals.remaining === 0,
+          });
+          if (totals.remaining === 0) stopMasterQueueWatcher();
+        } catch (error) {
+          updateMasterLiveProgress({
+            title: 'Очередь сохранена, наблюдение временно недоступно',
+            subtitle: 'Task-master продолжит работать в фоне. Не смог обновить счетчики: ' + (error && error.message ? error.message : String(error)),
+            moduleIndex: state.master.watchModules.length,
+            moduleTotal: state.master.watchModules.length,
+            queued: state.master.watchTotal,
+            processed: 0,
+            failed: 0,
+            totalTasks: state.master.watchTotal,
+          });
+        }
+      };
+
+      poll();
+      state.master.watchTimer = setInterval(poll, 8000);
+    }
+
+    async function updateMasterFile(slot, file) {
+      const ids = {
+        main: 'masterMainFileName',
+        noOrder: 'masterNoOrderFileName',
+        carrier: 'masterCarrierFileName',
+        packaging: 'masterPackagingFileName',
+        afterSale: 'masterAfterSaleFileName',
+      };
+      state.master.files[slot] = file || null;
+      state.master.fileNames[slot] = file ? file.name : '';
+      state.master.rows[slot] = [];
+      $(ids[slot]).textContent = file ? 'Файл выбран' : 'Файл пока не выбран';
+      resetMasterUpload(true);
+      let copiedTransferCount = 0;
+      if (slot === 'main') {
+        $('masterCopyTransfersButton').disabled = true;
+        if (file) copiedTransferCount = await prepareMasterTransfersForCopy(file);
+      }
+      if (!masterRequiredFilesReady()) {
+        showAlert(
+          'masterAlert',
+          copiedTransferCount
+            ? 'Основной файл добавлен. Можно скопировать передач для проверки отгрузки: ' + copiedTransferCount + '. Жду остальные файлы.'
+            : 'Файл добавлен. Жду остальные файлы для расчета мастер-выгрузки.',
+          'info'
+        );
+        return;
+      }
+      await buildMasterPreview();
+    }
+
+    async function prepareMasterTransfersForCopy(file) {
+      const rows = await readWorkbookRows(file, 'pmPrimary');
+      state.master.rows.main = rows;
+      const pmPreview = buildPmPreview(rows, [], plannedUploadDateForModule('pm'));
+      const count = pmPreview && pmPreview.copiedTransferIds ? pmPreview.copiedTransferIds.length : 0;
+      $('masterCopyTransfersButton').disabled = !count;
+      if (count) {
+        showAlert('masterAlert', 'Основной файл прочитан. Можно скопировать передач для проверки отгрузки: ' + count + '.', 'info');
+      }
+      return count;
+    }
+
+    async function copyMasterTransfers() {
+      if (!state.master.rows.main.length && state.master.files.main) {
+        await prepareMasterTransfersForCopy(state.master.files.main);
+      }
+      const pmPreview = buildPmPreview(state.master.rows.main || [], [], plannedUploadDateForModule('pm'));
+      const transferIds = pmPreview && pmPreview.copiedTransferIds ? pmPreview.copiedTransferIds : [];
+      if (!transferIds.length) {
+        showAlert('masterAlert', 'Не нашел передач ПМ/Почты за нужную дату в основном файле.');
+        return;
+      }
+      const text = transferIds.join('\n');
+      $('masterTransferFallback').style.display = 'none';
+      if (await copyTextToClipboard(text)) {
+        showAlert('masterAlert', 'Скопировано передач: ' + transferIds.length + '.', 'good');
+      } else {
+        $('masterTransferFallback').value = text;
+        $('masterTransferFallback').style.display = 'block';
+        $('masterTransferFallback').focus();
+        $('masterTransferFallback').select();
+        showAlert('masterAlert', 'Браузер заблокировал автокопирование. Я вывел список ниже и выделил его - нажмите Cmd+C.', 'info');
+      }
+    }
+
+    function masterRowId(row) {
+      return normalizeIdentifier(row && (row.product || row.shk || row.transfer || row.tare_id || row.tare || row.row_number));
+    }
+
+    function rejectUploadLabel(value) {
+      if (Array.isArray(value)) return value.map(rejectUploadLabel).filter(Boolean).join(', ');
+      const raw = normalizeText(value);
+      if (!raw) return '';
+      return MASTER_MODULES.includes(raw) || raw === 'main_source' || raw === 'packaging_source'
+        ? masterModuleLabel(raw)
+        : raw;
+    }
+
+    function pushReject(list, module, row, reason, dateValue, matchedUpload) {
+      list.push({
+        module: masterModuleLabel(module),
+        matched_upload: rejectUploadLabel(matchedUpload || module),
+        row_number: row && row.row_number ? row.row_number : '',
+        source_id: masterRowId(row),
+        date: dateValue || '',
+        reason,
+      });
+    }
+
+    function addDateRejects(rows, module, targetDate, dateGetter, predicate) {
+      const rejects = [];
+      rows.forEach((row) => {
+        if (!predicate(row)) return;
+        const dateValue = dateGetter(row);
+        if (!dateValue) {
+          pushReject(rejects, module, row, 'Не удалось прочитать дату', dateValue, module);
+          return;
+        }
+        if (dateValue !== targetDate) pushReject(rejects, module, row, 'Нужна дата ' + formatRuDate(targetDate) + ', в строке ' + formatRuDate(dateValue), dateValue, module);
+      });
+      return rejects;
+    }
+
+    function addConditionRejects(rows, module, targetDate, dateGetter, predicate, reason) {
+      const rejects = [];
+      rows.forEach((row) => {
+        const dateValue = dateGetter(row);
+        if (targetDate && dateValue !== targetDate) return;
+        if (!predicate(row)) pushReject(rejects, module, row, reason, dateValue, module);
+      });
+      return rejects;
+    }
+
+    function collectPmSpecialRejects(rows, carrierRows, targetDate) {
+      const rejects = [];
+      const primaryRows = rows.filter((row) => parseDateTime(row.created_at).date === targetDate);
+      const smsRows = primaryRows.filter((row) => isPmBufferStatus(row.product_status));
+      const excludedTransfers = new Set((carrierRows || [])
+        .filter((row) => normalizeForMatch(row.mx).includes('отгрузка сторонним перевозчиком'))
+        .map((row) => row.transfer));
+      const byTransfer = new Map();
+      primaryRows.forEach((row) => {
+        const group = byTransfer.get(row.transfer) || [];
+        group.push(row);
+        byTransfer.set(row.transfer, group);
+      });
+      Array.from(new Set(smsRows.map((row) => row.transfer).filter(isGroupableIdentifier))).forEach((transfer) => {
+        const group = byTransfer.get(transfer) || [];
+        if (excludedTransfers.has(transfer)) {
+          group.forEach((row) => pushReject(rejects, 'pm', row, 'Передача исключена: есть отгрузка сторонним перевозчиком', targetDate));
+          return;
+        }
+        const priceSum = group.reduce((acc, row) => acc + (Number(row.price) || 0), 0);
+        if (priceSum < 2000) {
+          group.forEach((row) => pushReject(rejects, 'pm', row, 'Суммарная стоимость передачи меньше 2000', targetDate));
+        }
+      });
+      return rejects;
+    }
+
+    function collectPackagingCheapRejects(rows, targetDate) {
+      const rejects = [];
+      const filteredRows = rows
+        .filter((row) => !isRwpStatus(row.last_status))
+        .filter((row) => parseDateTime(row.last_movement).date === targetDate);
+      const byShk = new Map();
+      filteredRows.forEach((row) => {
+        const previous = byShk.get(row.shk);
+        if (!previous || parseDateTime(row.last_movement).ts >= parseDateTime(previous.last_movement).ts) byShk.set(row.shk, row);
+      });
+      const uniqueRows = Array.from(byShk.values());
+      const byTare = new Map();
+      const singles = [];
+      uniqueRows.forEach((row) => {
+        if (!isGroupableIdentifier(row.tare_id)) {
+          singles.push(row);
+          return;
+        }
+        const group = byTare.get(row.tare_id) || [];
+        group.push(row);
+        byTare.set(row.tare_id, group);
+      });
+      byTare.forEach((group) => {
+        if (group.length <= 1) singles.push(group[0]);
+      });
+      singles.forEach((row) => {
+        if ((Number(row.price) || 0) < 1000) pushReject(rejects, 'packaging', row, 'Одиночный ШК дешевле 1000', targetDate);
+      });
+      return rejects;
+    }
+
+    function mainRowMatchesModule(row, module) {
+      if (module === 'pm') return isPmBufferStatus(row.product_status);
+      if (module === 'presort') return isPresortStatus(row) || isLabelingStatus(row);
+      if (module === 'marketplace_pc') return (isMarketplaceStatus(row) || isPcStatus(row)) && !mxHasBuffer(row);
+      if (module === 'wmi_mp_pc') return isWmiMpPcStatus(row);
+      return false;
+    }
+
+    function collectMainConditionRejects(rows, dates) {
+      const rejects = [];
+      const targetDates = new Set(MASTER_MAIN_MODULES.map((module) => dates[module]).filter(Boolean));
+      rows.forEach((row) => {
+        const rowDate = parseDateTime(row.created_at).date;
+        if (!targetDates.has(rowDate)) return;
+        const modulesForDate = MASTER_MAIN_MODULES.filter((module) => dates[module] === rowDate);
+        if (modulesForDate.some((module) => mainRowMatchesModule(row, module))) return;
+        pushReject(
+          rejects,
+          'main_source',
+          row,
+          'Дата подходит под плановые выгрузки, но статус/МХ не подошли ни под одну из них. Статус: ' + (row.product_status || '-') + '; МХ: ' + (row.mx || '-'),
+          rowDate,
+          modulesForDate.length ? modulesForDate : 'Не подходит ни в одну выгрузку'
+        );
+      });
+      return rejects;
+    }
+
+    function buildMasterRejects(rows, dates) {
+      const dateRejects = [];
+      const conditionRejects = [];
+      const mainRows = rows.main || [];
+      const noOrderRows = rows.noOrder || [];
+      const packagingRows = rows.packaging || [];
+      const afterRows = rows.afterSale || [];
+      const mainDate = (row) => parseDateTime(row.created_at).date;
+      const noOrderDate = (row) => parseDateTime(row.created_at).date;
+      const packagingDate = (row) => parseDateTime(row.last_movement).date;
+      const afterDate = (row) => parseDateTime(row.status_at).date;
+
+      appendItems(dateRejects, addDateRejects(mainRows, 'pm', dates.pm, mainDate, (row) => isPmBufferStatus(row.product_status)));
+      appendItems(dateRejects, addDateRejects(mainRows, 'presort', dates.presort, mainDate, (row) => isPresortStatus(row) || isLabelingStatus(row)));
+      appendItems(dateRejects, addDateRejects(mainRows, 'marketplace_pc', dates.marketplace_pc, mainDate, (row) => isMarketplaceStatus(row) || isPcStatus(row)));
+      appendItems(dateRejects, addDateRejects(mainRows, 'wmi_mp_pc', dates.wmi_mp_pc, mainDate, isWmiMpPcStatus));
+      appendItems(dateRejects, addDateRejects(noOrderRows, 'no_order', dates.no_order, noOrderDate, (row) => Boolean(row.product)));
+      appendItems(dateRejects, addDateRejects(packagingRows, 'packaging', dates.packaging, packagingDate, (row) => !isRwpStatus(row.last_status)));
+      appendItems(dateRejects, addDateRejects(packagingRows, 'rwp', dates.rwp, packagingDate, (row) => isRwpStatus(row.last_status)));
+      appendItems(dateRejects, addDateRejects(afterRows, 'after_sale_movement', dates.after_sale_movement, afterDate, (row) => Boolean(row.product)));
+
+      appendItems(conditionRejects, collectMainConditionRejects(mainRows, dates));
+      appendItems(conditionRejects, collectPmSpecialRejects(mainRows, rows.carrier || [], dates.pm));
+      appendItems(conditionRejects, collectPackagingCheapRejects(packagingRows, dates.packaging));
+
+      return { dateRejects, conditionRejects };
+    }
+
+    async function buildMasterPreview() {
+      const buildId = state.master.buildId + 1;
+      state.master.buildId = buildId;
+      resetMasterUpload(true);
+      hideAlert('masterAlert');
+      setMasterProgress('Read');
+      try {
+        const [mainRows, noOrderRows, carrierRows, packagingRows, afterRows] = await Promise.all([
+          state.master.rows.main.length ? Promise.resolve(state.master.rows.main) : readWorkbookRows(state.master.files.main, 'pmPrimary'),
+          readWorkbookRows(state.master.files.noOrder, 'pmPrimary'),
+          readWorkbookRows(state.master.files.carrier, 'pmCarrier'),
+          readWorkbookRows(state.master.files.packaging, 'packaging'),
+          readWorkbookRows(state.master.files.afterSale, 'afterSaleMovement'),
+        ]);
+        if (buildId !== state.master.buildId) return;
+        state.master.rows = { main: mainRows, noOrder: noOrderRows, carrier: carrierRows, packaging: packagingRows, afterSale: afterRows };
+        setMasterProgress('Calc');
+        const dates = masterDatePlan();
+        const modules = [
+          { module: 'pm', date: dates.pm, preview: buildPmPreview(mainRows, carrierRows, dates.pm) },
+          { module: 'presort', date: dates.presort, preview: buildPresortPreview(mainRows, dates.presort) },
+          { module: 'marketplace_pc', date: dates.marketplace_pc, preview: buildMarketplacePcPreview(mainRows, dates.marketplace_pc) },
+          { module: 'wmi_mp_pc', date: dates.wmi_mp_pc, preview: buildWmiMpPcPreview(mainRows, dates.wmi_mp_pc) },
+          { module: 'no_order', date: dates.no_order, preview: buildNoOrderPreview(noOrderRows, dates.no_order) },
+          { module: 'packaging', date: dates.packaging, preview: buildPackagingPreview(packagingRows, 'packaging', dates.packaging) },
+          { module: 'rwp', date: dates.rwp, preview: buildPackagingPreview(packagingRows, 'rwp', dates.rwp) },
+          { module: 'after_sale_movement', date: dates.after_sale_movement, preview: buildAfterSaleMovementPreview(afterRows, dates.after_sale_movement) },
+        ];
+        const rejects = buildMasterRejects(state.master.rows, dates);
+        state.master.dateRejects = rejects.dateRejects;
+        state.master.conditionRejects = rejects.conditionRejects;
+        state.master.preview = {
+          dates,
+          modules,
+          totalTasks: modules.reduce((acc, item) => acc + ((item.preview && item.preview.tasks && item.preview.tasks.length) || 0), 0),
+        };
+        setMasterProgress('Preview');
+        renderMasterPreview(state.master.preview);
+      } catch (error) {
+        showAlert('masterAlert', error && error.message ? error.message : String(error));
+      }
+    }
+
+    function renderMasterPreview(preview) {
+      const modules = preview && preview.modules ? preview.modules : [];
+      $('masterPreviewPanel').style.display = 'block';
+      $('masterSummary').innerHTML = modules.map((item) => {
+        const count = item.preview && item.preview.tasks ? item.preview.tasks.length : 0;
+        return ''
+          + '<article class="master-upload-card ' + (count > 0 ? 'good' : 'bad') + '">'
+          + '<div class="master-upload-name">' + escapeHtml(masterModuleLabel(item.module)) + '</div>'
+          + '<div class="master-upload-date">За ' + escapeHtml(formatRuDate(item.date)) + '</div>'
+          + '<div class="master-upload-count">' + count + '</div>'
+          + '<div class="mini">задач</div>'
+          + '</article>';
+      }).join('');
+      $('masterActions').classList.add('visible');
+      $('saveMasterUploadButton').disabled = !preview || !preview.totalTasks;
+      showAlert('masterAlert', preview && preview.totalTasks
+        ? 'Предпросмотр готов. Проверьте красные выгрузки и нажмите "Сохранить выгрузку".'
+        : 'По загруженным файлам задач к созданию не найдено.', preview && preview.totalTasks ? 'good' : 'info');
+    }
+
+    function renderRejectTable(id, items) {
+      if (!items || !items.length) {
+        $(id).innerHTML = '<div class="empty">Таких строк нет.</div>';
+        return;
+      }
+      const limit = 600;
+      const rows = items.slice(0, limit).map((item) => ''
+        + '<tr>'
+        + '<td>' + escapeHtml(item.module) + '</td>'
+        + '<td>' + escapeHtml(item.matched_upload || '-') + '</td>'
+        + '<td>' + escapeHtml(item.row_number) + '</td>'
+        + '<td>' + escapeHtml(item.source_id) + '</td>'
+        + '<td>' + escapeHtml(formatRuDate(item.date)) + '</td>'
+        + '<td>' + escapeHtml(item.reason) + '</td>'
+        + '</tr>'
+      ).join('');
+      const note = items.length > limit ? '<div class="empty">Показаны первые ' + limit + ' из ' + items.length + ' строк.</div>' : '';
+      $(id).innerHTML = note
+        + '<table>'
+        + '<thead><tr><th>Файл/проверка</th><th>Подходит в выгрузку</th><th>Строка</th><th>ID</th><th>Дата</th><th>Причина</th></tr></thead>'
+        + '<tbody>' + rows + '</tbody>'
+        + '</table>';
+    }
+
+    function openMasterRejectsModal() {
+      renderRejectTable('masterDateRejects', state.master.dateRejects || []);
+      renderRejectTable('masterConditionRejects', state.master.conditionRejects || []);
+      $('masterRejectsModal').classList.add('visible');
+      $('masterRejectsModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closeMasterRejectsModal() {
+      $('masterRejectsModal').classList.remove('visible');
+      $('masterRejectsModal').setAttribute('aria-hidden', 'true');
+    }
+
+    function masterFunctionForModule(module) {
+      if (module === 'packaging' || module === 'rwp') return 'runManualPackagingUpload';
+      if (module === 'presort') return 'runManualPresortUpload';
+      if (module === 'marketplace_pc') return 'runManualMarketplacePcUpload';
+      if (module === 'wmi_mp_pc') return 'runManualWmiMpPcUpload';
+      if (module === 'no_order') return 'runManualNoOrderUpload';
+      if (module === 'after_sale_movement') return 'runManualAfterSaleMovementUpload';
+      return 'runManualPmBufferUpload';
+    }
+
+    function masterSourceModuleForModule(module) {
+      if (module === 'packaging') return 'manual_packaging_opp';
+      if (module === 'rwp') return 'manual_rwp_opp';
+      if (module === 'presort') return 'manual_presort_opp';
+      if (module === 'marketplace_pc') return 'manual_marketplace_pc';
+      if (module === 'wmi_mp_pc') return 'manual_wmi_mp_pc';
+      if (module === 'no_order') return 'manual_no_order';
+      if (module === 'after_sale_movement') return 'manual_after_sale_movement';
+      return 'manual_pm_buffer';
+    }
+
+	    function rowsForDate(rows, dateGetter, targetDate) {
+	      return (rows || []).filter((row) => dateGetter(row) === targetDate);
+	    }
+
+	    function masterPrimaryRowsForModule(module, date) {
+	      if (module === 'after_sale_movement') {
+	        return rowsForDate(state.master.rows.afterSale, (row) => parseDateTime(row.status_at).date, date);
+	      }
+	      if (module === 'no_order') {
+	        return rowsForDate(state.master.rows.noOrder, (row) => parseDateTime(row.created_at).date, date);
+	      }
+	      const dateRows = rowsForDate(state.master.rows.main, (row) => parseDateTime(row.created_at).date, date);
+	      if (module === 'pm') {
+	        const transferIds = new Set(dateRows
+	          .filter((row) => isPmBufferStatus(row.product_status))
+	          .map((row) => row.transfer)
+	          .filter(isGroupableIdentifier));
+	        return dateRows.filter((row) => transferIds.has(row.transfer));
+	      }
+	      if (module === 'presort') return dateRows.filter((row) => isPresortStatus(row) || isLabelingStatus(row));
+	      if (module === 'marketplace_pc') return dateRows.filter((row) => (isMarketplaceStatus(row) || isPcStatus(row)) && !mxHasBuffer(row));
+	      if (module === 'wmi_mp_pc') return dateRows.filter(isWmiMpPcStatus);
+	      return dateRows;
+	    }
+
+	    function masterPackagingRowsForModule(module, date) {
+	      const dateRows = rowsForDate(state.master.rows.packaging, (row) => parseDateTime(row.last_movement).date, date);
+	      if (module === 'rwp') return dateRows.filter((row) => isRwpStatus(row.last_status));
+	      return dateRows.filter((row) => !isRwpStatus(row.last_status));
+	    }
+
+	    function masterCarrierRowsForPm(primaryRows) {
+	      const transferIds = new Set((primaryRows || []).map((row) => row.transfer).filter(isGroupableIdentifier));
+	      if (!transferIds.size) return [];
+	      return (state.master.rows.carrier || []).filter((row) => transferIds.has(row.transfer));
+	    }
+
+	    function compactPackagingUploadRows(rows) {
+	      return (rows || []).map((row) => ({
+	        row_number: row.row_number,
+	        warehouse: row.warehouse,
+	        block: row.block,
+	        shk: row.shk,
+	        price: row.price,
+	        tare_id: row.tare_id,
+	        supplier_id: row.supplier_id,
+	        receiver_id: row.receiver_id,
+	        last_status: row.last_status,
+	        last_movement: row.last_movement,
+	      }));
+	    }
+
+	    function compactPrimaryUploadRows(rows) {
+	      return (rows || []).map((row) => ({
+	        row_number: row.row_number,
+	        corrugated: row.corrugated,
+	        transfer: row.transfer,
+	        product: row.product,
+	        product_status: row.product_status,
+	        name: row.name,
+	        brand: row.brand,
+	        supplier: row.supplier,
+	        price: row.price,
+	        mx: row.mx,
+	        previous_mx: row.previous_mx,
+	        created_at: row.created_at,
+	        previous_mx_date: row.previous_mx_date,
+	        responsible: row.responsible,
+	        responsible_id: row.responsible_id,
+	        shipment_block: row.shipment_block,
+	      }));
+	    }
+
+	    function compactCarrierUploadRows(rows) {
+	      return (rows || []).map((row) => ({
+	        row_number: row.row_number,
+	        transfer: row.transfer,
+	        office: row.office,
+	        time: row.time,
+	        mx: row.mx,
+	        employee: row.employee,
+	        carrier: row.carrier,
+	      }));
+	    }
+
+	    function compactAfterSaleUploadRows(rows) {
+	      return (rows || []).map((row) => ({
+	        row_number: row.row_number,
+	        office: row.office,
+	        block: row.block,
+	        product: row.product,
+	        realized_at: row.realized_at,
+	        status_id: row.status_id,
+	        status: row.status,
+	        status_at: row.status_at,
+	        mx: row.mx,
+	        tare: row.tare,
+	        employee_id: row.employee_id,
+	        employee: row.employee,
+	      }));
+	    }
+
+	    function compactUploadRowsForModule(module, rows) {
+	      if (module === 'packaging' || module === 'rwp') return compactPackagingUploadRows(rows);
+	      if (module === 'after_sale_movement') return compactAfterSaleUploadRows(rows);
+	      return compactPrimaryUploadRows(rows);
+	    }
+
+	    function jsonByteLength(value) {
+	      try {
+	        return new Blob([JSON.stringify(value)]).size;
+	      } catch (error) {
+	        return 0;
+	      }
+	    }
+
+	    function formatBytes(bytes) {
+	      const value = Number(bytes || 0) || 0;
+	      if (value >= 1024 * 1024) return (value / 1024 / 1024).toFixed(2) + ' МБ';
+	      if (value >= 1024) return Math.round(value / 1024) + ' КБ';
+	      return value + ' Б';
+	    }
+
+	    function formatDuration(ms) {
+	      const value = Number(ms || 0) || 0;
+	      if (value >= 1000) return (value / 1000).toFixed(1) + ' сек';
+	      return Math.round(value) + ' мс';
+	    }
+
+	    function payloadDebugStats(payload) {
+	      return {
+	        rows: Array.isArray(payload.rows) ? payload.rows.length : 0,
+	        primaryRows: Array.isArray(payload.primary_rows) ? payload.primary_rows.length : 0,
+	        carrierRows: Array.isArray(payload.carrier_rows) ? payload.carrier_rows.length : 0,
+	        bytes: jsonByteLength(payload),
+	      };
+	    }
+
+	    function uploadDebugSummary(response) {
+	      const parts = [];
+	      const apps = response && response.apps_script_trace;
+	      if (apps) {
+	        parts.push('Apps Script: ' + formatDuration(apps.duration_ms) + ', запрос ' + formatBytes(apps.request_bytes) + ', ответ ' + formatBytes(apps.response_bytes));
+	      }
+	      const trace = response && Array.isArray(response.debug_trace) ? response.debug_trace : [];
+	      if (trace.length) {
+	        const last = trace[trace.length - 1];
+	        const built = trace.find((item) => item.stage === 'tasks_built');
+	        const upsert = trace.find((item) => item.stage === 'upsert_done');
+	        const uploadRun = trace.find((item) => item.stage === 'upload_run_done');
+	        if (built) parts.push('сбор задач: ' + formatDuration(built.build_elapsed_ms));
+	        if (upsert) parts.push('upsert: ' + formatDuration(upsert.upsert_elapsed_ms));
+	        if (uploadRun) parts.push('журнал: ' + formatDuration(uploadRun.upload_run_elapsed_ms));
+	        parts.push('последний этап: ' + (last.stage || '-') + ' на ' + formatDuration(last.elapsed_ms));
+	      }
+	      return parts.join(' | ');
+	    }
+
+	    function masterPayloadForModule(module, date) {
+		      const base = {
+		        token: state.config.token || '',
+		        wh_id: state.config.wh_id || '',
+		        upload_date: state.config.today || '',
+		        business_date: date || '',
+	        effective_date: date || '',
+	        debug_profile: true,
+	        process_queue: false,
+	        process_all: false,
+        process_limit: MASTER_QUEUE_BATCH_SIZE,
+        max_batches: 1,
+        retry_attempts: 4,
+        ...wmsPayloadFlags(),
+      };
+	      if (module === 'packaging' || module === 'rwp') {
+	        return Object.assign({}, base, {
+	          rows: compactUploadRowsForModule(module, masterPackagingRowsForModule(module, date)),
+	          file_name: state.master.fileNames.packaging,
+	          upload_type: module === 'rwp' ? 'rwp' : 'packaging',
+	          source_module: module === 'rwp' ? 'manual_rwp_opp' : 'manual_packaging_opp',
+	        });
+	      }
+	      const primaryRows = masterPrimaryRowsForModule(module, date);
+	      const modulePayload = Object.assign({}, base, {
+	        primary_rows: compactUploadRowsForModule(module, primaryRows),
+	        carrier_rows: module === 'pm' ? compactCarrierUploadRows(masterCarrierRowsForPm(primaryRows)) : [],
+	        primary_file_name: module === 'after_sale_movement' ? state.master.fileNames.afterSale : module === 'no_order' ? state.master.fileNames.noOrder : state.master.fileNames.main,
+	        carrier_file_name: module === 'pm' ? state.master.fileNames.carrier : '',
+	      });
+	      if (module === 'marketplace_pc') {
+	        modulePayload.marketplace_business_date = plannedUploadDateForModule('marketplace') || date || '';
+	        modulePayload.pc_business_date = plannedUploadDateForModule('pc') || date || '';
+	      }
+	      return modulePayload;
+    }
+
+    async function saveMasterUpload() {
+      if (state.master.saving) return;
+      const preview = state.master.preview;
+      if (!preview || !preview.totalTasks) {
+        showAlert('masterAlert', 'Нет задач к сохранению.');
+        return;
+      }
+      const modulesToSave = preview.modules.filter((item) => item.preview && item.preview.tasks && item.preview.tasks.length);
+      const moduleTotal = modulesToSave.length;
+      const watcherModules = masterSourceModulesFromItems(modulesToSave);
+      state.master.saving = true;
+      $('saveMasterUploadButton').disabled = true;
+      hideAlert('masterAlert');
+      setMasterProgress('Save');
+      updateMasterLiveProgress({
+        title: 'Старт мастер-выгрузки',
+        subtitle: 'Будет обработано выгрузок: ' + moduleTotal + '. План задач: ' + preview.totalTasks + '.',
+        moduleIndex: 0,
+        moduleTotal,
+        queued: 0,
+        processed: 0,
+        failed: 0,
+        totalTasks: preview.totalTasks,
+      });
+      const results = [];
+      let queuedTotal = 0;
+      let failedTotal = 0;
+      try {
+        for (let moduleIndex = 0; moduleIndex < modulesToSave.length; moduleIndex += 1) {
+          const item = modulesToSave[moduleIndex];
+          const planned = item.preview && item.preview.tasks ? item.preview.tasks.length : 0;
+          const moduleLabel = masterModuleLabel(item.module);
+          updateMasterLiveProgress({
+            title: 'Очередь: ' + moduleLabel,
+            subtitle: 'Модуль ' + (moduleIndex + 1) + '/' + moduleTotal + '. Сохраняю строки в Supabase. План: ' + planned + ' задач.',
+            moduleIndex: moduleIndex + 1,
+            moduleTotal,
+            queued: queuedTotal,
+            processed: 0,
+            failed: failedTotal,
+            totalTasks: preview.totalTasks,
+	          });
+	          const payload = masterPayloadForModule(item.module, item.date);
+	          const payloadStats = payloadDebugStats(payload);
+	          const rowsLabel = payloadStats.primaryRows || payloadStats.rows;
+	          showAlert('masterAlert', 'Сохраняю в очередь: ' + moduleLabel + '.\nМодуль ' + (moduleIndex + 1) + '/' + moduleTotal + '. План: ' + planned + ' задач. Отправляю строк: ' + rowsLabel + ', payload: ' + formatBytes(payloadStats.bytes) + '.', 'info');
+	          const waitStartedAt = Date.now();
+	          let waitTimer = null;
+	          const renderWaiting = () => {
+	            const waitedMs = Date.now() - waitStartedAt;
+	            updateMasterLiveProgress({
+	              title: 'Очередь: ' + moduleLabel,
+	              subtitle: 'Жду ответ сервера: ' + formatDuration(waitedMs) + '. Строки: ' + rowsLabel + ', payload: ' + formatBytes(payloadStats.bytes) + ', план: ' + planned + ' задач.',
+	              moduleIndex: moduleIndex + 1,
+	              moduleTotal,
+	              queued: queuedTotal,
+	              processed: 0,
+	              failed: failedTotal,
+	              totalTasks: preview.totalTasks,
+	            });
+	          };
+	          renderWaiting();
+	          waitTimer = setInterval(renderWaiting, 10000);
+	          let response;
+	          try {
+	            response = await callAppsScriptWithRetry(masterFunctionForModule(item.module), payload, {
+	              attempts: 3,
+	              baseDelayMs: 1200,
+	              alertId: 'masterAlert',
+	            });
+	          } finally {
+	            if (waitTimer) clearInterval(waitTimer);
+	          }
+	          const queued = createdCountFromResponse(response);
+	          queuedTotal += queued;
+	          mergeCalendarRun(response && response.upload_run);
+	          state.runsByType[uploadTypeKeyForModule(item.module)] = response && response.upload_run ? response.upload_run : { effective_date: item.date };
+	          const debugLine = uploadDebugSummary(response);
+	          updateMasterLiveProgress({
+	            title: 'Очередь сохранена: ' + moduleLabel,
+	            subtitle: 'В очередь добавлено/подтверждено: ' + queued + '. ' + (debugLine || 'Task-master создаст задачи в WEEEK в фоне.'),
+	            moduleIndex: moduleIndex + 1,
+	            moduleTotal,
+	            queued: queuedTotal,
+            processed: 0,
+	            failed: failedTotal,
+	            totalTasks: preview.totalTasks,
+	          });
+	          if (debugLine) {
+	            showAlert('masterAlert', moduleLabel + ': сохранено в очередь ' + queued + '.\n' + debugLine, 'info');
+	          }
+	          results.push(masterModuleLabel(item.module) + ': очередь ' + queued);
+        }
+        updateMasterLiveProgress({
+          title: 'Мастер-выгрузка сохранена',
+          subtitle: state.config.wmsOnly
+            ? 'Supabase: ' + queuedTotal + '. WEEEK не затронут. Можно закрыть окно.'
+            : 'Очередь: ' + queuedTotal + '. Создание задач в WEEEK продолжится в фоне через task-master. Можно закрыть окно.',
+          moduleIndex: moduleTotal,
+          moduleTotal,
+          queued: queuedTotal,
+          processed: 0,
+          failed: failedTotal,
+          totalTasks: preview.totalTasks,
+          done: true,
+        });
+        finishMasterProgress();
+        updateChoiceStatuses();
+        $('masterPreviewPanel').style.display = 'none';
+        $('masterDone').classList.add('visible');
+        $('masterDoneText').textContent = state.config.wmsOnly
+          ? 'Сохранено в Supabase: ' + queuedTotal + '. WEEEK не затронут, окно можно закрыть. ' + results.join('; ') + '.'
+          : 'Сохранено в очередь: ' + queuedTotal + '. Задачи создаст task-master в фоне, окно можно закрыть. ' + results.join('; ') + '.';
+        startMasterQueueWatcher(queuedTotal, watcherModules);
+      } catch (error) {
+        state.master.saving = false;
+        $('saveMasterUploadButton').disabled = false;
+        showAlert('masterAlert', error && error.message ? error.message : String(error));
+      }
+    }
+
+    function showDone(module, response, already) {
+      let createdCount = 0;
+      const displayDate = state.activeUploadDate
+        || normalizeText(response && (response.effective_date || response.business_date || response.upload_date))
+        || uploadDateForModule(module);
+      if (already) {
+        if (response && response.tasks_count !== null && response.tasks_count !== undefined) createdCount = Number(response.tasks_count);
+        else if (response && response.response && response.response.summary && response.response.summary.tasks_to_create_count !== null && response.response.summary.tasks_to_create_count !== undefined) createdCount = Number(response.response.summary.tasks_to_create_count);
+        else if (response && response.upserted_count !== null && response.upserted_count !== undefined) createdCount = Number(response.upserted_count);
+      } else {
+        createdCount = createdCountFromResponse(response);
+      }
+      if (isPackagingLikeModule(module)) {
+        $('packagingChecking').classList.remove('visible');
+        $('packagingDone').classList.add('visible');
+        $('packagingWork').style.display = 'none';
+        $('packagingDone').querySelector('.done-title').textContent = already ? 'Выгрузка уже есть' : 'Выгрузка завершена';
+        $('packagingDoneText').textContent = already
+          ? 'Выгрузка ' + moduleHumanLabel(module) + ' за ' + formatRuDate(displayDate) + ' уже есть. Создано задач: ' + createdCount + '.'
+          : state.config.wmsOnly
+            ? 'Выгрузка сохранена в Supabase. WEEEK не затронут. Записей: ' + createdCount + '.'
+            : 'Выгрузка сохранена в очередь. Задачи создаст task-master в фоне. В очереди: ' + createdCount + '.';
+        $('packagingStatus').textContent = 'Готово';
+        $('packagingStatus').classList.add('good');
+        return;
+      }
+      $('pmChecking').classList.remove('visible');
+      $('pmDone').classList.add('visible');
+      $('pmWork').style.display = 'none';
+      $('pmDone').querySelector('.done-title').textContent = already ? 'Выгрузка уже есть' : 'Выгрузка завершена';
+      $('pmDoneText').textContent = already
+        ? 'Выгрузка ' + moduleHumanLabel(module) + ' за ' + formatRuDate(displayDate) + ' уже есть. Создано задач: ' + createdCount + '.'
+        : state.config.wmsOnly
+          ? 'Выгрузка сохранена в Supabase. WEEEK не затронут. Записей: ' + createdCount + '.'
+          : 'Выгрузка сохранена в очередь. Задачи создаст task-master в фоне. В очереди: ' + createdCount + '.';
+      $('pmStatus').textContent = 'Готово';
+      $('pmStatus').classList.add('good');
+    }
+
+    function resetDone(module) {
+      if (isPackagingLikeModule(module)) {
+        const bucket = packagingLikeState(module);
+        bucket.forceRepeat = true;
+        bucket.completed = false;
+        bucket.rows = [];
+        bucket.preview = null;
+        $('packagingChecking').classList.remove('visible');
+        $('packagingDone').classList.remove('visible');
+        $('packagingWork').style.display = 'block';
+        $('packagingStatus').textContent = 'Повторная выгрузка';
+        $('packagingStatus').classList.remove('good');
+        $('packagingUploadLabel').style.pointerEvents = '';
+        $('packagingUploadLabel').style.opacity = '';
+        $('packagingFileInput').value = '';
+        $('packagingFileName').textContent = 'Файл пока не выбран';
+        $('packagingProgress').classList.remove('visible');
+        renderPackagingPreview(null);
+        return;
+      }
+      const bucket = pmLikeState(module);
+      bucket.forceRepeat = true;
+      bucket.completed = false;
+      bucket.primaryRows = [];
+      bucket.preview = null;
+      if (module === 'pm') {
+        state.pm.carrierRows = [];
+        state.pm.carrierSkipped = false;
+      }
+      $('pmChecking').classList.remove('visible');
+      $('pmDone').classList.remove('visible');
+      $('pmWork').style.display = 'block';
+      $('pmStatus').textContent = 'Повторная выгрузка';
+      $('pmStatus').classList.remove('good');
+      $('pmPrimaryInput').value = '';
+      $('pmCarrierInput').value = '';
+      $('pmPrimaryFileName').textContent = 'Основной файл пока не выбран';
+      $('pmCarrierFileName').textContent = 'Второй файл пока не выбран';
+      $('pmCarrierFileName').style.display = 'none';
+      $('pmCarrierLabel').style.display = 'none';
+      $('pmProgress').classList.remove('visible');
+      renderPmPreview(null);
+    }
+
+    async function handlePackagingFile(file) {
+      hideAlert('packagingAlert');
+      if (!file) return;
+      const module = state.mode === 'rwp' ? 'rwp' : 'packaging';
+      const bucket = packagingLikeState(module);
+      bucket.fileName = file.name;
+      $('packagingFileName').textContent = 'Файл выбран';
+      $('packagingUploadLabel').style.pointerEvents = 'none';
+      $('packagingUploadLabel').style.opacity = '0.55';
+
+      try {
+        setProgress(module, 'Read');
+        const rows = await readWorkbookRows(file, 'packaging');
+        bucket.rows = rows;
+
+        setProgress(module, 'Calc');
+        const preview = buildPackagingPreview(rows, module);
+        bucket.preview = preview;
+        renderPackagingPreview(preview);
+        if (!preview.taskCount) throw new Error('В файле нет задач к созданию по текущим правилам.');
+
+	        setProgress(module, 'Upload');
+	        const uploadDate = activeUploadDate();
+		        const response = await callAppsScript('runManualPackagingUpload', {
+		          token: state.config.token || '',
+		          wh_id: state.config.wh_id || '',
+		          rows: compactUploadRowsForModule(module, rows),
+	          file_name: bucket.fileName,
+	          upload_type: module === 'rwp' ? 'rwp' : 'packaging',
+	          source_module: module === 'rwp' ? 'manual_rwp_opp' : 'manual_packaging_opp',
+	          upload_date: state.config.today || '',
+	          business_date: uploadDate || '',
+	          effective_date: uploadDate || '',
+	          debug_profile: true,
+	          process_queue: false,
+	          process_all: false,
+	          ...wmsPayloadFlags(),
+	          ...(module === 'marketplace_pc' ? {
+	            marketplace_business_date: uploadDateForModule('marketplace') || uploadDate || '',
+	            pc_business_date: uploadDateForModule('pc') || uploadDate || '',
+	          } : {}),
+        });
+
+        setProgress(module, 'Log');
+        finishProgress(module);
+        bucket.completed = true;
+        mergeCalendarRun(response && response.upload_run);
+        state.runsByType[module === 'rwp' ? 'rwp' : 'packaging'] = response && response.upload_run ? response.upload_run : { effective_date: uploadDate };
+        updateChoiceStatuses();
+        showDone(module, response, false);
+      } catch (error) {
+        showAlert('packagingAlert', error && error.message ? error.message : String(error));
+        $('packagingUploadLabel').style.pointerEvents = '';
+        $('packagingUploadLabel').style.opacity = '';
+      }
+    }
+
+    async function handlePmPrimaryFile(file) {
+      hideAlert('pmAlert');
+      if (!file) return;
+      const module = state.mode === 'presort'
+        ? 'presort'
+        : state.mode === 'marketplace_pc'
+          ? 'marketplace_pc'
+          : state.mode === 'wmi_mp_pc'
+            ? 'wmi_mp_pc'
+            : state.mode === 'no_order'
+              ? 'no_order'
+              : state.mode === 'after_sale_movement'
+                ? 'after_sale_movement'
+                : 'pm';
+      const bucket = pmLikeState(module);
+      bucket.primaryFileName = file.name;
+      $('pmPrimaryFileName').textContent = 'Основной файл выбран';
+      bucket.primaryRows = await readWorkbookRows(file, module === 'after_sale_movement' ? 'afterSaleMovement' : 'pmPrimary');
+      if (module === 'presort') {
+        bucket.preview = buildPresortPreview();
+        renderPmPreview(bucket.preview);
+        showAlert('pmAlert', 'Файл прочитан. Строк: ' + bucket.primaryRows.length + '.', 'info');
+        await runPmAutoUpload();
+        return;
+      }
+      if (module === 'marketplace_pc') {
+        bucket.preview = buildMarketplacePcPreview();
+        renderPmPreview(bucket.preview);
+        showAlert('pmAlert', 'Файл прочитан. Строк: ' + bucket.primaryRows.length + '.', 'info');
+        await runPmAutoUpload();
+        return;
+      }
+      if (module === 'wmi_mp_pc') {
+        bucket.preview = buildWmiMpPcPreview();
+        renderPmPreview(bucket.preview);
+        showAlert('pmAlert', 'Файл прочитан. Строк: ' + bucket.primaryRows.length + '.', 'info');
+        await runPmAutoUpload();
+        return;
+      }
+      if (module === 'no_order') {
+        bucket.preview = buildNoOrderPreview();
+        renderPmPreview(bucket.preview);
+        showAlert('pmAlert', 'Файл прочитан. Строк: ' + bucket.primaryRows.length + '.', 'info');
+        await runPmAutoUpload();
+        return;
+      }
+      if (module === 'after_sale_movement') {
+        bucket.preview = buildAfterSaleMovementPreview();
+        renderPmPreview(bucket.preview);
+        showAlert('pmAlert', 'Файл прочитан. Строк: ' + bucket.primaryRows.length + '.', 'info');
+        await runPmAutoUpload();
+        return;
+      }
+      state.pm.carrierRows = [];
+      state.pm.carrierSkipped = false;
+      state.pm.preview = buildPmPreview();
+      renderPmPreview(state.pm.preview);
+      showAlert('pmAlert', 'Основной файл прочитан. Строк: ' + state.pm.primaryRows.length + '.', 'info');
+    }
+
+    function revealPmCarrier() {
+      $('pmCarrierLabel').style.display = 'inline-block';
+      $('pmCarrierFileName').style.display = 'inline-block';
+    }
+
+    async function copyPmTransfers() {
+      if (!state.pm.preview || !state.pm.preview.copiedTransferIds.length) return;
+      const text = state.pm.preview.copiedTransferIds.join('\n');
+      if (await copyTextToClipboard(text)) {
+        showAlert('pmAlert', 'Скопировано передач: ' + state.pm.preview.copiedTransferIds.length + '.', 'good');
+      } else {
+        showAlert('pmAlert', 'Браузер заблокировал автокопирование. Попробуйте открыть фрейм в отдельной вкладке или используйте мастер-выгрузку: там появится поле для ручного копирования.', 'info');
+      }
+      revealPmCarrier();
+    }
+
+    async function handlePmCarrierFile(file) {
+      hideAlert('pmAlert');
+      if (!file) return;
+      state.pm.carrierFileName = file.name;
+      $('pmCarrierFileName').textContent = 'Второй файл выбран';
+      state.pm.carrierRows = await readWorkbookRows(file, 'pmCarrier');
+      state.pm.carrierSkipped = false;
+      state.pm.preview = buildPmPreview();
+      renderPmPreview(state.pm.preview);
+      await runPmAutoUpload();
+    }
+
+    async function skipPmCarrier() {
+      state.pm.carrierRows = [];
+      state.pm.carrierSkipped = true;
+      $('pmCarrierFileName').style.display = 'inline-block';
+      $('pmCarrierFileName').textContent = 'Второй файл пропущен';
+      state.pm.preview = buildPmPreview();
+      renderPmPreview(state.pm.preview);
+      await runPmAutoUpload();
+    }
+
+    async function runPmAutoUpload() {
+      hideAlert('pmAlert');
+      const module = state.mode === 'presort'
+        ? 'presort'
+        : state.mode === 'marketplace_pc'
+          ? 'marketplace_pc'
+          : state.mode === 'wmi_mp_pc'
+            ? 'wmi_mp_pc'
+            : state.mode === 'no_order'
+              ? 'no_order'
+              : state.mode === 'after_sale_movement'
+                ? 'after_sale_movement'
+                : 'pm';
+      const bucket = pmLikeState(module);
+      if (!bucket.primaryRows.length) {
+        showAlert('pmAlert', 'Сначала загрузите основную таблицу.');
+        return;
+      }
+      if (!bucket.preview || !bucket.preview.tasks.length) {
+        showAlert('pmAlert', 'Нет задач к созданию по текущим правилам.');
+        return;
+      }
+      try {
+        setProgress('pm', 'Read');
+        setProgress('pm', 'Calc');
+        setProgress('pm', 'Upload');
+        const uploadDate = activeUploadDate();
+        const functionName = module === 'presort'
+          ? 'runManualPresortUpload'
+          : module === 'marketplace_pc'
+            ? 'runManualMarketplacePcUpload'
+            : module === 'wmi_mp_pc'
+              ? 'runManualWmiMpPcUpload'
+            : module === 'no_order'
+              ? 'runManualNoOrderUpload'
+              : module === 'after_sale_movement'
+                ? 'runManualAfterSaleMovementUpload'
+                : 'runManualPmBufferUpload';
+		        const response = await callAppsScript(functionName, {
+		          token: state.config.token || '',
+		          wh_id: state.config.wh_id || '',
+		          primary_rows: compactUploadRowsForModule(module, bucket.primaryRows),
+	          carrier_rows: module === 'pm' ? compactCarrierUploadRows(state.pm.carrierRows) : [],
+	          primary_file_name: bucket.primaryFileName,
+	          carrier_file_name: module === 'pm' ? state.pm.carrierFileName : '',
+	          upload_date: state.config.today || '',
+	          business_date: uploadDate || '',
+	          effective_date: uploadDate || '',
+	          debug_profile: true,
+	          process_queue: false,
+	          process_all: false,
+	          ...wmsPayloadFlags(),
+        });
+        setProgress('pm', 'Log');
+        finishProgress('pm');
+        bucket.completed = true;
+        mergeCalendarRun(response && response.upload_run);
+        state.runsByType[module === 'presort' ? 'presort' : module === 'marketplace_pc' ? 'marketplace_pc' : module === 'wmi_mp_pc' ? 'wmi_mp_pc' : module === 'no_order' ? 'no_order' : module === 'after_sale_movement' ? 'after_sale_movement' : 'pm_buffer'] = response && response.upload_run ? response.upload_run : { effective_date: uploadDate };
+        updateChoiceStatuses();
+        showDone(module, response, false);
+      } catch (error) {
+        showAlert('pmAlert', error && error.message ? error.message : String(error));
+      }
+    }
+
+    function applyStatus(status) {
+      state.statusLoading = false;
+      if (status && Array.isArray(status.settings)) {
+        applyUploadSettings(status.settings);
+      }
+      if (status && status.calendar && Array.isArray(status.calendar.runs)) {
+        state.calendarRuns = status.calendar.runs;
+      }
+      if (status && Number(status.required_uploads_count)) {
+        state.requiredUploadsCount = Number(status.required_uploads_count);
+      }
+      renderCalendar();
+      if ($('masterModal').classList.contains('visible')) updateMasterInstructions();
+
+      const dateLabel = formatRuDate(status.selected_date || state.selectedDate);
+      $('packagingInstructionDate').textContent = dateLabel;
+
+      const packagingRun = status && status.packaging && status.packaging.run;
+      state.runsByType.packaging = packagingRun || null;
+      if (state.mode === 'packaging') {
+        const run = runForUpload('packaging', activeUploadDate());
+        if (run && !state.packaging.forceRepeat) showDone('packaging', run, true);
+        else showModuleWork('packaging', 'Можно выгружать');
+      }
+
+      const rwpRun = status && status.rwp && status.rwp.run;
+      state.runsByType.rwp = rwpRun || null;
+      if (state.mode === 'rwp') {
+        const run = runForUpload('rwp', activeUploadDate());
+        if (run && !state.rwp.forceRepeat) showDone('rwp', run, true);
+        else showModuleWork('rwp', 'Можно выгружать');
+      }
+
+      const pmRun = status && status.pm_buffer && status.pm_buffer.run;
+      state.runsByType.pm_buffer = pmRun || null;
+      if (state.mode === 'pm') {
+        const run = runForUpload('pm', activeUploadDate());
+        if (run && !state.pm.forceRepeat) showDone('pm', run, true);
+        else showModuleWork('pm', 'Можно выгружать');
+      }
+
+      const presortRun = status && status.presort && status.presort.run;
+      state.runsByType.presort = presortRun || null;
+      if (state.mode === 'presort') {
+        const run = runForUpload('presort', activeUploadDate());
+        if (run && !state.presort.forceRepeat) showDone('presort', run, true);
+        else showModuleWork('presort', 'Можно выгружать');
+      }
+
+      const marketplacePcRun = status && status.marketplace_pc && status.marketplace_pc.run;
+      state.runsByType.marketplace_pc = marketplacePcRun || null;
+      if (state.mode === 'marketplace_pc') {
+        const run = runForUpload('marketplace_pc', activeUploadDate());
+        if (run && !state.marketplacePc.forceRepeat) showDone('marketplace_pc', run, true);
+        else showModuleWork('marketplace_pc', 'Можно выгружать');
+      }
+
+      const wmiMpPcRun = status && status.wmi_mp_pc && status.wmi_mp_pc.run;
+      state.runsByType.wmi_mp_pc = wmiMpPcRun || null;
+      if (state.mode === 'wmi_mp_pc') {
+        const run = runForUpload('wmi_mp_pc', activeUploadDate());
+        if (run && !state.wmiMpPc.forceRepeat) showDone('wmi_mp_pc', run, true);
+        else showModuleWork('wmi_mp_pc', 'Можно выгружать');
+      }
+
+      const noOrderRun = status && status.no_order && status.no_order.run;
+      state.runsByType.no_order = noOrderRun || null;
+      if (state.mode === 'no_order') {
+        const run = runForUpload('no_order', activeUploadDate());
+        if (run && !state.noOrder.forceRepeat) showDone('no_order', run, true);
+        else showModuleWork('no_order', 'Можно выгружать');
+      }
+
+      const afterSaleMovementRun = status && status.after_sale_movement && status.after_sale_movement.run;
+      state.runsByType.after_sale_movement = afterSaleMovementRun || null;
+      if (state.mode === 'after_sale_movement') {
+        const run = runForUpload('after_sale_movement', activeUploadDate());
+        if (run && !state.afterSaleMovement.forceRepeat) showDone('after_sale_movement', run, true);
+        else showModuleWork('after_sale_movement', 'Можно выгружать');
+      }
+      updateChoiceStatuses();
+    }
+
+    async function refreshStatusForSelectedDate() {
+      $('packagingInstructionDate').textContent = formatRuDate(state.selectedDate);
+      state.statusLoading = true;
+      state.runsByType.packaging = null;
+      state.runsByType.rwp = null;
+      state.runsByType.pm_buffer = null;
+      state.runsByType.presort = null;
+      state.runsByType.marketplace_pc = null;
+      state.runsByType.wmi_mp_pc = null;
+      state.runsByType.no_order = null;
+      state.runsByType.after_sale_movement = null;
+      updateChoiceStatuses();
+      setModuleChecking('packaging', true);
+      setModuleChecking('rwp', true);
+      setModuleChecking('pm', true);
+      setModuleChecking('presort', true);
+      setModuleChecking('marketplace_pc', true);
+      setModuleChecking('wmi_mp_pc', true);
+      setModuleChecking('no_order', true);
+      setModuleChecking('after_sale_movement', true);
+      try {
+        const range = state.calendarRange || buildCalendarRange();
+        state.calendarRange = range;
+        const status = await callAppsScript('getManualUploadsStatus', {
+          token: state.config.token || '',
+          upload_date: state.config.today || '',
+          selected_date: state.selectedDate || '',
+          business_date: state.selectedDate || '',
+          effective_date: state.selectedDate || '',
+          start_date: range.start,
+          end_date: range.end,
+        });
+        applyStatus(status);
+      } catch (error) {
+        state.statusLoading = false;
+        updateChoiceStatuses();
+        $('packagingChecking').classList.remove('visible');
+        $('pmChecking').classList.remove('visible');
+        $('packagingStatus').textContent = 'Журнал недоступен';
+        $('pmStatus').textContent = 'Журнал недоступен';
+        showAlert('packagingAlert', 'Не удалось проверить журнал выгрузок: ' + (error && error.message ? error.message : String(error)), 'info');
+      }
+    }
+
+    function applyWmsModeCopy() {
+      if (!state.config || !state.config.wmsOnly) return;
+      const kicker = document.querySelector('.kicker');
+      const title = document.querySelector('.topbar h1');
+      if (kicker) kicker.textContent = 'WMS+ // СЦ Нижний Новгород Ларина';
+      if (title) title.textContent = 'Выгрузки';
+      const replacements = [
+        ['packagingStepWeeek', 'WEEEK отключен для этой выгрузки'],
+        ['pmStepWeeek', 'WEEEK отключен для этой выгрузки'],
+        ['masterStepSave', 'Сохраняю выгрузки в Supabase'],
+      ];
+      replacements.forEach(([id, text]) => {
+        const node = $(id);
+        if (!node) return;
+        const span = node.querySelector('span:last-child');
+        if (span) span.textContent = text;
+        else node.textContent = text;
+      });
+    }
+
+    $('choosePackaging').addEventListener('click', () => chooseUploadMode('packaging'));
+    $('chooseRwp').addEventListener('click', () => chooseUploadMode('rwp'));
+    $('choosePm').addEventListener('click', () => chooseUploadMode('pm'));
+    $('choosePresort').addEventListener('click', () => chooseUploadMode('presort'));
+    $('chooseMarketplacePc').addEventListener('click', () => chooseUploadMode('marketplace_pc'));
+    $('chooseWmiMpPc').addEventListener('click', () => chooseUploadMode('wmi_mp_pc'));
+    $('chooseNoOrder').addEventListener('click', () => chooseUploadMode('no_order'));
+    $('chooseAfterSaleMovement').addEventListener('click', () => chooseUploadMode('after_sale_movement'));
+    $('homeButton').addEventListener('click', goHome);
+    $('openUploadMenuButton').addEventListener('click', openUploadMenu);
+    $('openMasterUploadButton').addEventListener('click', openMasterModal);
+    $('closeUploadMenuButton').addEventListener('click', closeUploadMenu);
+    $('backToUploadChoicesButton').addEventListener('click', () => {
+      showUploadChoices();
+      updateChoiceStatuses();
+    });
+    $('uploadModal').addEventListener('click', (event) => {
+      if (event.target === $('uploadModal')) closeUploadMenu();
+    });
+    $('openBackfillCalendarButton').addEventListener('click', openBackfillModal);
+    $('closeBackfillModalButton').addEventListener('click', closeBackfillModal);
+    $('backfillModal').addEventListener('click', (event) => {
+      if (event.target === $('backfillModal')) closeBackfillModal();
+    });
+    $('closeMasterModalButton').addEventListener('click', closeMasterModal);
+    $('masterModal').addEventListener('click', (event) => {
+      if (event.target === $('masterModal')) closeMasterModal();
+    });
+    $('masterMainFileInput').addEventListener('change', (event) => updateMasterFile('main', event.target.files && event.target.files[0]).catch((error) => showAlert('masterAlert', error.message || String(error))));
+    $('masterNoOrderFileInput').addEventListener('change', (event) => updateMasterFile('noOrder', event.target.files && event.target.files[0]).catch((error) => showAlert('masterAlert', error.message || String(error))));
+    $('masterPackagingFileInput').addEventListener('change', (event) => updateMasterFile('packaging', event.target.files && event.target.files[0]).catch((error) => showAlert('masterAlert', error.message || String(error))));
+    $('masterAfterSaleFileInput').addEventListener('change', (event) => updateMasterFile('afterSale', event.target.files && event.target.files[0]).catch((error) => showAlert('masterAlert', error.message || String(error))));
+    $('masterCarrierFileInput').addEventListener('change', (event) => updateMasterFile('carrier', event.target.files && event.target.files[0]).catch((error) => showAlert('masterAlert', error.message || String(error))));
+    $('masterCopyTransfersButton').addEventListener('click', () => copyMasterTransfers().catch((error) => showAlert('masterAlert', error.message || String(error))));
+    $('saveMasterUploadButton').addEventListener('click', () => saveMasterUpload().catch((error) => showAlert('masterAlert', error.message || String(error))));
+    $('openMasterRejectsButton').addEventListener('click', openMasterRejectsModal);
+    $('closeMasterRejectsButton').addEventListener('click', closeMasterRejectsModal);
+    $('masterRejectsModal').addEventListener('click', (event) => {
+      if (event.target === $('masterRejectsModal')) closeMasterRejectsModal();
+    });
+    $('repeatMasterUploadButton').addEventListener('click', () => {
+      resetMasterUpload(false);
+      showAlert('masterAlert', 'Загрузите все пять файлов. После этого я автоматически посчитаю будущие задачи.', 'info');
+    });
+    $('packagingFileInput').addEventListener('change', (event) => handlePackagingFile(event.target.files && event.target.files[0]));
+    $('packagingRepeatButton').addEventListener('click', () => resetDone(state.mode === 'rwp' ? 'rwp' : 'packaging'));
+    $('pmPrimaryInput').addEventListener('change', (event) => handlePmPrimaryFile(event.target.files && event.target.files[0]).catch((error) => showAlert('pmAlert', error.message || String(error))));
+    $('pmCarrierInput').addEventListener('change', (event) => handlePmCarrierFile(event.target.files && event.target.files[0]).catch((error) => showAlert('pmAlert', error.message || String(error))));
+    $('pmCopyButton').addEventListener('click', copyPmTransfers);
+    $('pmSkipCarrierButton').addEventListener('click', () => skipPmCarrier().catch((error) => showAlert('pmAlert', error.message || String(error))));
+    $('pmRepeatButton').addEventListener('click', () => resetDone(state.mode === 'presort' ? 'presort' : state.mode === 'marketplace_pc' ? 'marketplace_pc' : state.mode === 'wmi_mp_pc' ? 'wmi_mp_pc' : state.mode === 'no_order' ? 'no_order' : state.mode === 'after_sale_movement' ? 'after_sale_movement' : 'pm'));
+
+    applyWmsModeCopy();
+    mountModulesInModal();
+    renderPackagingPreview(null);
+    renderPmPreview(null);
+    state.calendarRange = buildCalendarRange();
+    renderCalendar();
+    refreshStatusForSelectedDate();
+  </script>
+</body>
+</html>

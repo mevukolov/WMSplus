@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #f3eee6;
+      --paper: #fffaf2;
+      --card: #ffffff;
+      --ink: #302219;
+      --muted: #7a6658;
+      --accent: #83644d;
+      --accent-dark: #3e2e23;
+      --line: rgba(62, 46, 35, 0.16);
+      --good: #247a4b;
+      --bad: #b42318;
+      --soft: rgba(131, 100, 77, 0.11);
+      --shadow: 0 20px 54px rgba(62, 46, 35, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: radial-gradient(circle at 8% 0%, rgba(131, 100, 77, 0.16), transparent 32%), var(--bg);
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+
+    body { padding: 16px; }
+
+    .shell {
+      width: min(980px, 100%);
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: rgba(255, 250, 242, 0.96);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .topbar {
+      padding: 20px;
+      background: var(--accent-dark);
+      color: #fff7ec;
+    }
+
+    .kicker {
+      margin: 0 0 6px;
+      color: rgba(255, 247, 236, 0.68);
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 44px);
+      line-height: 0.98;
+      letter-spacing: -0.04em;
+    }
+
+    .content {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .note {
+      border: 1px solid rgba(131, 100, 77, 0.22);
+      border-radius: 20px;
+      background: rgba(131, 100, 77, 0.08);
+      padding: 14px 16px;
+      color: var(--accent-dark);
+      font-weight: 900;
+      line-height: 1.45;
+    }
+
+    .status {
+      display: none;
+      border-radius: 18px;
+      padding: 12px 14px;
+      font-weight: 950;
+      line-height: 1.35;
+      white-space: pre-wrap;
+    }
+
+    .status.visible { display: block; }
+    .status.info {
+      color: var(--accent-dark);
+      background: rgba(131, 100, 77, 0.1);
+      border: 1px solid rgba(131, 100, 77, 0.22);
+    }
+    .status.good {
+      color: var(--good);
+      background: rgba(36, 122, 75, 0.1);
+      border: 1px solid rgba(36, 122, 75, 0.22);
+    }
+    .status.bad {
+      color: var(--bad);
+      background: rgba(180, 35, 24, 0.08);
+      border: 1px solid rgba(180, 35, 24, 0.18);
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--card);
+      overflow: hidden;
+    }
+
+    .card-head {
+      padding: 15px;
+      border-bottom: 1px solid var(--line);
+      background: #fffaf4;
+    }
+
+    .card-title {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -0.04em;
+    }
+
+    .card-desc {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 850;
+      line-height: 1.35;
+    }
+
+    .card-body {
+      padding: 15px;
+      display: grid;
+      gap: 12px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 950;
+      line-height: 1.25;
+    }
+
+    input[type="number"],
+    select {
+      width: 100%;
+      border: 1px solid rgba(62, 46, 35, 0.18);
+      border-radius: 14px;
+      background: #fffaf4;
+      color: var(--ink);
+      padding: 11px 12px;
+      font: inherit;
+      font-weight: 950;
+      outline: none;
+    }
+
+    input[type="number"]:focus,
+    select:focus {
+      border-color: rgba(131, 100, 77, 0.65);
+      box-shadow: 0 0 0 3px rgba(131, 100, 77, 0.12);
+    }
+
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--accent-dark);
+      font-weight: 950;
+    }
+
+    .check-row input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 820;
+      line-height: 1.35;
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      background: var(--accent);
+      color: #fff8ee;
+      font: inherit;
+      font-weight: 1000;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(131, 100, 77, 0.2);
+      transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px rgba(131, 100, 77, 0.27);
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    @media (max-width: 900px) {
+      body { padding: 10px; }
+      .settings-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <p class="kicker">ОПП // СЦ Нижний Новгород Ларина</p>
+      <h1>Настройка ОПП</h1>
+    </header>
+
+    <section class="content">
+      <div class="note">
+        Здесь редактируются сроки ручных выгрузок и зона ответственности. Отрицательное значение в поле "Дата выгрузки" означает смещение назад: например, -7 значит, что сегодня выгружается дата неделю назад.
+      </div>
+
+      <div id="status" class="status info visible">Загружаю настройки...</div>
+      <div id="settingsGrid" class="settings-grid"></div>
+    </section>
+  </main>
+
+  <script>
+    const config = {
+      token: new URLSearchParams(window.location.search).get('token') || '',
+    };
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+
+    function normalizeText(value) {
+      if (value === null || value === undefined) return '';
+      return String(value).trim();
+    }
+
+    function escapeHtml(value) {
+      return normalizeText(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function showStatus(message, type) {
+      const el = $('status');
+      el.textContent = message || '';
+      el.className = 'status visible ' + (type || 'info');
+    }
+
+    function callAppsScript(functionName, payload) {
+      return new Promise(function (resolve, reject) {
+        if (!window.google || !google.script || !google.script.run) {
+          reject(new Error('google.script.run недоступен. Откройте iframe через опубликованный Apps Script.'));
+          return;
+        }
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(function (error) { reject(error); })
+          [functionName](payload);
+      });
+    }
+
+    function numberValue(moduleName, fieldName, fallback) {
+      const input = document.querySelector('[data-module="' + moduleName + '"][data-field="' + fieldName + '"]');
+      if (!input) return fallback;
+      const parsed = Number(input.value);
+      return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+    }
+
+    function booleanValue(moduleName, fieldName) {
+      const input = document.querySelector('[data-module="' + moduleName + '"][data-field="' + fieldName + '"]');
+      return input ? Boolean(input.checked) : true;
+    }
+
+    function stringValue(moduleName, fieldName, fallback) {
+      const input = document.querySelector('[data-module="' + moduleName + '"][data-field="' + fieldName + '"]');
+      return input ? normalizeText(input.value) : fallback;
+    }
+
+    function renderSettings(settings) {
+      const list = Array.isArray(settings) ? settings : [];
+      if (!list.length) {
+        $('settingsGrid').innerHTML = '<div class="note">Настройки пока не найдены.</div>';
+        return;
+      }
+      $('settingsGrid').innerHTML = list.map(function (item) {
+        const moduleName = normalizeText(item.module);
+        const isPm = moduleName === 'pm';
+	        const taskFields = isPm
+          ? ''
+	            + '<label>Срок разбора ПМ, дней (справочно)'
+            + '<input type="number" data-module="' + escapeHtml(moduleName) + '" data-field="pm_deadline_days" value="' + escapeHtml(item.pm_deadline_days) + '">'
+            + '</label>'
+	            + '<label>Срок разбора Почты, дней (справочно)'
+            + '<input type="number" data-module="' + escapeHtml(moduleName) + '" data-field="mail_deadline_days" value="' + escapeHtml(item.mail_deadline_days) + '">'
+            + '</label>'
+          : ''
+	            + '<label>Срок разбора, дней (справочно)'
+            + '<input type="number" data-module="' + escapeHtml(moduleName) + '" data-field="task_deadline_days" value="' + escapeHtml(item.task_deadline_days) + '">'
+	            + '</label>';
+        const zone = normalizeText(item.responsibility_zone) || 'Нет привязки';
+        const zoneOptions = ['Исходящий поток', 'Входящий поток', 'Нет привязки'].map(function (value) {
+          return '<option value="' + escapeHtml(value) + '"' + (zone === value ? ' selected' : '') + '>' + escapeHtml(value) + '</option>';
+        }).join('');
+	        return ''
+          + '<article class="card">'
+          + '<div class="card-head">'
+          + '<h2 class="card-title">' + escapeHtml(item.label || moduleName) + '</h2>'
+          + '<p class="card-desc">' + escapeHtml(item.description || '') + '</p>'
+          + '</div>'
+          + '<div class="card-body">'
+	          + '<label>Дата выгрузки, смещение от сегодня'
+	          + '<input type="number" data-module="' + escapeHtml(moduleName) + '" data-field="upload_offset_days" value="' + escapeHtml(item.upload_offset_days) + '">'
+	          + '</label>'
+	          + taskFields
+	          + '<label>Зона ответственности'
+	          + '<select data-module="' + escapeHtml(moduleName) + '" data-field="responsibility_zone">'
+	          + zoneOptions
+	          + '</select>'
+	          + '</label>'
+	          + '<label class="check-row">'
+          + '<input type="checkbox" data-module="' + escapeHtml(moduleName) + '" data-field="is_required" ' + (item.is_required === false ? '' : 'checked') + '>'
+          + '<span>Обязательная выгрузка в календаре</span>'
+          + '</label>'
+	          + '<div class="hint">Пример: -4 в дате выгрузки означает, что 14.08 будет закрываться 10.08. Дата задачи в WEEEK считается как плановая дата выгрузки + 1 день.</div>'
+          + '<button type="button" data-save-module="' + escapeHtml(moduleName) + '">Сохранить</button>'
+          + '</div>'
+          + '</article>';
+      }).join('');
+
+      document.querySelectorAll('[data-save-module]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          saveSetting(button.getAttribute('data-save-module'));
+        });
+      });
+    }
+
+    async function loadSettings() {
+      showStatus('Загружаю настройки...', 'info');
+      try {
+        const response = await callAppsScript('getManualUploadSettings', {
+          token: config.token || '',
+          force_refresh: true,
+        });
+        renderSettings(response && response.settings);
+        showStatus('Настройки загружены.', 'good');
+      } catch (error) {
+        showStatus(error && error.message ? error.message : String(error), 'bad');
+      }
+    }
+
+    async function saveSetting(moduleName) {
+      const isPm = moduleName === 'pm';
+      const button = document.querySelector('[data-save-module="' + moduleName + '"]');
+      if (button) button.disabled = true;
+      showStatus('Сохраняю ' + moduleName + '...', 'info');
+      try {
+        const payload = {
+          token: config.token || '',
+          module: moduleName,
+	          upload_offset_days: numberValue(moduleName, 'upload_offset_days', 0),
+	          is_required: booleanValue(moduleName, 'is_required'),
+	          responsibility_zone: stringValue(moduleName, 'responsibility_zone', 'Нет привязки'),
+	        };
+        if (isPm) {
+          payload.pm_deadline_days = numberValue(moduleName, 'pm_deadline_days', 2);
+          payload.mail_deadline_days = numberValue(moduleName, 'mail_deadline_days', 3);
+        } else {
+          payload.task_deadline_days = numberValue(moduleName, 'task_deadline_days', moduleName === 'rwp' ? 4 : 7);
+        }
+        const response = await callAppsScript('saveManualUploadSetting', payload);
+        renderSettings(response && response.settings);
+        showStatus('Настройка сохранена.', 'good');
+      } catch (error) {
+        showStatus(error && error.message ? error.message : String(error), 'bad');
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    loadSettings();
+  </script>
+</body>
+</html>

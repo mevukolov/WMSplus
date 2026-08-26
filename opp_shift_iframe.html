@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>Прогресс ОПП</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="opp_shift_iframe.js?v=20260731_01" defer></script>
+    <style>
+        :root {
+            --bg: #f3f6fb;
+            --panel: #ffffff;
+            --ink: #132238;
+            --muted: #64748b;
+            --line: rgba(15, 23, 42, 0.1);
+            --good: #16a34a;
+            --good-bg: rgba(22, 163, 74, 0.12);
+            --warn: #d97706;
+            --warn-bg: rgba(245, 158, 11, 0.16);
+            --bad: #dc2626;
+            --bad-bg: rgba(239, 68, 68, 0.14);
+            --accent: #0f766e;
+            --accent-bg: rgba(20, 184, 166, 0.12);
+            --shadow: 0 12px 34px rgba(15, 23, 42, 0.08);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+            background: radial-gradient(circle at 10% 0%, rgba(20, 184, 166, 0.16), transparent 28%),
+                        linear-gradient(135deg, #eef6f5 0%, #f7f8fb 52%, #eef2ff 100%);
+            color: var(--ink);
+            font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        }
+
+        body {
+            padding: 12px;
+        }
+
+        .opp-frame {
+            width: 100%;
+            max-width: 1240px;
+            margin: 0 auto;
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: stretch;
+            margin-bottom: 12px;
+        }
+
+        .hero-main,
+        .side-card,
+        .status-card {
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: var(--shadow);
+            border-radius: 18px;
+        }
+
+        .hero-main {
+            padding: 14px;
+            min-width: 0;
+        }
+
+        .eyebrow {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: clamp(24px, 4vw, 40px);
+            line-height: 1.02;
+            letter-spacing: -0.04em;
+        }
+
+        .freshness {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 7px 10px;
+            border-radius: 999px;
+            background: var(--accent-bg);
+            color: #115e59;
+            font-size: 13px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .freshness-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: var(--accent);
+            box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.12);
+        }
+
+        .meta-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .meta-pill {
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 999px;
+            background: #f8fafc;
+            padding: 5px 9px;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(112px, 1fr));
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .summary-card {
+            min-height: 66px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #f8fafc;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .summary-card.good,
+        .status-card.good {
+            border-color: rgba(22, 163, 74, 0.38);
+            background: linear-gradient(180deg, rgba(22, 163, 74, 0.14), rgba(255, 255, 255, 0.92));
+        }
+
+        .summary-card.warn,
+        .status-card.warn {
+            border-color: rgba(245, 158, 11, 0.42);
+            background: linear-gradient(180deg, rgba(245, 158, 11, 0.18), rgba(255, 255, 255, 0.92));
+        }
+
+        .summary-card.bad,
+        .status-card.bad {
+            border-color: rgba(239, 68, 68, 0.42);
+            background: linear-gradient(180deg, rgba(239, 68, 68, 0.16), rgba(255, 255, 255, 0.92));
+        }
+
+        .summary-label {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.15;
+        }
+
+        .summary-value {
+            margin-top: 2px;
+            font-size: 22px;
+            font-weight: 900;
+            line-height: 1;
+            letter-spacing: -0.03em;
+        }
+
+        .side-card {
+            width: 230px;
+            padding: 12px;
+        }
+
+        .side-title {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .lag-main {
+            margin: 3px 0 8px;
+            font-size: 34px;
+            font-weight: 950;
+            letter-spacing: -0.05em;
+        }
+
+        .lag-list {
+            display: grid;
+            gap: 4px;
+        }
+
+        .lag-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 12px;
+            line-height: 1.15;
+        }
+
+        .lag-name {
+            min-width: 0;
+            color: var(--muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .lag-value {
+            font-weight: 800;
+        }
+
+        .section-title {
+            margin: 14px 2px 8px;
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .section-title h2 {
+            margin: 0;
+            font-size: 18px;
+            letter-spacing: -0.02em;
+        }
+
+        .section-note {
+            color: var(--muted);
+            font-size: 12px;
+            text-align: right;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .status-card {
+            position: relative;
+            min-height: 138px;
+            padding: 11px;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            overflow: hidden;
+        }
+
+        .status-top {
+            display: grid;
+            grid-template-columns: 24px minmax(0, 1fr);
+            gap: 7px;
+            align-items: center;
+        }
+
+        .status-mark {
+            width: 24px;
+            height: 24px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 900;
+            color: #fff;
+        }
+
+        .status-mark.good {
+            background: var(--good);
+        }
+
+        .status-mark.warn {
+            background: var(--warn);
+        }
+
+        .status-mark.bad {
+            background: var(--bad);
+        }
+
+        .status-name {
+            min-width: 0;
+            font-size: 16px;
+            font-weight: 900;
+            line-height: 1.05;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: center;
+            font-size: 12px;
+            color: var(--muted);
+            border-top: 1px solid rgba(15, 23, 42, 0.06);
+            padding-top: 5px;
+        }
+
+        .metric-value {
+            color: var(--ink);
+            font-weight: 850;
+            text-align: right;
+        }
+
+        .employee-line {
+            margin-top: auto;
+            color: var(--muted);
+            font-size: 12px;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .quality-list {
+            margin-top: 12px;
+            display: grid;
+            gap: 6px;
+        }
+
+        .quality-item {
+            border: 1px solid rgba(239, 68, 68, 0.22);
+            background: rgba(239, 68, 68, 0.09);
+            color: #7f1d1d;
+            border-radius: 12px;
+            padding: 8px 10px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .state {
+            min-height: 280px;
+            border: 1px dashed rgba(15, 23, 42, 0.18);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.72);
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 24px;
+        }
+
+        .error-state {
+            color: #991b1b;
+            background: rgba(254, 242, 242, 0.84);
+            border-color: rgba(239, 68, 68, 0.28);
+        }
+
+        @media (max-width: 980px) {
+            body {
+                padding: 8px;
+            }
+
+            .hero {
+                grid-template-columns: 1fr;
+            }
+
+            .side-card {
+                width: 100%;
+            }
+
+            .summary-grid,
+            .status-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 560px) {
+            .summary-grid,
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .title-row {
+                align-items: flex-start;
+            }
+
+            .freshness {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="opp-frame" id="opp-frame">
+        <div class="state">Загружаю прогресс ОПП...</div>
+    </main>
+</body>
+</html>

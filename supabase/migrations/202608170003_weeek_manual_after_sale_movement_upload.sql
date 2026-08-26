@@ -1,0 +1,97 @@
+insert into public.weeek_manual_upload_settings (
+  module,
+  label,
+  source_module,
+  upload_type,
+  upload_offset_days,
+  task_deadline_days,
+  pm_deadline_days,
+  mail_deadline_days,
+  is_required,
+  description,
+  sort_order
+)
+values
+(
+  'after_sale_movement',
+  'Движение после продажи',
+  'manual_after_sale_movement',
+  'after_sale_movement',
+  0,
+  2,
+  null,
+  null,
+  true,
+  'Контроль товара, получившего движение после реализации.',
+  110
+)
+on conflict (module) do update set
+  label = excluded.label,
+  source_module = excluded.source_module,
+  upload_type = excluded.upload_type,
+  description = excluded.description,
+  sort_order = excluded.sort_order;
+
+insert into public.weeek_task_routes (
+  route_key,
+  task_type,
+  active_board_id,
+  active_board_name,
+  active_default_column_id,
+  active_default_column_name,
+  inactive_board_id,
+  inactive_board_name,
+  inactive_wait_column_id,
+  inactive_wait_column_name,
+  inactive_done_column_id,
+  inactive_done_column_name,
+  reopen_after_days,
+  reopen_date_field_id,
+  reopen_date_field_name,
+  reopened_tag_name,
+  deferred_verdicts,
+  final_verdicts,
+  not_started_verdicts
+)
+values
+(
+  'manual_after_sale_movement_opp',
+  'Разбор ОПП // Движение после продажи',
+  '3',
+  '❗️ Активные задачи',
+  null,
+  'Движение после продажи',
+  '7',
+  '❌ Неактивные задачи',
+  null,
+  'Ожидание',
+  null,
+  'Разбор завершен',
+  2,
+  'a25fe442-940f-4bd9-86c0-eeb25de06655',
+  'Дата переоткрытия',
+  'Переоткрытое задание',
+  array['Отправлен на релиз','Отправлен на списание ревизией','Отправлен запрос'],
+  array['Найден/Релиз/Списан','Нет на МХ/Не найден'],
+  array['Не выбран','Новая','Не начато']
+)
+on conflict (route_key) do update set
+  task_type = excluded.task_type,
+  active_board_id = excluded.active_board_id,
+  active_board_name = excluded.active_board_name,
+  active_default_column_id = excluded.active_default_column_id,
+  active_default_column_name = excluded.active_default_column_name,
+  inactive_board_id = excluded.inactive_board_id,
+  inactive_board_name = excluded.inactive_board_name,
+  inactive_wait_column_id = excluded.inactive_wait_column_id,
+  inactive_wait_column_name = excluded.inactive_wait_column_name,
+  inactive_done_column_id = excluded.inactive_done_column_id,
+  inactive_done_column_name = excluded.inactive_done_column_name,
+  reopen_after_days = excluded.reopen_after_days,
+  reopen_date_field_id = excluded.reopen_date_field_id,
+  reopen_date_field_name = excluded.reopen_date_field_name,
+  reopened_tag_name = excluded.reopened_tag_name,
+  deferred_verdicts = excluded.deferred_verdicts,
+  final_verdicts = excluded.final_verdicts,
+  not_started_verdicts = excluded.not_started_verdicts,
+  updated_at = timezone('utc', now());

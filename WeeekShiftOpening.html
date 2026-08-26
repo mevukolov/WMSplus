@@ -1,0 +1,1622 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #f8f3ed;
+      --paper: #fffaf4;
+      --paper-strong: #ffffff;
+      --ink: #2d2119;
+      --muted: #7b685b;
+      --accent: #83644d;
+      --accent-dark: #3e2e23;
+      --line: rgba(62, 46, 35, 0.16);
+      --good: #23824d;
+      --bad: #b42318;
+      --warn: #b7791f;
+      --shadow: 0 18px 45px rgba(62, 46, 35, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 8% 0%, rgba(131, 100, 77, 0.14), transparent 30%),
+        linear-gradient(180deg, #fffaf4 0%, var(--bg) 100%);
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+
+    body { padding: 16px; }
+
+    .shell {
+      width: min(760px, 100%);
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: rgba(255, 250, 244, 0.94);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .topbar {
+      padding: 18px 20px;
+      background: var(--accent-dark);
+      color: #fff8ee;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .kicker {
+      margin: 0 0 4px;
+      color: rgba(255, 248, 238, 0.68);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 5vw, 38px);
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .date-pill {
+      flex: 0 0 auto;
+      border: 1px solid rgba(255, 248, 238, 0.28);
+      border-radius: 999px;
+      padding: 8px 11px;
+      color: #fff8ee;
+      font-weight: 900;
+      background: rgba(255, 255, 255, 0.08);
+      white-space: nowrap;
+    }
+
+    .content { padding: 20px; }
+
+    .screen { display: none; }
+    .screen.active { display: block; animation: rise 180ms ease-out; }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .center-card {
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      border: 1px dashed rgba(131, 100, 77, 0.32);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.48);
+      padding: 24px;
+    }
+
+    .title {
+      margin: 0 0 14px;
+      font-size: 24px;
+      letter-spacing: -0.03em;
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .center-card .btn-row { justify-content: center; }
+
+    button,
+    .upload-button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      color: #fff8ee;
+      background: var(--accent);
+      font: inherit;
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(131, 100, 77, 0.22);
+      transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    }
+
+    button:hover:not(:disabled),
+    .upload-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px rgba(131, 100, 77, 0.28);
+    }
+
+    button.secondary {
+      color: var(--accent-dark);
+      background: rgba(131, 100, 77, 0.12);
+      box-shadow: none;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      box-shadow: none;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    label.field {
+      display: grid;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--paper-strong);
+      color: var(--ink);
+      font: inherit;
+      font-size: 16px;
+      padding: 12px 13px;
+      outline: none;
+    }
+
+    select:focus {
+      border-color: rgba(131, 100, 77, 0.62);
+      box-shadow: 0 0 0 4px rgba(131, 100, 77, 0.12);
+    }
+
+    .upload-zone {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--paper-strong);
+      padding: 22px;
+      text-align: center;
+    }
+
+    .upload-title {
+      margin: 0 0 16px;
+      font-size: 22px;
+      font-weight: 950;
+      letter-spacing: -0.03em;
+    }
+
+    input[type="file"] {
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      position: absolute;
+      pointer-events: none;
+    }
+
+    .file-name {
+      margin-top: 12px;
+      color: var(--muted);
+      font-weight: 800;
+      word-break: break-word;
+    }
+
+    .upload-stats {
+      margin-top: 16px;
+      border: 1px solid rgba(62, 46, 35, 0.12);
+      border-radius: 18px;
+      background: rgba(248, 243, 237, 0.74);
+      padding: 14px;
+      text-align: left;
+    }
+
+    .upload-stats[hidden] { display: none; }
+
+    .upload-stats-title {
+      margin: 0 0 10px;
+      font-weight: 950;
+      color: var(--accent-dark);
+      letter-spacing: -0.02em;
+    }
+
+    .upload-stats-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .upload-stats-head .upload-stats-title {
+      margin: 0;
+    }
+
+    .upload-add-badge {
+      flex: 0 0 auto;
+      color: var(--good);
+      font-size: 26px;
+      font-weight: 950;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .upload-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .upload-stat {
+      border: 1px solid rgba(62, 46, 35, 0.10);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.72);
+      padding: 10px;
+    }
+
+    .upload-stat-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .upload-stat-value {
+      margin-top: 4px;
+      color: var(--ink);
+      font-size: 18px;
+      font-weight: 950;
+      line-height: 1.1;
+    }
+
+    .upload-stats-note {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .upload-stats-note.warn { color: var(--warn); }
+    .upload-stats-note.good { color: var(--good); }
+
+    .upload-detail-grid {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .upload-detail-box {
+      border: 1px solid rgba(62, 46, 35, 0.10);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.56);
+      padding: 12px;
+      min-width: 0;
+    }
+
+    .upload-detail-title {
+      margin: 0 0 8px;
+      color: var(--accent-dark);
+      font-size: 13px;
+      font-weight: 950;
+      letter-spacing: -0.01em;
+    }
+
+    .upload-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .upload-list-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: baseline;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .upload-list-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .upload-list-value {
+      color: var(--ink);
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .upload-list-row.clickable {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      padding: 4px 6px;
+      color: inherit;
+      box-shadow: none;
+      text-align: left;
+      cursor: pointer;
+      transition: background 140ms ease, transform 140ms ease;
+    }
+
+    .upload-list-row.clickable:hover {
+      transform: translateY(-1px);
+      background: rgba(131, 100, 77, 0.10);
+    }
+
+    .detail-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: none;
+      padding: 18px;
+      background: rgba(45, 33, 25, 0.42);
+    }
+
+    .detail-modal.visible {
+      display: grid;
+      place-items: center;
+    }
+
+    .detail-modal-card {
+      width: min(960px, 100%);
+      max-height: min(88vh, 860px);
+      overflow: auto;
+      border: 1px solid rgba(255, 248, 238, 0.22);
+      border-radius: 24px;
+      background: #fffaf4;
+      box-shadow: 0 28px 80px rgba(45, 33, 25, 0.35);
+    }
+
+    .detail-modal-head {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 18px;
+      background: var(--accent-dark);
+      color: #fff8ee;
+    }
+
+    .detail-modal-title {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+
+    .detail-modal-subtitle {
+      margin: 6px 0 0;
+      color: rgba(255, 248, 238, 0.72);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .detail-close {
+      flex: 0 0 auto;
+      border: 1px solid rgba(255, 248, 238, 0.24);
+      background: rgba(255, 255, 255, 0.10);
+      box-shadow: none;
+      padding: 9px 12px;
+    }
+
+    .detail-modal-body {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .detail-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .detail-kpi {
+      border: 1px solid rgba(62, 46, 35, 0.11);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.76);
+      padding: 10px;
+    }
+
+    .detail-kpi-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .detail-kpi-value {
+      margin-top: 4px;
+      color: var(--ink);
+      font-size: 19px;
+      font-weight: 950;
+    }
+
+    .detail-chart-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      gap: 12px;
+    }
+
+    .detail-chart-box,
+    .detail-table-box {
+      border: 1px solid rgba(62, 46, 35, 0.11);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.72);
+      padding: 12px;
+      min-width: 0;
+    }
+
+    .detail-section-title {
+      margin: 0 0 10px;
+      color: var(--accent-dark);
+      font-size: 14px;
+      font-weight: 950;
+    }
+
+    .detail-table-wrap {
+      max-height: 320px;
+      overflow: auto;
+      border-radius: 12px;
+      border: 1px solid rgba(62, 46, 35, 0.10);
+    }
+
+    .detail-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .detail-table th,
+    .detail-table td {
+      padding: 8px;
+      border-bottom: 1px solid rgba(62, 46, 35, 0.08);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .detail-table th {
+      position: sticky;
+      top: 0;
+      background: #f8f3ed;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .state-card {
+      border: 1px solid rgba(35, 130, 77, 0.24);
+      border-radius: 22px;
+      background: rgba(35, 130, 77, 0.08);
+      padding: 18px;
+    }
+
+    .state-title {
+      margin: 0 0 12px;
+      color: var(--good);
+      font-size: 24px;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+
+    .people-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .person-card {
+      border: 1px solid rgba(62, 46, 35, 0.12);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.68);
+      padding: 12px;
+    }
+
+    .person-role {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .person-name {
+      margin-top: 4px;
+      font-size: 18px;
+      font-weight: 950;
+      line-height: 1.15;
+    }
+
+    .alert {
+      margin-top: 14px;
+      border-radius: 16px;
+      padding: 12px;
+      line-height: 1.35;
+      display: none;
+    }
+
+    .alert.visible { display: block; }
+    .alert.error { background: rgba(180, 35, 24, 0.10); color: var(--bad); }
+    .alert.info { background: rgba(183, 121, 31, 0.12); color: var(--warn); }
+
+    .loader {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .loader::before {
+      content: "";
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(131, 100, 77, 0.22);
+      border-top-color: var(--accent);
+      animation: spin 800ms linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 620px) {
+      body { padding: 10px; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .content { padding: 14px; }
+      .form-grid,
+      .people-grid,
+      .upload-stats-grid,
+      .upload-detail-grid,
+      .detail-kpi-grid,
+      .detail-chart-grid { grid-template-columns: 1fr; }
+      button,
+      .upload-button { width: 100%; text-align: center; }
+      .btn-row { flex-direction: column; }
+      .detail-modal { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="kicker">ОПП</p>
+        <h1>Открытие смены</h1>
+      </div>
+      <div class="date-pill" id="datePill">...</div>
+    </header>
+
+    <section class="content">
+      <div id="screenLoading" class="screen active">
+        <div class="center-card">
+          <div class="loader">Проверяю смену</div>
+        </div>
+      </div>
+
+      <div id="screenAlreadyOpen" class="screen">
+        <div class="state-card">
+          <h2 class="state-title" id="alreadyTitle">Смена открыта</h2>
+          <div class="people-grid">
+            <div class="person-card">
+              <div class="person-role">Входящий поток</div>
+              <div class="person-name" id="alreadyIncoming">...</div>
+            </div>
+            <div class="person-card">
+              <div class="person-role">Исходящий поток</div>
+              <div class="person-name" id="alreadyOutgoing">...</div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="secondary" id="alreadyHomeButton">Домик</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="screenStart" class="screen">
+        <div class="center-card">
+          <div>
+            <h2 class="title">Смена еще не открыта</h2>
+            <p class="hint">Заполним ответственных и отметим загрузку данных по чистым списаниям.</p>
+            <div class="btn-row">
+              <button type="button" id="startButton">Открыть смену</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="screenPeople" class="screen">
+        <h2 class="title">Кто сегодня на смене?</h2>
+        <div class="form-grid">
+          <label class="field">
+            Исходящий поток
+            <select id="outgoingSelect"></select>
+          </label>
+          <label class="field">
+            Входящий поток
+            <select id="incomingSelect"></select>
+          </label>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="secondary" id="peopleBackButton">Назад</button>
+          <button type="button" id="peopleNextButton" disabled>Далее</button>
+        </div>
+      </div>
+
+      <div id="screenUpload" class="screen">
+        <div class="upload-zone">
+          <p class="upload-title">Добавить данные по чистым списаниям</p>
+          <label class="upload-button" for="fileInput">Загрузить</label>
+          <input id="fileInput" type="file" accept=".xlsx,.xls">
+          <div class="file-name" id="fileName">Файл пока не выбран</div>
+          <div class="upload-stats" id="fileStats" hidden></div>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="secondary" id="uploadBackButton">Назад</button>
+          <button type="button" id="finishButton" disabled>Открыть смену</button>
+        </div>
+      </div>
+
+      <div id="screenDone" class="screen">
+        <div class="state-card">
+          <h2 class="state-title" id="doneTitle">Смена открыта</h2>
+          <div class="people-grid">
+            <div class="person-card">
+              <div class="person-role">Входящий поток</div>
+              <div class="person-name" id="doneIncoming">...</div>
+            </div>
+            <div class="person-card">
+              <div class="person-role">Исходящий поток</div>
+              <div class="person-name" id="doneOutgoing">...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="alert" class="alert"></div>
+    </section>
+  </main>
+
+  <div id="pureDetailModal" class="detail-modal" aria-hidden="true">
+    <div class="detail-modal-card" role="dialog" aria-modal="true" aria-labelledby="pureDetailTitle">
+      <div class="detail-modal-head">
+        <div>
+          <h2 id="pureDetailTitle" class="detail-modal-title">Детализация</h2>
+          <p id="pureDetailSubtitle" class="detail-modal-subtitle"></p>
+        </div>
+        <button id="pureDetailClose" type="button" class="detail-close">Закрыть</button>
+      </div>
+      <div id="pureDetailBody" class="detail-modal-body"></div>
+    </div>
+  </div>
+
+  <script>
+    const initialConfig = <?!= JSON.stringify(initialConfig || {}) ?>;
+    const state = {
+      config: initialConfig,
+      employees: [],
+      shiftDate: '',
+      shiftLabel: '',
+      selectedFileName: '',
+      selectedFileRows: [],
+      localFileStats: null,
+      pureDetailRows: [],
+      pureLossesPreview: null,
+      filePreviewBusy: false,
+      detailCharts: [],
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const screens = ['screenLoading', 'screenAlreadyOpen', 'screenStart', 'screenPeople', 'screenUpload', 'screenDone'];
+
+    function showScreen(id) {
+      screens.forEach((screenId) => $(screenId).classList.toggle('active', screenId === id));
+      hideAlert();
+    }
+
+    function showAlert(message, type = 'error') {
+      const box = $('alert');
+      box.textContent = message;
+      box.className = 'alert visible ' + type;
+    }
+
+    function hideAlert() {
+      const box = $('alert');
+      box.className = 'alert';
+      box.textContent = '';
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatInt(value) {
+      const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
+      return Math.trunc(safe).toLocaleString('ru-RU');
+    }
+
+    function formatMoney(value) {
+      const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
+      return safe.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ₽';
+    }
+
+    const PURE_AUTO_IDS = new Set([11, 21, 26, 31, 32, 35, 42, 47]);
+    const EXPENSIVE_PRICE_THRESHOLD = 1000;
+    const PURE_COLS = {
+      shk: ['ШК', 'shk', 'Шк', 'Штрихкод'],
+      dateLost: ['Дата последнего списания', 'date_lost'],
+      lr: ['Лостризон последнего списания', 'ЛР последнего списания', 'ID списания'],
+      price: ['Сумма списания', 'Сумма'],
+      whId: ['ID офиса', 'ID офиса статуса перед списанием', 'ID офиса статуса перед списания', 'wh_id'],
+      postedFlag: ['Флаг оприходования', 'Оприходовано', 'Флаг оприходован'],
+      postedDate: ['Дата оприходования'],
+      status: ['Статус перед списанием', 'Статус ШК перед списанием'],
+      qty: ['Шт списаний', 'Шт. списаний', 'Шт списания', 'Количество', 'Кол-во', 'Qty', 'qty'],
+      nm: ['ID номенклатуры', 'ID Номенклатуры', 'ID НМ', 'nm'],
+      brand: ['Наименования бренда', 'Наименование бренда', 'Бренд'],
+      productName: ['Наименования товара', 'Наименование товара', 'Товар'],
+      comment: ['Комментарий последнего списания', 'Комментарий'],
+    };
+    const NORMALIZED_PURE_COLS = Object.fromEntries(
+      Object.entries(PURE_COLS).map(([key, variants]) => [key, variants.map(normalizeHeaderKey)])
+    );
+
+    function normalizeHeaderKey(value) {
+      return String(value || '')
+        .toLowerCase()
+        .replace(/\u00a0/g, ' ')
+        .replace(/ё/g, 'е')
+        .replace(/['"`]/g, '')
+        .replace(/[()[\]]/g, '')
+        .replace(/[\s_-]+/g, '');
+    }
+
+    function buildNormalizedRow(row) {
+      const output = {};
+      Object.keys(row || {}).forEach((key) => {
+        output[normalizeHeaderKey(key)] = row[key];
+      });
+      return output;
+    }
+
+    function getCellValue(row, normalizedRow, columnKey) {
+      const variants = PURE_COLS[columnKey] || [];
+      for (const name of variants) {
+        if (Object.prototype.hasOwnProperty.call(row || {}, name)) return row[name];
+      }
+      const normalizedVariants = NORMALIZED_PURE_COLS[columnKey] || [];
+      for (const normalized of normalizedVariants) {
+        if (Object.prototype.hasOwnProperty.call(normalizedRow || {}, normalized)) return normalizedRow[normalized];
+      }
+      return '';
+    }
+
+    function normalizeToken(value) {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        if (Number.isInteger(value)) return String(value);
+        return String(value).replace(/\.0+$/, '');
+      }
+      const raw = String(value).trim();
+      if (!raw) return '';
+      const compact = raw.replace(/\s+/g, '');
+      if (/^-?\d+\.0+$/.test(compact)) return compact.replace(/\.0+$/, '');
+      return compact;
+    }
+
+    function toNumberOrZero(value) {
+      if (value === null || value === undefined || value === '') return 0;
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      const raw = String(value).trim().replace(/\u00a0/g, '').replace(/\s+/g, '');
+      if (!raw) return 0;
+      const hasComma = raw.includes(',');
+      const hasDot = raw.includes('.');
+      let normalized = raw;
+      if (hasComma && hasDot) {
+        normalized = raw.lastIndexOf(',') > raw.lastIndexOf('.')
+          ? raw.replace(/\./g, '').replace(',', '.')
+          : raw.replace(/,/g, '');
+      } else if (hasComma) {
+        normalized = raw.replace(',', '.');
+      }
+      normalized = normalized.replace(/[^\d.-]/g, '');
+      const parsed = Number(normalized);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function parseDateValue(value) {
+      if (value === null || value === undefined || value === '') return null;
+      if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        const ts = (Math.floor(value) - 25569) * 86400 * 1000;
+        const d = new Date(ts);
+        if (!Number.isNaN(d.getTime())) return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+      }
+      const raw = String(value).trim();
+      if (!raw) return null;
+      const datePart = raw.replace('T', ' ').split(' ')[0];
+      let match = datePart.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+      if (match) {
+        let year = Number(match[3]);
+        if (year < 100) year += 2000;
+        const date = new Date(year, Number(match[2]) - 1, Number(match[1]));
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
+      match = datePart.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+      if (match) {
+        const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
+      const parsed = new Date(raw);
+      if (!Number.isNaN(parsed.getTime())) return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+      return null;
+    }
+
+    function formatIsoDate(date) {
+      return [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0'),
+      ].join('-');
+    }
+
+    function addIsoDays(isoDate, days) {
+      const match = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return '';
+      const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days));
+      return [
+        date.getUTCFullYear(),
+        String(date.getUTCMonth() + 1).padStart(2, '0'),
+        String(date.getUTCDate()).padStart(2, '0'),
+      ].join('-');
+    }
+
+    function formatRuIsoDate(isoDate) {
+      const match = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return match ? `${match[3]}.${match[2]}.${match[1]}` : isoDate || '—';
+    }
+
+    function isTrueLike(value) {
+      if (value === true) return true;
+      if (value === false || value === 0 || value === null || value === undefined) return false;
+      const normalized = String(value).trim().toLowerCase();
+      return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'да';
+    }
+
+    function normalizePureRow(row) {
+      const normalized = buildNormalizedRow(row);
+      const date = parseDateValue(getCellValue(row, normalized, 'dateLost'));
+      const price = toNumberOrZero(getCellValue(row, normalized, 'price'));
+      const qtyRaw = toNumberOrZero(getCellValue(row, normalized, 'qty'));
+      const shk = normalizeToken(getCellValue(row, normalized, 'shk'));
+      const lr = normalizeToken(getCellValue(row, normalized, 'lr'));
+      const status = String(getCellValue(row, normalized, 'status') || '—').trim() || '—';
+      return {
+        raw: row,
+        date,
+        dateIso: date ? formatIsoDate(date) : '',
+        shk,
+        nm: normalizeToken(getCellValue(row, normalized, 'nm')),
+        brand: String(getCellValue(row, normalized, 'brand') || '').trim(),
+        productName: String(getCellValue(row, normalized, 'productName') || '').trim(),
+        comment: String(getCellValue(row, normalized, 'comment') || '').trim(),
+        whId: normalizeToken(getCellValue(row, normalized, 'whId')),
+        lr,
+        lrNum: Number(lr),
+        status,
+        price,
+        qty: qtyRaw || (shk ? 1 : 0),
+        posted: isTrueLike(getCellValue(row, normalized, 'postedFlag')),
+        postedDate: parseDateValue(getCellValue(row, normalized, 'postedDate')),
+      };
+    }
+
+    function sumMetric(items, key) {
+      return (Array.isArray(items) ? items : []).reduce((sum, item) => sum + Number(item && item[key] || 0), 0);
+    }
+
+    function aggregateTop(items, key, limit = 8) {
+      const map = new Map();
+      (Array.isArray(items) ? items : []).forEach((item) => {
+        const name = String(item && item[key] || '—').trim() || '—';
+        const current = map.get(name) || { name, qty: 0, sum: 0, rows: 0 };
+        current.qty += Number(item.qty || 0);
+        current.sum += Number(item.price || 0);
+        current.rows += 1;
+        map.set(name, current);
+      });
+      return Array.from(map.values())
+        .sort((a, b) => b.sum - a.sum || b.qty - a.qty || a.name.localeCompare(b.name, 'ru'))
+        .slice(0, limit);
+    }
+
+    function buildLocalPureStats(rows) {
+      const whId = String(state.config.wh_id || '').trim() || '50144199';
+      const targetDate = addIsoDays(state.shiftDate, -1);
+      const normalizedRows = (Array.isArray(rows) ? rows : []).map(normalizePureRow);
+      const validDateRows = normalizedRows.filter((row) => row.dateIso);
+      const targetRows = normalizedRows.filter((row) => row.dateIso === targetDate);
+      const targetWhRows = targetRows.filter((row) => row.whId === whId);
+      const autoRows = targetWhRows.filter((row) => PURE_AUTO_IDS.has(row.lrNum));
+      const manualRows = targetWhRows.filter((row) => !PURE_AUTO_IDS.has(row.lrNum));
+      const postedRows = targetWhRows.filter((row) => row.posted);
+      const autoPostedRows = autoRows.filter((row) => row.posted);
+      const manualPostedRows = manualRows.filter((row) => row.posted);
+      const expensiveRows = targetWhRows.filter((row) => row.price >= EXPENSIVE_PRICE_THRESHOLD);
+      const targetUploadRows = targetRows.map((row) => row.raw);
+
+      return {
+        preview_pending: true,
+        target_date: targetDate,
+        target_date_label: formatRuIsoDate(targetDate),
+        source_total_rows: rows.length,
+        rows_with_valid_date: validDateRows.length,
+        file_dates_count: aggregateTop(validDateRows.map((row) => ({ ...row, dateLabel: formatRuIsoDate(row.dateIso) })), 'dateLabel', 10),
+        target_date_rows: targetRows.length,
+        wh_matched_rows: targetWhRows.length,
+        total_qty: sumMetric(targetWhRows, 'qty'),
+        total_sum: sumMetric(targetWhRows, 'price'),
+        auto_qty: sumMetric(autoRows, 'qty'),
+        auto_sum: sumMetric(autoRows, 'price'),
+        manual_qty: sumMetric(manualRows, 'qty'),
+        manual_sum: sumMetric(manualRows, 'price'),
+        posted_qty: sumMetric(postedRows, 'qty'),
+        posted_sum: sumMetric(postedRows, 'price'),
+        posted_auto_qty: sumMetric(autoPostedRows, 'qty'),
+        posted_auto_sum: sumMetric(autoPostedRows, 'price'),
+        posted_manual_qty: sumMetric(manualPostedRows, 'qty'),
+        posted_manual_sum: sumMetric(manualPostedRows, 'price'),
+        expensive_qty: sumMetric(expensiveRows, 'qty'),
+        expensive_sum: sumMetric(expensiveRows, 'price'),
+        posted_auto_percent: sumMetric(autoRows, 'qty') ? (sumMetric(autoPostedRows, 'qty') / sumMetric(autoRows, 'qty')) * 100 : 0,
+        top_lr: aggregateTop(targetWhRows, 'lr', 8),
+        top_status: aggregateTop(targetWhRows, 'status', 8),
+        target_upload_rows: targetUploadRows,
+        target_detail_rows: targetWhRows,
+      };
+    }
+
+    function renderTopList(items, emptyText, valueFormatter, options = {}) {
+      const rows = Array.isArray(items) ? items : [];
+      if (!rows.length) {
+        return `<div class="upload-list-row"><span class="upload-list-name">${escapeHtml(emptyText)}</span><span class="upload-list-value">—</span></div>`;
+      }
+      const dataAttr = options.dataAttr || 'data-detail';
+      return rows.map((item) => `
+        <${options.clickable ? 'button' : 'div'} class="upload-list-row${options.clickable ? ' clickable' : ''}" ${options.clickable ? `type="button" ${dataAttr}="${escapeHtml(item.name)}"` : ''}>
+          <span class="upload-list-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+          <span class="upload-list-value">${escapeHtml(valueFormatter(item))}</span>
+        </${options.clickable ? 'button' : 'div'}>
+      `).join('');
+    }
+
+    function compactStatsForPayload(stats) {
+      const copy = { ...(stats || {}) };
+      delete copy.target_upload_rows;
+      delete copy.target_detail_rows;
+      return copy;
+    }
+
+    function destroyDetailCharts() {
+      state.detailCharts.forEach((chart) => {
+        try { chart.destroy(); } catch (_) {}
+      });
+      state.detailCharts = [];
+    }
+
+    function openDetailModal(title, subtitle, bodyHtml) {
+      destroyDetailCharts();
+      $('pureDetailTitle').textContent = title || 'Детализация';
+      $('pureDetailSubtitle').textContent = subtitle || '';
+      $('pureDetailBody').innerHTML = bodyHtml || '';
+      $('pureDetailModal').classList.add('visible');
+      $('pureDetailModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closeDetailModal() {
+      destroyDetailCharts();
+      $('pureDetailModal').classList.remove('visible');
+      $('pureDetailModal').setAttribute('aria-hidden', 'true');
+      $('pureDetailBody').innerHTML = '';
+    }
+
+    function aggregateDetailRows(items, key, limit = 12) {
+      return aggregateTop(items, key, limit);
+    }
+
+    function aggregateByDate(items) {
+      const map = new Map();
+      (Array.isArray(items) ? items : []).forEach((item) => {
+        const key = item.dateIso || '—';
+        const current = map.get(key) || { name: key, qty: 0, sum: 0 };
+        current.qty += Number(item.qty || 0);
+        current.sum += Number(item.price || 0);
+        map.set(key, current);
+      });
+      return Array.from(map.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    }
+
+    function renderDetailKpis(items) {
+      const safeItems = Array.isArray(items) ? items : [];
+      const postedItems = safeItems.filter((item) => item.posted);
+      const expensiveItems = safeItems.filter((item) => item.price >= EXPENSIVE_PRICE_THRESHOLD);
+      const totalQty = sumMetric(safeItems, 'qty');
+      const postedQty = sumMetric(postedItems, 'qty');
+      const postedPct = totalQty ? (postedQty / totalQty) * 100 : 0;
+      return `
+        <div class="detail-kpi-grid">
+          <div class="detail-kpi"><div class="detail-kpi-label">Всего списано</div><div class="detail-kpi-value">${formatInt(totalQty)} ШК</div></div>
+          <div class="detail-kpi"><div class="detail-kpi-label">Сумма</div><div class="detail-kpi-value">${formatMoney(sumMetric(safeItems, 'price'))}</div></div>
+          <div class="detail-kpi"><div class="detail-kpi-label">Оприход</div><div class="detail-kpi-value">${formatInt(postedQty)} ШК / ${postedPct.toFixed(0)}%</div></div>
+          <div class="detail-kpi"><div class="detail-kpi-label">Дорогостой</div><div class="detail-kpi-value">${formatInt(sumMetric(expensiveItems, 'qty'))} ШК</div></div>
+        </div>
+      `;
+    }
+
+    function renderDetailTable(items) {
+      const safeItems = Array.isArray(items) ? items : [];
+      if (!safeItems.length) {
+        return '<p class="upload-stats-note warn">Нет строк для детализации.</p>';
+      }
+
+      return `
+        <div class="detail-table-wrap">
+          <table class="detail-table">
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>ШК</th>
+                <th>НМ</th>
+                <th>Статус</th>
+                <th>Сумма</th>
+                <th>Бренд / товар</th>
+                <th>Оприход</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${safeItems.slice(0, 250).map((item) => `
+                <tr>
+                  <td>${escapeHtml(formatRuIsoDate(item.dateIso))}</td>
+                  <td>${escapeHtml(item.shk || '—')}</td>
+                  <td>${escapeHtml(item.nm || '—')}</td>
+                  <td>${escapeHtml(item.status || '—')}</td>
+                  <td>${escapeHtml(formatMoney(item.price))}</td>
+                  <td>${escapeHtml([item.brand, item.productName].filter(Boolean).join(' / ') || '—')}</td>
+                  <td>${item.posted ? 'Да' : 'Нет'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${safeItems.length > 250 ? `<p class="upload-stats-note warn">Показаны первые 250 строк из ${formatInt(safeItems.length)}.</p>` : ''}
+      `;
+    }
+
+    function renderDetailCharts(items) {
+      if (typeof Chart === 'undefined') return;
+
+      const byDate = aggregateByDate(items);
+      const dateCanvas = document.getElementById('lrDateChart');
+      if (dateCanvas && byDate.length) {
+        state.detailCharts.push(new Chart(dateCanvas, {
+          type: 'bar',
+          data: {
+            labels: byDate.map((item) => formatRuIsoDate(item.name)),
+            datasets: [
+              {
+                label: 'ШК',
+                data: byDate.map((item) => item.qty),
+                backgroundColor: 'rgba(131, 100, 77, 0.42)',
+                borderColor: '#83644D',
+                borderWidth: 1,
+              },
+              {
+                label: 'Сумма',
+                data: byDate.map((item) => item.sum),
+                type: 'line',
+                borderColor: '#3E2E23',
+                backgroundColor: '#3E2E23',
+                tension: 0.25,
+                yAxisID: 'y1',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+              y: { beginAtZero: true },
+              y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false } },
+            },
+          },
+        }));
+      }
+
+      const statusRows = aggregateDetailRows(items, 'status', 8);
+      const statusCanvas = document.getElementById('lrStatusChart');
+      if (statusCanvas && statusRows.length) {
+        state.detailCharts.push(new Chart(statusCanvas, {
+          type: 'doughnut',
+          data: {
+            labels: statusRows.map((item) => item.name),
+            datasets: [{
+              data: statusRows.map((item) => item.qty),
+              backgroundColor: ['#83644D', '#3E2E23', '#B7791F', '#23824D', '#B42318', '#7B685B', '#D0B8A8', '#8A6E59'],
+              borderWidth: 0,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+          },
+        }));
+      }
+    }
+
+    function openRowsDetail(items, title) {
+      const safeItems = Array.isArray(items) ? items : [];
+      openDetailModal(title || 'Детализация строк', `${formatInt(safeItems.length)} строк`, `
+        ${renderDetailKpis(safeItems)}
+        <div class="detail-table-box">
+          <p class="detail-section-title">Строки</p>
+          ${renderDetailTable(safeItems)}
+        </div>
+      `);
+    }
+
+    function openStatusDetail(statusValue) {
+      const status = String(statusValue || '').trim() || '—';
+      const items = state.pureDetailRows.filter((row) => String(row.status || '—') === status);
+      openRowsDetail(items, `Статус — ${status}`);
+    }
+
+    function openLrDetail(lrValue) {
+      const lr = normalizeToken(lrValue);
+      const items = state.pureDetailRows.filter((row) => normalizeToken(row.lr) === lr);
+      const statusRows = aggregateDetailRows(items, 'status', 10);
+
+      openDetailModal(
+        `LR ${lr}`,
+        `Чистые списания за ${state.pureLossesPreview?.target_date_label || state.localFileStats?.target_date_label || 'дату'}: ${formatInt(items.length)} строк`,
+        `
+          ${renderDetailKpis(items)}
+          <div class="detail-chart-grid">
+            <div class="detail-chart-box">
+              <p class="detail-section-title">Динамика по датам</p>
+              <div style="height:260px;"><canvas id="lrDateChart"></canvas></div>
+            </div>
+            <div class="detail-chart-box">
+              <p class="detail-section-title">Статусы</p>
+              <div style="height:260px;"><canvas id="lrStatusChart"></canvas></div>
+            </div>
+          </div>
+          <div class="upload-detail-box">
+            <p class="detail-section-title">Детализация по статусу</p>
+            <div class="upload-list">
+              ${renderTopList(statusRows, 'Нет статусов', (item) => `${formatInt(item.qty)} ШК / ${formatMoney(item.sum)}`, { clickable: false })}
+            </div>
+          </div>
+          <div class="detail-table-box">
+            <p class="detail-section-title">Детализация LR</p>
+            ${renderDetailTable(items)}
+          </div>
+        `
+      );
+
+      renderDetailCharts(items);
+
+      const statusButtons = $('pureDetailBody').querySelectorAll('.upload-detail-box .upload-list-row');
+      statusButtons.forEach((rowEl) => {
+        rowEl.classList.add('clickable');
+        rowEl.setAttribute('role', 'button');
+        rowEl.addEventListener('click', () => {
+          const status = rowEl.querySelector('.upload-list-name')?.textContent || '';
+          const filtered = items.filter((item) => String(item.status || '—') === status);
+          openRowsDetail(filtered, `LR ${lr} — ${status}`);
+        });
+      });
+    }
+
+    function resetFileState() {
+      state.selectedFileName = '';
+      state.selectedFileRows = [];
+      state.localFileStats = null;
+      state.pureDetailRows = [];
+      state.pureLossesPreview = null;
+      state.filePreviewBusy = false;
+      $('fileName').textContent = 'Файл пока не выбран';
+      $('fileStats').hidden = true;
+      $('fileStats').innerHTML = '';
+      updateFinishButton();
+    }
+
+    function updateFinishButton() {
+      $('finishButton').disabled = state.filePreviewBusy || !state.selectedFileName || !state.pureLossesPreview;
+    }
+
+    function renderUploadStats(stats) {
+      const box = $('fileStats');
+      if (!stats || typeof stats !== 'object') {
+        box.hidden = true;
+        box.innerHTML = '';
+        return;
+      }
+
+      const targetLabel = stats.target_date_label || stats.target_date || '—';
+      const hasTargetRows = Number(stats.target_date_rows || 0) > 0;
+      const hasInsertRows = Number(stats.planned_insert_new || 0) > 0;
+      const isPreviewPending = Boolean(stats.preview_pending);
+      const statsNoteClass = isPreviewPending ? 'warn' : (hasTargetRows ? (hasInsertRows ? 'good' : 'warn') : 'warn');
+      const statsNoteText = isPreviewPending
+        ? 'Локальная статистика готова мгновенно. Сейчас отдельно проверяю базу: дубли, авто-ЛР и строки к добавлению.'
+        : hasTargetRows
+          ? (hasInsertRows
+              ? 'Preview готов: при открытии смены эти строки будут добавлены в pure_losses_rep.'
+              : 'За нужную дату строки найдены, но новых к добавлению нет: вероятно, они уже были загружены или отмечены оприходованными.')
+          : 'За предыдущую дату строк не найдено. Смену можно открыть, но импорт чистых списаний будет пустым.';
+
+      box.innerHTML = `
+        <div class="upload-stats-head">
+          <p class="upload-stats-title">Статистика чистых списаний за ${escapeHtml(targetLabel)}</p>
+          <div class="upload-add-badge">${isPreviewPending ? '+...' : `+${formatInt(stats.planned_insert_new)}`}</div>
+        </div>
+        <div class="upload-stats-grid">
+          <div class="upload-stat">
+            <div class="upload-stat-label">Всего списано</div>
+            <div class="upload-stat-value">${formatInt(stats.total_qty ?? stats.wh_matched_rows)} ШК</div>
+          </div>
+          <div class="upload-stat">
+            <div class="upload-stat-label">Сумма</div>
+            <div class="upload-stat-value">${formatMoney(stats.total_sum ?? stats.candidate_sum_price)}</div>
+          </div>
+          <div class="upload-stat">
+            <div class="upload-stat-label">Автосписания</div>
+            <div class="upload-stat-value">${formatInt(stats.auto_qty ?? stats.auto_lr_matched_rows)} ШК</div>
+          </div>
+          <div class="upload-stat">
+            <div class="upload-stat-label">Дорогостой</div>
+            <div class="upload-stat-value">${formatInt(stats.expensive_qty)} ШК / ${formatMoney(stats.expensive_sum)}</div>
+          </div>
+          <div class="upload-stat">
+            <div class="upload-stat-label">Оприход после списания</div>
+            <div class="upload-stat-value">${formatInt(stats.posted_auto_qty)} ШК</div>
+          </div>
+        </div>
+        <div class="upload-detail-grid">
+          <div class="upload-detail-box">
+            <p class="upload-detail-title">Топ LR по сумме</p>
+            <div class="upload-list">
+              ${renderTopList(stats.top_lr, 'Нет LR за дату', (item) => `${formatInt(item.qty)} ШК / ${formatMoney(item.sum)}`, { clickable: true, dataAttr: 'data-lr-detail' })}
+            </div>
+          </div>
+          <div class="upload-detail-box">
+            <p class="upload-detail-title">Статусы перед списанием</p>
+            <div class="upload-list">
+              ${renderTopList(stats.top_status, 'Нет статусов за дату', (item) => `${formatInt(item.qty)} ШК / ${formatMoney(item.sum)}`, { clickable: true, dataAttr: 'data-status-detail' })}
+            </div>
+          </div>
+        </div>
+        <p class="upload-stats-note ${statsNoteClass}">${escapeHtml(statsNoteText)}</p>
+      `;
+      box.hidden = false;
+      box.querySelectorAll('[data-lr-detail]').forEach((button) => {
+        button.addEventListener('click', () => openLrDetail(button.getAttribute('data-lr-detail') || ''));
+      });
+      box.querySelectorAll('[data-status-detail]').forEach((button) => {
+        button.addEventListener('click', () => openStatusDetail(button.getAttribute('data-status-detail') || ''));
+      });
+    }
+
+    async function readExcelRows(file) {
+      if (typeof XLSX === 'undefined') {
+        throw new Error('Не загрузилась библиотека XLSX. Обнови iframe и попробуй еще раз.');
+      }
+
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames && workbook.SheetNames[0];
+      if (!firstSheetName) return [];
+
+      const firstSheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+      return Array.isArray(rows) ? rows : [];
+    }
+
+    async function previewSelectedFile(file) {
+      resetFileState();
+      if (!file) return;
+
+      state.filePreviewBusy = true;
+      state.selectedFileName = file.name;
+      $('fileName').textContent = file.name + ' • читаю файл...';
+      updateFinishButton();
+
+      try {
+        const rows = await readExcelRows(file);
+        const localStats = buildLocalPureStats(rows);
+        state.localFileStats = localStats;
+        state.selectedFileRows = Array.isArray(localStats.target_upload_rows) ? localStats.target_upload_rows : [];
+        state.pureDetailRows = Array.isArray(localStats.target_detail_rows) ? localStats.target_detail_rows : [];
+        $('fileName').textContent = file.name + ' • статистика готова, проверяю базу...';
+        renderUploadStats(localStats);
+
+        google.script.run
+          .withSuccessHandler((response) => {
+            state.filePreviewBusy = false;
+            if (!response || response.ok === false) {
+              state.pureLossesPreview = null;
+              $('fileName').textContent = file.name + ' • ошибка проверки';
+              showAlert((response && response.error) || 'Не удалось проверить файл');
+              updateFinishButton();
+              return;
+            }
+
+            const localStats = state.localFileStats || {};
+            const remoteStats = response.pure_losses_import || {};
+            state.pureLossesPreview = {
+              ...localStats,
+              ...remoteStats,
+              source_total_rows: localStats.source_total_rows,
+              rows_with_valid_date: localStats.rows_with_valid_date,
+              file_dates_count: localStats.file_dates_count,
+              target_date_rows: localStats.target_date_rows,
+              top_lr: localStats.top_lr,
+              top_status: localStats.top_status,
+              target_upload_rows: localStats.target_upload_rows,
+              target_detail_rows: localStats.target_detail_rows,
+              preview_pending: false,
+            };
+            $('fileName').textContent = file.name + ' • файл готов';
+            renderUploadStats(state.pureLossesPreview);
+            updateFinishButton();
+          })
+          .withFailureHandler((error) => {
+            state.filePreviewBusy = false;
+            state.pureLossesPreview = null;
+            $('fileName').textContent = file.name + ' • ошибка проверки';
+            showAlert(error && error.message ? error.message : String(error));
+            updateFinishButton();
+          })
+          .previewPureLossesUpload({
+            token: state.config.token || '',
+            wh_id: state.config.wh_id || '',
+            shift_date: state.shiftDate,
+            file_name: file.name,
+            pure_losses_rows: state.selectedFileRows,
+          });
+      } catch (error) {
+        state.filePreviewBusy = false;
+        state.pureLossesPreview = null;
+        $('fileName').textContent = file.name + ' • ошибка чтения';
+        showAlert(error && error.message ? error.message : String(error));
+        updateFinishButton();
+      }
+    }
+
+    function employeeLabel(employee) {
+      if (!employee) return 'Не указан';
+      return employee.full_name || employee.employee_id || employee.id;
+    }
+
+    function findEmployee(id) {
+      return state.employees.find((employee) => employee.id === id) || null;
+    }
+
+    function setDateLabel(label) {
+      const safeLabel = label || 'сегодня';
+      $('datePill').textContent = safeLabel;
+      if ($('startButton')) $('startButton').textContent = 'Открыть смену ' + safeLabel;
+    }
+
+    function renderExistingShift(shift, targetPrefix) {
+      const label = shift && shift.shift_label ? shift.shift_label : state.shiftLabel;
+      $(targetPrefix + 'Title').textContent = 'Смена ' + label + ' открыта';
+      $(targetPrefix + 'Incoming').textContent = employeeLabel(shift && shift.incoming_employee);
+      $(targetPrefix + 'Outgoing').textContent = employeeLabel(shift && shift.outgoing_employee);
+    }
+
+    function shiftEventPayload(shift) {
+      return {
+        shift: shift || null,
+        shift_date: state.shiftDate,
+        shift_label: state.shiftLabel,
+        incoming_employee: shift && shift.incoming_employee ? shift.incoming_employee : null,
+        outgoing_employee: shift && shift.outgoing_employee ? shift.outgoing_employee : null,
+      };
+    }
+
+    function notifyParent(type, payload) {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            source: 'opp_shift_opening',
+            type,
+            payload: payload || {},
+          }, '*');
+        }
+      } catch (_error) {}
+    }
+
+    function goHome() {
+      notifyParent('go_home', {});
+    }
+
+    function fillSelect(select, employees) {
+      select.innerHTML = '';
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = 'Выберите сотрудника';
+      select.appendChild(empty);
+
+      employees.forEach((employee) => {
+        const option = document.createElement('option');
+        option.value = employee.id;
+        option.textContent = employeeLabel(employee);
+        select.appendChild(option);
+      });
+    }
+
+    function validatePeopleStep() {
+      $('peopleNextButton').disabled = !$('incomingSelect').value || !$('outgoingSelect').value;
+    }
+
+    function loadState() {
+      showScreen('screenLoading');
+      google.script.run
+        .withSuccessHandler((response) => {
+          if (!response || response.ok === false) {
+            showScreen('screenStart');
+            showAlert((response && response.error) || 'Не удалось загрузить состояние смены');
+            return;
+          }
+
+          state.employees = Array.isArray(response.employees) ? response.employees : [];
+          state.shiftDate = response.shift_date || '';
+          state.shiftLabel = response.shift_label || response.shift_date || '';
+          setDateLabel(state.shiftLabel);
+
+          if (response.shift) {
+            renderExistingShift(response.shift, 'already');
+            showScreen('screenAlreadyOpen');
+            notifyParent('shift_existing', shiftEventPayload(response.shift));
+            return;
+          }
+
+          fillSelect($('incomingSelect'), state.employees);
+          fillSelect($('outgoingSelect'), state.employees);
+          $('peopleBackButton').style.display = 'none';
+          showScreen('screenPeople');
+          validatePeopleStep();
+          if (!state.employees.length) {
+            showAlert('В базе weeek_employees нет активных сотрудников. Сначала добавь сотрудников в Supabase.', 'info');
+          }
+        })
+        .withFailureHandler((error) => {
+          showScreen('screenStart');
+          showAlert(error && error.message ? error.message : String(error));
+        })
+        .getShiftOpeningState({
+          token: state.config.token || '',
+          wh_id: state.config.wh_id || '',
+        });
+    }
+
+    function submitShift() {
+      const incomingId = $('incomingSelect').value;
+      const outgoingId = $('outgoingSelect').value;
+      const fileName = state.selectedFileName;
+      if (!incomingId || !outgoingId || !fileName || !state.pureLossesPreview) return;
+
+      $('finishButton').disabled = true;
+      $('finishButton').textContent = 'Открываю...';
+
+      google.script.run
+        .withSuccessHandler((response) => {
+          $('finishButton').textContent = 'Открыть смену';
+          $('finishButton').disabled = false;
+          if (!response || response.ok === false) {
+            showAlert((response && response.error) || 'Не удалось открыть смену');
+            return;
+          }
+
+          if (response.shift) {
+            renderExistingShift(response.shift, 'done');
+            showScreen('screenDone');
+            notifyParent('shift_opened', shiftEventPayload(response.shift));
+          } else {
+            const fallbackShift = {
+              shift_date: state.shiftDate,
+              shift_label: state.shiftLabel,
+              incoming_employee: findEmployee(incomingId),
+              outgoing_employee: findEmployee(outgoingId),
+            };
+            $('doneTitle').textContent = 'Смена ' + state.shiftLabel + ' открыта';
+            $('doneIncoming').textContent = employeeLabel(fallbackShift.incoming_employee);
+            $('doneOutgoing').textContent = employeeLabel(fallbackShift.outgoing_employee);
+            showScreen('screenDone');
+            notifyParent('shift_opened', shiftEventPayload(fallbackShift));
+          }
+        })
+        .withFailureHandler((error) => {
+          $('finishButton').textContent = 'Открыть смену';
+          $('finishButton').disabled = false;
+          showAlert(error && error.message ? error.message : String(error));
+        })
+        .openWeeekShift({
+          token: state.config.token || '',
+          wh_id: state.config.wh_id || '',
+          shift_date: state.shiftDate,
+          incoming_employee_id: incomingId,
+          outgoing_employee_id: outgoingId,
+          file_uploaded: true,
+          file_name: fileName,
+          pure_losses_rows: state.selectedFileRows,
+          payload: {
+            pure_losses_date_mode: 'previous_shift_date',
+            pure_losses_import_preview: compactStatsForPayload(state.pureLossesPreview),
+          },
+        });
+    }
+
+    $('startButton').addEventListener('click', () => showScreen('screenPeople'));
+    $('peopleBackButton').addEventListener('click', () => showScreen('screenStart'));
+    $('peopleNextButton').addEventListener('click', () => showScreen('screenUpload'));
+    $('uploadBackButton').addEventListener('click', () => showScreen('screenPeople'));
+    $('finishButton').addEventListener('click', submitShift);
+    $('alreadyHomeButton').addEventListener('click', goHome);
+    $('incomingSelect').addEventListener('change', validatePeopleStep);
+    $('outgoingSelect').addEventListener('change', validatePeopleStep);
+    $('fileInput').addEventListener('change', (event) => {
+      const file = event.target.files && event.target.files[0];
+      previewSelectedFile(file);
+    });
+    $('pureDetailClose').addEventListener('click', closeDetailModal);
+    $('pureDetailModal').addEventListener('click', (event) => {
+      if (event.target === $('pureDetailModal')) closeDetailModal();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && $('pureDetailModal').classList.contains('visible')) {
+        closeDetailModal();
+      }
+    });
+
+    loadState();
+  </script>
+</body>
+</html>

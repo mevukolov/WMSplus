@@ -10,6 +10,7 @@
     const CACHE_SCOPE_DASHBOARD_MONTH = "opp_dashboard_month";
     const CACHE_SCOPE_DASHBOARD_ROLLING30 = "opp_dashboard_rolling30";
     const TABLE_PURE = "pure_losses_rep";
+    const TABLE_MISTAKES = "mistakes_rep";
     const PURE_DECISION_COLUMNS = ["opp_deecision", "opp_decision"];
     const PURE_SOLVED_COLUMNS = ["date_solved", "dt_solved"];
     const SUPPORTED_DEADLINE_KEYS = ["SPS_WMI", "SMC", "SMS", "WMI_BZ", "RWP", "24", "ORS", "REPACK"];
@@ -60,6 +61,17 @@
     const calendarModal = document.getElementById("calendar-modal");
     const calendarModalContent = document.getElementById("calendar-modal-content");
     const calendarModalCloseBtn = document.getElementById("calendar-modal-close");
+    const mistakesBtn = document.getElementById("mistakes-btn");
+    const mistakesModal = document.getElementById("mistakes-modal");
+    const mistakesModalCloseBtn = document.getElementById("mistakes-modal-close");
+    const mistakesDateFromEl = document.getElementById("mistakes-date-from");
+    const mistakesDateToEl = document.getElementById("mistakes-date-to");
+    const mistakesWorkplaceEl = document.getElementById("mistakes-workplace");
+    const mistakesApplyBtn = document.getElementById("mistakes-apply-btn");
+    const mistakesModalStatus = document.getElementById("mistakes-modal-status");
+    const mistakesChartCanvas = document.getElementById("mistakes-chart");
+    const mistakesChartEmpty = document.getElementById("mistakes-chart-empty");
+    const mistakesSummaryBody = document.getElementById("mistakes-summary-body");
 
     let currentWhId = "";
     let currentWhName = "";
@@ -97,6 +109,9 @@
     let lastPureResolvedByShift = new Map();
     let lastPureMissingDates = [];
     let currentPureDeadlineConfig = null;
+    let mistakesChart = null;
+    let mistakesFilterInitialized = false;
+    let mistakesLoading = false;
 
     let pageTitleObserver = null;
 
@@ -268,7 +283,7 @@
         const dueSum = toNumber(item?.dueSumPrice);
         const analyzedSum = toNumber(item?.analyzedSumPrice);
         const uploadStatus = normalizeKey(item?.uploadStatus || item?.upload_status);
-        const hasUpload = !uploadStatus || /есть/i.test(uploadStatus);
+        const hasUpload = toNumber(item?.dueTotal ?? item?.due_total_unique_shk) > 0 || !uploadStatus || /есть/i.test(uploadStatus);
 
         const expensivePct = expensiveDue > 0 ? (expensiveAnalyzed / expensiveDue) * 100 : null;
         const sumPct = dueSum > 0 ? (analyzedSum / dueSum) * 100 : null;
@@ -382,9 +397,33 @@
         });
     }
 
+    function ensureMistakesActionButton() {
+        if (!pageTitleActionsEl) return null;
+        let btn = pageTitleActionsEl.querySelector("#mistakes-btn");
+        if (!btn) {
+            btn = document.createElement("button");
+            btn.id = "mistakes-btn";
+            btn.className = "btn btn-rect";
+            btn.type = "button";
+            btn.textContent = "Ошибки исполнителей";
+            pageTitleActionsEl.appendChild(btn);
+        }
+        return btn;
+    }
+
+    function bindMistakesActionButton() {
+        const btn = ensureMistakesActionButton();
+        if (!btn || btn.dataset.boundMistakes === "1") return;
+        btn.dataset.boundMistakes = "1";
+        btn.addEventListener("click", openMistakesModal);
+    }
+
     function renderHeaderShiftButton(targetShift) {
         if (!pageTitleActionsEl) return;
-        pageTitleActionsEl.innerHTML = "";
+        const mistakesActionBtn = ensureMistakesActionButton();
+        bindMistakesActionButton();
+        const existingPrev = pageTitleActionsEl.querySelector("#dashboard-prev-shift-btn");
+        if (existingPrev) existingPrev.remove();
 
         if (!targetShift) return;
 
@@ -405,6 +444,10 @@
             renderSummary();
         });
 
+        if (mistakesActionBtn && mistakesActionBtn.parentElement === pageTitleActionsEl) {
+            pageTitleActionsEl.insertBefore(btn, mistakesActionBtn);
+            return;
+        }
         pageTitleActionsEl.appendChild(btn);
     }
 
@@ -474,14 +517,6 @@
         const key = normalizeDeadlineKey(detailItem?.key);
         const shiftDateIso = parseIsoDate(shiftItem?.date);
 
-        if (key === "WMI_BZ") {
-            if (!shiftDateIso) return "-";
-            if (shiftItem?.shiftType === "night") {
-                return `${formatDateRu(shiftDateIso)} До 13:00`;
-            }
-            const prevDateIso = shiftIsoDate(shiftDateIso, -1) || shiftDateIso;
-            return `${formatDateRu(prevDateIso)} После 13:00`;
-        }
         if (key === "ORS") {
             if (!shiftDateIso) return "-";
             if (shiftItem?.shiftType === "day") {
@@ -1768,7 +1803,7 @@
             if (numericIds.length) {
                 const { data, error } = await window.supabaseClient
                     .from("users")
-                    .select("id, fio, name")
+                    .select("id, fio")
                     .in("id", numericIds);
 
                 if (!error && Array.isArray(data)) {
@@ -1795,7 +1830,7 @@
 
             const idText = normalizeKey(id);
             const userRow = usersById.get(idText) || null;
-            const displayName = normalizeKey(userRow?.fio || userRow?.name || alias || id);
+            const displayName = normalizeKey(userRow?.fio || alias || id);
             const displayWords = normalizeEmployeeWords(displayName);
 
             directory.push({
@@ -2288,7 +2323,7 @@
                             analyzerValues: detailAnalyzerValues,
                             employeeNames: detailEmployeeNames,
                             breakdownStatuses: detailBreakdownStatuses,
-                            uploadStatus: normalizeKey(detail?.upload_status) || (detailDueTotal > 0 ? "Есть" : "Нет выгрузки"),
+                            uploadStatus: detailDueTotal > 0 ? "Есть" : (normalizeKey(detail?.upload_status) || "Нет выгрузки"),
                             sheetNames,
                             remainingExpensiveByDate: detail?.remaining_expensive_by_date ?? detail?.expensive_remaining_by_date ?? detail?.remaining_expensive_due_by_date ?? detail?.expensive_due_by_date ?? null,
                             hasPriceDetail: keyNorm !== "ORS"
@@ -3067,6 +3102,256 @@
         if (calendarModal) calendarModal.classList.add("hidden");
     }
 
+    function closeMistakesModal() {
+        if (mistakesModal) mistakesModal.classList.add("hidden");
+    }
+
+    function setMistakesModalStatus(text, type) {
+        if (!mistakesModalStatus) return;
+        const safeText = normalizeKey(text);
+        mistakesModalStatus.textContent = safeText;
+        mistakesModalStatus.style.display = safeText ? "" : "none";
+        mistakesModalStatus.style.color = type === "error" ? "#b91c1c" : "#64748b";
+    }
+
+    function getDefaultMistakesPeriod() {
+        const to = toIsoDate(moscowNowDate());
+        const from = shiftIsoDate(to, -29) || to;
+        return { from, to };
+    }
+
+    function initMistakesFilters() {
+        if (mistakesFilterInitialized) return;
+        const period = getDefaultMistakesPeriod();
+        if (mistakesDateFromEl && !parseIsoDate(mistakesDateFromEl.value)) {
+            mistakesDateFromEl.value = period.from;
+        }
+        if (mistakesDateToEl && !parseIsoDate(mistakesDateToEl.value)) {
+            mistakesDateToEl.value = period.to;
+        }
+        mistakesFilterInitialized = true;
+    }
+
+    function renderMistakesWorkplaceOptions(values, selectedValue) {
+        if (!mistakesWorkplaceEl) return;
+        const selected = normalizeKey(selectedValue);
+        const safeValues = Array.from(new Set((Array.isArray(values) ? values : []).map((value) => normalizeKey(value)).filter(Boolean)))
+            .sort((a, b) => a.localeCompare(b, "ru"));
+        const finalValues = safeValues.includes(selected) || !selected
+            ? safeValues
+            : [selected, ...safeValues];
+
+        mistakesWorkplaceEl.innerHTML = `<option value="">Все участки</option>${finalValues.map((value) => {
+            const isSelected = value === selected ? " selected" : "";
+            return `<option value="${escapeHtml(value)}"${isSelected}>${escapeHtml(value)}</option>`;
+        }).join("")}`;
+    }
+
+    function buildMistakesEmployeeSeries(rows) {
+        const map = new Map();
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const emp = normalizeKey(row?.emp) || "Без имени";
+            const shk = normalizeKey(row?.shk);
+            if (!shk) return;
+            if (!map.has(emp)) map.set(emp, new Set());
+            map.get(emp).add(shk);
+        });
+
+        return Array.from(map.entries())
+            .map(([emp, shkSet]) => ({
+                emp,
+                uniqueShk: shkSet.size
+            }))
+            .filter((item) => item.uniqueShk > 0)
+            .sort((a, b) => (b.uniqueShk - a.uniqueShk) || a.emp.localeCompare(b.emp, "ru"));
+    }
+
+    function renderMistakesSummaryTable(series) {
+        if (!mistakesSummaryBody) return;
+        const rows = Array.isArray(series) ? series : [];
+        if (!rows.length) {
+            mistakesSummaryBody.innerHTML = `<tr><td colspan="2" class="muted">Нет данных.</td></tr>`;
+            return;
+        }
+        mistakesSummaryBody.innerHTML = rows.map((item) => `
+            <tr>
+                <td>${escapeHtml(item.emp)}</td>
+                <td>${formatNumber(item.uniqueShk)}</td>
+            </tr>
+        `).join("");
+    }
+
+    function renderMistakesChart(series) {
+        if (!mistakesChartCanvas) return;
+        if (mistakesChart) {
+            mistakesChart.destroy();
+            mistakesChart = null;
+        }
+
+        const rows = Array.isArray(series) ? series : [];
+        if (!rows.length || typeof Chart === "undefined") {
+            if (mistakesChartEmpty) mistakesChartEmpty.style.display = "";
+            return;
+        }
+        if (mistakesChartEmpty) mistakesChartEmpty.style.display = "none";
+
+        const labels = rows.map((item) => item.emp);
+        const values = rows.map((item) => item.uniqueShk);
+
+        mistakesChart = new Chart(mistakesChartCanvas, {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: "Уникальные ШК",
+                        data: values,
+                        backgroundColor: "rgba(37, 99, 235, 0.78)",
+                        borderColor: "#1d4ed8",
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: "y",
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `Уникальных ШК: ${formatNumber(ctx.parsed.x)}`
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        },
+                        grid: {
+                            color: "rgba(148, 163, 184, 0.25)"
+                        }
+                    },
+                    y: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    async function fetchMistakesRowsByPeriod(period) {
+        if (!window.supabaseClient) {
+            throw new Error("Supabase клиент не инициализирован.");
+        }
+
+        const fromIso = parseIsoDate(period?.from);
+        const toIso = parseIsoDate(period?.to);
+        const pageSize = 1000;
+        const rows = [];
+
+        for (let from = 0; ; from += pageSize) {
+            const to = from + pageSize - 1;
+            let query = window.supabaseClient
+                .from(TABLE_MISTAKES)
+                .select("emp, emp_workplace, date, shk, date_logged")
+                .order("date", { ascending: false, nullsFirst: false })
+                .order("date_logged", { ascending: false, nullsFirst: false });
+
+            if (fromIso) {
+                query = query.gte("date", fromIso);
+            }
+            if (toIso) {
+                query = query.lte("date", toIso);
+            }
+
+            const { data, error } = await query.range(from, to);
+            if (error) {
+                throw new Error(error.message || String(error));
+            }
+
+            const chunk = Array.isArray(data) ? data : [];
+            if (!chunk.length) break;
+            rows.push(...chunk);
+            if (chunk.length < pageSize) break;
+        }
+
+        return rows;
+    }
+
+    async function refreshMistakesModal() {
+        if (mistakesLoading) return;
+        if (!mistakesModal) return;
+        if (!mistakesDateFromEl || !mistakesDateToEl) return;
+
+        let from = parseIsoDate(mistakesDateFromEl.value);
+        let to = parseIsoDate(mistakesDateToEl.value);
+        if (!from || !to) {
+            const fallback = getDefaultMistakesPeriod();
+            from = from || fallback.from;
+            to = to || fallback.to;
+            mistakesDateFromEl.value = from;
+            mistakesDateToEl.value = to;
+        }
+        if (from > to) {
+            const swap = from;
+            from = to;
+            to = swap;
+            mistakesDateFromEl.value = from;
+            mistakesDateToEl.value = to;
+        }
+
+        const selectedWorkplace = normalizeKey(mistakesWorkplaceEl?.value);
+        mistakesLoading = true;
+        if (mistakesApplyBtn) mistakesApplyBtn.disabled = true;
+        setMistakesModalStatus("Загрузка данных...", "");
+
+        try {
+            const rowsByPeriod = await fetchMistakesRowsByPeriod({ from, to });
+            const workplaceValues = rowsByPeriod.map((row) => normalizeKey(row?.emp_workplace)).filter(Boolean);
+            renderMistakesWorkplaceOptions(workplaceValues, selectedWorkplace);
+
+            const workplaceFilter = normalizeKey(mistakesWorkplaceEl?.value);
+            const filteredRows = workplaceFilter
+                ? rowsByPeriod.filter((row) => normalizeKey(row?.emp_workplace) === workplaceFilter)
+                : rowsByPeriod;
+            const series = buildMistakesEmployeeSeries(filteredRows);
+            const uniqueByPeriod = new Set(filteredRows.map((row) => normalizeKey(row?.shk)).filter(Boolean)).size;
+
+            renderMistakesSummaryTable(series);
+            renderMistakesChart(series);
+            if (!series.length && mistakesChartEmpty) {
+                mistakesChartEmpty.style.display = "";
+            }
+
+            const statusParts = [
+                `Записей: ${formatNumber(filteredRows.length)}`,
+                `Сотрудников: ${formatNumber(series.length)}`,
+                `Уникальных ШК: ${formatNumber(uniqueByPeriod)}`
+            ];
+            setMistakesModalStatus(statusParts.join(" • "), "");
+        } catch (error) {
+            renderMistakesSummaryTable([]);
+            renderMistakesChart([]);
+            const message = error instanceof Error ? error.message : String(error);
+            setMistakesModalStatus(`Ошибка загрузки mistakes_rep: ${message}`, "error");
+        } finally {
+            mistakesLoading = false;
+            if (mistakesApplyBtn) mistakesApplyBtn.disabled = false;
+        }
+    }
+
+    async function openMistakesModal() {
+        if (!mistakesModal) return;
+        initMistakesFilters();
+        mistakesModal.classList.remove("hidden");
+        await refreshMistakesModal();
+    }
+
     function openCalendarModal() {
         if (!calendarModal || !calendarModalContent) return;
 
@@ -3464,7 +3749,35 @@
     }
 
     function bindEvents() {
-        // На dashboard нет полей даты/модалок, обновление происходит при открытии страницы.
+        bindMistakesActionButton();
+
+        if (mistakesBtn && mistakesBtn.dataset.boundMistakes !== "1") {
+            mistakesBtn.dataset.boundMistakes = "1";
+            mistakesBtn.addEventListener("click", openMistakesModal);
+        }
+
+        if (mistakesApplyBtn) {
+            mistakesApplyBtn.addEventListener("click", refreshMistakesModal);
+        }
+
+        if (mistakesModalCloseBtn) {
+            mistakesModalCloseBtn.addEventListener("click", closeMistakesModal);
+        }
+
+        if (mistakesModal) {
+            mistakesModal.addEventListener("click", (event) => {
+                if (event.target === mistakesModal || event.target.classList.contains("modal-backdrop")) {
+                    closeMistakesModal();
+                }
+            });
+        }
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            if (mistakesModal && !mistakesModal.classList.contains("hidden")) {
+                closeMistakesModal();
+            }
+        });
     }
 
     async function init() {

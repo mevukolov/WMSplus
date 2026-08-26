@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WMS+ Achievements Test</title>
+  <style>
+    :root {
+      --ink: #221d33;
+      --muted: #66718b;
+      --paper: #fffaf3;
+      --panel: rgba(255, 255, 255, .78);
+      --line: rgba(82, 65, 127, .16);
+      --violet: #623cea;
+      --violet-2: #9f7aea;
+      --shadow: 0 30px 90px rgba(40, 28, 72, .20);
+      --shadow-soft: 0 16px 44px rgba(40, 28, 72, .14);
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      color-scheme: light;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Avenir Next", "Trebuchet MS", Verdana, sans-serif;
+      background:
+        radial-gradient(circle at 12% 4%, rgba(98, 60, 234, .23), transparent 28vw),
+        radial-gradient(circle at 82% 10%, rgba(255, 183, 77, .16), transparent 26vw),
+        linear-gradient(135deg, #f7f1ff 0%, #fff9ef 48%, #edf7ff 100%);
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(98,60,234,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(98,60,234,.045) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(circle at 50% 30%, black, transparent 75%);
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 60px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.7);
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(120deg, rgba(255,255,255,.92), rgba(255,255,255,.58)),
+        radial-gradient(circle at 88% 12%, rgba(98,60,234,.18), transparent 34%);
+      box-shadow: var(--shadow);
+      padding: clamp(24px, 5vw, 48px);
+      animation: pageRise .72s cubic-bezier(.2,.9,.2,1) both;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 280px;
+      height: 280px;
+      right: -88px;
+      top: -96px;
+      border-radius: 999px;
+      background: rgba(98,60,234,.13);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.7);
+    }
+
+    .kicker {
+      margin: 0 0 8px;
+      color: var(--violet);
+      font-size: 13px;
+      font-weight: 1000;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 780px;
+      font-size: clamp(34px, 6vw, 72px);
+      line-height: .95;
+      letter-spacing: -.055em;
+    }
+
+    .hero p {
+      max-width: 760px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: clamp(15px, 2vw, 18px);
+      line-height: 1.5;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .panel {
+      border: 1px solid rgba(255,255,255,.7);
+      border-radius: var(--radius-xl);
+      background: var(--panel);
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(20px);
+      padding: 22px;
+      animation: pageRise .72s cubic-bezier(.2,.9,.2,1) both;
+    }
+
+    .panel:nth-child(2) { animation-delay: .08s; }
+
+    .panel h2 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      letter-spacing: -.035em;
+    }
+
+    .panel-note {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .rarity-btn,
+    .utility-btn {
+      position: relative;
+      overflow: hidden;
+      min-height: 74px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255,255,255,.78);
+      color: var(--ink);
+      text-align: left;
+      padding: 14px 16px;
+      font: inherit;
+      font-weight: 1000;
+      cursor: pointer;
+      box-shadow: 0 10px 26px rgba(40, 28, 72, .08);
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+
+    .rarity-btn::after,
+    .utility-btn::after {
+      content: "";
+      position: absolute;
+      inset: -80% auto auto -30%;
+      width: 88px;
+      height: 220%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.75), transparent);
+      transform: rotate(24deg) translateX(-120px);
+      transition: transform .45s ease;
+    }
+
+    .rarity-btn:hover,
+    .utility-btn:hover {
+      transform: translateY(-3px) scale(1.012);
+      border-color: color-mix(in srgb, var(--accent, var(--violet)) 42%, white);
+      box-shadow: 0 18px 38px rgba(40, 28, 72, .14);
+    }
+
+    .rarity-btn:hover::after,
+    .utility-btn:hover::after { transform: rotate(24deg) translateX(360px); }
+
+    .rarity-btn:active,
+    .utility-btn:active { transform: translateY(1px) scale(.99); }
+
+    .rarity-btn span,
+    .utility-btn span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    .common { --accent: #94a3b8; }
+    .uncommon { --accent: #22c55e; }
+    .rare { --accent: #2f80ed; }
+    .epic { --accent: #a855f7; }
+    .legendary { --accent: #f97316; }
+
+    .utility-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .utility-btn {
+      --accent: var(--violet);
+      min-height: 58px;
+      background: linear-gradient(135deg, rgba(98,60,234,.98), rgba(159,122,234,.92));
+      color: white;
+      text-align: center;
+    }
+
+    .utility-btn span { color: rgba(255,255,255,.76); }
+
+    .fake-work {
+      display: grid;
+      gap: 14px;
+    }
+
+    .work-card {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255,255,255,.7);
+      padding: 16px;
+    }
+
+    .work-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      font-weight: 1000;
+    }
+
+    .progress {
+      height: 14px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #eee8ff;
+      box-shadow: inset 0 0 0 1px rgba(98,60,234,.12);
+    }
+
+    .progress span {
+      display: block;
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #623cea, #2f80ed, #22c55e);
+      transition: width .34s ease;
+    }
+
+    .modal-demo {
+      position: fixed;
+      inset: 0;
+      z-index: 5000;
+      display: none;
+      place-items: center;
+      padding: 24px;
+      background: rgba(24, 18, 45, .48);
+      backdrop-filter: blur(10px);
+    }
+
+    .modal-demo.active { display: grid; }
+
+    .modal-card {
+      width: min(620px, 100%);
+      border: 1px solid rgba(255,255,255,.65);
+      border-radius: 34px;
+      background: rgba(255,255,255,.94);
+      box-shadow: var(--shadow);
+      padding: 26px;
+      animation: modalPop .35s cubic-bezier(.2,.9,.2,1) both;
+    }
+
+    .modal-card h3 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      letter-spacing: -.04em;
+    }
+
+    .modal-card p { color: var(--muted); line-height: 1.5; }
+
+    .modal-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .small-btn {
+      border: 0;
+      border-radius: 16px;
+      background: #eee8ff;
+      color: var(--violet);
+      padding: 12px 14px;
+      font: inherit;
+      font-weight: 1000;
+      cursor: pointer;
+    }
+
+    .small-btn.primary { background: var(--violet); color: #fff; }
+
+    #achievementLayer {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483000;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: max(18px, env(safe-area-inset-top)) 16px 0;
+      overflow: hidden;
+    }
+
+    .achievement-toast {
+      --accent: #94a3b8;
+      --accent-soft: rgba(148, 163, 184, .18);
+      position: relative;
+      width: min(560px, calc(100vw - 28px));
+      min-height: 118px;
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr);
+      gap: 14px;
+      align-items: center;
+      overflow: hidden;
+      border-radius: 30px;
+      border: 1px solid rgba(255,255,255,.72);
+      background:
+        radial-gradient(circle at 16% 16%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 34%),
+        linear-gradient(135deg, rgba(255,255,255,.95), rgba(255,255,255,.78));
+      box-shadow:
+        0 24px 80px color-mix(in srgb, var(--accent) 24%, rgba(30, 18, 60, .2)),
+        inset 0 0 0 1px rgba(255,255,255,.66);
+      padding: 18px;
+      transform-origin: top center;
+      animation:
+        achEnter .72s cubic-bezier(.12,1.18,.22,1) both,
+        achFloat 3.8s ease-in-out .7s infinite,
+        achExit .48s ease 5.55s forwards;
+    }
+
+    .achievement-toast::before {
+      content: "";
+      position: absolute;
+      inset: -2px;
+      border-radius: inherit;
+      padding: 2px;
+      background: conic-gradient(from var(--spin, 0deg), transparent, var(--accent), transparent, color-mix(in srgb, var(--accent) 50%, white), transparent);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: .74;
+      animation: borderSpin 2.4s linear infinite;
+    }
+
+    .achievement-toast::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(115deg, transparent 0 34%, rgba(255,255,255,.86) 47%, transparent 60% 100%);
+      transform: translateX(-120%);
+      animation: achSheen 1.1s ease .2s both;
+    }
+
+    .ach-icon {
+      width: 76px;
+      height: 76px;
+      display: grid;
+      place-items: center;
+      position: relative;
+      z-index: 2;
+      border-radius: 24px;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, white);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, white);
+      font-size: 34px;
+      animation: iconKick .82s cubic-bezier(.18,1.4,.22,1) both;
+    }
+
+    .ach-icon::before,
+    .ach-icon::after {
+      content: "";
+      position: absolute;
+      inset: -8px;
+      border-radius: 28px;
+      border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent);
+      animation: iconRing 1.6s ease-out infinite;
+    }
+
+    .ach-icon::after { animation-delay: .5s; }
+
+    .ach-body {
+      position: relative;
+      z-index: 2;
+      min-width: 0;
+    }
+
+    .ach-rarity {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 5px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 14%, white);
+      color: color-mix(in srgb, var(--accent) 76%, #221d33);
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 1000;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .ach-title {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(20px, 4vw, 28px);
+      line-height: 1.02;
+      letter-spacing: -.045em;
+      overflow-wrap: anywhere;
+    }
+
+    .ach-text {
+      margin: 7px 0 0;
+      color: #5c667f;
+      font-size: 14px;
+      line-height: 1.38;
+    }
+
+    .particle {
+      position: absolute;
+      z-index: 1;
+      left: 50%;
+      top: 50%;
+      width: var(--size, 8px);
+      height: var(--size, 8px);
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 80%, transparent);
+      opacity: 0;
+      transform: translate(-50%, -50%);
+      animation: particleBurst 1.25s cubic-bezier(.16,.88,.23,1) var(--delay, 0s) forwards;
+    }
+
+    .achievement-toast.rarity-common {
+      --accent: #94a3b8;
+      --accent-soft: rgba(148, 163, 184, .18);
+    }
+
+    .achievement-toast.rarity-common .ach-icon {
+      animation-name: iconKick, commonPulse;
+      animation-duration: .82s, 2.4s;
+      animation-delay: 0s, .85s;
+      animation-iteration-count: 1, infinite;
+    }
+
+    .achievement-toast.rarity-uncommon {
+      --accent: #20b95d;
+      --accent-soft: rgba(34,197,94,.18);
+      animation-name: achEnter, uncommonBloom, achFloat, achExit;
+      animation-duration: .72s, 1.2s, 3.8s, .48s;
+      animation-delay: 0s, .18s, .7s, 5.55s;
+      animation-fill-mode: both, both, none, forwards;
+      animation-timing-function: cubic-bezier(.12,1.18,.22,1), ease-out, ease-in-out, ease;
+      animation-iteration-count: 1, 1, infinite, 1;
+    }
+
+    .achievement-toast.rarity-rare {
+      --accent: #2f80ed;
+      --accent-soft: rgba(47,128,237,.18);
+    }
+
+    .achievement-toast.rarity-rare .ach-icon {
+      clip-path: polygon(50% 0%, 94% 25%, 94% 75%, 50% 100%, 6% 75%, 6% 25%);
+    }
+
+    .achievement-toast.rarity-rare .rare-wave {
+      position: absolute;
+      inset: -30% -20%;
+      z-index: 1;
+      background: repeating-linear-gradient(90deg, transparent 0 14px, rgba(47,128,237,.12) 14px 16px);
+      transform: rotate(-12deg) translateX(-40%);
+      animation: rareScan 1.5s ease-out .12s both;
+    }
+
+    .achievement-toast.rarity-epic {
+      --accent: #a855f7;
+      --accent-soft: rgba(168,85,247,.2);
+      background:
+        radial-gradient(circle at 18% 18%, rgba(168,85,247,.28), transparent 32%),
+        radial-gradient(circle at 88% 84%, rgba(98,60,234,.22), transparent 34%),
+        linear-gradient(135deg, rgba(255,255,255,.95), rgba(251,245,255,.82));
+    }
+
+    .achievement-toast.rarity-epic .ach-icon {
+      animation: iconKick .82s cubic-bezier(.18,1.4,.22,1) both, epicWobble 2.4s ease-in-out .8s infinite;
+    }
+
+    .achievement-toast.rarity-epic .epic-orbit {
+      position: absolute;
+      inset: -42px;
+      z-index: 0;
+      border-radius: 999px;
+      background: conic-gradient(from 0deg, transparent, rgba(168,85,247,.16), transparent, rgba(98,60,234,.18), transparent);
+      filter: blur(3px);
+      animation: epicOrbit 2.8s linear infinite;
+    }
+
+    .achievement-toast.rarity-legendary {
+      --accent: #f97316;
+      --accent-soft: rgba(249,115,22,.22);
+      background:
+        radial-gradient(circle at 12% 12%, rgba(255, 226, 122, .45), transparent 26%),
+        radial-gradient(circle at 88% 88%, rgba(249,115,22,.24), transparent 34%),
+        linear-gradient(135deg, rgba(255,255,255,.96), rgba(255,247,237,.86));
+      animation-name: legendaryDrop, legendaryHeat, achFloat, achExit;
+      animation-duration: .85s, 2.7s, 3.5s, .48s;
+      animation-delay: 0s, .5s, .75s, 5.95s;
+      animation-fill-mode: both, both, none, forwards;
+      animation-timing-function: cubic-bezier(.08,1.28,.18,1), ease-in-out, ease-in-out, ease;
+      animation-iteration-count: 1, infinite, infinite, 1;
+    }
+
+    .achievement-toast.rarity-legendary .ach-icon {
+      color: #fff;
+      background: radial-gradient(circle at 35% 20%, #ffe27a, #f97316 62%, #9a3412 100%);
+      box-shadow: 0 0 44px rgba(249,115,22,.52), inset 0 0 0 1px rgba(255,255,255,.55);
+      animation: legendaryIcon .95s cubic-bezier(.12,1.45,.2,1) both, legendaryGlow 1.6s ease-in-out .9s infinite;
+    }
+
+    .achievement-toast.rarity-legendary .legendary-flare {
+      position: absolute;
+      z-index: 0;
+      width: 360px;
+      height: 360px;
+      right: -140px;
+      top: -150px;
+      border-radius: 999px;
+      background:
+        conic-gradient(from 0deg, transparent, rgba(255,226,122,.38), transparent, rgba(249,115,22,.32), transparent);
+      animation: legendaryFlare 1.8s linear infinite;
+      filter: blur(1px);
+    }
+
+    @property --spin {
+      syntax: "<angle>";
+      inherits: false;
+      initial-value: 0deg;
+    }
+
+    @keyframes pageRise {
+      from { opacity: 0; transform: translateY(18px) scale(.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes modalPop {
+      from { opacity: 0; transform: translateY(18px) scale(.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes achEnter {
+      0% { opacity: 0; transform: translateY(-34px) scale(.82) rotateX(18deg); filter: blur(8px); }
+      62% { opacity: 1; transform: translateY(8px) scale(1.035) rotateX(0deg); filter: blur(0); }
+      100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+    }
+
+    @keyframes legendaryDrop {
+      0% { opacity: 0; transform: translateY(-70px) scale(.72) rotate(-2deg); filter: blur(10px) saturate(1.7); }
+      55% { opacity: 1; transform: translateY(10px) scale(1.06) rotate(1deg); filter: blur(0) saturate(1.3); }
+      74% { transform: translateY(-5px) scale(1.01) rotate(-.5deg); }
+      100% { transform: translateY(0) scale(1) rotate(0deg); }
+    }
+
+    @keyframes achExit {
+      to { opacity: 0; transform: translateY(-22px) scale(.96); filter: blur(5px); }
+    }
+
+    @keyframes achFloat {
+      0%, 100% { translate: 0 0; }
+      50% { translate: 0 5px; }
+    }
+
+    @keyframes achSheen {
+      from { transform: translateX(-130%); }
+      to { transform: translateX(130%); }
+    }
+
+    @keyframes borderSpin {
+      to { --spin: 360deg; }
+    }
+
+    @keyframes iconKick {
+      0% { transform: scale(.55) rotate(-18deg); opacity: 0; }
+      66% { transform: scale(1.14) rotate(5deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+
+    @keyframes iconRing {
+      0% { opacity: .78; transform: scale(.72); }
+      100% { opacity: 0; transform: scale(1.28); }
+    }
+
+    @keyframes commonPulse {
+      0%, 100% { box-shadow: inset 0 0 0 1px rgba(148,163,184,.24), 0 0 0 rgba(148,163,184,0); }
+      50% { box-shadow: inset 0 0 0 1px rgba(148,163,184,.24), 0 0 30px rgba(148,163,184,.24); }
+    }
+
+    @keyframes uncommonBloom {
+      0% { box-shadow: 0 24px 80px rgba(34,197,94,.12), inset 0 0 0 1px rgba(255,255,255,.66); }
+      55% { box-shadow: 0 30px 92px rgba(34,197,94,.32), inset 0 0 0 1px rgba(255,255,255,.66); }
+      100% { box-shadow: 0 24px 80px rgba(34,197,94,.22), inset 0 0 0 1px rgba(255,255,255,.66); }
+    }
+
+    @keyframes rareScan {
+      from { transform: rotate(-12deg) translateX(-55%); opacity: 0; }
+      20% { opacity: 1; }
+      to { transform: rotate(-12deg) translateX(55%); opacity: 0; }
+    }
+
+    @keyframes epicWobble {
+      0%, 100% { transform: rotate(0deg) scale(1); }
+      33% { transform: rotate(-4deg) scale(1.04); }
+      66% { transform: rotate(4deg) scale(1.02); }
+    }
+
+    @keyframes epicOrbit {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes legendaryIcon {
+      0% { transform: scale(.42) rotate(-34deg); opacity: 0; }
+      58% { transform: scale(1.22) rotate(9deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+
+    @keyframes legendaryGlow {
+      0%, 100% { filter: brightness(1); }
+      50% { filter: brightness(1.24) saturate(1.25); }
+    }
+
+    @keyframes legendaryHeat {
+      0%, 100% { filter: saturate(1); }
+      50% { filter: saturate(1.18); }
+    }
+
+    @keyframes legendaryFlare {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes particleBurst {
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(.4); }
+      15% { opacity: 1; }
+      100% {
+        opacity: 0;
+        transform:
+          translate(calc(-50% + var(--x)), calc(-50% + var(--y)))
+          rotate(var(--r, 180deg))
+          scale(.8);
+      }
+    }
+
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+      .button-grid { grid-template-columns: 1fr; }
+      .utility-row { grid-template-columns: 1fr; }
+      .achievement-toast { grid-template-columns: 62px minmax(0, 1fr); min-height: 106px; border-radius: 24px; padding: 14px; }
+      .ach-icon { width: 62px; height: 62px; border-radius: 20px; font-size: 28px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="achievementLayer" aria-live="polite" aria-atomic="true"></div>
+
+  <main class="page">
+    <section class="hero">
+      <p class="kicker">WMS+ sandbox</p>
+      <h1>Тест ачивок поверх всего интерфейса</h1>
+      <p>Эта страница не подключена к основному билду. Здесь можно погонять пять редкостей, проверить появление поверх модалок и посмотреть, как ачивки всплывают во время выполнения процесса.</p>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Проверка редкостей</h2>
+        <p class="panel-note">Каждая кнопка вызывает свою анимацию. Позже сюда можно подставить реальные названия и условия получения ачивок.</p>
+        <div class="button-grid">
+          <button class="rarity-btn common" type="button" data-achievement="common">⚪ Обычная<span>Спокойное появление, мягкое кольцо и серебристый отблеск.</span></button>
+          <button class="rarity-btn uncommon" type="button" data-achievement="uncommon">🟢 Необычная<span>Зеленый bloom, легкие частицы, ощущение “пошло дело”.</span></button>
+          <button class="rarity-btn rare" type="button" data-achievement="rare">🔵 Редкая<span>Синий скан, стеклянная форма и более резкий вход.</span></button>
+          <button class="rarity-btn epic" type="button" data-achievement="epic">🟣 Эпическая<span>Фиолетовая орбита, портал и чуть более драматичный масштаб.</span></button>
+          <button class="rarity-btn legendary" type="button" data-achievement="legendary">🟠 Легендарная<span>Оранжевый flare, конфетти, усиленный drop и свечение.</span></button>
+        </div>
+        <div class="utility-row">
+          <button id="runSeries" class="utility-btn" type="button">Запустить серию<span>Все пять ачивок с паузами</span></button>
+          <button id="openModal" class="utility-btn" type="button">Открыть модалку<span>Проверка слоя поверх модалок</span></button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Во время выполнения</h2>
+        <p class="panel-note">Сценарий имитирует процесс: прогресс идет сам, ачивки выскакивают на контрольных точках.</p>
+        <div class="fake-work">
+          <div class="work-card">
+            <div class="work-title"><span>Обработка выгрузки</span><span id="progressLabel">0%</span></div>
+            <div class="progress"><span id="progressBar"></span></div>
+          </div>
+          <button id="simulateWork" class="utility-btn" type="button">Симулировать выполнение<span>Ачивки всплывают по ходу работы</span></button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="demoModal" class="modal-demo" role="dialog" aria-modal="true" aria-labelledby="demoModalTitle">
+    <div class="modal-card">
+      <h3 id="demoModalTitle">Тестовая модалка</h3>
+      <p>Это искусственная модалка с высоким слоем. Ачивки должны появляться выше нее, иначе в бою они потеряются под карточками задач.</p>
+      <div class="modal-actions">
+        <button class="small-btn primary" type="button" data-modal-achievement="epic">Показать эпическую</button>
+        <button class="small-btn primary" type="button" data-modal-achievement="legendary">Показать легендарную</button>
+        <button id="closeModal" class="small-btn" type="button">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const ACHIEVEMENTS = {
+      common: {
+        rarity: "Обычная",
+        emoji: "⚪",
+        title: "Стабильная рука",
+        text: "Задача закрыта без лишней драмы. Иногда это уже подвиг.",
+        icon: "✓",
+        particles: 10,
+      },
+      uncommon: {
+        rarity: "Необычная",
+        emoji: "🟢",
+        title: "Разбор пошел",
+        text: "Темп хороший. Таблица вздохнула, а очередь стала чуть короче.",
+        icon: "↗",
+        particles: 16,
+      },
+      rare: {
+        rarity: "Редкая",
+        emoji: "🔵",
+        title: "Чистый выстрел",
+        text: "Попадание в проблему без рикошета по соседним процессам.",
+        icon: "◆",
+        particles: 20,
+      },
+      epic: {
+        rarity: "Эпическая",
+        emoji: "🟣",
+        title: "Оператор хаоса",
+        text: "Ты не просто разобрал задачу. Ты заставил бардак признать поражение.",
+        icon: "✦",
+        particles: 28,
+      },
+      legendary: {
+        rarity: "Легендарная",
+        emoji: "🟠",
+        title: "Финальный босс смены",
+        text: "Если бы у склада был саундтрек, сейчас бы включились барабаны.",
+        icon: "★",
+        particles: 42,
+      },
+    };
+
+    const layer = document.getElementById("achievementLayer");
+    const progressBar = document.getElementById("progressBar");
+    const progressLabel = document.getElementById("progressLabel");
+    const modal = document.getElementById("demoModal");
+
+    function particleMarkup(count) {
+      return Array.from({ length: count }, (_, index) => {
+        const angle = (Math.PI * 2 * index) / count;
+        const radius = 80 + Math.random() * 150;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius * .62;
+        const size = 4 + Math.random() * 8;
+        const delay = Math.random() * .22;
+        const rotation = Math.round(Math.random() * 520 - 260);
+        return "<i class='particle' style='--x:" + x.toFixed(1) + "px;--y:" + y.toFixed(1) + "px;--size:" + size.toFixed(1) + "px;--delay:" + delay.toFixed(2) + "s;--r:" + rotation + "deg'></i>";
+      }).join("");
+    }
+
+    function extraMarkup(type) {
+      if (type === "rare") return "<i class='rare-wave'></i>";
+      if (type === "epic") return "<i class='epic-orbit'></i>";
+      if (type === "legendary") return "<i class='legendary-flare'></i>";
+      return "";
+    }
+
+    function spawnAchievement(type, overrides = {}) {
+      const data = { ...ACHIEVEMENTS[type], ...overrides };
+      if (!data || !layer) return;
+
+      const toast = document.createElement("article");
+      toast.className = "achievement-toast rarity-" + type;
+      toast.setAttribute("role", "status");
+      toast.innerHTML = extraMarkup(type)
+        + particleMarkup(data.particles || 12)
+        + "<div class='ach-icon'>" + data.icon + "</div>"
+        + "<div class='ach-body'>"
+        + "<div class='ach-rarity'>" + data.emoji + " " + data.rarity + "</div>"
+        + "<h2 class='ach-title'>" + escapeHtml(data.title) + "</h2>"
+        + "<p class='ach-text'>" + escapeHtml(data.text) + "</p>"
+        + "</div>";
+
+      layer.prepend(toast);
+      window.setTimeout(() => toast.remove(), type === "legendary" ? 6700 : 6200);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
+    async function runSeries() {
+      for (const type of ["common", "uncommon", "rare", "epic", "legendary"]) {
+        spawnAchievement(type);
+        await sleep(type === "legendary" ? 900 : 760);
+      }
+    }
+
+    async function simulateWork() {
+      const checkpoints = new Map([
+        [18, ["common", { title: "Процесс стартовал", text: "Файл не убежал, браузер пока держится." }]],
+        [42, ["uncommon", { title: "Первый проход", text: "Очередь стала меньше. Уже приятно, но расслабляться рано." }]],
+        [68, ["rare", { title: "Данные сходятся", text: "Подозрительно хорошо. Но мы не жалуемся." }]],
+        [88, ["epic", { title: "Почти финиш", text: "Еще немного, и можно будет сделать вид, что так и планировалось." }]],
+        [100, ["legendary", { title: "Выгрузка добита", text: "Система моргнула первой. Засчитываем победу." }]],
+      ]);
+
+      progressBar.style.width = "0%";
+      progressLabel.textContent = "0%";
+      const fired = new Set();
+
+      for (let value = 1; value <= 100; value += 1) {
+        progressBar.style.width = value + "%";
+        progressLabel.textContent = value + "%";
+        if (checkpoints.has(value) && !fired.has(value)) {
+          fired.add(value);
+          const [type, overrides] = checkpoints.get(value);
+          spawnAchievement(type, overrides);
+        }
+        await sleep(value > 92 ? 28 : 18);
+      }
+    }
+
+    document.querySelectorAll("[data-achievement]").forEach((button) => {
+      button.addEventListener("click", () => spawnAchievement(button.dataset.achievement));
+    });
+
+    document.querySelectorAll("[data-modal-achievement]").forEach((button) => {
+      button.addEventListener("click", () => spawnAchievement(button.dataset.modalAchievement));
+    });
+
+    document.getElementById("runSeries").addEventListener("click", runSeries);
+    document.getElementById("simulateWork").addEventListener("click", simulateWork);
+    document.getElementById("openModal").addEventListener("click", () => modal.classList.add("active"));
+    document.getElementById("closeModal").addEventListener("click", () => modal.classList.remove("active"));
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) modal.classList.remove("active");
+    });
+  </script>
+</body>
+</html>

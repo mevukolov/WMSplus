@@ -4197,7 +4197,7 @@
 
         const { data, error } = await supabaseClient
             .from("users")
-            .select("id, fio, name")
+            .select("id, fio")
             .in("id", numericIds);
 
         if (error || !Array.isArray(data)) return;
@@ -4205,7 +4205,7 @@
         data.forEach((row) => {
             const id = normalizeToken(row?.id);
             if (!id) return;
-            const displayName = toText(row?.fio || row?.name);
+            const displayName = toText(row?.fio);
             if (!displayName) return;
             employeeMap.set(id, displayName);
         });

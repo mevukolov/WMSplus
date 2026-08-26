@@ -1,0 +1,868 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --panel: #ffffff;
+      --ink: #132238;
+      --muted: #64748b;
+      --line: rgba(15, 23, 42, 0.1);
+      --good: #16a34a;
+      --warn: #d97706;
+      --bad: #dc2626;
+      --accent: #0f766e;
+      --accent-bg: rgba(20, 184, 166, 0.12);
+      --shadow: 0 12px 34px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: radial-gradient(circle at 10% 0%, rgba(20, 184, 166, 0.16), transparent 28%),
+                  linear-gradient(135deg, #eef6f5 0%, #f7f8fb 52%, #eef2ff 100%);
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+
+    body { padding: 12px; }
+
+    .opp-frame {
+      width: 100%;
+      max-width: 1240px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 230px;
+      gap: 12px;
+      align-items: stretch;
+      margin-bottom: 12px;
+    }
+
+    .hero-main,
+    .side-card,
+    .status-card {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: var(--shadow);
+      border-radius: 18px;
+    }
+
+    .hero-main {
+      padding: 14px;
+      min-width: 0;
+    }
+
+    .eyebrow {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 4vw, 40px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    .freshness {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: var(--accent-bg);
+      color: #115e59;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .freshness-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.12);
+    }
+
+    .meta-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .meta-pill {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 999px;
+      background: #f8fafc;
+      padding: 5px 9px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(112px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .summary-card {
+      min-height: 66px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #f8fafc;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .summary-card.good,
+    .status-card.good {
+      border-color: rgba(22, 163, 74, 0.38);
+      background: linear-gradient(180deg, rgba(22, 163, 74, 0.14), rgba(255, 255, 255, 0.92));
+    }
+
+    .summary-card.warn,
+    .status-card.warn {
+      border-color: rgba(245, 158, 11, 0.42);
+      background: linear-gradient(180deg, rgba(245, 158, 11, 0.18), rgba(255, 255, 255, 0.92));
+    }
+
+    .summary-card.bad,
+    .status-card.bad {
+      border-color: rgba(239, 68, 68, 0.42);
+      background: linear-gradient(180deg, rgba(239, 68, 68, 0.16), rgba(255, 255, 255, 0.92));
+    }
+
+    .summary-label {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.15;
+    }
+
+    .summary-value {
+      margin-top: 2px;
+      font-size: 22px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+
+    .side-card { padding: 12px; }
+
+    .side-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .lag-main {
+      margin: 3px 0 8px;
+      font-size: 34px;
+      font-weight: 950;
+      letter-spacing: -0.05em;
+    }
+
+    .lag-list { display: grid; gap: 4px; }
+
+    .lag-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      line-height: 1.15;
+    }
+
+    .lag-name {
+      min-width: 0;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .lag-value { font-weight: 800; }
+
+    .good { color: var(--good); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+
+    .section-title {
+      margin: 14px 2px 8px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+
+    .section-note {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .status-card {
+      position: relative;
+      min-height: 138px;
+      padding: 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      overflow: hidden;
+    }
+
+    .status-top {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      gap: 7px;
+      align-items: center;
+    }
+
+    .status-mark {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 900;
+      color: #fff;
+    }
+
+    .status-mark.good { background: var(--good); }
+    .status-mark.warn { background: var(--warn); }
+    .status-mark.bad { background: var(--bad); }
+
+    .status-name {
+      min-width: 0;
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1.05;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+      border-top: 1px solid rgba(15, 23, 42, 0.06);
+      padding-top: 5px;
+    }
+
+    .metric-value {
+      color: var(--ink);
+      font-weight: 850;
+      text-align: right;
+    }
+
+    .employee-line {
+      margin-top: auto;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .quality-list {
+      margin-top: 12px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .quality-item {
+      border: 1px solid rgba(239, 68, 68, 0.22);
+      background: rgba(239, 68, 68, 0.09);
+      color: #7f1d1d;
+      border-radius: 12px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .state {
+      min-height: 280px;
+      border: 1px dashed rgba(15, 23, 42, 0.18);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .error-state {
+      color: #991b1b;
+      background: rgba(254, 242, 242, 0.84);
+      border-color: rgba(239, 68, 68, 0.28);
+    }
+
+    @media (max-width: 980px) {
+      body { padding: 8px; }
+      .hero { grid-template-columns: 1fr; }
+      .summary-grid,
+      .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 560px) {
+      .summary-grid,
+      .status-grid { grid-template-columns: 1fr; }
+      .freshness { width: 100%; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <main class="opp-frame" id="opp-frame">
+    <div class="state">Загружаю прогресс ОПП...</div>
+  </main>
+
+  <script>
+    const INITIAL_CONFIG = <?!= JSON.stringify(initialConfig) ?>;
+
+    (function () {
+      "use strict";
+
+      const DEFAULT_OPTIONS = {
+        min_total_percent: 70,
+        warn_total_percent: 85,
+        min_sum_percent: 70,
+        warn_sum_percent: 85,
+        min_expensive_percent: 70,
+        warn_expensive_percent: 95,
+        low_quality_threshold_percent: 70,
+        include_warnings: true,
+        lag_missing_upload_penalty_percent: 10
+      };
+      const STATUS_LABELS = {
+        SPS_WMI: "SPS + WMI",
+        SMC: "SMC",
+        SMS: "SMS",
+        WMI_BZ: "WMI Без заказа",
+        RWP: "RWP",
+        "24": "24",
+        ORS: "ORS",
+        REPACK: "Упаковка"
+      };
+      const STATUS_ORDER = ["24", "REPACK", "RWP", "SMC", "SMS", "SPS_WMI", "WMI_BZ", "ORS"];
+      const MAIN_EMPLOYEE_KEYS = new Set(["REPACK", "SPS_WMI", "WMI_BZ", "SMC", "SMS", "RWP"]);
+      const MSK_TIME_ZONE = "Europe/Moscow";
+      const root = document.getElementById("opp-frame");
+      let refreshTimer = null;
+
+      function text(value) { return String(value ?? "").trim(); }
+      function escapeHtml(value) {
+        return text(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+      function parseMaybeJson(value) {
+        if (typeof value !== "string") return value;
+        const raw = value.trim();
+        if (!raw || (!raw.startsWith("{") && !raw.startsWith("["))) return value;
+        try { return JSON.parse(raw); } catch (_) { return value; }
+      }
+      function num(value) {
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        const raw = text(value).replace(/\s+/g, "").replace(",", ".");
+        if (!raw) return 0;
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      function get(obj, keys) {
+        if (!obj || typeof obj !== "object") return undefined;
+        for (const key of keys) {
+          if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+        }
+        return undefined;
+      }
+      function getText(obj, keys) { return text(get(obj, keys)); }
+      function getNum(obj, keys) { return num(get(obj, keys)); }
+      function pct(part, total) {
+        const totalNum = num(total);
+        if (totalNum <= 0) return null;
+        return Math.max(0, (num(part) / totalNum) * 100);
+      }
+      function formatInt(value) {
+        return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(num(value));
+      }
+      function formatPercent(value) {
+        if (value === null || !Number.isFinite(value)) return "-";
+        return `${Math.round(value)}%`;
+      }
+      function clampPercent(value) {
+        if (value === null || !Number.isFinite(value)) return null;
+        return Math.max(0, Math.min(100, value));
+      }
+      function normalizeDeadlineKey(value) {
+        const raw = text(value).toUpperCase().replace(/\s+/g, "");
+        if (!raw) return "";
+        if (raw === "SPS+WMI" || raw === "SPS_WMI") return "SPS_WMI";
+        if (raw === "WMIБЕЗЗАКАЗА" || raw === "WMI_BZ") return "WMI_BZ";
+        if (raw === "УПАКОВКА") return "REPACK";
+        return raw;
+      }
+      function parseIsoDate(value) {
+        const raw = text(value);
+        const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+        const ru = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+        if (!ru) return "";
+        const year = ru[3].length === 2 ? `20${ru[3]}` : ru[3];
+        return `${year}-${String(ru[2]).padStart(2, "0")}-${String(ru[1]).padStart(2, "0")}`;
+      }
+      function shiftIsoDate(isoDate, daysDelta) {
+        const safe = parseIsoDate(isoDate);
+        if (!safe) return "";
+        const dt = new Date(`${safe}T00:00:00Z`);
+        if (!Number.isFinite(dt.getTime())) return "";
+        dt.setUTCDate(dt.getUTCDate() + Number(daysDelta || 0));
+        return dt.toISOString().slice(0, 10);
+      }
+      function formatDateRu(value) {
+        const iso = parseIsoDate(value);
+        if (!iso) return text(value);
+        const parts = iso.split("-");
+        return `${parts[2]}.${parts[1]}.${parts[0]}`;
+      }
+      function formatDateTimeRu(value) {
+        const raw = text(value);
+        if (!raw) return "";
+        const dt = new Date(raw);
+        if (Number.isFinite(dt.getTime())) {
+          return new Intl.DateTimeFormat("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: MSK_TIME_ZONE
+          }).format(dt);
+        }
+        const ruMatch = raw.match(/^(\d{1,2})[.](\d{1,2})[.](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+        if (ruMatch) {
+          const date = `${ruMatch[1].padStart(2, "0")}.${ruMatch[2].padStart(2, "0")}.${ruMatch[3]}`;
+          return ruMatch[4] ? `${date} ${ruMatch[4].padStart(2, "0")}:${ruMatch[5]}` : date;
+        }
+        return raw;
+      }
+      function moscowNowParts() {
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: MSK_TIME_ZONE,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          hourCycle: "h23"
+        }).formatToParts(new Date());
+        const out = {};
+        parts.forEach(function(part) { if (part.type !== "literal") out[part.type] = part.value; });
+        return out;
+      }
+      function currentOperationalDate() {
+        const parts = moscowNowParts();
+        const today = `${parts.year}-${parts.month}-${parts.day}`;
+        return Number(parts.hour || 0) < 8 ? shiftIsoDate(today, -1) : today;
+      }
+      function normalizeArray(value) {
+        return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
+      }
+      function normalizeStatusCounts(value) {
+        return (Array.isArray(value) ? value : [])
+          .map(function(item) {
+            return {
+              status: getText(item, ["status", "name", "label"]),
+              count: getNum(item, ["count", "value"])
+            };
+          })
+          .filter(function(item) { return item.status && item.count > 0; });
+      }
+      function normalizeDetail(raw) {
+        const key = normalizeDeadlineKey(getText(raw, ["key", "display_key", "displayKey"]));
+        const displayKey = STATUS_LABELS[key] || getText(raw, ["display_key", "displayKey", "key"]) || key || "Выгрузка";
+        const dueTotal = getNum(raw, ["due_total_unique_shk", "dueTotal", "due_total", "totalDue"]);
+        const analyzed = getNum(raw, ["analyzed_due_unique_shk", "analyzed", "analyzed_due", "analyzedDue"]);
+        const dueSum = getNum(raw, ["due_total_sum_price", "dueSumPrice", "due_sum_price"]);
+        const analyzedSum = getNum(raw, ["analyzed_due_sum_price", "analyzedSumPrice", "analyzed_sum_price"]);
+        const expensiveDue = getNum(raw, ["expensive_due_total_unique_shk", "expensiveDueTotal", "expensive_due_total"]);
+        const expensiveAnalyzed = getNum(raw, ["expensive_analyzed_due_unique_shk", "expensiveAnalyzed", "expensive_analyzed"]);
+        const uploadStatus = getText(raw, ["upload_status", "uploadStatus"]);
+        const analyzerValues = normalizeArray(get(raw, ["analyzer_values", "analyzerValues", "employeeNames"]));
+        const dueLabel = getText(raw, ["due_for_date_label", "dueForDateLabel", "due_until_label", "dueUntilLabel"]);
+        const lowQualityCount = getNum(raw, ["low_quality_without_comment_unique_shk", "lowQualityWithoutComment", "low_quality_without_comment"]);
+        const lowQualityPercentRaw = get(raw, ["low_quality_without_comment_percent", "lowQualityWithoutCommentPercent"]);
+        const lowQualityPercent = lowQualityPercentRaw === undefined || lowQualityPercentRaw === null || text(lowQualityPercentRaw) === ""
+          ? pct(lowQualityCount, dueTotal)
+          : num(lowQualityPercentRaw);
+        return {
+          key: key,
+          displayKey: displayKey,
+          dueTotal: dueTotal,
+          analyzed: analyzed,
+          dueSum: dueSum,
+          analyzedSum: analyzedSum,
+          expensiveDue: expensiveDue,
+          expensiveAnalyzed: expensiveAnalyzed,
+          uploadStatus: uploadStatus || (dueTotal > 0 ? "Есть" : "Нет выгрузки"),
+          analyzerValues: analyzerValues,
+          dueLabel: dueLabel,
+          breakdownStatusCounts: normalizeStatusCounts(get(raw, ["breakdown_status_counts", "breakdownStatusCounts"])),
+          lowQualityStatus: getText(raw, ["low_quality_status", "lowQualityStatus"]) || "Ожидает обработки",
+          lowQualityCount: lowQualityCount,
+          lowQualityPercent: lowQualityPercent
+        };
+      }
+      function normalizeShift(raw) {
+        const operationalDate = parseIsoDate(getText(raw, ["operational_date_key", "operationalDateKey", "date"]));
+        const shiftId = getText(raw, ["shift_id", "shiftId"]);
+        const idDate = (shiftId.match(/(?:day|night|shift):(\d{4}-\d{2}-\d{2})/) || [])[1] || "";
+        const date = operationalDate || idDate;
+        const shiftName = getText(raw, ["shift_name", "shiftName"]) || "Смена";
+        const shiftLabel = getText(raw, ["shift_label", "displayDate", "dateLabel", "operational_date_label"]) || formatDateRu(date);
+        const details = (Array.isArray(raw && raw.details) ? raw.details : []).map(normalizeDetail).filter(Boolean);
+        return {
+          shiftId: shiftId || (date ? `shift:${date}` : ""),
+          shiftName: shiftName,
+          shiftLabel: shiftLabel,
+          date: date,
+          totalDue: getNum(raw, ["total_due_unique_shk", "totalDue", "dueTotal"]),
+          analyzed: getNum(raw, ["analyzed_due_unique_shk", "analyzed", "analyzedDue"]),
+          dueSum: getNum(raw, ["total_due_sum_price", "dueSumPrice"]),
+          analyzedSum: getNum(raw, ["analyzed_due_sum_price", "analyzedSumPrice"]),
+          expensiveDue: getNum(raw, ["expensive_due_total_unique_shk", "expensiveDueTotal"]),
+          expensiveAnalyzed: getNum(raw, ["expensive_analyzed_due_unique_shk", "expensiveAnalyzed"]),
+          analyzerValues: normalizeArray(get(raw, ["analyzer_values", "analyzerValues", "employeeNames"])),
+          details: details
+        };
+      }
+      function mergeStatusCounts(existing, incoming) {
+        const map = new Map();
+        (existing || []).concat(incoming || []).forEach(function(item) {
+          const key = text(item.status);
+          if (!key) return;
+          map.set(key, (map.get(key) || 0) + num(item.count));
+        });
+        return Array.from(map, function(entry) { return { status: entry[0], count: entry[1] }; })
+          .sort(function(a, b) { return b.count - a.count || a.status.localeCompare(b.status, "ru"); });
+      }
+      function mergeDetails(details) {
+        const map = new Map();
+        details.forEach(function(item) {
+          const key = item.key || normalizeDeadlineKey(item.displayKey) || item.displayKey;
+          const existing = map.get(key);
+          if (!existing) {
+            map.set(key, Object.assign({}, item, { analyzerValues: item.analyzerValues.slice() }));
+            return;
+          }
+          existing.dueTotal += item.dueTotal;
+          existing.analyzed += item.analyzed;
+          existing.dueSum += item.dueSum;
+          existing.analyzedSum += item.analyzedSum;
+          existing.expensiveDue += item.expensiveDue;
+          existing.expensiveAnalyzed += item.expensiveAnalyzed;
+          existing.lowQualityCount += item.lowQualityCount;
+          existing.lowQualityPercent = pct(existing.lowQualityCount, existing.dueTotal);
+          existing.uploadStatus = /есть/i.test(existing.uploadStatus) || /есть/i.test(item.uploadStatus) || item.dueTotal > 0 ? "Есть" : "Нет выгрузки";
+          existing.analyzerValues = Array.from(new Set(existing.analyzerValues.concat(item.analyzerValues))).sort(function(a, b) { return a.localeCompare(b, "ru"); });
+          existing.breakdownStatusCounts = mergeStatusCounts(existing.breakdownStatusCounts, item.breakdownStatusCounts);
+        });
+        return Array.from(map.values()).sort(function(a, b) {
+          const left = STATUS_ORDER.indexOf(a.key);
+          const right = STATUS_ORDER.indexOf(b.key);
+          if (left !== -1 || right !== -1) return (left === -1 ? 999 : left) - (right === -1 ? 999 : right);
+          return a.displayKey.localeCompare(b.displayKey, "ru");
+        });
+      }
+      function mergeShiftsByDate(shifts, dateKey) {
+        const exact = shifts.find(function(shift) { return shift.shiftId === `shift:${dateKey}`; });
+        if (exact) return exact;
+        const sameDate = shifts.filter(function(shift) { return shift.date === dateKey; });
+        if (!sameDate.length) return null;
+        const details = mergeDetails(sameDate.flatMap(function(shift) { return shift.details; }));
+        const employees = new Set();
+        sameDate.forEach(function(shift) { shift.analyzerValues.forEach(function(name) { employees.add(name); }); });
+        details.forEach(function(detail) { detail.analyzerValues.forEach(function(name) { employees.add(name); }); });
+        return {
+          shiftId: `shift:${dateKey}`,
+          shiftName: "Смена",
+          shiftLabel: formatDateRu(dateKey),
+          date: dateKey,
+          totalDue: sameDate.reduce(function(sum, shift) { return sum + shift.totalDue; }, 0),
+          analyzed: sameDate.reduce(function(sum, shift) { return sum + shift.analyzed; }, 0),
+          dueSum: sameDate.reduce(function(sum, shift) { return sum + shift.dueSum; }, 0),
+          analyzedSum: sameDate.reduce(function(sum, shift) { return sum + shift.analyzedSum; }, 0),
+          expensiveDue: sameDate.reduce(function(sum, shift) { return sum + shift.expensiveDue; }, 0),
+          expensiveAnalyzed: sameDate.reduce(function(sum, shift) { return sum + shift.expensiveAnalyzed; }, 0),
+          analyzerValues: Array.from(employees).sort(function(a, b) { return a.localeCompare(b, "ru"); }),
+          details: details
+        };
+      }
+      function findTargetShift(payload) {
+        const shifts = (Array.isArray(payload && payload.shift_dynamics) ? payload.shift_dynamics : [])
+          .map(normalizeShift)
+          .filter(function(shift) { return shift.date || shift.shiftId; });
+        if (!shifts.length) return null;
+        if (INITIAL_CONFIG.shift_id) {
+          const exact = shifts.find(function(shift) { return shift.shiftId === INITIAL_CONFIG.shift_id; });
+          if (exact) return exact;
+        }
+        const requestedDate = parseIsoDate(INITIAL_CONFIG.date) || currentOperationalDate();
+        const merged = mergeShiftsByDate(shifts, requestedDate);
+        if (merged) return merged;
+        return shifts.sort(function(a, b) { return text(b.date).localeCompare(text(a.date)); })[0] || null;
+      }
+      function detailHasUpload(detail) { return detail.dueTotal > 0 || /есть/i.test(detail.uploadStatus); }
+      function assessDetail(detail, options) {
+        const totalPct = pct(detail.analyzed, detail.dueTotal);
+        const sumPct = pct(detail.analyzedSum, detail.dueSum);
+        const expensivePct = pct(detail.expensiveAnalyzed, detail.expensiveDue);
+        if (!detailHasUpload(detail) || detail.dueTotal <= 0) {
+          return { level: "bad", hasProblem: true, mark: "!", totalPct: totalPct, sumPct: sumPct, expensivePct: expensivePct };
+        }
+        const valueProtected = expensivePct !== null && expensivePct >= 100 && sumPct !== null && sumPct > 80;
+        let level = "good";
+        let hasProblem = false;
+        if (!valueProtected) {
+          if (totalPct !== null && totalPct < num(options.min_total_percent)) { level = "bad"; hasProblem = true; }
+          else if (options.include_warnings !== false && totalPct !== null && totalPct < num(options.warn_total_percent) && level !== "bad") { level = "warn"; hasProblem = true; }
+        }
+        if (!valueProtected) {
+          if (sumPct !== null && sumPct < num(options.min_sum_percent)) { level = "bad"; hasProblem = true; }
+          else if (options.include_warnings !== false && sumPct !== null && sumPct < num(options.warn_sum_percent) && level !== "bad") { level = "warn"; hasProblem = true; }
+        }
+        if (expensivePct !== null && expensivePct < num(options.min_expensive_percent)) { level = "bad"; hasProblem = true; }
+        else if (options.include_warnings !== false && expensivePct !== null && expensivePct < num(options.warn_expensive_percent) && level !== "bad") { level = "warn"; hasProblem = true; }
+        return { level: level, hasProblem: hasProblem, mark: level === "good" ? "✓" : "!", totalPct: totalPct, sumPct: sumPct, expensivePct: expensivePct };
+      }
+      function assessSummary(shift, options) {
+        const totalPct = pct(shift.analyzed, shift.totalDue);
+        const sumPct = pct(shift.analyzedSum, shift.dueSum);
+        const expensivePct = pct(shift.expensiveAnalyzed, shift.expensiveDue);
+        return {
+          totalPct: totalPct,
+          sumPct: sumPct,
+          expensivePct: expensivePct,
+          totalLevel: totalPct !== null && totalPct < num(options.min_total_percent) ? "bad" : totalPct !== null && totalPct < num(options.warn_total_percent) ? "warn" : "good",
+          sumLevel: sumPct !== null && sumPct < num(options.min_sum_percent) ? "bad" : sumPct !== null && sumPct < num(options.warn_sum_percent) ? "warn" : "good",
+          expensiveLevel: expensivePct !== null && expensivePct < 100 ? "bad" : "good"
+        };
+      }
+      function buildQualityAssessments(shift, options) {
+        const threshold = num(options.low_quality_threshold_percent);
+        return shift.details.map(function(detail) {
+          if (detail.lowQualityCount <= 0 || detail.lowQualityPercent === null || detail.lowQualityPercent <= threshold) return null;
+          return `${detail.displayKey}: ${detail.lowQualityStatus} без комментария ${formatPercent(detail.lowQualityPercent)}`;
+        }).filter(Boolean);
+      }
+      function lagClass(value) {
+        if (value === null || !Number.isFinite(value)) return "";
+        if (value > 60) return "bad";
+        if (value > 30) return "warn";
+        return "good";
+      }
+      function buildCurrentUploadPenaltyMap(currentShift, options) {
+        const penaltyStep = Math.max(0, num(options.lag_missing_upload_penalty_percent));
+        const out = new Map();
+        if (!penaltyStep || !currentShift || !currentShift.details || !currentShift.details.length) return out;
+        currentShift.details.forEach(function(detail) {
+          if (detailHasUpload(detail)) return;
+          out.set(detail.key || normalizeDeadlineKey(detail.displayKey), { penalty: penaltyStep });
+        });
+        return out;
+      }
+      function buildLagItems(lagPayload, currentShift, options) {
+        const shifts = (Array.isArray(lagPayload && lagPayload.shift_dynamics) ? lagPayload.shift_dynamics : [])
+          .map(normalizeShift)
+          .filter(function(shift) { return shift.details.length; });
+        const details = shifts.flatMap(function(shift) { return shift.details; });
+        if (!details.length) return [];
+        const grouped = new Map();
+        details.forEach(function(detail) {
+          const key = detail.key || normalizeDeadlineKey(detail.displayKey) || detail.displayKey;
+          const bucket = grouped.get(key) || { key: key, title: detail.displayKey, due: 0, analyzed: 0, dueSum: 0, analyzedSum: 0 };
+          bucket.due += detail.dueTotal;
+          bucket.analyzed += detail.analyzed;
+          bucket.dueSum += detail.dueSum;
+          bucket.analyzedSum += detail.analyzedSum;
+          grouped.set(key, bucket);
+        });
+        const penaltyMap = buildCurrentUploadPenaltyMap(currentShift, options);
+        const buckets = Array.from(grouped.values());
+        const totalDueSum = buckets.reduce(function(sum, item) { return sum + item.dueSum; }, 0);
+        const totalAnalyzedSum = buckets.reduce(function(sum, item) { return sum + item.analyzedSum; }, 0);
+        const totalDue = buckets.reduce(function(sum, item) { return sum + item.due; }, 0);
+        const totalAnalyzed = buckets.reduce(function(sum, item) { return sum + item.analyzed; }, 0);
+        const overallBasePct = totalDueSum > 0 ? pct(totalAnalyzedSum, totalDueSum) : pct(totalAnalyzed, totalDue);
+        const overallPenalty = buckets.reduce(function(sum, item) { return sum + num((penaltyMap.get(item.key) || {}).penalty); }, 0);
+        const overallLag = overallBasePct === null ? (overallPenalty ? overallPenalty : null) : clampPercent(100 - overallBasePct + overallPenalty);
+        const out = [{ title: "Общее", lag: overallLag, isOverall: true }];
+        buckets.sort(function(a, b) { return a.title.localeCompare(b.title, "ru"); }).forEach(function(item) {
+          const basePct = item.dueSum > 0 ? pct(item.analyzedSum, item.dueSum) : pct(item.analyzed, item.due);
+          const penalty = num((penaltyMap.get(item.key) || {}).penalty);
+          const lag = basePct === null ? (penalty ? penalty : null) : clampPercent(100 - basePct + penalty);
+          out.push({ title: item.title, lag: lag, isOverall: false });
+        });
+        return out;
+      }
+      function freshnessText(cacheRow, payload) {
+        const generated = getText(payload, ["generated_at", "generatedAt"]) || getText(payload && payload.today_deadline, ["as_of_label", "asOfText"]);
+        return formatDateTimeRu(generated || (cacheRow && (cacheRow.source_generated_at || cacheRow.refreshed_at))) || "—";
+      }
+      function renderState(message, isError) {
+        root.innerHTML = `<div class="state ${isError ? "error-state" : ""}">${escapeHtml(message)}</div>`;
+      }
+      function renderSummaryCards(shift, summary, problemCount) {
+        return `
+          <div class="summary-grid">
+            <div class="summary-card ${summary.totalLevel}"><div class="summary-label">Разобрано ШК</div><div class="summary-value">${escapeHtml(formatPercent(summary.totalPct))}</div></div>
+            <div class="summary-card ${summary.sumLevel}"><div class="summary-label">Сумма</div><div class="summary-value">${escapeHtml(formatPercent(summary.sumPct))}</div></div>
+            <div class="summary-card ${summary.expensiveLevel}"><div class="summary-label">Дорогостой</div><div class="summary-value">${escapeHtml(formatPercent(summary.expensivePct))}</div></div>
+            <div class="summary-card ${problemCount ? "warn" : "good"}"><div class="summary-label">Требуют внимания</div><div class="summary-value">${formatInt(problemCount)}</div></div>
+          </div>
+        `;
+      }
+      function renderLagPanel(lagItems) {
+        if (!lagItems.length) {
+          return `<aside class="side-card"><div class="side-title">Отставание</div><div class="lag-main">—</div><div class="lag-list"><div class="lag-item"><span class="lag-name">Нет данных</span></div></div></aside>`;
+        }
+        const overall = lagItems.find(function(item) { return item.isOverall; }) || lagItems[0];
+        const itemsHtml = lagItems.filter(function(item) { return !item.isOverall; }).map(function(item) {
+          return `<div class="lag-item"><span class="lag-name" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span><span class="lag-value ${lagClass(item.lag)}">${escapeHtml(formatPercent(item.lag))}</span></div>`;
+        }).join("");
+        return `<aside class="side-card"><div class="side-title">Отставание</div><div class="lag-main ${lagClass(overall.lag)}">${escapeHtml(formatPercent(overall.lag))}</div><div class="lag-list">${itemsHtml}</div></aside>`;
+      }
+      function renderStatusCard(detail, assessment) {
+        const employeeText = detail.analyzerValues.length ? detail.analyzerValues.join(", ") : "—";
+        const sumText = detail.dueSum > 0 ? formatPercent(assessment.sumPct) : "—";
+        const expensiveText = detail.expensiveDue > 0 ? `${formatInt(detail.expensiveAnalyzed)}/${formatInt(detail.expensiveDue)} (${formatPercent(assessment.expensivePct)})` : "—";
+        const uploadTitle = detailHasUpload(detail) ? "Выгрузка есть" : "Нет выгрузки";
+        return `
+          <article class="status-card ${assessment.level}" title="${escapeHtml(uploadTitle)}">
+            <div class="status-top"><span class="status-mark ${assessment.level}">${escapeHtml(assessment.mark)}</span><div class="status-name" title="${escapeHtml(detail.displayKey)}">${escapeHtml(detail.displayKey)}</div></div>
+            <div class="metric-row"><span>Разбор</span><span class="metric-value">${formatInt(detail.analyzed)}/${formatInt(detail.dueTotal)} (${escapeHtml(formatPercent(assessment.totalPct))})</span></div>
+            <div class="metric-row"><span>Сумма</span><span class="metric-value">${escapeHtml(sumText)}</span></div>
+            <div class="metric-row"><span>Дорогостой</span><span class="metric-value">${escapeHtml(expensiveText)}</span></div>
+            <div class="employee-line" title="${escapeHtml(employeeText)}">${escapeHtml(employeeText)}</div>
+          </article>
+        `;
+      }
+      function render(data) {
+        if (!data || data.ok === false) {
+          renderState((data && data.error) || "Не удалось загрузить данные.", true);
+          return;
+        }
+        const payload = parseMaybeJson(data.payload);
+        const lagPayload = parseMaybeJson(data.lag_cache_row && data.lag_cache_row.payload) || null;
+        const options = Object.assign({}, DEFAULT_OPTIONS, data.options || {});
+        const shift = findTargetShift(payload);
+        if (!shift) {
+          renderState("В кэше не найдена смена для отображения. Проверьте, что opp_telegram_shift содержит shift_dynamics.", true);
+          return;
+        }
+        shift.details = mergeDetails(shift.details);
+        const mainEmployees = new Set(shift.analyzerValues);
+        shift.details.forEach(function(detail) {
+          if (!MAIN_EMPLOYEE_KEYS.has(detail.key)) return;
+          detail.analyzerValues.forEach(function(name) { mainEmployees.add(name); });
+        });
+        const employeeLine = Array.from(mainEmployees).filter(Boolean).sort(function(a, b) { return a.localeCompare(b, "ru"); }).join(", ") || "—";
+        const summary = assessSummary(shift, options);
+        const assessed = shift.details.map(function(detail) { return { detail: detail, assessment: assessDetail(detail, options) }; });
+        const problemCount = assessed.filter(function(item) { return item.assessment.hasProblem; }).length;
+        const quality = buildQualityAssessments(shift, options);
+        const lagItems = buildLagItems(lagPayload, shift, options);
+        const actualText = freshnessText(data.cache_row, payload);
+        const scope = getText(data.cache_row, ["cache_scope", "cacheScope"]);
+        const statusCards = assessed.map(function(item) { return renderStatusCard(item.detail, item.assessment); }).join("");
+        const qualityHtml = quality.length ? `<div class="quality-list">${quality.map(function(item) { return `<div class="quality-item">Низкокачественный разбор: ${escapeHtml(item)}</div>`; }).join("")}</div>` : "";
+
+        root.innerHTML = `
+          <section class="hero">
+            <div class="hero-main">
+              <div class="eyebrow">Прогресс ОПП</div>
+              <div class="title-row">
+                <h1>${escapeHtml(shift.shiftName)} ${escapeHtml(shift.shiftLabel)}</h1>
+                <div class="freshness" title="Кэш: ${escapeHtml(scope)}"><span class="freshness-dot"></span><span>Актуально: ${escapeHtml(actualText)}</span></div>
+              </div>
+              <div class="meta-row"><span class="meta-pill">Сотрудники: ${escapeHtml(employeeLine)}</span><span class="meta-pill">WH: ${escapeHtml(data.wh_id || INITIAL_CONFIG.wh_id)}</span></div>
+              ${renderSummaryCards(shift, summary, problemCount)}
+            </div>
+            ${renderLagPanel(lagItems)}
+          </section>
+          <section class="section-title"><h2>Статусы за смену</h2><div class="section-note">Обновляется из Supabase-кэша</div></section>
+          <section class="status-grid">${statusCards || `<div class="state">По смене нет детализации.</div>`}</section>
+          ${qualityHtml}
+        `;
+      }
+      function load() {
+        google.script.run
+          .withSuccessHandler(render)
+          .withFailureHandler(function(error) {
+            renderState((error && error.message) || "Не удалось загрузить прогресс ОПП.", true);
+          })
+          .getOppFrameData(INITIAL_CONFIG);
+      }
+      function scheduleRefresh() {
+        const refreshSec = Math.max(30, num(INITIAL_CONFIG.refresh) || 60);
+        if (refreshTimer) clearInterval(refreshTimer);
+        refreshTimer = setInterval(load, refreshSec * 1000);
+      }
+      document.addEventListener("visibilitychange", function() {
+        if (!document.hidden) load();
+      });
+      load();
+      scheduleRefresh();
+    })();
+  </script>
+</body>
+</html>

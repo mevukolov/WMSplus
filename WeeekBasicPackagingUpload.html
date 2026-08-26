@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f8f3ed;
+      --paper: #fffaf4;
+      --card: #ffffff;
+      --ink: #2d2119;
+      --muted: #7b685b;
+      --accent: #83644d;
+      --accent-dark: #3e2e23;
+      --line: rgba(62, 46, 35, 0.16);
+      --good: #23824d;
+      --bad: #b42318;
+      --warn: #b7791f;
+      --shadow: 0 18px 44px rgba(62, 46, 35, 0.13);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+
+    body { padding: 16px; }
+
+    .shell {
+      width: min(980px, 100%);
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 250, 244, 0.96);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .topbar {
+      padding: 18px 20px;
+      background: var(--accent-dark);
+      color: #fff8ee;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .kicker {
+      margin: 0 0 5px;
+      color: rgba(255, 248, 238, 0.7);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 4vw, 38px);
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .top-note {
+      max-width: 290px;
+      color: rgba(255, 248, 238, 0.76);
+      font-size: 13px;
+      line-height: 1.35;
+      text-align: right;
+    }
+
+    .content { padding: 18px; }
+
+    .upload-zone {
+      border: 1px dashed rgba(131, 100, 77, 0.38);
+      border-radius: 22px;
+      background: var(--card);
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .upload-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .upload-title {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 950;
+      letter-spacing: -0.03em;
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    input[type="file"] {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    button, .upload-button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      background: var(--accent);
+      color: #fff8ee;
+      font: inherit;
+      font-weight: 950;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(131, 100, 77, 0.22);
+      transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    }
+
+    button:hover:not(:disabled), .upload-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px rgba(131, 100, 77, 0.28);
+    }
+
+    button.secondary {
+      background: rgba(131, 100, 77, 0.12);
+      color: var(--accent-dark);
+      box-shadow: none;
+    }
+
+    button.good { background: var(--good); }
+    button.warn { background: var(--warn); }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .file-name {
+      color: var(--muted);
+      font-weight: 800;
+      word-break: break-word;
+    }
+
+    .alert {
+      display: none;
+      margin-top: 14px;
+      border-radius: 18px;
+      padding: 12px 14px;
+      border: 1px solid rgba(180, 35, 24, 0.18);
+      background: rgba(180, 35, 24, 0.08);
+      color: var(--bad);
+      font-weight: 850;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+
+    .alert.visible { display: block; }
+    .alert.info {
+      border-color: rgba(131, 100, 77, 0.22);
+      background: rgba(131, 100, 77, 0.1);
+      color: var(--accent-dark);
+    }
+    .alert.good {
+      border-color: rgba(35, 130, 77, 0.22);
+      background: rgba(35, 130, 77, 0.1);
+      color: var(--good);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .stat-card {
+      min-height: 86px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--card);
+      padding: 12px;
+      display: grid;
+      align-content: center;
+      gap: 5px;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .stat-value {
+      font-size: 26px;
+      font-weight: 1000;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .stat-card.good .stat-value { color: var(--good); }
+    .stat-card.warn .stat-value { color: var(--warn); }
+    .stat-card.bad .stat-value { color: var(--bad); }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      align-items: center;
+    }
+
+    .panel {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--card);
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 13px 15px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 1000;
+      letter-spacing: -0.03em;
+    }
+
+    .table-wrap { overflow: auto; max-height: 360px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(62, 46, 35, 0.1);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: #fbf2e8;
+      color: var(--muted);
+      z-index: 1;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    td.price { font-weight: 900; white-space: nowrap; }
+    td.shk-list { max-width: 280px; word-break: break-word; }
+
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+      text-align: center;
+      font-weight: 850;
+    }
+
+    .result-box {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.74);
+      padding: 14px;
+      color: var(--muted);
+      font-weight: 800;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    @media (max-width: 820px) {
+      body { padding: 10px; }
+      .topbar { display: block; }
+      .top-note { text-align: left; margin-top: 10px; max-width: none; }
+      .content { padding: 12px; }
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stat-card:last-child { grid-column: span 2; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="kicker">WEEEK basic queue</p>
+        <h1>Ручная выгрузка упаковки</h1>
+      </div>
+      <div class="top-note">Загружаем XLSX, группируем ШК по таре и ставим задачи в WEEEK без дублей.</div>
+    </header>
+
+    <section class="content">
+      <div class="upload-zone">
+        <div class="upload-head">
+          <div>
+            <p class="upload-title">Добавить файл зависших ШК</p>
+            <p class="hint">Берем столбцы C, D, E, H, I. Одиночные ШК дешевле 1000 рублей игнорируются, тара с несколькими ШК становится одной задачей.</p>
+          </div>
+          <label class="upload-button" for="fileInput">Выбрать XLSX</label>
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv">
+        </div>
+        <div id="fileName" class="file-name">Файл пока не выбран</div>
+      </div>
+
+      <div id="alert" class="alert"></div>
+
+      <section class="stats-grid" aria-label="Сводка файла">
+        <div class="stat-card"><div class="stat-label">ШК найдено</div><div id="foundShk" class="stat-value">0</div></div>
+        <div class="stat-card"><div class="stat-label">Тар найдено</div><div id="tareCount" class="stat-value">0</div></div>
+        <div class="stat-card"><div class="stat-label">Тар в группировке</div><div id="groupedTareCount" class="stat-value">0</div></div>
+        <div class="stat-card good"><div class="stat-label">Задач будет создано</div><div id="taskCount" class="stat-value">0</div></div>
+        <div class="stat-card warn"><div class="stat-label">Пропущено до 1000</div><div id="skippedCheap" class="stat-value">0</div></div>
+      </section>
+
+      <div class="actions">
+        <button id="previewServerButton" class="secondary" disabled>Проверить на сервере</button>
+        <button id="uploadButton" class="good" disabled>Залить в Supabase</button>
+        <button id="processButton" class="warn" disabled>Создать задачи в WEEEK</button>
+        <span id="actionHint" class="mini">Сначала выбери файл.</span>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Пример будущих задач</h2>
+          <span id="sampleNote" class="mini">Показываем первые 30 задач</span>
+        </div>
+        <div id="sampleTableWrap" class="table-wrap">
+          <div class="empty">После выбора файла здесь появятся задачи, которые будут поставлены.</div>
+        </div>
+      </section>
+
+      <div id="resultBox" class="result-box" style="display:none"></div>
+    </section>
+  </main>
+
+  <script>
+    const initialConfig = <?!= JSON.stringify(initialConfig || {}) ?>;
+    const state = {
+      config: initialConfig || {},
+      fileName: '',
+      rows: [],
+      tasks: [],
+      uploaded: false,
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function showAlert(message, type = 'error') {
+      const el = $('alert');
+      el.textContent = message || '';
+      el.className = 'alert visible' + (type === 'info' ? ' info' : type === 'good' ? ' good' : '');
+    }
+
+    function hideAlert() {
+      const el = $('alert');
+      el.textContent = '';
+      el.className = 'alert';
+    }
+
+    function setText(id, value) {
+      $(id).textContent = String(value ?? 0);
+    }
+
+    function normalizeText(value) {
+      if (value === null || value === undefined) return '';
+      return String(value).trim();
+    }
+
+    function normalizeIdentifier(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value).toFixed(0);
+      const raw = normalizeText(value).replace(/\u00a0/g, '').replace(/\s+/g, '');
+      if (!raw) return '';
+      if (/^[+-]?\d+(?:\.\d+)?e[+-]?\d+$/i.test(raw)) {
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed)) return Math.trunc(parsed).toFixed(0);
+      }
+      if (/^\d+\.0+$/.test(raw)) return raw.replace(/\.0+$/, '');
+      return raw;
+    }
+
+    function normalizePrice(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      const raw = normalizeText(value)
+        .replace(/\u00a0/g, '')
+        .replace(/\s+/g, '')
+        .replace(',', '.')
+        .replace(/[^0-9.\-]/g, '');
+      if (!raw) return null;
+      const parsed = Number(raw.replace(/\.(?=.*\.)/g, ''));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function formatMoney(value) {
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
+      return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(Number(value)) + ' ₽';
+    }
+
+    function excelSerialToDate(value) {
+      if (!Number.isFinite(value)) return null;
+      const ms = Math.round((value - 25569) * 86400 * 1000);
+      const date = new Date(ms);
+      return Number.isFinite(date.getTime()) ? date : null;
+    }
+
+    function parseDateTime(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        const date = excelSerialToDate(value);
+        if (date) return { ts: date.getTime(), date: date.toISOString().slice(0, 10) };
+      }
+      const raw = normalizeText(value);
+      if (!raw) return { ts: 0, date: '' };
+      let match = raw.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/);
+      if (match) {
+        const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)));
+        return { ts: date.getTime(), date: date.toISOString().slice(0, 10) };
+      }
+      match = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+      if (match) {
+        let year = Number(match[3]);
+        if (year < 100) year += 2000;
+        const date = new Date(Date.UTC(year, Number(match[2]) - 1, Number(match[1]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)));
+        return { ts: date.getTime(), date: date.toISOString().slice(0, 10) };
+      }
+      const parsed = new Date(raw.replace(' ', 'T'));
+      return Number.isFinite(parsed.getTime()) ? { ts: parsed.getTime(), date: parsed.toISOString().slice(0, 10) } : { ts: 0, date: raw };
+    }
+
+    function addDays(isoDate, days) {
+      if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return '';
+      const date = new Date(isoDate + 'T00:00:00Z');
+      date.setUTCDate(date.getUTCDate() + days);
+      return date.toISOString().slice(0, 10);
+    }
+
+    function formatRuDate(isoDate) {
+      const match = normalizeText(isoDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return match ? `${match[3]}.${match[2]}.${match[1]}` : isoDate || '-';
+    }
+
+    function normalizeRow(row, rowNumber) {
+      const shk = normalizeIdentifier(row[2]);
+      if (!shk) return null;
+      return {
+        row_number: rowNumber,
+        warehouse: normalizeText(row[0]),
+        block: normalizeText(row[1]),
+        shk,
+        price: normalizePrice(row[3]),
+        tare_id: normalizeIdentifier(row[4]),
+        supplier_id: normalizeIdentifier(row[5]),
+        receiver_id: normalizeIdentifier(row[6]),
+        last_status: normalizeText(row[7]),
+        last_movement: normalizeText(row[8]),
+      };
+    }
+
+    function findHeaderIndex(rows) {
+      const max = Math.min(rows.length, 30);
+      for (let i = 0; i < max; i += 1) {
+        const line = rows[i].map(normalizeText).join(' ').toLowerCase();
+        if (line.includes('id товара') && line.includes('стоимость') && line.includes('id тары')) return i;
+      }
+      return 0;
+    }
+
+    function buildPreview(rows) {
+      const byShk = new Map();
+      let duplicateShkCount = 0;
+      rows.forEach((row) => {
+        const previous = byShk.get(row.shk);
+        if (previous) {
+          duplicateShkCount += 1;
+          if (parseDateTime(row.last_movement).ts >= parseDateTime(previous.last_movement).ts) byShk.set(row.shk, row);
+        } else {
+          byShk.set(row.shk, row);
+        }
+      });
+
+      const uniqueRows = Array.from(byShk.values());
+      const byTare = new Map();
+      const noTare = [];
+      uniqueRows.forEach((row) => {
+        if (!row.tare_id) {
+          noTare.push(row);
+          return;
+        }
+        const group = byTare.get(row.tare_id) || [];
+        group.push(row);
+        byTare.set(row.tare_id, group);
+      });
+
+      const tasks = [];
+      let skippedCheap = 0;
+      let groupedTareCount = 0;
+
+      byTare.forEach((group, tareId) => {
+        if (group.length > 1) {
+          groupedTareCount += 1;
+          const sorted = group.slice().sort((a, b) => a.shk.localeCompare(b.shk, 'ru'));
+          const newest = sorted.slice().sort((a, b) => parseDateTime(b.last_movement).ts - parseDateTime(a.last_movement).ts)[0] || sorted[0];
+          const sum = sorted.reduce((acc, item) => acc + (Number(item.price) || 0), 0);
+          tasks.push({
+            kind: 'tare',
+            source_id: tareId,
+            title: 'Упаковка | ' + tareId,
+            due_date: addDays(parseDateTime(newest.last_movement).date, 7),
+            price: sum,
+            shk_ids: sorted.map((item) => item.shk),
+            status: newest.last_status || '-',
+          });
+          return;
+        }
+        noTare.push(group[0]);
+      });
+
+      noTare.forEach((row) => {
+        const price = Number(row.price) || 0;
+        if (price < 1000) {
+          skippedCheap += 1;
+          return;
+        }
+        tasks.push({
+          kind: 'shk',
+          source_id: row.shk,
+          title: 'Упаковка | ' + row.shk,
+          due_date: addDays(parseDateTime(row.last_movement).date, 7),
+          price: row.price,
+          shk_ids: [row.shk],
+          status: row.last_status || '-',
+        });
+      });
+
+      return {
+        foundShk: uniqueRows.length,
+        duplicateShkCount,
+        tareCount: Array.from(byTare.keys()).filter(Boolean).length,
+        groupedTareCount,
+        taskCount: tasks.length,
+        skippedCheap,
+        tasks,
+      };
+    }
+
+    function renderStats(preview) {
+      setText('foundShk', preview ? preview.foundShk : 0);
+      setText('tareCount', preview ? preview.tareCount : 0);
+      setText('groupedTareCount', preview ? preview.groupedTareCount : 0);
+      setText('taskCount', preview ? preview.taskCount : 0);
+      setText('skippedCheap', preview ? preview.skippedCheap : 0);
+      $('previewServerButton').disabled = !preview || !state.rows.length;
+      $('uploadButton').disabled = !preview || !preview.taskCount;
+      $('processButton').disabled = true;
+      $('actionHint').textContent = preview && preview.taskCount
+        ? 'Проверь сводку и залей задачи в Supabase.'
+        : 'Нет задач к созданию по текущим правилам.';
+    }
+
+    function renderSample(tasks) {
+      if (!tasks || !tasks.length) {
+        $('sampleTableWrap').innerHTML = '<div class="empty">Нет задач к созданию.</div>';
+        return;
+      }
+
+      const rows = tasks.slice(0, 30).map((task) => `
+        <tr>
+          <td>${escapeHtml(task.title)}</td>
+          <td>${escapeHtml(task.kind === 'tare' ? 'Тара' : 'ШК')}</td>
+          <td class="shk-list">${escapeHtml(task.shk_ids.join(', '))}</td>
+          <td class="price">${escapeHtml(formatMoney(task.price))}</td>
+          <td>${escapeHtml(formatRuDate(task.due_date))}</td>
+          <td>${escapeHtml(task.status || '-')}</td>
+        </tr>
+      `).join('');
+
+      $('sampleTableWrap').innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Название</th>
+              <th>Тип</th>
+              <th>ШК внутри</th>
+              <th>Цена</th>
+              <th>Дата</th>
+              <th>Статус движения</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    function escapeHtml(value) {
+      return normalizeText(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    async function readWorkbook(file) {
+      if (typeof XLSX === 'undefined') throw new Error('Не загрузилась библиотека XLSX. Обнови iframe и попробуй еще раз.');
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) throw new Error('В файле не найдено листов.');
+      const sheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+      const headerIndex = findHeaderIndex(rows);
+      return rows.slice(headerIndex + 1)
+        .map((row, index) => normalizeRow(row, headerIndex + index + 2))
+        .filter(Boolean);
+    }
+
+    async function handleFile(file) {
+      hideAlert();
+      $('resultBox').style.display = 'none';
+      state.uploaded = false;
+      state.fileName = file ? file.name : '';
+      $('fileName').textContent = file ? file.name : 'Файл пока не выбран';
+      if (!file) return;
+
+      try {
+        $('actionHint').textContent = 'Читаю файл...';
+        const rows = await readWorkbook(file);
+        state.rows = rows;
+        const preview = buildPreview(rows);
+        state.tasks = preview.tasks;
+        renderStats(preview);
+        renderSample(preview.tasks);
+        showAlert(`Файл прочитан. Дублей ШК внутри файла: ${preview.duplicateShkCount}.`, 'info');
+      } catch (error) {
+        state.rows = [];
+        state.tasks = [];
+        renderStats(null);
+        renderSample([]);
+        showAlert(error && error.message ? error.message : String(error));
+      }
+    }
+
+    function setBusy(buttonId, busy, text) {
+      const button = $(buttonId);
+      if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
+      button.disabled = busy;
+      button.textContent = busy ? text : button.dataset.originalText;
+    }
+
+    function callAppsScript(functionName, payload) {
+      return new Promise((resolve, reject) => {
+        if (!window.google || !google.script || !google.script.run) {
+          reject(new Error('google.script.run недоступен. Открой iframe через опубликованный Apps Script, не как локальный файл.'));
+          return;
+        }
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler((error) => reject(error))
+          [functionName](payload);
+      });
+    }
+
+    function serverPayload(extra = {}) {
+      return {
+        token: state.config.token || '',
+        rows: state.rows,
+        file_name: state.fileName,
+        ...extra,
+      };
+    }
+
+    async function previewOnServer() {
+      if (!state.rows.length) return;
+      hideAlert();
+      setBusy('previewServerButton', true, 'Проверяю...');
+      try {
+        const response = await callAppsScript('previewBasicPackagingTasks', serverPayload());
+        $('resultBox').style.display = 'block';
+        $('resultBox').textContent = formatServerResponse(response, 'Серверный предпросмотр');
+        showAlert('Серверный расчет готов. Если цифры совпадают с плашками, можно заливать.', 'good');
+      } catch (error) {
+        showAlert(error && error.message ? error.message : String(error));
+      } finally {
+        setBusy('previewServerButton', false);
+      }
+    }
+
+    async function uploadToSupabase() {
+      if (!state.rows.length || !state.tasks.length) return;
+      hideAlert();
+      $('uploadButton').disabled = true;
+      setBusy('uploadButton', true, 'Заливаю...');
+      try {
+        const response = await callAppsScript('uploadBasicPackagingTasks', serverPayload({ process_queue: false }));
+        state.uploaded = true;
+        $('processButton').disabled = false;
+        $('resultBox').style.display = 'block';
+        $('resultBox').textContent = formatServerResponse(response, 'Заливка в Supabase');
+        showAlert('Задачи залиты в weeek_tasks_basic. Теперь можно создать их в WEEEK.', 'good');
+        $('actionHint').textContent = 'Очередь готова. Запусти создание задач в WEEEK.';
+      } catch (error) {
+        $('uploadButton').disabled = false;
+        showAlert(error && error.message ? error.message : String(error));
+      } finally {
+        setBusy('uploadButton', false);
+        $('uploadButton').disabled = state.uploaded || !state.tasks.length;
+      }
+    }
+
+    async function processQueue() {
+      hideAlert();
+      setBusy('processButton', true, 'Создаю...');
+      try {
+        const response = await callAppsScript('processBasicPackagingQueue', {
+          token: state.config.token || '',
+          limit: 50,
+          process_all: true,
+          max_batches: 20,
+        });
+        $('resultBox').style.display = 'block';
+        $('resultBox').textContent = formatServerResponse(response, 'Создание задач в WEEEK');
+        const master = response && response.master ? response.master : response;
+        const failed = Number(master.failed_count || 0);
+        const processed = Number(master.processed_count || 0);
+        const batchCount = Number(master.batch_count || 1);
+        showAlert(failed ? `Создано/обработано: ${processed}, ошибок: ${failed}, пачек: ${batchCount}. Посмотри детали ниже.` : `WEEEK обработал задач: ${processed}, пачек: ${batchCount}.`, failed ? 'info' : 'good');
+      } catch (error) {
+        showAlert(error && error.message ? error.message : String(error));
+      } finally {
+        setBusy('processButton', false);
+        $('processButton').disabled = false;
+      }
+    }
+
+    function formatServerResponse(response, title) {
+      const summary = response && response.summary ? response.summary : {};
+      const lines = [title + ':'];
+      if (summary.tasks_to_create_count !== undefined) lines.push('Задач к созданию: ' + summary.tasks_to_create_count);
+      if (summary.found_shk_count !== undefined) lines.push('ШК найдено: ' + summary.found_shk_count);
+      if (summary.grouped_tare_count !== undefined) lines.push('Тар в группировке: ' + summary.grouped_tare_count);
+      if (response && response.upserted_count !== undefined) lines.push('Записано/обновлено в Supabase: ' + response.upserted_count);
+      if (response && response.master) {
+        lines.push('Ответ task-master:');
+        lines.push(JSON.stringify(response.master, null, 2));
+      } else if (response && response.sample_tasks) {
+        lines.push('Пример задач:');
+        lines.push(JSON.stringify(response.sample_tasks.slice(0, 5), null, 2));
+      } else {
+        lines.push(JSON.stringify(response, null, 2));
+      }
+      return lines.join('\n');
+    }
+
+    $('fileInput').addEventListener('change', (event) => {
+      const file = event.target.files && event.target.files[0];
+      handleFile(file);
+    });
+    $('previewServerButton').addEventListener('click', previewOnServer);
+    $('uploadButton').addEventListener('click', uploadToSupabase);
+    $('processButton').addEventListener('click', processQueue);
+
+    renderStats(null);
+    renderSample([]);
+  </script>
+</body>
+</html>

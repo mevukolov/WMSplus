@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #f3eee6;
+      --paper: #fffaf2;
+      --card: #ffffff;
+      --ink: #302219;
+      --muted: #7a6658;
+      --accent: #83644d;
+      --accent-dark: #3e2e23;
+      --line: rgba(62, 46, 35, 0.16);
+      --good: #247a4b;
+      --warn: #b7791f;
+      --bad: #b42318;
+      --soft: rgba(131, 100, 77, 0.11);
+      --shadow: 0 20px 54px rgba(62, 46, 35, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(131, 100, 77, 0.16), transparent 32%),
+        linear-gradient(180deg, #fffaf2 0%, var(--bg) 100%);
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+
+    body { padding: 16px; }
+
+    .shell {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: rgba(255, 250, 242, 0.96);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .topbar {
+      padding: 22px;
+      background: var(--accent-dark);
+      color: #fff7ec;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+    }
+
+    .kicker {
+      margin: 0 0 7px;
+      color: rgba(255, 247, 236, 0.68);
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 5vw, 48px);
+      line-height: 0.96;
+      letter-spacing: -0.05em;
+    }
+
+    .top-note {
+      max-width: 360px;
+      text-align: right;
+      color: rgba(255, 247, 236, 0.82);
+      font-weight: 850;
+      line-height: 1.35;
+    }
+
+    .content { padding: 20px; }
+
+    .screen { display: none; }
+    .screen.active { display: block; animation: rise 180ms ease-out; }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .gate {
+      min-height: 360px;
+      border: 1px dashed rgba(131, 100, 77, 0.34);
+      border-radius: 26px;
+      background:
+        radial-gradient(circle at 50% 0%, rgba(131, 100, 77, 0.14), transparent 40%),
+        rgba(255, 255, 255, 0.55);
+      padding: 18px;
+    }
+
+    .loading-screen {
+      min-height: 360px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      border: 1px dashed rgba(131, 100, 77, 0.24);
+      border-radius: 26px;
+      background: rgba(255, 255, 255, 0.52);
+      padding: 34px;
+    }
+
+    .loader {
+      width: 54px;
+      height: 54px;
+      border-radius: 999px;
+      border: 6px solid rgba(131, 100, 77, 0.18);
+      border-top-color: var(--accent);
+      animation: spin 850ms linear infinite;
+      margin: 0 auto 18px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .gate-card {
+      width: 100%;
+      display: grid;
+      gap: 14px;
+    }
+
+    .gate-title {
+      margin: 0;
+      font-size: clamp(26px, 5vw, 42px);
+      line-height: 0.98;
+      letter-spacing: -0.05em;
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      font-weight: 850;
+      line-height: 1.42;
+    }
+
+    .inline-shift-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 8px 8px 0;
+    }
+
+    .inline-shift-frame {
+      width: 100%;
+      min-height: 1120px;
+      border: 0;
+      border-radius: 22px;
+      background: var(--bg);
+      box-shadow: inset 0 0 0 1px rgba(62, 46, 35, 0.10);
+    }
+
+    .uploads-frame {
+      width: 100%;
+      min-height: 1350px;
+      border: 0;
+      border-radius: 22px;
+      background: var(--bg);
+      box-shadow: inset 0 0 0 1px rgba(62, 46, 35, 0.10);
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 13px 19px;
+      background: var(--accent);
+      color: #fff7ec;
+      font: inherit;
+      font-weight: 950;
+      cursor: pointer;
+      box-shadow: 0 12px 28px rgba(131, 100, 77, 0.24);
+      transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 34px rgba(131, 100, 77, 0.30);
+    }
+
+    button.secondary {
+      background: var(--soft);
+      color: var(--accent-dark);
+      box-shadow: none;
+    }
+
+    button.ghost {
+      background: transparent;
+      color: var(--accent-dark);
+      border: 1px solid var(--line);
+      box-shadow: none;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .dashboard-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    .dashboard-title {
+      margin: 0;
+      font-size: clamp(28px, 5vw, 44px);
+      letter-spacing: -0.05em;
+      line-height: 1;
+    }
+
+    .dashboard-subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-weight: 850;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .metric-card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--card);
+      padding: 16px;
+      min-height: 118px;
+    }
+
+    .metric-label {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 950;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .metric-value {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 950;
+      letter-spacing: -0.04em;
+      line-height: 1.05;
+    }
+
+    .metric-note {
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+
+    .dynamic-panel {
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(255, 250, 242, 0.9)),
+        var(--paper);
+      padding: 20px;
+      min-height: 220px;
+      display: grid;
+      align-content: center;
+      text-align: center;
+    }
+
+    .dynamic-panel h2 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.04em;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+
+    .page-shell {
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: rgba(255, 255, 255, 0.62);
+      padding: 14px;
+    }
+
+    .status {
+      display: none;
+      margin-top: 12px;
+      border-radius: 16px;
+      padding: 12px 14px;
+      font-weight: 850;
+      line-height: 1.35;
+    }
+
+    .status.visible { display: block; }
+    .status.info { background: rgba(131, 100, 77, 0.12); color: var(--accent-dark); }
+    .status.good { background: rgba(36, 122, 75, 0.12); color: var(--good); }
+    .status.bad { background: rgba(180, 35, 24, 0.1); color: var(--bad); }
+
+    @media (max-width: 860px) {
+      body { padding: 10px; }
+      .topbar,
+      .dashboard-head {
+        display: grid;
+        text-align: left;
+      }
+      .top-note { text-align: left; }
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 560px) {
+      .metric-grid { grid-template-columns: 1fr; }
+      .content { padding: 14px; }
+      .gate { padding: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="kicker">ОПП // СЦ Нижний Новгород Ларина</p>
+        <h1>Динамика ОПП</h1>
+      </div>
+      <div class="top-note" id="topNote">Единый фрейм: открытие смены, чистые списания и ручные выгрузки.</div>
+    </header>
+
+    <section class="content">
+      <section id="screenLoading" class="screen active">
+        <div class="loading-screen">
+          <div>
+            <div class="loader" aria-hidden="true"></div>
+            <h2 class="gate-title">Проверяю смену</h2>
+            <p class="hint">Секунду, сверяю состояние смены и подготавливаю рабочий экран.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="screenGate" class="screen">
+        <div class="gate">
+          <div class="gate-card">
+            <div class="inline-shift-head">
+              <div>
+                <p class="kicker" style="color: var(--muted); margin: 0 0 6px;">Старт смены</p>
+                <h2 class="gate-title" id="gateTitle">Открытие смены</h2>
+                <p class="hint">Выберите ответственных и загрузите чистые списания. После открытия смены экран сам перейдет в динамику.</p>
+              </div>
+            </div>
+            <div id="gateStatus" class="status info visible">Проверяю состояние смены...</div>
+            <iframe id="inlineShiftFrame" class="inline-shift-frame" title="Открытие смены"></iframe>
+          </div>
+        </div>
+      </section>
+
+      <section id="screenDashboard" class="screen">
+        <div class="dashboard-head">
+          <div>
+            <h2 class="dashboard-title">Динамика ОПП</h2>
+            <p class="dashboard-subtitle" id="dashboardSubtitle">Смена готова к работе.</p>
+          </div>
+          <button id="reopenShiftButton" class="ghost" type="button">Показать открытие смены</button>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric-card">
+            <p class="metric-label">Смена</p>
+            <p class="metric-value" id="metricShift">Сегодня</p>
+            <p class="metric-note" id="metricShiftNote">Открыта</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">Входящий поток</p>
+            <p class="metric-value" id="metricIncoming">...</p>
+            <p class="metric-note">Автоназначение задач по зоне ответственности</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">Исходящий поток</p>
+            <p class="metric-value" id="metricOutgoing">...</p>
+            <p class="metric-note">Автоназначение задач по зоне ответственности</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">Чистые списания</p>
+            <p class="metric-value" id="metricPureLosses">Загружены</p>
+            <p class="metric-note">Статистика строится из файла открытия смены</p>
+          </article>
+        </div>
+
+        <section class="dynamic-panel">
+          <h2>Рабочая зона динамики</h2>
+          <p class="hint">Здесь постепенно соберем показатели смены, очереди и качество разбора. Первый подключенный модуль ниже.</p>
+          <div class="actions">
+            <button id="openUploadsButton" type="button">Выгрузки</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="screenUploads" class="screen">
+        <div class="dashboard-head">
+          <div>
+            <h2 class="dashboard-title">Выгрузки</h2>
+            <p class="dashboard-subtitle">Календарь, мастер-выгрузка и ручная постановка задач WEEEK.</p>
+          </div>
+          <button id="uploadsHomeButton" class="ghost" type="button">Домик</button>
+        </div>
+        <div class="page-shell">
+          <iframe id="uploadsFrame" class="uploads-frame" title="Выгрузки"></iframe>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const initialConfig = <?!= JSON.stringify(initialConfig || {}) ?>;
+    const state = {
+      config: initialConfig || {},
+      shift: null,
+      shiftDate: '',
+      shiftLabel: '',
+      shiftFrameLoaded: false,
+      uploadsFrameLoaded: false,
+    };
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+
+    function normalizeText(value) {
+      if (value === null || value === undefined) return '';
+      return String(value).trim();
+    }
+
+    function showScreen(id) {
+      ['screenLoading', 'screenGate', 'screenDashboard', 'screenUploads'].forEach((screenId) => {
+        $(screenId).classList.toggle('active', screenId === id);
+      });
+    }
+
+    function showStatus(message, type) {
+      const el = $('gateStatus');
+      el.textContent = message || '';
+      el.className = 'status visible ' + (type || 'info');
+    }
+
+    function hideStatus() {
+      $('gateStatus').className = 'status';
+      $('gateStatus').textContent = '';
+    }
+
+    function employeeLabel(employee) {
+      if (!employee) return 'Не указан';
+      return employee.full_name || employee.employee_id || employee.id || 'Не указан';
+    }
+
+    function todayRu() {
+      return new Intl.DateTimeFormat('ru-RU', {
+        timeZone: 'Europe/Moscow',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }).format(new Date());
+    }
+
+    function serviceBaseUrl() {
+      const configured = normalizeText(state.config.app_url);
+      if (configured) return configured;
+      const current = new URL(window.location.href);
+      current.search = '';
+      return current.toString();
+    }
+
+    function buildViewUrl(view) {
+      const url = new URL(serviceBaseUrl());
+      url.searchParams.set('token', normalizeText(state.config.token));
+      url.searchParams.set('view', view);
+      const whId = normalizeText(state.config.wh_id);
+      if (whId) url.searchParams.set('wh_id', whId);
+      return url.toString();
+    }
+
+    function showShiftOpeningInline() {
+      if (!state.shiftFrameLoaded) {
+        const url = new URL(buildViewUrl('shift_opening'));
+        url.searchParams.set('embedded', '1');
+        $('inlineShiftFrame').src = url.toString();
+        state.shiftFrameLoaded = true;
+      }
+      showStatus('Форма открытия смены готовится...', 'info');
+      showScreen('screenGate');
+    }
+
+    function showDashboard() {
+      $('topNote').textContent = 'Смена открыта. Доступна динамика и ручные выгрузки.';
+      showScreen('screenDashboard');
+    }
+
+    function showUploadsPage() {
+      if (!state.uploadsFrameLoaded) {
+        $('uploadsFrame').src = buildViewUrl('uploads');
+        state.uploadsFrameLoaded = true;
+      }
+      $('topNote').textContent = 'Открыт раздел ручных выгрузок.';
+      showScreen('screenUploads');
+    }
+
+    function updateDashboard(payload) {
+      const shift = payload && payload.shift ? payload.shift : payload;
+      state.shift = shift || state.shift;
+      state.shiftDate = normalizeText((shift && shift.shift_date) || (payload && payload.shift_date) || state.shiftDate);
+      state.shiftLabel = normalizeText((shift && shift.shift_label) || (payload && payload.shift_label) || state.shiftLabel || todayRu());
+
+      const incoming = shift && shift.incoming_employee ? shift.incoming_employee : null;
+      const outgoing = shift && shift.outgoing_employee ? shift.outgoing_employee : null;
+      $('metricShift').textContent = state.shiftLabel || todayRu();
+      $('metricShiftNote').textContent = 'Смена открыта';
+      $('metricIncoming').textContent = employeeLabel(incoming);
+      $('metricOutgoing').textContent = employeeLabel(outgoing);
+      $('dashboardSubtitle').textContent = 'Смена ' + (state.shiftLabel || todayRu()) + ' открыта. Можно работать с выгрузками.';
+      $('topNote').textContent = 'Смена открыта. Доступна динамика и ручные выгрузки.';
+      showDashboard();
+    }
+
+    function checkShiftState() {
+      google.script.run
+        .withSuccessHandler((response) => {
+          if (response && response.ok !== false && response.shift) {
+            updateDashboard(response);
+            return;
+          }
+          showShiftOpeningInline();
+        })
+        .withFailureHandler((error) => {
+          showShiftOpeningInline();
+          showStatus('Не удалось проверить смену: ' + (error && error.message ? error.message : String(error)), 'info');
+        })
+        .getShiftOpeningState({
+          token: normalizeText(state.config.token),
+          wh_id: normalizeText(state.config.wh_id),
+        });
+    }
+
+    window.addEventListener('message', (event) => {
+      const data = event && event.data ? event.data : null;
+      if (!data) return;
+      if (data.source === 'opp_shift_opening') {
+        if (data.type === 'shift_opened' || data.type === 'shift_existing') {
+          updateDashboard(data.payload || {});
+        }
+        if (data.type === 'go_home') showDashboard();
+      }
+      if (data.source === 'opp_manual_uploads' && data.type === 'go_home') {
+        showDashboard();
+      }
+    });
+
+    $('inlineShiftFrame').addEventListener('load', hideStatus);
+    $('reopenShiftButton').addEventListener('click', showShiftOpeningInline);
+    $('openUploadsButton').addEventListener('click', showUploadsPage);
+    $('uploadsHomeButton').addEventListener('click', showDashboard);
+
+    checkShiftState();
+  </script>
+</body>
+</html>

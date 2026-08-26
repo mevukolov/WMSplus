@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <script src="ui.js" defer></script>
-    <script src="opp_admin.js?v=20260414_10" defer></script>
+    <script src="opp_admin.js?v=20260421_01" defer></script>
 
     <style>
         .opp-toolbar {
@@ -224,6 +224,10 @@
             z-index: 780;
         }
 
+        #mistakes-modal {
+            z-index: 800;
+        }
+
         .opp-shift-status-summary {
             border: 1px solid rgba(15,23,42,0.1);
             border-radius: 10px;
@@ -289,6 +293,40 @@
             height: 240px;
             position: relative;
             margin-top: 8px;
+        }
+
+        .opp-mistakes-toolbar {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+            gap: 10px;
+            align-items: end;
+            margin-bottom: 12px;
+        }
+
+        .opp-mistakes-toolbar .btn {
+            min-width: 120px;
+            height: 40px;
+        }
+
+        .opp-mistakes-chart-wrap {
+            height: 320px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 10px;
+            padding: 10px;
+            background: #f8fafc;
+        }
+
+        .opp-mistakes-empty {
+            margin-top: 10px;
+            color: #64748b;
+        }
+
+        .opp-mistakes-summary {
+            margin-top: 12px;
+            max-height: 260px;
+            overflow: auto;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 10px;
         }
 
         .opp-status-mini-grid {
@@ -792,6 +830,12 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        @media (max-width: 900px) {
+            .opp-mistakes-toolbar {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -853,6 +897,7 @@
                 <h1 id="page-title">Динамика ОПП</h1>
                 <div id="page-title-actions" class="opp-page-title-actions">
                     <button id="calendar-btn" class="btn btn-rect">Календарь</button>
+                    <button id="mistakes-btn" class="btn btn-rect">Ошибки исполнителей</button>
                 </div>
             </div>
 
@@ -949,6 +994,53 @@
         <div id="pure-help-modal-empty" class="muted" style="display:none;margin:8px 0 12px;"></div>
         <div style="display:flex;justify-content:flex-end;">
             <button id="pure-help-modal-close" class="btn btn-rect">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<div id="mistakes-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:1080px;">
+        <h2 class="opp-detail-title" style="margin-bottom:12px;">Ошибки исполнителей</h2>
+        <div class="opp-mistakes-toolbar">
+            <div class="opp-field">
+                <label class="muted">Период с</label>
+                <input id="mistakes-date-from" class="input" type="date">
+            </div>
+            <div class="opp-field">
+                <label class="muted">Период по</label>
+                <input id="mistakes-date-to" class="input" type="date">
+            </div>
+            <div class="opp-field">
+                <label class="muted">Участок</label>
+                <select id="mistakes-workplace" class="input">
+                    <option value="">Все участки</option>
+                </select>
+            </div>
+            <button id="mistakes-apply-btn" class="btn btn-rect" type="button">Показать</button>
+        </div>
+
+        <div id="mistakes-modal-status" class="muted" style="margin:0 0 10px;"></div>
+
+        <div class="opp-mistakes-chart-wrap">
+            <canvas id="mistakes-chart"></canvas>
+        </div>
+        <div id="mistakes-chart-empty" class="opp-mistakes-empty" style="display:none;">Нет данных для отображения графика.</div>
+
+        <div class="opp-mistakes-summary">
+            <table class="table modal-table" style="min-width:520px;">
+                <thead>
+                <tr>
+                    <th>Сотрудник</th>
+                    <th>Уникальных ШК</th>
+                </tr>
+                </thead>
+                <tbody id="mistakes-summary-body"></tbody>
+            </table>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+            <button id="mistakes-modal-close" class="btn btn-rect">Закрыть</button>
         </div>
     </div>
 </div>
