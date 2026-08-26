@@ -34,9 +34,6 @@
     const AUTO_FOUND_DECISION = "Найден";
     const AUTO_FOUND_EMP_ID = "2405";
     const AUTO_FOUND_COMMENT = "У товара есть движение";
-    const SYSTEM_MOVEMENT_VERDICT = "Система - Движение";
-    const SYSTEM_NO_SHK_NOT_FOUND_VERDICT = "Система - Не найден Без ШК";
-    const SYSTEM_NO_SHK_FOUND_VERDICT = "Система - Обнаружен Без ШК";
     const SYSTEM_COMPLETION_VERDICT_KEYS = new Set([
         SYSTEM_MOVEMENT_VERDICT,
         SYSTEM_NO_SHK_NOT_FOUND_VERDICT,
@@ -421,29 +418,6 @@
         "Списания AWH",
         "Коробки на входе",
     ];
-    const REVIEW_VERDICTS = [
-        "Не выбран",
-        "Найден/Релиз/Списан",
-        "Отправлен на релиз",
-        "Отправлен на списание ревизией",
-        "Отправлен запрос",
-        "Нет на МХ/Не найден",
-        "Добавлен в исключения",
-    ];
-    const INCOMING_FLOW_ATTACHMENT_OPTIONS = [
-        "Не выбран",
-        "Вложено верно",
-        "Вложено неверно",
-        "Отправлен под пустым стикером",
-        "Дубль",
-        "Некорректный запрос",
-        "Движение",
-    ];
-    const DEFERRED_VERDICT_FIELDS = {
-        "Отправлен запрос": "Направление запроса",
-        "Отправлен на релиз": "Вставьте ссылку на запрос релиза",
-        "Отправлен на списание ревизией": "Вставьте ссылку",
-    };
     const FLOW_SKIP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
     const FLOW_SCORE_VERSION = "flow-mvp-2026-08-24";
     const FLOW_ALLOWED_USER_IDS = new Set(["1034305"]);
@@ -2880,6 +2854,11 @@
         if (error) throw error;
         refreshTaskRow(row.id, data || payload);
         state.review.rows = (state.review.rows || []).filter((item) => item.id !== row.id);
+        void writeTaskHistory({ ...row, ...payload, ...(data || {}) }, "task_system_closed", {
+            title: displayTaskTitle(row),
+            verdict: SYSTEM_MOVEMENT_VERDICT,
+            comment: note || "Подтверждено движение по Superset",
+        });
         return data || payload;
     }
 
@@ -3553,7 +3532,6 @@
                 completed_by_id: user.id || null,
                 completed_by_name: user.name || null,
                 completed_at: now,
-                no_shk_checked_at: now,
             },
             no_shk_review: {
                 shk: item.shk,
@@ -5000,7 +4978,7 @@
         if (error) throw error;
         refreshTaskRow(fresh.id, data || patch);
         const updated = findTaskRow(fresh.id) || { ...fresh, ...(data || patch) };
-        void writeTaskHistory(updated, "flow_claimed", { score: scored.score, reasons: scored.reasons, group: scored.group || null, lock_until: lockUntil });
+        void writeTaskHistory(updated, "task_claimed", { score: scored.score, reasons: scored.reasons, group: scored.group || null, lock_until: lockUntil });
         return updated;
     }
 
@@ -5268,7 +5246,7 @@
                 .single();
             if (error) throw error;
             refreshTaskRow(id, data || patch);
-            void writeTaskHistory(findTaskRow(id) || row, "flow_skipped", skipEvent);
+            void writeTaskHistory(findTaskRow(id) || row, "task_skipped", skipEvent);
             if (state.flow.currentRowId === id) {
                 state.flow.currentRowId = "";
                 state.flow.currentScore = null;
@@ -6247,13 +6225,15 @@
     }
 
     function taskCompletionActor(row, historyRow) {
+        // History-first, payload-fallback (wms_task_history only covers tasks
+        // completed since 2026-08-24; older ones fall back to source_payload).
         const review = taskReviewPayload(row);
         return {
-            id: normalizeIdentifier(review.completed_by_id)
-                || normalizeIdentifier(historyRow && historyRow.actor_employee_id)
+            id: normalizeIdentifier(historyRow && historyRow.actor_employee_id)
+                || normalizeIdentifier(review.completed_by_id)
                 || normalizeIdentifier(row && row.assignee_employee_id),
-            name: normalizeText(review.completed_by_name)
-                || normalizeText(historyRow && historyRow.actor_name)
+            name: normalizeText(historyRow && historyRow.actor_name)
+                || normalizeText(review.completed_by_name)
                 || normalizeText(row && row.assignee_name),
         };
     }
@@ -6871,6 +6851,68 @@
         return "<div class='task-history-box copyable' data-copy-value='" + escapeHtml(lines.join("\n")) + "' title='Нажми, чтобы скопировать'><strong>История разбора</strong>\n" + escapeHtml(lines.join("\n")) + "</div>";
     }
 
+    const TASK_HISTORY_EVENT_LABELS = {
+        task_created: "Задача создана",
+        task_claimed: "Взято в работу (Flow)",
+        task_skipped: "Пропущено (Flow)",
+        task_started: "Начато",
+        task_completed: "Завершено",
+        task_deferred: "Отложено",
+        task_reopened: "Переоткрыто вручную",
+        task_auto_reopened: "Переоткрыто автоматически",
+        task_system_closed: "Закрыто системой (актуализация)",
+    };
+
+    function taskHistoryEventLabel(eventType) {
+        return TASK_HISTORY_EVENT_LABELS[eventType] || normalizeText(eventType) || "Событие";
+    }
+
+    async function loadTaskDetailHistory(id) {
+        const db = supabaseDb();
+        if (!db || !id) return [];
+        const read = await readOptionalRows(db, FLOW_HISTORY_TABLE, (query) => query
+            .select("*")
+            .eq("task_id", id)
+            .order("created_at", { ascending: true })
+            .limit(200));
+        return read.ok ? (read.rows || []) : [];
+    }
+
+    function taskHistoryFeedItemHtml(item) {
+        const payload = item.payload && typeof item.payload === "object" && !Array.isArray(item.payload) ? item.payload : {};
+        const actor = normalizeText(item.actor_name) || normalizeText(item.actor_employee_id) || "Система";
+        const parts = [taskHistoryEventLabel(item.event_type)];
+        const verdict = normalizeText(payload.verdict);
+        if (verdict && verdict !== "Не выбран") parts.push("вердикт: " + verdict);
+        if (normalizeText(payload.comment)) parts.push("комментарий: " + payload.comment);
+        if (payload.reopen_after) parts.push("до " + formatRuDateTime(payload.reopen_after));
+        return "<div class='task-history-feed-item'>"
+            + "<div class='task-history-feed-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
+            + "<div class='task-history-feed-body'><strong>" + escapeHtml(actor) + "</strong> — " + escapeHtml(parts.join(", ")) + "</div>"
+            + "</div>";
+    }
+
+    function renderTaskDetailHistoryFeed(historyRows, row) {
+        const target = $("taskDetailHistoryFeed");
+        if (!target) return;
+        if (historyRows && historyRows.length) {
+            const items = historyRows.slice().reverse().map(taskHistoryFeedItemHtml).join("");
+            target.className = "task-history-feed-wrap";
+            target.innerHTML = "<strong>История</strong><div class='task-history-feed'>" + items + "</div>";
+            return;
+        }
+        // wms_task_history only has rows since 2026-08-24 — fall back to the
+        // payload-derived summary for tasks older than that instead of
+        // fabricating history rows that never happened.
+        target.outerHTML = taskHistoryBox(row) || "<div id='taskDetailHistoryFeed'></div>";
+    }
+
+    async function loadAndRenderTaskDetailHistory(row) {
+        const historyRows = await loadTaskDetailHistory(row.id);
+        if (!state.taskDetail || state.taskDetail.rowId !== row.id) return;
+        renderTaskDetailHistoryFeed(historyRows, row);
+    }
+
     function taskDetailActionButtons(row, readOnly) {
         if (readOnly) {
             return "<div class='task-detail-actions'><button id='reopenTaskBtn' class='btn btn-square' type='button' title='Переоткрыть задачу'>↻</button><button id='closeTaskDetail' class='btn btn-square' type='button'>×</button></div>";
@@ -6923,9 +6965,10 @@
             + taskTagsBox(row)
             + incomingFlowShkInfoBox(row)
             + taskTareInfoBox(row)
-            + taskHistoryBox(row)
+            + "<div id='taskDetailHistoryFeed' class='task-history-feed-wrap'>Загрузка истории…</div>"
             + reviewBlock
             + "</div>";
+        void loadAndRenderTaskDetailHistory(row);
         $("closeTaskDetail").addEventListener("click", closeTaskDetail);
         target.querySelectorAll("[data-copy-value]").forEach((field) => {
             field.addEventListener("click", async () => {
@@ -7381,8 +7424,6 @@
         if (!row || normalizeText(row.task_status) !== "Завершено") return false;
         if (isTrueLike(row.is_deleted)) return false;
         if (isSystemCompletionVerdict(row.opp_verdict)) return false;
-        const review = taskReviewPayload(row);
-        if (isTrueLike(review.system_closed) || isTrueLike(review.auto_closed)) return false;
         return true;
     }
 
@@ -8036,6 +8077,9 @@
                 if (existing) Object.assign(existing, row, data || payload);
                 else state.review.rows.unshift({ ...row, ...(data || payload) });
             }
+            void writeTaskHistory({ ...row, ...payload, ...(data || {}) }, "task_reopened", {
+                title: displayTaskTitle(row),
+            });
             closeReopenConfirm();
             closeTaskDetail();
             renderInactive();
@@ -8716,11 +8760,9 @@
     }
 
     function staffStatsPrespisokActor(row) {
-        const payload = row && row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : {};
-        const actor = payload.actor && typeof payload.actor === "object" && !Array.isArray(payload.actor) ? payload.actor : {};
         return {
-            id: normalizeIdentifier(actor.id) || normalizeIdentifier(row && row.operator_id),
-            name: normalizeText(actor.name) || normalizeText(row && row.operator_name),
+            id: normalizeIdentifier(row && row.operator_id),
+            name: normalizeText(row && row.operator_name),
         };
     }
 
@@ -8782,6 +8824,10 @@
         (employees || []).forEach((employee) => {
             ensureStaffStatsRow(byEmployee, employee.employee_id || employee.id, employee.full_name || employee.name);
         });
+        // History-first, payload-fallback: wms_task_history only has rows since
+        // 2026-08-24, so historyDeferredTaskIds dedupes against source_payload.deferred_at
+        // below only to catch older tasks that predate history tracking, not as a
+        // parallel counting path for the same event.
         const historyDeferredTaskIds = new Set();
         const completedHistoryByTaskId = new Map();
         (historyRows || []).filter((row) => normalizeText(row.event_type) === "task_completed" && moscowDateFromValue(row.created_at) === date).forEach((row) => {
@@ -8824,7 +8870,7 @@
             const review = taskReviewPayload(row);
             const payload = taskPayload(row);
             const noShk = payload.no_shk_review && typeof payload.no_shk_review === "object" && !Array.isArray(payload.no_shk_review) ? payload.no_shk_review : {};
-            const noShkAt = normalizeText(noShk.checked_at) || normalizeText(review.no_shk_checked_at) || (isQuickNoShkVerdict(row.opp_verdict) ? row.completed_at : "");
+            const noShkAt = normalizeText(noShk.checked_at) || (isQuickNoShkVerdict(row.opp_verdict) ? row.completed_at : "");
             if (moscowDateFromValue(noShkAt) === date && (noShk.result || isQuickNoShkVerdict(row.opp_verdict))) {
                 const actor = staffStatsNoShkActor(row);
                 const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
