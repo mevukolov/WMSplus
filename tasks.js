@@ -43,6 +43,11 @@
     const QUICK_NO_SHK_SUPERSET_CACHE_KEY = "wms_quick_no_shk_superset_cache_v1";
     const QUICK_NO_SHK_SUPERSET_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
     const QUICK_NO_SHK_PRELOAD_AHEAD = 4;
+    const SUPERSET_CACHE_TABLE = "wms_superset_cache";
+    const SUPERSET_CACHE_CHUNK_SIZE = 500;
+    const QUICK_NO_SHK_STREAK_THRESHOLD_MS = 6000;
+    const QUICK_NO_SHK_TIMER_WARN_MS = 8000;
+    const QUICK_NO_SHK_TIMER_HOT_MS = 16000;
     const NO_SHK_SEARCH_LIMIT = 120;
     const NO_SHK_PHOTO_PREVIEW_LIMIT = 18;
     const NO_SHK_FOUND_COMMENT = "Разбор Без ШК: товар опознан в WMS+.";
@@ -3009,6 +3014,9 @@
             preloading: false,
             achievementsChecked: false,
             loadToken: "",
+            streak: 0,
+            bestStreak: 0,
+            lastActionKey: "",
         };
     }
 
@@ -3053,6 +3061,76 @@
 
     function mergeQuickNoShkSupersetRows(existingRows, nextRows) {
         return Array.from(latestSupersetByShk([...(existingRows || []), ...(nextRows || [])]).values());
+    }
+
+    // Superset uploads used to live only in this browser's localStorage, so
+    // starting the check from a different computer meant re-uploading a file
+    // someone else had already fed the app minutes earlier. Pushing/pulling
+    // through wms_superset_cache lets any device pick up the latest known
+    // data for whatever SHKs it actually needs.
+    async function pushSupersetRowsToSupabase(rows) {
+        const db = supabaseDb();
+        const compact = compactSupersetRowsForQuickNoShk(rows);
+        if (!db || !compact.length) return;
+        const now = new Date().toISOString();
+        const payloads = compact.map((row) => ({
+            wh_id: WH_ID,
+            shk: row.shk,
+            nm: row.nm || null,
+            name: row.name || null,
+            last_office: row.last_office || null,
+            last_status: row.last_status || null,
+            last_status_at: row.last_status_at || null,
+            last_status_ts: row.last_status_ts || null,
+            price: row.price || null,
+            updated_at: now,
+        }));
+        for (const chunk of chunkArray(payloads, SUPERSET_CACHE_CHUNK_SIZE)) {
+            try {
+                const { error } = await db.from(SUPERSET_CACHE_TABLE).upsert(chunk, { onConflict: "wh_id,shk" });
+                if (error) throw error;
+            } catch (error) {
+                console.warn("superset cache push skipped:", error);
+                return;
+            }
+        }
+    }
+
+    async function fetchSupersetRowsFromSupabase(shks) {
+        const db = supabaseDb();
+        const ids = Array.from(new Set((shks || []).map(normalizeIdentifier).filter(Boolean)));
+        if (!db || !ids.length) return [];
+        const rows = [];
+        for (const chunk of chunkArray(ids, 200)) {
+            try {
+                const { data, error } = await db
+                    .from(SUPERSET_CACHE_TABLE)
+                    .select("shk,nm,name,last_office,last_status,last_status_at,last_status_ts,price")
+                    .eq("wh_id", WH_ID)
+                    .in("shk", chunk);
+                if (error) throw error;
+                rows.push(...(data || []));
+            } catch (error) {
+                console.warn("superset cache fetch skipped:", error);
+            }
+        }
+        return rows;
+    }
+
+    // Pulls whatever the warehouse already knows (from any device) about the
+    // SHKs this session still needs, before falling back to asking the
+    // current user to upload a Superset file themselves.
+    async function hydrateQuickNoShkSupersetFromSupabase() {
+        const needed = quickNoShkSupersetNeedStats().all;
+        if (!needed.length) return;
+        const remoteRows = await fetchSupersetRowsFromSupabase(needed);
+        if (!remoteRows.length) return;
+        const mergedRows = mergeQuickNoShkSupersetRows(state.quickNoShk.supersetRows || [], remoteRows);
+        state.quickNoShk.supersetRows = mergedRows;
+        state.quickNoShk.supersetByShk = latestSupersetByShk(mergedRows);
+        saveQuickNoShkSupersetCache(mergedRows);
+        await enrichTaskNomenclatureFromSuperset(mergedRows, { allowMovementRows: true });
+        buildQuickNoShkItems();
     }
 
     function isQuickNoShkPureCandidate(row) {
@@ -3243,7 +3321,15 @@
         const total = $("quickNoShkTotalTimer");
         if (total) total.textContent = formatDuration(quickNoShkElapsedMs());
         const item = $("quickNoShkItemTimer");
-        if (item) item.textContent = formatDuration(quickNoShkItemElapsedMs());
+        if (item) {
+            const ms = quickNoShkItemElapsedMs();
+            item.textContent = formatDuration(ms);
+            const card = item.closest(".quick-no-shk-hud-tile");
+            if (card) {
+                card.classList.toggle("is-warm", ms >= QUICK_NO_SHK_TIMER_WARN_MS && ms < QUICK_NO_SHK_TIMER_HOT_MS);
+                card.classList.toggle("is-hot", ms >= QUICK_NO_SHK_TIMER_HOT_MS);
+            }
+        }
     }
 
     function startQuickNoShkClock() {
@@ -3275,6 +3361,8 @@
             if (state.quickNoShk.loadToken !== loadToken || !$("quickNoShkModal").classList.contains("active")) return;
             state.quickNoShk.pureCandidates = pureRows || [];
             buildQuickNoShkItems();
+            await hydrateQuickNoShkSupersetFromSupabase();
+            if (state.quickNoShk.loadToken !== loadToken || !$("quickNoShkModal").classList.contains("active")) return;
             state.quickNoShk.loading = false;
             renderQuickNoShk();
         } catch (error) {
@@ -3414,6 +3502,7 @@
             state.quickNoShk.supersetRows = mergedRows;
             state.quickNoShk.supersetByShk = latestSupersetByShk(mergedRows);
             saveQuickNoShkSupersetCache(mergedRows);
+            void pushSupersetRowsToSupabase(rows);
             await enrichTaskNomenclatureFromSuperset(mergedRows, { statusTarget: "quickNoShkStatus", allowMovementRows: true });
             state.actualize.rows = mergedRows;
             state.actualize.stats = actualizeSupersetStats(mergedRows);
@@ -3461,7 +3550,7 @@
     async function loadQuickNoShkPhoto(item) {
         const nm = normalizeIdentifier(item && item.nm);
         if (!nm || Object.prototype.hasOwnProperty.call(state.quickNoShk.photoCache, nm)) return;
-        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 4, maxHosts: 30 });
+        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 1, maxHosts: 30 });
         const found = await findFirstLoadableImage(urls);
         state.quickNoShk.photoCache[nm] = found || "";
         const current = currentQuickNoShkItem();
@@ -3481,9 +3570,7 @@
                 if (!item || done.has(item.key) || !nm || Object.prototype.hasOwnProperty.call(state.quickNoShk.photoCache, nm)) continue;
                 next.push(item);
             }
-            for (const item of next) {
-                await loadQuickNoShkPhoto(item);
-            }
+            await Promise.all(next.map((item) => loadQuickNoShkPhoto(item)));
         } finally {
             state.quickNoShk.preloading = false;
         }
@@ -3499,11 +3586,18 @@
         }
         const progress = (state.quickNoShk.actions || []).length;
         const total = (state.quickNoShk.items || []).length;
+        const pct = total ? Math.min(100, Math.round((progress / total) * 100)) : 0;
+        const streak = Number(state.quickNoShk.streak) || 0;
+        const streakBadge = streak >= 2
+            ? "<div class='quick-no-shk-streak'>🔥 Комбо ×" + streak + "</div>"
+            : "";
         target.innerHTML = quickNoShkTopHtml("Быстрый режим: " + progress + "/" + total + ". Смотри фото, сверяй глазами, жми без философского романа.")
             + "<section class='quick-no-shk-panel'>"
+            + "<div class='quick-no-shk-progress'><div class='quick-no-shk-progress-fill' style='width:" + pct + "%'></div></div>"
             + "<div class='quick-no-shk-hud'>"
-            + "<div><span>Общее время</span><strong id='quickNoShkTotalTimer'>" + escapeHtml(formatDuration(quickNoShkElapsedMs())) + "</strong></div>"
-            + "<div><span>Текущая цель</span><strong id='quickNoShkItemTimer'>" + escapeHtml(formatDuration(quickNoShkItemElapsedMs())) + "</strong></div>"
+            + "<div class='quick-no-shk-hud-tile'><span>Общее время</span><strong id='quickNoShkTotalTimer'>" + escapeHtml(formatDuration(quickNoShkElapsedMs())) + "</strong></div>"
+            + "<div class='quick-no-shk-hud-tile'><span>Текущая цель</span><strong id='quickNoShkItemTimer'>" + escapeHtml(formatDuration(quickNoShkItemElapsedMs())) + "</strong></div>"
+            + streakBadge
             + "</div>"
             + "<div class='quick-no-shk-game'>"
             + "<div class='quick-no-shk-photo-wrap'>" + quickNoShkPhotoHtml(item) + "</div>"
@@ -3525,11 +3619,47 @@
             + "</aside></div></section>";
         bindQuickNoShkClose();
         target.querySelectorAll("[data-quick-no-shk]").forEach((button) => {
-            button.addEventListener("click", () => { void applyQuickNoShkAction(button.dataset.quickNoShk || ""); });
+            button.addEventListener("click", () => {
+                triggerQuickNoShkHitEffect(button, button.dataset.quickNoShk === "found");
+                void applyQuickNoShkAction(button.dataset.quickNoShk || "");
+            });
         });
         void loadQuickNoShkPhoto(item);
         void preloadQuickNoShkPhotos();
         updateQuickNoShkTimers();
+    }
+
+    function quickNoShkBurstParticlesHtml(count, color) {
+        return Array.from({ length: count }, (_item, index) => {
+            const angle = (Math.PI * 2 * index) / count + Math.random() * 0.5;
+            const radius = 54 + Math.random() * 130;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius * .72;
+            const size = 5 + Math.random() * 9;
+            const delay = Math.random() * .07;
+            return "<i class='quick-no-shk-particle' style='--x:" + x.toFixed(1) + "px;--y:" + y.toFixed(1) + "px;--size:" + size.toFixed(1) + "px;--delay:" + delay.toFixed(2) + "s;--c:" + color + "'></i>";
+        }).join("");
+    }
+
+    function triggerQuickNoShkHitEffect(buttonEl, found) {
+        const color = found ? "#22c55e" : "#f87171";
+        const burst = document.createElement("div");
+        burst.className = "quick-no-shk-burst";
+        burst.innerHTML = quickNoShkBurstParticlesHtml(16, color);
+        if (buttonEl && buttonEl.getBoundingClientRect) {
+            const rect = buttonEl.getBoundingClientRect();
+            burst.style.left = (rect.left + rect.width / 2) + "px";
+            burst.style.top = (rect.top + rect.height / 2) + "px";
+        }
+        document.body.appendChild(burst);
+        window.setTimeout(() => burst.remove(), 750);
+        const card = document.querySelector(".quick-no-shk-card");
+        if (card) {
+            card.classList.remove("quick-no-shk-shake", "quick-no-shk-flash-found", "quick-no-shk-flash-miss");
+            void card.offsetWidth;
+            card.classList.add("quick-no-shk-shake", found ? "quick-no-shk-flash-found" : "quick-no-shk-flash-miss");
+            window.setTimeout(() => card.classList.remove("quick-no-shk-shake", "quick-no-shk-flash-found", "quick-no-shk-flash-miss"), 500);
+        }
     }
 
     async function completeTaskBySystemNoShk(row, item, verdict, note) {
@@ -3773,6 +3903,11 @@
                 await markTaskNoShkCheckedWithoutClosing(row, item, verdict, note);
                 keptActive = true;
             }
+            const decisionMs = quickNoShkItemElapsedMs();
+            if (decisionMs > 0 && decisionMs < QUICK_NO_SHK_STREAK_THRESHOLD_MS) state.quickNoShk.streak += 1;
+            else state.quickNoShk.streak = 0;
+            state.quickNoShk.bestStreak = Math.max(state.quickNoShk.bestStreak, state.quickNoShk.streak);
+            state.quickNoShk.lastActionKey = actionKey + ":" + Date.now();
             state.quickNoShk.actions.push({
                 key: item.key,
                 shk: item.shk,
@@ -3783,6 +3918,7 @@
                 found,
                 kind: item.kind || "task",
                 keptActive,
+                decisionMs,
                 at: new Date().toISOString(),
             });
             state.quickNoShk.index += 1;
@@ -3813,13 +3949,17 @@
         const notFound = actions.filter((action) => !action.found);
         const keptActive = actions.filter((action) => action.keptActive);
         const foundRows = found.map((action) => "<div class='quick-no-shk-finish-row'><strong>" + escapeHtml(action.shk) + "</strong><br>" + escapeHtml(action.name || "-") + "<br>НМ: " + escapeHtml(action.nm || "-") + " · " + escapeHtml(formatMoney(action.price)) + (action.kind === "pure" ? " · чистые списания" : "") + "</div>").join("");
+        const avgMs = actions.length ? Math.round(actions.reduce((sum, action) => sum + (Number(action.decisionMs) || 0), 0) / actions.length) : 0;
         target.innerHTML = quickNoShkTopHtml("Проверка завершена. Найденное при оклейке вынесено отдельно, остальное закрыто системным вердиктом.")
-            + "<section class='quick-no-shk-panel'>"
+            + "<section class='quick-no-shk-panel quick-no-shk-finish-panel'>"
+            + "<div class='quick-no-shk-finish-hero'>🏁</div>"
             + "<div class='prespisok-finish-grid'>"
             + "<div class='prespisok-finish-stat'><span>Проверено</span><strong>" + actions.length + "</strong></div>"
             + "<div class='prespisok-finish-stat saved'><span>Есть</span><strong>" + found.length + "</strong></div>"
             + "<div class='prespisok-finish-stat writeoff'><span>Не найден</span><strong>" + notFound.length + "</strong></div>"
             + "<div class='prespisok-finish-stat'><span>Остались в ручном</span><strong>" + keptActive.length + "</strong></div>"
+            + "<div class='prespisok-finish-stat'><span>Лучшее комбо</span><strong>🔥" + (Number(state.quickNoShk.bestStreak) || 0) + "</strong></div>"
+            + "<div class='prespisok-finish-stat'><span>Средний темп</span><strong>" + escapeHtml(formatDuration(avgMs)) + "</strong></div>"
             + "</div>"
             + "<h3 class='quick-no-shk-title' style='font-size:clamp(28px,4vw,54px);margin-top:18px'>Найдено при оклейке</h3>"
             + "<div class='quick-no-shk-finish-list'>" + (foundRows || "<div class='quick-no-shk-finish-row'>Ничего не нашли. Иногда реальность скучнее файла.</div>") + "</div>"
@@ -3827,6 +3967,24 @@
             + "</section>";
         bindQuickNoShkClose();
         $("closeQuickNoShkFinish").addEventListener("click", closeQuickNoShkModal);
+        fireQuickNoShkConfetti();
+    }
+
+    function fireQuickNoShkConfetti() {
+        const layer = document.createElement("div");
+        layer.className = "quick-no-shk-confetti-layer";
+        const colors = ["#86efac", "#22c55e", "#facc15", "#38bdf8", "#f87171", "#c084fc"];
+        layer.innerHTML = Array.from({ length: 60 }, () => {
+            const left = Math.random() * 100;
+            const size = 6 + Math.random() * 8;
+            const delay = Math.random() * .5;
+            const duration = 1.6 + Math.random() * 1.1;
+            const rotate = Math.round(Math.random() * 720 - 360);
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            return "<i class='quick-no-shk-confetti-bit' style='--left:" + left.toFixed(1) + "%;--size:" + size.toFixed(1) + "px;--delay:" + delay.toFixed(2) + "s;--duration:" + duration.toFixed(2) + "s;--rotate:" + rotate + "deg;--c:" + color + "'></i>";
+        }).join("");
+        document.body.appendChild(layer);
+        window.setTimeout(() => layer.remove(), 3200);
     }
 
     function resetNoShkReviewState(keepPhotos) {
@@ -10928,7 +11086,14 @@
     }
 
     async function findFirstLoadableImage(urls) {
-        const batchSize = 16;
+        // WB shards product photos across ~30-60 CDN hosts with no public
+        // mapping from article to host, so this races every candidate host
+        // at once instead of guessing one at a time. Batching at 16 (the old
+        // value) meant up to ~60 sequential 1.3s rounds before giving up --
+        // effectively minutes per photo. Racing a much larger wave means the
+        // real host (wherever it lands) is almost always caught in the
+        // first round.
+        const batchSize = 300;
         for (let i = 0; i < (urls || []).length; i += batchSize) {
             const found = await firstFulfilled(urls.slice(i, i + batchSize).map((url) => probeImageUrl(url, 1300)));
             if (found) return found;
