@@ -6,6 +6,14 @@
     const SETTINGS_TABLE = "wms_manual_upload_settings";
     const WMS_TASKS_TABLE = "wms_tasks";
     const WMS_TASK_SELECT_COLUMNS = "id,source_module,source_id,source_row_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at";
+    // Achievement counting only ever reads a handful of flat fields plus the
+    // actor's id/name (buried in source_payload.wms_review). The full
+    // WMS_TASK_SELECT_COLUMNS row -- source_payload especially, which carries
+    // every task_item/review/history blob -- averages ~2.5KB/row; across
+    // thousands of completed tasks that's ~19MB transferred on every single
+    // achievement check (every page load, every task completion). Extracting
+    // just the two JSON fields we need server-side cuts that to ~2MB.
+    const ACHIEVEMENT_TASK_LEAN_COLUMNS = "id,task_status,is_deleted,opp_verdict,task_type,title,source_module,upload_type,completed_at,updated_at,assignee_employee_id,assignee_name,completed_by_id:source_payload->wms_review->>completed_by_id,completed_by_name:source_payload->wms_review->>completed_by_name";
     const WMS_EMPLOYEES_TABLE = "wms_employees";
     const WMS_SHIFTS_TABLE = "wms_shifts";
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
@@ -7708,6 +7716,18 @@
         return true;
     }
 
+    function hydrateLeanAchievementRow(row) {
+        return {
+            ...row,
+            source_payload: {
+                wms_review: {
+                    completed_by_id: row.completed_by_id || null,
+                    completed_by_name: row.completed_by_name || null,
+                },
+            },
+        };
+    }
+
     async function fetchCompletedAchievementTasks() {
         const db = supabaseDb();
         if (!db) return { ok: true, rows: [] };
@@ -7715,13 +7735,14 @@
         try {
             let query = db
                 .from(WMS_TASKS_TABLE)
-                .select(WMS_TASK_SELECT_COLUMNS)
+                .select(ACHIEVEMENT_TASK_LEAN_COLUMNS)
                 .eq("task_status", "Завершено")
                 .order("completed_at", { ascending: false, nullsFirst: false })
                 .limit(10000);
             const { data, error } = await query;
             if (error) throw error;
-            return { ok: true, rows: (data || []).filter((row) => isManualAchievementTask(row) && taskCompletedByMatches(row, user)) };
+            const rows = (data || []).map(hydrateLeanAchievementRow);
+            return { ok: true, rows: rows.filter((row) => isManualAchievementTask(row) && taskCompletedByMatches(row, user)) };
         } catch (error) {
             console.warn("achievement completed tasks query skipped:", error);
             // ok:false must never be treated as "zero eligible tasks" by a caller --
