@@ -6878,18 +6878,52 @@
         return read.ok ? (read.rows || []) : [];
     }
 
+    const AVATAR_PALETTE = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#ec4899", "#84cc16", "#f97316"];
+
+    function avatarColorFor(key) {
+        const str = normalizeText(key) || "?";
+        let hash = 0;
+        for (let i = 0; i < str.length; i += 1) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+        return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+    }
+
+    function avatarInitials(name) {
+        const parts = normalizeText(name).split(/\s+/).filter(Boolean);
+        if (!parts.length) return "?";
+        if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+
+    function taskHistoryAvatarHtml(actorId, actorName, isSystem) {
+        if (isSystem) return "<span class='task-chat-avatar task-chat-avatar-system' aria-hidden='true'>⚙</span>";
+        const label = actorName || actorId;
+        return "<span class='task-chat-avatar' style='background:" + escapeHtml(avatarColorFor(actorId || actorName)) + "' aria-hidden='true'>" + escapeHtml(avatarInitials(label)) + "</span>";
+    }
+
     function taskHistoryFeedItemHtml(item) {
         const payload = item.payload && typeof item.payload === "object" && !Array.isArray(item.payload) ? item.payload : {};
-        const actor = normalizeText(item.actor_name) || normalizeText(item.actor_employee_id) || "Система";
-        const verdict = normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран"
-            ? payload.verdict
-            : taskHistoryEventLabel(item.event_type);
+        const rawActorName = normalizeText(item.actor_name);
+        const rawActorId = normalizeText(item.actor_employee_id);
+        // A task closed via actualization (or a legacy row carrying the same
+        // system verdict) is credited to "Система" in Кто/Вердикт -- the
+        // real person who ran the actualization goes in the comment instead,
+        // per how this should read for reviewers scanning the feed.
+        const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
+        const isSystem = isSystemClosed || (!rawActorName && !rawActorId);
+        const actorDisplay = isSystemClosed ? "Система" : (rawActorName || rawActorId || "Система");
+        const verdict = isSystemClosed
+            ? "Закрыто автоматически"
+            : (normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран" ? payload.verdict : taskHistoryEventLabel(item.event_type));
         const commentParts = [];
+        if (isSystemClosed) {
+            const performer = rawActorName || rawActorId;
+            if (performer) commentParts.push("Выполнил: " + performer);
+        }
         if (normalizeText(payload.comment)) commentParts.push(payload.comment);
         if (payload.reopen_after) commentParts.push("до " + formatRuDateTime(payload.reopen_after));
         return "<div class='task-chat-row'>"
             + "<div class='task-chat-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
-            + "<div class='task-chat-actor'>" + escapeHtml(actor) + "</div>"
+            + "<div class='task-chat-actor'>" + taskHistoryAvatarHtml(rawActorId, rawActorName, isSystem) + "<span>" + escapeHtml(actorDisplay) + "</span></div>"
             + "<div class='task-chat-verdict'>" + escapeHtml(verdict) + "</div>"
             + "<div class='task-chat-comment'>" + escapeHtml(commentParts.join(" · ") || "—") + "</div>"
             + "</div>";
@@ -6948,7 +6982,7 @@
             target.innerHTML = "<strong>История</strong><div class='task-chat-empty'>Событий пока нет.</div>";
             return;
         }
-        const items = merged.slice().reverse().map(taskHistoryFeedItemHtml).join("");
+        const items = merged.map(taskHistoryFeedItemHtml).join("");
         target.innerHTML = "<strong>История</strong>"
             + "<div class='task-chat-head'><div>Когда</div><div>Кто</div><div>Вердикт</div><div>Комментарий</div></div>"
             + "<div class='task-history-feed'>" + items + "</div>";
