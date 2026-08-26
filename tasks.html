@@ -488,13 +488,17 @@
         .task-history-box { margin-top: 12px; border-radius: 16px; border: 1px solid #fde68a; background: #fffbeb; padding: 14px; color: #713f12; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
         .task-history-box.copyable { cursor: copy; }
         .task-history-box.copyable:hover { border-color: #f59e0b; box-shadow: var(--shadow-sm); }
-        .task-history-feed-wrap { margin-top: 12px; border-radius: 16px; border: 1px solid #fde68a; background: #fffbeb; padding: 14px; color: #713f12; }
+        .task-history-feed-wrap { margin-top: 12px; border-radius: 16px; border: 1px solid #fde68a; background: #fffbeb; padding: 14px; color: #713f12; overflow-x: auto; }
         .task-history-feed-wrap > strong { display: block; margin-bottom: 8px; }
-        .task-history-feed { display: grid; gap: 8px; }
-        .task-history-feed-item { display: grid; grid-template-columns: minmax(120px, .5fr) 1fr; gap: 10px; align-items: baseline; border-top: 1px solid rgba(180,83,9,.18); padding-top: 8px; }
-        .task-history-feed-item:first-child { border-top: none; padding-top: 0; }
-        .task-history-feed-time { color: #92400e; font-size: 12px; white-space: nowrap; }
-        .task-history-feed-body { color: #713f12; line-height: 1.4; overflow-wrap: anywhere; }
+        .task-chat-empty { color: #92400e; font-size: 13px; }
+        .task-chat-head { display: grid; grid-template-columns: 128px 140px 150px 1fr; gap: 10px; padding: 0 0 6px; color: #92400e; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .02em; min-width: 480px; }
+        .task-history-feed { display: grid; gap: 0; min-width: 480px; }
+        .task-chat-row { display: grid; grid-template-columns: 128px 140px 150px 1fr; gap: 10px; align-items: start; border-top: 1px solid rgba(180,83,9,.18); padding: 8px 0; }
+        .task-chat-row:first-child { border-top: none; padding-top: 0; }
+        .task-chat-time { color: #92400e; font-size: 12px; white-space: nowrap; }
+        .task-chat-actor { color: #713f12; font-weight: 900; overflow-wrap: anywhere; }
+        .task-chat-verdict { color: #713f12; overflow-wrap: anywhere; }
+        .task-chat-comment { color: #713f12; line-height: 1.4; overflow-wrap: anywhere; }
         .task-form { margin-top: 14px; display: grid; gap: 10px; min-width: 0; }
         .task-form label { color: #334155; font-size: 13px; font-weight: 900; }
         .task-form textarea, .task-form select, .task-form input { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; border: 1px solid #dbe3ec; border-radius: 14px; padding: 11px 12px; background: #fff; color: #242038; font: inherit; }

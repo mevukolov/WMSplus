@@ -6881,30 +6881,77 @@
     function taskHistoryFeedItemHtml(item) {
         const payload = item.payload && typeof item.payload === "object" && !Array.isArray(item.payload) ? item.payload : {};
         const actor = normalizeText(item.actor_name) || normalizeText(item.actor_employee_id) || "Система";
-        const parts = [taskHistoryEventLabel(item.event_type)];
-        const verdict = normalizeText(payload.verdict);
-        if (verdict && verdict !== "Не выбран") parts.push("вердикт: " + verdict);
-        if (normalizeText(payload.comment)) parts.push("комментарий: " + payload.comment);
-        if (payload.reopen_after) parts.push("до " + formatRuDateTime(payload.reopen_after));
-        return "<div class='task-history-feed-item'>"
-            + "<div class='task-history-feed-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
-            + "<div class='task-history-feed-body'><strong>" + escapeHtml(actor) + "</strong> — " + escapeHtml(parts.join(", ")) + "</div>"
+        const verdict = normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран"
+            ? payload.verdict
+            : taskHistoryEventLabel(item.event_type);
+        const commentParts = [];
+        if (normalizeText(payload.comment)) commentParts.push(payload.comment);
+        if (payload.reopen_after) commentParts.push("до " + formatRuDateTime(payload.reopen_after));
+        return "<div class='task-chat-row'>"
+            + "<div class='task-chat-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
+            + "<div class='task-chat-actor'>" + escapeHtml(actor) + "</div>"
+            + "<div class='task-chat-verdict'>" + escapeHtml(verdict) + "</div>"
+            + "<div class='task-chat-comment'>" + escapeHtml(commentParts.join(" · ") || "—") + "</div>"
             + "</div>";
+    }
+
+    // wms_task_history only has rows since 2026-08-24. For anything the task
+    // itself remembers from before that (or from a write path that skipped
+    // history for some other reason) we reconstruct one entry per gap from
+    // source_payload, so the feed doesn't silently drop older context just
+    // because a newer real history row now also exists for the task.
+    function synthesizeLegacyHistoryEntries(row, realHistoryRows) {
+        const review = taskReviewPayload(row);
+        const presentTypes = new Set((realHistoryRows || []).map((item) => item.event_type));
+        const entries = [];
+        const verdict = normalizeText(review.verdict || review.attachment || row.opp_verdict);
+        if (verdict && verdict !== "Не выбран" && !presentTypes.has("task_completed") && !presentTypes.has("task_system_closed")) {
+            const actor = taskCompletionActor(row);
+            entries.push({
+                created_at: review.completed_at || row.completed_at || row.updated_at,
+                event_type: "task_completed",
+                actor_name: actor.name,
+                actor_employee_id: actor.id,
+                payload: { verdict, comment: review.comment },
+            });
+        }
+        if (review.defer_reason && !presentTypes.has("task_deferred")) {
+            entries.push({
+                created_at: review.deferred_at || row.updated_at,
+                event_type: "task_deferred",
+                actor_name: review.deferred_by_name,
+                actor_employee_id: review.deferred_by_id,
+                payload: { comment: review.defer_reason, reopen_after: review.reopen_after },
+            });
+        }
+        if (review.manual_reopen_at && !presentTypes.has("task_reopened")) {
+            entries.push({
+                created_at: review.manual_reopen_at,
+                event_type: "task_reopened",
+                actor_name: review.manual_reopen_by_name,
+                actor_employee_id: review.manual_reopen_by_id,
+                payload: {},
+            });
+        }
+        return entries;
     }
 
     function renderTaskDetailHistoryFeed(historyRows, row) {
         const target = $("taskDetailHistoryFeed");
         if (!target) return;
-        if (historyRows && historyRows.length) {
-            const items = historyRows.slice().reverse().map(taskHistoryFeedItemHtml).join("");
-            target.className = "task-history-feed-wrap";
-            target.innerHTML = "<strong>История</strong><div class='task-history-feed'>" + items + "</div>";
+        const merged = (historyRows || [])
+            .concat(synthesizeLegacyHistoryEntries(row, historyRows))
+            .filter((item) => item && item.created_at)
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        target.className = "task-history-feed-wrap";
+        if (!merged.length) {
+            target.innerHTML = "<strong>История</strong><div class='task-chat-empty'>Событий пока нет.</div>";
             return;
         }
-        // wms_task_history only has rows since 2026-08-24 — fall back to the
-        // payload-derived summary for tasks older than that instead of
-        // fabricating history rows that never happened.
-        target.outerHTML = taskHistoryBox(row) || "<div id='taskDetailHistoryFeed'></div>";
+        const items = merged.slice().reverse().map(taskHistoryFeedItemHtml).join("");
+        target.innerHTML = "<strong>История</strong>"
+            + "<div class='task-chat-head'><div>Когда</div><div>Кто</div><div>Вердикт</div><div>Комментарий</div></div>"
+            + "<div class='task-history-feed'>" + items + "</div>";
     }
 
     async function loadAndRenderTaskDetailHistory(row) {
@@ -8000,7 +8047,7 @@
             if (error) throw error;
             void writeTaskHistory({ ...row, ...payload, ...(data || {}) }, "task_deferred", {
                 title: displayTaskTitle(row),
-                reason,
+                comment: reason,
                 reopen_after: reopenAfter,
             });
             const activeRow = (state.review.rows || []).find((item) => item.id === id);
