@@ -11815,7 +11815,14 @@
         state.files.primary = file;
         $("fileName").textContent = "Файл выбран: " + file.name;
         setStatus("Читаю файл...");
-        const rows = await readWorkbookRows(file, kind);
+        // loadWriteoffTerms() without force only fetches once per session
+        // (state.writeoffTerms.loaded guard), so a long-lived open upload tab
+        // kept computing due_date from whatever terms it first loaded --
+        // stale as soon as someone edits days_without_movement in the Сроки
+        // списания modal. Force a fresh pull right before every upload so
+        // writeoffDateInfoForRows() below always sees current terms, same as
+        // the recalculate_wms_task_writeoff_dates RPC does.
+        const [rows] = await Promise.all([readWorkbookRows(file, kind), loadWriteoffTerms(true)]);
         state.rows.primary = rows;
         state.specialCheck = null;
         if (module === "pm") {
