@@ -644,6 +644,7 @@
             reopenRowId: "",
             splitRowId: "",
             splitShk: "",
+            countdownTimer: null,
         },
         master: {
             files: {},
@@ -6607,12 +6608,17 @@
             return;
         }
         state.flow.allowConflictOpenId = "";
-        state.taskDetail = { rowId: id, source: source || "review", editRowId: "", deferRowId: "", reopenRowId: "", splitRowId: "", splitShk: "" };
+        if (state.taskDetail && state.taskDetail.countdownTimer) clearInterval(state.taskDetail.countdownTimer);
+        state.taskDetail = { rowId: id, source: source || "review", editRowId: "", deferRowId: "", reopenRowId: "", splitRowId: "", splitShk: "", countdownTimer: null };
         renderTaskDetail(row);
         setFlowModalOpen("taskDetailModal", true);
     }
 
     function closeTaskDetail() {
+        if (state.taskDetail && state.taskDetail.countdownTimer) {
+            clearInterval(state.taskDetail.countdownTimer);
+            state.taskDetail.countdownTimer = null;
+        }
         setFlowModalOpen("taskDetailModal", false);
     }
 
@@ -7035,8 +7041,8 @@
     function renderAllTareShkModal(row) {
         const target = $("allTareShkWrap");
         if (!target) return;
-        const items = taskItems(row);
-        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>ШК в таре</h3><p class='work-subtitle'>Всего " + items.length + ".</p></div><button id='closeAllTareShk' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
+        const items = taskItems(row).slice().sort((a, b) => (Number(b.price) || 0) - (Number(a.price) || 0));
+        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>ШК в таре</h3><p class='work-subtitle'>Всего " + items.length + ", от дорогих к дешёвым.</p></div><button id='closeAllTareShk' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
             + "<div class='task-tare-list'>" + (items.map(taskTareRowHtml).join("") || "<div class='task-tare-meta'>ШК не найдены</div>") + "</div>";
         $("closeAllTareShk").addEventListener("click", closeAllTareShkModal);
         target.querySelectorAll("[data-copy-single-shk]").forEach((button) => {
@@ -7156,13 +7162,16 @@
         // per how this should read for reviewers scanning the feed.
         const isForecast = item.event_type === "task_predicted_writeoff";
         const isStatusLine = item.event_type === "task_last_movement_status";
+        const isCreated = item.event_type === "task_created";
         const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
-        const isSystem = isSystemClosed || isForecast || isStatusLine || (!rawActorName && !rawActorId);
-        const actorDisplay = (isSystemClosed || isForecast || isStatusLine) ? "Система" : (rawActorName || rawActorId || "Система");
+        const isSystem = isSystemClosed || isForecast || isStatusLine || isCreated || (!rawActorName && !rawActorId);
+        const actorDisplay = (isSystemClosed || isForecast || isStatusLine || isCreated) ? "Система" : (rawActorName || rawActorId || "Система");
         const verdict = isForecast
             ? "Прогнозируемая дата списания"
             : isStatusLine
-            ? "Статус ШК"
+            ? (normalizeText(payload.status_code) || "Статус ШК")
+            : isCreated
+            ? "Создана задача"
             : isSystemClosed
             ? "Закрыто автоматически"
             : (normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран" ? payload.verdict : taskHistoryEventLabel(item.event_type));
@@ -7173,41 +7182,27 @@
         }
         if (normalizeText(payload.comment)) commentParts.push(payload.comment);
         if (payload.reopen_after) commentParts.push("до " + formatRuDateTime(payload.reopen_after));
-        const rowClass = "task-chat-row" + (isForecast ? " task-chat-row-forecast" : "");
+        const rowClass = "task-chat-row"
+            + (isForecast ? " task-chat-row-forecast" : "")
+            + (!isSystem ? " task-chat-row-verdict" : "");
+        const commentHtml = escapeHtml(commentParts.join(" · ") || "—");
         return "<div class='" + rowClass + "'>"
             + "<div class='task-chat-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
             + "<div class='task-chat-actor'>" + taskHistoryAvatarHtml(rawActorId, rawActorName, isSystem) + "<span>" + escapeHtml(actorDisplay) + "</span></div>"
             + "<div class='task-chat-verdict'>" + escapeHtml(verdict) + "</div>"
-            + "<div class='task-chat-comment'>" + escapeHtml(commentParts.join(" · ") || "—") + "</div>"
+            + "<div class='task-chat-comment'>" + (isForecast ? "<em>" + commentHtml + "</em>" : commentHtml) + "</div>"
             + "</div>";
     }
 
-    // Not real history rows -- computed live from the task's current items
-    // and the live writeoff terms, so they always reflect the latest terms
-    // even for tasks uploaded before those terms last changed. Rendered
-    // alongside real history in chronological order like any other entry.
-    function synthesizeForecastHistoryEntries(row) {
-        const entries = [];
-        const items = taskItems(row);
-        if (!items.length) return entries;
-        let lastMovement = null;
-        items.forEach((item) => {
-            const parsed = parseDateTime(item.movement);
-            if (!parsed.iso) return;
-            if (!lastMovement || parsed.ts > lastMovement.ts) lastMovement = { ts: parsed.ts, iso: parsed.iso, mx: normalizeText(item.mx) };
-        });
-        if (lastMovement) {
-            entries.push({
-                created_at: lastMovement.iso,
-                event_type: "task_last_movement_status",
-                actor_name: "",
-                actor_employee_id: "",
-                payload: { comment: lastMovement.mx || "Склад не указан" },
-            });
-        }
+    // Earliest (movement + days_without_movement) across the task's items,
+    // using the live writeoff terms -- so it always reflects the latest
+    // terms even for tasks uploaded before those terms last changed. Shared
+    // by the "Прогнозируемая дата списания" history line and the header
+    // countdown pill.
+    function predictedWriteoffTs(row) {
         const termMap = activeWriteoffStatusTerms();
-        let predicted = null;
-        items.forEach((item) => {
+        let best = null;
+        taskItems(row).forEach((item) => {
             const parsed = parseDateTime(item.movement);
             if (!parsed.iso) return;
             const statusKey = normalizeWriteoffTermKey(item.status, "status");
@@ -7217,11 +7212,44 @@
             const predictedIso = addDaysToTimestamp(parsed.iso, days);
             const predictedTs = predictedIso ? Date.parse(predictedIso) : NaN;
             if (!Number.isFinite(predictedTs)) return;
-            if (!predicted || predictedTs < predicted.ts) predicted = { ts: predictedTs, iso: predictedIso };
+            if (best === null || predictedTs < best) best = predictedTs;
         });
-        if (predicted) {
+        return best;
+    }
+
+    // Not real history rows -- computed live from the task's current items
+    // and the live writeoff terms. Rendered alongside real history in
+    // chronological order like any other entry.
+    function synthesizeForecastHistoryEntries(row) {
+        const entries = [];
+        entries.push({
+            created_at: row.created_at,
+            event_type: "task_created",
+            actor_name: "Система",
+            actor_employee_id: "",
+            payload: {},
+        });
+        const items = taskItems(row);
+        if (!items.length) return entries;
+        let lastMovement = null;
+        items.forEach((item) => {
+            const parsed = parseDateTime(item.movement);
+            if (!parsed.iso) return;
+            if (!lastMovement || parsed.ts > lastMovement.ts) lastMovement = { ts: parsed.ts, iso: parsed.iso, mx: normalizeText(item.mx), statusCode: latinStatusCode(item.status) };
+        });
+        if (lastMovement) {
             entries.push({
-                created_at: predicted.iso,
+                created_at: lastMovement.iso,
+                event_type: "task_last_movement_status",
+                actor_name: "",
+                actor_employee_id: "",
+                payload: { comment: lastMovement.mx || "Склад не указан", status_code: lastMovement.statusCode },
+            });
+        }
+        const predictedTs = predictedWriteoffTs(row);
+        if (predictedTs !== null) {
+            entries.push({
+                created_at: new Date(predictedTs).toISOString(),
                 event_type: "task_predicted_writeoff",
                 actor_name: "",
                 actor_employee_id: "",
@@ -7280,14 +7308,14 @@
             .concat(synthesizeForecastHistoryEntries(row))
             .filter((item) => item && item.created_at)
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-        target.className = "task-history-feed-wrap";
+        target.className = "task-chat-history";
         if (!merged.length) {
             target.innerHTML = "<strong>История</strong><div class='task-chat-empty'>Событий пока нет.</div>";
             return;
         }
         const items = merged.map(taskHistoryFeedItemHtml).join("");
         target.innerHTML = "<strong>История</strong>"
-            + "<div class='task-chat-head'><div>Когда</div><div>Кто</div><div>Вердикт</div><div>Комментарий</div></div>"
+            + "<div class='task-chat-head'><div>Дата</div><div>Сотрудник</div><div>Событие</div><div>Комментарий</div></div>"
             + "<div class='task-history-feed'>" + items + "</div>";
     }
 
@@ -7338,25 +7366,42 @@
                 + "<div id='taskExtraFieldWrap' class='task-compose-field" + (extraLabel ? "" : " hidden") + "'><label id='taskExtraLabel' for='taskExtraInput'>" + escapeHtml(extraLabel) + "</label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
                 + "</div>"
                 + "<div class='task-compose-bar'>"
-                + "<select id='taskVerdictInput' class='task-compose-verdict' aria-label='" + (incomingFlow ? "Вложение" : "Вердикт") + "'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
+                + "<div class='task-verdict-picker' id='taskVerdictPicker'>"
+                + "<button type='button' id='taskVerdictTrigger' class='task-verdict-trigger' aria-label='" + (incomingFlow ? "Вложение" : "Вердикт") + "'><span id='taskVerdictTriggerLabel' class='task-verdict-trigger-label'>" + escapeHtml(formVerdict) + "</span><span class='task-verdict-chevron' aria-hidden='true'>▾</span></button>"
+                + "<select id='taskVerdictInput' class='task-verdict-native-select' aria-hidden='true' tabindex='-1'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
+                + "<div id='taskVerdictPopup' class='task-verdict-popup'>" + taskVerdictOptionsHtml(verdictOptions, formVerdict) + "</div>"
+                + "</div>"
                 + "<textarea id='taskCommentInput' class='task-compose-input' rows='1' aria-label='" + (incomingFlow ? "Комментарий ОПП" : "Комментарий") + "' placeholder='" + (incomingFlow ? "Комментарий ОПП" : "Что сделали по задаче") + "'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
                 + "<button id='completeTaskBtn' class='task-compose-send' type='button' disabled title='Завершить задачу' aria-label='Завершить задачу'>✓</button>"
                 + "</div>"
                 + "<div id='taskDetailStatus' class='review-status'></div>"
                 + "<div id='taskWritebackConflictActions' class='task-writeback-conflict hidden'></div>"
                 + "</div>";
+        const predictedTs = predictedWriteoffTs(row);
+        const countdownHtml = predictedTs !== null
+            ? "<div id='taskWriteoffCountdown' class='task-detail-countdown " + writeoffCountdownTone(predictedTs) + "'>" + escapeHtml(formatWriteoffCountdown(predictedTs)) + "</div>"
+            : "";
         target.innerHTML = "<div class='task-detail-head'><div>"
             + "<div class='task-detail-created'>Создано " + escapeHtml(formatRuDateTime(row.created_at)) + "</div>"
-            + "<div class='task-detail-title-row'><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='task-detail-price'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</div></div>"
+            + "<div class='task-detail-title-row'><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='task-detail-price' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</div>" + countdownHtml + "</div>"
             + "<div class='review-table-subtitle'>" + escapeHtml(row.task_type || "-") + "</div></div>" + taskDetailActionButtons(row, readOnly) + "</div>"
             + "<div class='task-detail-body'>"
             + "<div class='task-info-grid'>" + taskDetailInfo(row) + "</div>"
             + taskTagsBox(row)
             + incomingFlowShkInfoBox(row)
             + taskTareInfoBox(row)
-            + "<div id='taskDetailHistoryFeed' class='task-history-feed-wrap'>Загрузка истории…</div>"
+            + "<div class='task-chat-panel'>"
+            + "<div id='taskDetailHistoryFeed' class='task-chat-history'>Загрузка истории…</div>"
             + reviewBlock
+            + "</div>"
             + "</div>";
+        if (state.taskDetail.countdownTimer) {
+            clearInterval(state.taskDetail.countdownTimer);
+            state.taskDetail.countdownTimer = null;
+        }
+        if (predictedTs !== null) {
+            state.taskDetail.countdownTimer = setInterval(() => updateTaskWriteoffCountdown(predictedTs), 30000);
+        }
         void loadAndRenderTaskDetailHistory(row);
         $("closeTaskDetail").addEventListener("click", closeTaskDetail);
         target.querySelectorAll("[data-copy-value]").forEach((field) => {
@@ -7406,6 +7451,18 @@
             }
         });
         autoGrowTextarea($("taskCommentInput"));
+        const verdictTrigger = $("taskVerdictTrigger");
+        if (verdictTrigger) verdictTrigger.addEventListener("click", () => {
+            const picker = $("taskVerdictPicker");
+            if (picker && picker.classList.contains("is-open")) closeTaskVerdictPicker();
+            else openTaskVerdictPicker();
+        });
+        const verdictPopup = $("taskVerdictPopup");
+        if (verdictPopup) verdictPopup.querySelectorAll(".task-verdict-option").forEach((button) => {
+            button.addEventListener("click", () => selectTaskVerdictOption(button.dataset.value || ""));
+        });
+        document.removeEventListener("click", taskVerdictOutsideClick);
+        document.addEventListener("click", taskVerdictOutsideClick);
         $("completeTaskBtn").addEventListener("click", () => { void completeTaskFromDetail(row.id); });
         updateTaskDetailForm();
     }
@@ -7414,6 +7471,74 @@
         if (!el) return;
         el.style.height = "auto";
         el.style.height = el.scrollHeight + "px";
+    }
+
+    function taskVerdictOptionsHtml(options, selected) {
+        return (options || []).map((option) => "<button type='button' class='task-verdict-option" + (option === selected ? " is-selected" : "") + "' data-value='" + escapeHtml(option) + "'>" + escapeHtml(option) + "</button>").join("");
+    }
+
+    function openTaskVerdictPicker() {
+        const picker = $("taskVerdictPicker");
+        if (picker) picker.classList.add("is-open");
+    }
+
+    function closeTaskVerdictPicker() {
+        const picker = $("taskVerdictPicker");
+        if (picker) picker.classList.remove("is-open");
+    }
+
+    function taskVerdictOutsideClick(event) {
+        const picker = $("taskVerdictPicker");
+        if (!picker || !picker.classList.contains("is-open")) return;
+        if (!picker.contains(event.target)) closeTaskVerdictPicker();
+    }
+
+    function selectTaskVerdictOption(value) {
+        const nativeSelect = $("taskVerdictInput");
+        if (!nativeSelect || !value) return;
+        nativeSelect.value = value;
+        const label = $("taskVerdictTriggerLabel");
+        if (label) label.textContent = value;
+        const popup = $("taskVerdictPopup");
+        if (popup) popup.querySelectorAll(".task-verdict-option").forEach((button) => {
+            button.classList.toggle("is-selected", button.dataset.value === value);
+        });
+        closeTaskVerdictPicker();
+        const trigger = $("taskVerdictTrigger");
+        if (trigger) {
+            trigger.classList.remove("is-pop");
+            void trigger.offsetWidth;
+            trigger.classList.add("is-pop");
+        }
+        nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function formatWriteoffCountdown(targetTs) {
+        const diffMs = targetTs - Date.now();
+        const overdue = diffMs < 0;
+        const totalMinutes = Math.floor(Math.abs(diffMs) / 60000);
+        const days = Math.floor(totalMinutes / 1440);
+        const hours = Math.floor((totalMinutes % 1440) / 60);
+        const minutes = totalMinutes % 60;
+        const parts = [];
+        if (days) parts.push(days + "д");
+        if (days || hours) parts.push(hours + "ч");
+        parts.push(minutes + "м");
+        return (overdue ? "Просрочено: " : "До списания: ") + parts.join(" ");
+    }
+
+    function writeoffCountdownTone(targetTs) {
+        const diffMs = targetTs - Date.now();
+        if (diffMs < 0) return "is-overdue";
+        if (diffMs < 24 * 3600000) return "is-soon";
+        return "";
+    }
+
+    function updateTaskWriteoffCountdown(targetTs) {
+        const el = $("taskWriteoffCountdown");
+        if (!el) return;
+        el.textContent = formatWriteoffCountdown(targetTs);
+        el.className = "task-detail-countdown " + writeoffCountdownTone(targetTs);
     }
 
     function closeEditTareTaskModal() {
