@@ -1556,11 +1556,28 @@
         el.style.display = message ? "" : "none";
     }
 
+    const modalCloseTokens = {};
+
     function setFlowModalOpen(id, open) {
         const modal = $(id);
         if (!modal) return;
-        modal.classList.toggle("active", Boolean(open));
-        modal.setAttribute("aria-hidden", open ? "false" : "true");
+        if (open) {
+            modalCloseTokens[id] = (modalCloseTokens[id] || 0) + 1;
+            modal.classList.remove("is-closing");
+            modal.classList.add("active");
+            modal.setAttribute("aria-hidden", "false");
+            return;
+        }
+        modal.setAttribute("aria-hidden", "true");
+        if (!modal.classList.contains("active")) return;
+        const token = (modalCloseTokens[id] = (modalCloseTokens[id] || 0) + 1);
+        modal.classList.add("is-closing");
+        const finish = () => {
+            if (modalCloseTokens[id] !== token) return;
+            modal.classList.remove("active", "is-closing");
+        };
+        modal.addEventListener("animationend", finish, { once: true });
+        setTimeout(finish, 260);
     }
 
     function closeFlowModals() {
@@ -5323,7 +5340,7 @@
             + "<section class='flow-task-panel'><h4>Инфо по задаче</h4><div class='task-info-grid'>" + taskDetailInfo(row) + "</div>" + taskTagsBox(row) + "</section>"
             + "</div>"
             + incomingFlowShkInfoBox(row)
-            + taskTareInfoBox(row)
+            + taskTareInfoBox(row, true)
             + taskHistoryBox(row)
             + flowGroupBoxHtml(score.group, row.id)
             + "<div class='flow-actions'>"
@@ -6622,6 +6639,28 @@
         setFlowModalOpen("taskDetailModal", false);
     }
 
+    const TASK_CELEBRATION_ICONS = { green: "✓", yellow: "◴", red: "✕" };
+
+    function playTaskCompletionCelebration(tone) {
+        const card = document.querySelector("#taskDetailModal .task-detail-card");
+        const icon = TASK_CELEBRATION_ICONS[tone];
+        if (!card || !icon) return Promise.resolve();
+        return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            overlay.className = "task-celebration task-celebration-" + tone;
+            overlay.innerHTML = "<div class='task-celebration-icon'>" + icon + "</div>";
+            card.appendChild(overlay);
+            card.classList.add("is-celebrating");
+            void overlay.offsetWidth;
+            overlay.classList.add("is-active");
+            setTimeout(() => {
+                overlay.remove();
+                card.classList.remove("is-celebrating");
+                resolve();
+            }, 1400);
+        });
+    }
+
     function closeSpecialInfoModal() {
         setFlowModalOpen("specialInfoModal", false);
     }
@@ -7024,15 +7063,16 @@
             + "</button>";
     }
 
-    function taskTareInfoBox(row) {
+    function taskTareInfoBox(row, readOnly) {
         if (!isTareTask(row)) return "";
         const items = taskItems(row);
         const ids = items.map((item) => item.shk).filter(Boolean).join("\n");
         const preview = items.slice(0, TASK_TARE_PREVIEW_LIMIT);
         const rows = preview.map(taskTareRowHtml).join("");
         const hiddenCount = items.length - preview.length;
+        const editBtn = readOnly ? "" : "<button id='editTareTaskBtn' class='btn btn-square' type='button' title='Редактировать тару'>✎</button>";
         return "<div class='task-tare-box'>"
-            + "<div class='task-tare-head'><strong>ШК в таре · " + items.length + "</strong><button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(ids) + "'>Скопировать все</button></div>"
+            + "<div class='task-tare-head'><strong>ШК в таре · " + items.length + "</strong><div class='task-tare-head-actions'>" + editBtn + "<button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(ids) + "'>Скопировать все</button></div></div>"
             + "<div class='task-tare-list'>" + (rows || "<div class='task-tare-meta'>ШК не найдены</div>") + "</div>"
             + (hiddenCount > 0 ? "<button id='showAllTareShkBtn' class='btn btn-outline task-tare-more' type='button'>Показать все " + items.length + "</button>" : "")
             + "</div>";
@@ -7329,9 +7369,8 @@
         if (readOnly) {
             return "<div class='task-detail-actions'><button id='reopenTaskBtn' class='btn btn-square' type='button' title='Переоткрыть задачу'>↻</button><button id='closeTaskDetail' class='btn btn-square' type='button'>×</button></div>";
         }
-        const edit = isTareTask(row) ? "<button id='editTareTaskBtn' class='btn btn-square' type='button' title='Редактировать задачу'>✎</button>" : "";
         const defer = isPrespisokTask(row) ? "" : "<button id='openDeferTaskBtn' class='btn btn-square' type='button' title='Отложить'>◴</button>";
-        return "<div class='task-detail-actions'>" + edit + defer + "<button id='closeTaskDetail' class='btn btn-square' type='button'>×</button></div>";
+        return "<div class='task-detail-actions'>" + defer + "<button id='closeTaskDetail' class='btn btn-square' type='button'>×</button></div>";
     }
 
     function renderTaskDetail(row) {
@@ -7353,6 +7392,12 @@
         if (incomingFlow) readOnlyReviewLines.push("ID виновного: " + (savedReview.guilty_id || "-"));
         if (savedReview.extra_label || savedReview.extra_value) readOnlyReviewLines.push((savedReview.extra_label || "Доп. поле") + ": " + (savedReview.extra_value || "-"));
         if (savedReview.completed_by_name || savedReview.completed_by_id) readOnlyReviewLines.push("Кто поставил вердикт: " + [savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / "));
+        const verdictTriggerLabel = formVerdict === "Не выбран" ? (incomingFlow ? "Вложение" : "Вердикт") : formVerdict;
+        const verdictPickerHtml = "<div class='task-verdict-picker' id='taskVerdictPicker'>"
+            + "<button type='button' id='taskVerdictTrigger' class='task-verdict-trigger' aria-label='" + (incomingFlow ? "Вложение" : "Вердикт") + "'><span id='taskVerdictTriggerLabel' class='task-verdict-trigger-label'>" + escapeHtml(verdictTriggerLabel) + "</span><span class='task-verdict-chevron' aria-hidden='true'>▾</span></button>"
+            + "<select id='taskVerdictInput' class='task-verdict-native-select' aria-hidden='true' tabindex='-1'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
+            + "<div id='taskVerdictPopup' class='task-verdict-popup'>" + taskVerdictOptionsHtml(verdictOptions, formVerdict) + "</div>"
+            + "</div>";
         const reviewBlock = readOnly
             ? "<div class='task-description-box copyable' data-copy-value='" + escapeHtml(readOnlyReviewLines.join("\n")) + "' title='Нажми, чтобы скопировать'><strong>Комментарий:</strong><br>" + escapeHtml(savedReview.comment || "-")
                 + "<br><br><strong>" + (incomingFlow ? "Вложение" : "Вердикт") + ":</strong><br>" + escapeHtml(verdict || "-")
@@ -7360,20 +7405,31 @@
                 + (savedReview.extra_label || savedReview.extra_value ? "<br><br><strong>" + escapeHtml(savedReview.extra_label || "Доп. поле") + ":</strong><br>" + escapeHtml(savedReview.extra_value || "-") : "")
                 + (savedReview.completed_by_name || savedReview.completed_by_id ? "<br><br><strong>Кто поставил вердикт:</strong><br>" + escapeHtml([savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / ")) : "")
                 + "</div>"
-            : "<div class='task-form task-compose'>"
+            : incomingFlow
+            ? "<div class='task-form task-compose'>"
                 + "<div class='task-compose-extra'>"
-                + (incomingFlow ? "<div class='task-compose-field'><label for='taskGuiltyIdInput'>ID виновного</label><input id='taskGuiltyIdInput' type='text' inputmode='numeric' pattern='\\d{5,8}' maxlength='8' value='" + escapeHtml(savedReview.guilty_id || "") + "' placeholder='5-8 цифр'></div>" : "")
+                + "<div class='task-compose-field'><label for='taskGuiltyIdInput'>ID виновного</label><input id='taskGuiltyIdInput' type='text' inputmode='numeric' pattern='\\d{5,8}' maxlength='8' value='" + escapeHtml(savedReview.guilty_id || "") + "' placeholder='5-8 цифр'></div>"
                 + "<div id='taskExtraFieldWrap' class='task-compose-field" + (extraLabel ? "" : " hidden") + "'><label id='taskExtraLabel' for='taskExtraInput'>" + escapeHtml(extraLabel) + "</label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
                 + "</div>"
-                + "<div class='task-compose-bar'>"
-                + "<div class='task-verdict-picker' id='taskVerdictPicker'>"
-                + "<button type='button' id='taskVerdictTrigger' class='task-verdict-trigger' aria-label='" + (incomingFlow ? "Вложение" : "Вердикт") + "'><span id='taskVerdictTriggerLabel' class='task-verdict-trigger-label'>" + escapeHtml(formVerdict) + "</span><span class='task-verdict-chevron' aria-hidden='true'>▾</span></button>"
-                + "<select id='taskVerdictInput' class='task-verdict-native-select' aria-hidden='true' tabindex='-1'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
-                + "<div id='taskVerdictPopup' class='task-verdict-popup'>" + taskVerdictOptionsHtml(verdictOptions, formVerdict) + "</div>"
-                + "</div>"
-                + "<textarea id='taskCommentInput' class='task-compose-input' rows='1' aria-label='" + (incomingFlow ? "Комментарий ОПП" : "Комментарий") + "' placeholder='" + (incomingFlow ? "Комментарий ОПП" : "Что сделали по задаче") + "'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
+                + "<div class='task-compose-bar' id='taskComposeBar'>"
+                + verdictPickerHtml
+                + "<textarea id='taskCommentInput' class='task-compose-input' rows='1' aria-label='Комментарий ОПП' placeholder='Комментарий ОПП'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
                 + "<button id='completeTaskBtn' class='task-compose-send' type='button' disabled title='Завершить задачу' aria-label='Завершить задачу'>✓</button>"
                 + "</div>"
+                + "<div id='taskDetailStatus' class='review-status'></div>"
+                + "<div id='taskWritebackConflictActions' class='task-writeback-conflict hidden'></div>"
+                + "</div>"
+            : "<div class='task-form task-compose' id='taskComposeForm'>"
+                + "<div class='task-compose-row-collapse' id='taskComposeAboveRow'><div class='task-compose-row-inner' id='taskComposeAboveInner'>"
+                + "<div id='taskExtraFieldWrap' class='task-compose-field hidden'><label id='taskExtraLabel' for='taskExtraInput'></label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
+                + "</div></div>"
+                + "<div class='task-compose-bar' id='taskComposeBar'>"
+                + verdictPickerHtml
+                + "<button id='completeTaskBtn' class='task-compose-send' type='button' disabled title='Завершить задачу' aria-label='Завершить задачу'>✓</button>"
+                + "</div>"
+                + "<div class='task-compose-row-collapse' id='taskComposeBelowRow'><div class='task-compose-row-inner' id='taskComposeBelowInner'>"
+                + "<textarea id='taskCommentInput' class='task-compose-input' rows='1' aria-label='Комментарий' placeholder='Если есть что запомнить'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
+                + "</div></div>"
                 + "<div id='taskDetailStatus' class='review-status'></div>"
                 + "<div id='taskWritebackConflictActions' class='task-writeback-conflict hidden'></div>"
                 + "</div>";
@@ -7389,7 +7445,7 @@
             + "<div class='task-info-grid'>" + taskDetailInfo(row) + "</div>"
             + taskTagsBox(row)
             + incomingFlowShkInfoBox(row)
-            + taskTareInfoBox(row)
+            + taskTareInfoBox(row, readOnly)
             + "<div class='task-chat-panel'>"
             + "<div id='taskDetailHistoryFeed' class='task-chat-history'>Загрузка истории…</div>"
             + reviewBlock
@@ -7857,26 +7913,74 @@
         const row = findTaskRow(state.taskDetail.rowId);
         const incomingFlow = isIncomingFlowRequestTask(row);
         const verdict = normalizeText($("taskVerdictInput") && $("taskVerdictInput").value) || "Не выбран";
-        const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
-        const extraWrap = $("taskExtraFieldWrap");
-        const extraLabelEl = $("taskExtraLabel");
-        if (extraWrap) extraWrap.classList.toggle("hidden", !extraLabel);
-        if (extraLabelEl) extraLabelEl.textContent = extraLabel;
         const comment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
         const extra = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
-        const guiltyIdError = incomingFlow ? incomingFlowGuiltyIdError($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value) : "";
         const missing = [];
-        if (!comment) missing.push(incomingFlow ? "Комментарий ОПП" : "Комментарий");
-        if (!verdict || verdict === "Не выбран") missing.push(incomingFlow ? "Вложение" : "Вердикт");
-        if (guiltyIdError) missing.push(guiltyIdError);
+        if (incomingFlow) {
+            const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
+            const extraWrap = $("taskExtraFieldWrap");
+            const extraLabelEl = $("taskExtraLabel");
+            if (extraWrap) extraWrap.classList.toggle("hidden", !extraLabel);
+            if (extraLabelEl) extraLabelEl.textContent = extraLabel;
+            const guiltyIdError = incomingFlowGuiltyIdError($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value);
+            if (!comment) missing.push("Комментарий ОПП");
+            if (!verdict || verdict === "Не выбран") missing.push("Вложение");
+            if (guiltyIdError) missing.push(guiltyIdError);
+            if (extraLabel && !extra) missing.push(extraLabel);
+        } else {
+            const tone = VERDICT_TONE[verdict] || "";
+            updateComposeRows(verdict, tone, extra);
+            if (!verdict || verdict === "Не выбран") missing.push("Вердикт");
+            if (tone === "yellow" && !extra) missing.push(DEFERRED_VERDICT_FIELDS[verdict] || "Ссылка");
+            if (tone === "red" && !comment) missing.push("Комментарий");
+        }
         if (verdict === SYSTEM_MOVEMENT_VERDICT) missing.push("доступный пользователю вердикт");
-        if (extraLabel && !extra) missing.push(extraLabel);
         const ready = missing.length === 0;
         const button = $("completeTaskBtn");
         if (button) {
+            const wasReady = !button.disabled;
             button.disabled = !ready;
             button.title = ready ? "" : "Не заполнено: " + missing.join(", ");
+            if (ready && !wasReady) {
+                button.classList.remove("is-pop");
+                void button.offsetWidth;
+                button.classList.add("is-pop");
+            }
         }
+    }
+
+    function positionCommentField(tone) {
+        const textarea = $("taskCommentInput");
+        if (!textarea) return;
+        const aboveInner = $("taskComposeAboveInner");
+        const belowInner = $("taskComposeBelowInner");
+        if (tone === "red" && aboveInner) {
+            if (textarea.parentElement !== aboveInner) aboveInner.appendChild(textarea);
+            textarea.placeholder = "Что сделали по задаче";
+        } else if (belowInner) {
+            if (textarea.parentElement !== belowInner) belowInner.appendChild(textarea);
+            textarea.placeholder = "Если есть что запомнить";
+        }
+    }
+
+    function updateComposeRows(verdict, tone, extraValue) {
+        const bar = $("taskComposeBar");
+        if (bar) {
+            bar.classList.remove("tone-green", "tone-yellow", "tone-red");
+            if (tone) bar.classList.add("tone-" + tone);
+        }
+        const trigger = $("taskVerdictTrigger");
+        if (trigger) trigger.classList.toggle("is-narrow", tone === "yellow");
+        const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
+        const extraWrap = $("taskExtraFieldWrap");
+        const extraLabelEl = $("taskExtraLabel");
+        if (extraLabelEl) extraLabelEl.textContent = extraLabel;
+        if (extraWrap) extraWrap.classList.toggle("hidden", tone !== "yellow");
+        positionCommentField(tone);
+        const aboveRow = $("taskComposeAboveRow");
+        const belowRow = $("taskComposeBelowRow");
+        if (aboveRow) aboveRow.classList.toggle("is-expanded", tone === "yellow" || tone === "red");
+        if (belowRow) belowRow.classList.toggle("is-expanded", tone === "yellow" && Boolean(extraValue));
     }
 
     function addDaysIso(days) {
@@ -8341,11 +8445,13 @@
             return;
         }
         if (incomingFlow && guiltyId === "1034305") void unlockAchievement("guilty_1034305", { task_id: id, source_id: row.source_id });
-        if (!comment || verdict === "Не выбран" || (extraLabel && !extraValue) || guiltyIdError) {
+        const tone = incomingFlow ? "" : (VERDICT_TONE[verdict] || "");
+        const commentRequired = incomingFlow || tone === "red";
+        if ((commentRequired && !comment) || verdict === "Не выбран" || (extraLabel && !extraValue) || guiltyIdError) {
             const status = $("taskDetailStatus");
             if (status) status.textContent = incomingFlow
                 ? "Заполни Комментарий ОПП, Вложение и ID виновного: только цифры, 5-8 символов."
-                : "Заполни комментарий, вердикт и обязательное поле по выбранному вердикту.";
+                : "Заполни вердикт и обязательное поле по выбранному вердикту.";
             return;
         }
         const now = new Date().toISOString();
@@ -8434,7 +8540,6 @@
                 state.flow.employeeStats.bySection[section].count += 1;
             }
             setReviewStatus(isDeferred ? "Задача отложена до " + formatRuDateTime(reopenAfter) + "." : "Задача завершена.", "good");
-            closeTaskDetail();
             renderReview();
             refreshOpenSectionModal();
             if (state.view === "flow") {
@@ -8442,6 +8547,8 @@
                 renderFlowPage();
             }
             if (!isDeferred) void evaluateTaskCompletionAchievements(completedForAchievements, { source: "manual_task_complete" });
+            if (!incomingFlow && tone) void playTaskCompletionCelebration(tone).then(closeTaskDetail);
+            else closeTaskDetail();
         } catch (error) {
             console.error("wms task complete failed:", error);
             if (status) status.textContent = "Не удалось завершить задачу: " + (error && error.message ? error.message : String(error));
@@ -8549,10 +8656,10 @@
             if (activeRow) Object.assign(activeRow, data || payload);
             state.review.rows = (state.review.rows || []).filter((item) => item.id !== id || isActiveReviewTask(item));
             closeDeferTaskModal();
-            closeTaskDetail();
             setReviewStatus("Задача отложена до " + formatRuDateTime(reopenAfter) + ".", "good");
             renderReview();
             refreshOpenSectionModal();
+            void playTaskCompletionCelebration("yellow").then(closeTaskDetail);
         } catch (error) {
             console.error("wms task defer failed:", error);
             if (status) status.textContent = "Не удалось отложить задачу: " + (error && error.message ? error.message : String(error));
@@ -14318,6 +14425,7 @@
         void refreshPrespisokLeaderboard();
         void loadShiftState();
         void loadAchievements();
+        void loadWriteoffTerms();
     }
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
