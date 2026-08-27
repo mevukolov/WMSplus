@@ -644,6 +644,7 @@
             reopenRowId: "",
             splitRowId: "",
             splitShk: "",
+            expensiveConfirmRowId: "",
             countdownTimer: null,
         },
         master: {
@@ -1612,6 +1613,7 @@
         setFlowModalOpen("editTareTaskModal", false);
         setFlowModalOpen("deferTaskModal", false);
         setFlowModalOpen("reopenConfirmModal", false);
+        setFlowModalOpen("expensiveWriteoffModal", false);
         setFlowModalOpen("splitShkConfirmModal", false);
         setFlowModalOpen("inactiveTasksModal", false);
         setFlowModalOpen("prespisokSecondLineModal", false);
@@ -6626,7 +6628,7 @@
         }
         state.flow.allowConflictOpenId = "";
         if (state.taskDetail && state.taskDetail.countdownTimer) clearInterval(state.taskDetail.countdownTimer);
-        state.taskDetail = { rowId: id, source: source || "review", editRowId: "", deferRowId: "", reopenRowId: "", splitRowId: "", splitShk: "", countdownTimer: null };
+        state.taskDetail = { rowId: id, source: source || "review", editRowId: "", deferRowId: "", reopenRowId: "", splitRowId: "", splitShk: "", expensiveConfirmRowId: "", countdownTimer: null };
         renderTaskDetail(row);
         setFlowModalOpen("taskDetailModal", true);
     }
@@ -7444,7 +7446,7 @@
                 + "<div id='taskWritebackConflictActions' class='task-writeback-conflict hidden'></div>"
                 + "</div>"
             : "<div class='task-form task-compose' id='taskComposeForm'>"
-                + "<div class='task-compose-bar is-empty' id='taskComposeBar'>"
+                + "<div class='task-compose-bar is-centered' id='taskComposeBar'>"
                 + "<div class='task-compose-spacer'></div>"
                 + verdictPickerHtml
                 + "<div class='task-compose-spacer'></div>"
@@ -7545,7 +7547,10 @@
         });
         document.removeEventListener("click", taskVerdictOutsideClick);
         document.addEventListener("click", taskVerdictOutsideClick);
-        $("completeTaskBtn").addEventListener("click", () => { void completeTaskFromDetail(row.id); });
+        $("completeTaskBtn").addEventListener("click", () => {
+            if (shouldConfirmExpensiveWriteoff(row)) { openExpensiveWriteoffConfirm(row.id); return; }
+            void completeTaskFromDetail(row.id);
+        });
         updateTaskDetailForm();
     }
 
@@ -7994,11 +7999,13 @@
         const bar = $("taskComposeBar");
         if (bar) {
             bar.classList.remove("tone-green", "tone-yellow", "tone-red");
-            bar.classList.toggle("is-empty", !tone);
+            // Green needs no inline field, so it stays centered like the
+            // empty state; yellow/red need room for the field, so the
+            // centering spacers collapse and the trigger (sized to its own
+            // text, never truncated) settles to the left.
+            bar.classList.toggle("is-centered", !tone || tone === "green");
             if (tone) bar.classList.add("tone-" + tone);
         }
-        const trigger = $("taskVerdictTrigger");
-        if (trigger) trigger.classList.toggle("is-narrow", tone === "yellow" || tone === "red");
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const extraWrap = $("taskExtraFieldWrap");
         const extraInput = $("taskExtraInput");
@@ -8707,6 +8714,38 @@
     function closeReopenConfirm() {
         state.taskDetail.reopenRowId = "";
         setFlowModalOpen("reopenConfirmModal", false);
+    }
+
+    const EXPENSIVE_WRITEOFF_THRESHOLD = 10000;
+
+    function shouldConfirmExpensiveWriteoff(row) {
+        if (!row || isIncomingFlowRequestTask(row)) return false;
+        const verdict = normalizeText($("taskVerdictInput") && $("taskVerdictInput").value);
+        if (verdict !== "Нет на МХ/Не найден") return false;
+        return (Number(row.source_price_sum) || 0) > EXPENSIVE_WRITEOFF_THRESHOLD;
+    }
+
+    function openExpensiveWriteoffConfirm(id) {
+        const row = findTaskRow(id);
+        if (!row) return;
+        state.taskDetail.expensiveConfirmRowId = id;
+        const isTare = isTareTask(row);
+        const text = $("expensiveWriteoffText");
+        if (text) text.textContent = isTare
+            ? "Тара — дорогостоящая. Уверены, что её невозможно найти? Это наша зарплата!"
+            : "Товар — дорогостоящий. Уверены, что его невозможно найти? Это наша зарплата!";
+        setFlowModalOpen("expensiveWriteoffModal", true);
+    }
+
+    function closeExpensiveWriteoffConfirm() {
+        state.taskDetail.expensiveConfirmRowId = "";
+        setFlowModalOpen("expensiveWriteoffModal", false);
+    }
+
+    function confirmExpensiveWriteoff() {
+        const id = state.taskDetail.expensiveConfirmRowId;
+        closeExpensiveWriteoffConfirm();
+        if (id) void completeTaskFromDetail(id);
     }
 
     async function reopenTaskFromConfirm() {
@@ -14366,6 +14405,8 @@
         $("closeReopenConfirm").addEventListener("click", closeReopenConfirm);
         $("cancelReopenTask").addEventListener("click", closeReopenConfirm);
         $("confirmReopenTask").addEventListener("click", () => { void reopenTaskFromConfirm(); });
+        $("expensiveWriteoffBack").addEventListener("click", closeExpensiveWriteoffConfirm);
+        $("expensiveWriteoffConfirm").addEventListener("click", confirmExpensiveWriteoff);
         $("closeSplitShkConfirm").addEventListener("click", closeSplitShkConfirm);
         $("cancelSplitShk").addEventListener("click", closeSplitShkConfirm);
         $("confirmSplitShk").addEventListener("click", () => { void splitShkFromConfirm(); });

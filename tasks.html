@@ -369,7 +369,8 @@
         #deferTaskModal,
         #reopenConfirmModal,
         #splitShkConfirmModal,
-        #allTareShkModal { z-index: 4400; }
+        #allTareShkModal,
+        #expensiveWriteoffModal { z-index: 4400; }
         #achievementDetailModal { z-index: 4420; }
         .tasks-flow-card {
             width: min(920px, 100%);
@@ -563,9 +564,9 @@
         .task-compose-bar { position: relative; display: flex; align-items: center; gap: 8px; border: 1px solid #dbe3ec; border-radius: 22px; background: #fff; padding: 6px; }
         .task-compose-bar::before { content: ""; position: absolute; inset: 0; border-radius: 22px; background: transparent; clip-path: circle(0% at 36px 50%); transition: clip-path .55s cubic-bezier(.16,.85,.24,1.05); pointer-events: none; }
         .task-compose-spacer { flex-grow: 0; flex-shrink: 1; flex-basis: 0; transition: flex-grow .4s cubic-bezier(.22,.9,.28,1.05); }
-        .task-compose-bar.is-empty .task-compose-spacer { flex-grow: 1; }
+        .task-compose-bar.is-centered .task-compose-spacer { flex-grow: 1; }
         .task-compose-inline-slot { flex-grow: 0; flex-shrink: 1; flex-basis: 0; min-width: 0; overflow: hidden; transition: flex-grow .32s cubic-bezier(.22,.9,.28,1.05); }
-        .task-compose-inline-slot.is-filled { flex: 1 1 auto; }
+        .task-compose-inline-slot.is-filled { flex: 1 1 auto; min-width: 60px; }
         .task-compose-inline-field { width: 100%; }
         .task-compose-inline-field input,
         .task-compose-inline-slot textarea { width: 100%; box-sizing: border-box; border: 0; background: transparent; padding: 9px 10px; font: inherit; color: #242038; resize: none; min-height: 0; line-height: 1.3; }
@@ -586,11 +587,9 @@
         .task-compose-send.is-pop { animation: taskComposeSendPop .4s cubic-bezier(.3,1.4,.4,1.1); }
         .task-verdict-picker { position: relative; flex: 0 0 auto; }
         .task-verdict-native-select { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
-        .task-verdict-trigger { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 9px 10px 9px 14px; font-size: 12px; font-weight: 800; color: #475569; background: #f1f5f9; cursor: pointer; max-width: 150px; height: 42px; box-sizing: border-box; transition: background .14s ease, color .14s ease, max-width .32s cubic-bezier(.22,.9,.28,1.05); }
-        .task-verdict-trigger.is-narrow { max-width: 46px; padding-left: 12px; }
-        .task-verdict-trigger.is-narrow .task-verdict-trigger-label { opacity: 0; width: 0; }
+        .task-verdict-trigger { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 9px 14px; font-size: 12px; font-weight: 800; color: #475569; background: #f1f5f9; cursor: pointer; white-space: nowrap; height: 42px; box-sizing: border-box; transition: background .14s ease, color .14s ease; }
         .task-verdict-trigger:hover { background: #e9edf3; }
-        .task-verdict-trigger-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 108px; transition: opacity .2s ease, width .32s cubic-bezier(.22,.9,.28,1.05); }
+        .task-verdict-trigger-label { white-space: nowrap; }
         .task-verdict-chevron { font-size: 9px; opacity: .6; transition: transform .16s ease; }
         .task-verdict-picker.is-open .task-verdict-chevron { transform: rotate(180deg); }
         .task-verdict-picker.is-open .task-verdict-trigger { background: color-mix(in srgb, var(--accent) 16%, #f1f5f9); color: var(--accent-dark); }
@@ -682,6 +681,16 @@
         @keyframes achievementLegendaryFlare { to { transform: rotate(360deg); } }
         @keyframes achievementParticleBurst { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.4); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y))) rotate(var(--r, 180deg)) scale(.8); } }
         .task-small-card { width: min(560px, calc(100vw - 32px)); }
+        .task-expensive-card { text-align: center; padding: 32px 28px; display: grid; gap: 18px; justify-items: center; }
+        .task-expensive-icon { width: 76px; height: 76px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 38px; background: #fef3c7; color: #b45309; animation: taskExpensiveIconPulse 1.1s ease-in-out infinite; }
+        @keyframes taskExpensiveIconPulse { 0%, 100% { transform: scale(1) rotate(0deg); box-shadow: 0 0 0 0 rgba(180,83,9,.28); } 50% { transform: scale(1.08) rotate(-4deg); box-shadow: 0 0 0 14px rgba(180,83,9,0); } }
+        .task-expensive-text { margin: 0; font-size: 17px; font-weight: 800; color: #242038; line-height: 1.4; max-width: 420px; }
+        .task-expensive-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; }
+        .task-expensive-btn { flex: 1 1 200px; min-height: 52px; border-radius: 16px; font-size: 15px; font-weight: 900; border: 0; }
+        .task-expensive-btn-safe { background: #16a34a; color: #fff; }
+        .task-expensive-btn-safe:hover { background: #15803d; }
+        .task-expensive-btn-danger { background: #dc2626; color: #fff; }
+        .task-expensive-btn-danger:hover { background: #b91c1c; }
         .task-small-form { display: grid; gap: 12px; margin-top: 14px; }
         .task-small-form label { color: #334155; font-size: 13px; font-weight: 900; }
         .task-small-form textarea,
@@ -1590,6 +1599,17 @@
             <button id="cancelReopenTask" class="btn btn-outline" type="button">Отмена</button>
         </div>
         <div id="reopenConfirmStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="expensiveWriteoffModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card task-expensive-card">
+        <div class="task-expensive-icon">⚠</div>
+        <p class="task-expensive-text" id="expensiveWriteoffText"></p>
+        <div class="task-expensive-actions">
+            <button id="expensiveWriteoffBack" class="btn task-expensive-btn task-expensive-btn-safe" type="button">Вернуться к поиску</button>
+            <button id="expensiveWriteoffConfirm" class="btn task-expensive-btn task-expensive-btn-danger" type="button">Списать товар</button>
+        </div>
     </div>
 </section>
 
