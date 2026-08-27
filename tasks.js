@@ -7222,9 +7222,10 @@
         }
         if (normalizeText(payload.comment)) commentParts.push(payload.comment);
         if (payload.reopen_after) commentParts.push("до " + formatRuDateTime(payload.reopen_after));
+        const historyTone = isSystem ? "" : (VERDICT_TONE[payload.verdict] || "yellow");
         const rowClass = "task-chat-row"
             + (isForecast ? " task-chat-row-forecast" : "")
-            + (!isSystem ? " task-chat-row-verdict" : "");
+            + (historyTone ? " task-chat-row-" + historyTone : "");
         const commentHtml = escapeHtml(commentParts.join(" · ") || "—");
         return "<div class='" + rowClass + "'>"
             + "<div class='task-chat-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
@@ -7340,6 +7341,27 @@
         return entries;
     }
 
+    function animateTaskDetailCardResize(mutate) {
+        const card = document.querySelector("#taskDetailModal .task-detail-card");
+        if (!card) { mutate(); return; }
+        const startHeight = card.getBoundingClientRect().height;
+        mutate();
+        const endHeight = card.scrollHeight;
+        if (Math.abs(endHeight - startHeight) < 2) return;
+        card.style.height = startHeight + "px";
+        card.style.transition = "none";
+        void card.offsetHeight;
+        card.style.transition = "height .38s cubic-bezier(.22,.9,.28,1.05)";
+        requestAnimationFrame(() => { card.style.height = endHeight + "px"; });
+        const cleanup = () => {
+            card.style.height = "";
+            card.style.transition = "";
+            card.removeEventListener("transitionend", cleanup);
+        };
+        card.addEventListener("transitionend", cleanup);
+        setTimeout(cleanup, 500);
+    }
+
     function renderTaskDetailHistoryFeed(historyRows, row) {
         const target = $("taskDetailHistoryFeed");
         if (!target) return;
@@ -7348,15 +7370,17 @@
             .concat(synthesizeForecastHistoryEntries(row))
             .filter((item) => item && item.created_at)
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-        target.className = "task-chat-history";
-        if (!merged.length) {
-            target.innerHTML = "<strong>История</strong><div class='task-chat-empty'>Событий пока нет.</div>";
-            return;
-        }
-        const items = merged.map(taskHistoryFeedItemHtml).join("");
-        target.innerHTML = "<strong>История</strong>"
-            + "<div class='task-chat-head'><div>Дата</div><div>Сотрудник</div><div>Событие</div><div>Комментарий</div></div>"
-            + "<div class='task-history-feed'>" + items + "</div>";
+        animateTaskDetailCardResize(() => {
+            target.className = "task-chat-history";
+            if (!merged.length) {
+                target.innerHTML = "<strong>История</strong><div class='task-chat-empty'>Событий пока нет.</div>";
+                return;
+            }
+            const items = merged.map(taskHistoryFeedItemHtml).join("");
+            target.innerHTML = "<strong>История</strong>"
+                + "<div class='task-chat-head'><div>Дата</div><div>Сотрудник</div><div>Событие</div><div>Комментарий</div></div>"
+                + "<div class='task-history-feed'>" + items + "</div>";
+        });
     }
 
     async function loadAndRenderTaskDetailHistory(row) {
@@ -7420,11 +7444,13 @@
                 + "<div id='taskWritebackConflictActions' class='task-writeback-conflict hidden'></div>"
                 + "</div>"
             : "<div class='task-form task-compose' id='taskComposeForm'>"
-                + "<div class='task-compose-row-collapse' id='taskComposeAboveRow'><div class='task-compose-row-inner' id='taskComposeAboveInner'>"
-                + "<div id='taskExtraFieldWrap' class='task-compose-field hidden'><label id='taskExtraLabel' for='taskExtraInput'></label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
-                + "</div></div>"
-                + "<div class='task-compose-bar' id='taskComposeBar'>"
+                + "<div class='task-compose-bar is-empty' id='taskComposeBar'>"
+                + "<div class='task-compose-spacer'></div>"
                 + verdictPickerHtml
+                + "<div class='task-compose-spacer'></div>"
+                + "<div id='taskComposeInlineSlot' class='task-compose-inline-slot'>"
+                + "<div id='taskExtraFieldWrap' class='task-compose-inline-field hidden'><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
+                + "</div>"
                 + "<button id='completeTaskBtn' class='task-compose-send' type='button' disabled title='Завершить задачу' aria-label='Завершить задачу'>✓</button>"
                 + "</div>"
                 + "<div class='task-compose-row-collapse' id='taskComposeBelowRow'><div class='task-compose-row-inner' id='taskComposeBelowInner'>"
@@ -7938,10 +7964,11 @@
         const ready = missing.length === 0;
         const button = $("completeTaskBtn");
         if (button) {
-            const wasReady = !button.disabled;
+            const wasVisible = button.classList.contains("is-visible");
             button.disabled = !ready;
+            button.classList.toggle("is-visible", ready);
             button.title = ready ? "" : "Не заполнено: " + missing.join(", ");
-            if (ready && !wasReady) {
+            if (ready && !wasVisible) {
                 button.classList.remove("is-pop");
                 void button.offsetWidth;
                 button.classList.add("is-pop");
@@ -7952,10 +7979,10 @@
     function positionCommentField(tone) {
         const textarea = $("taskCommentInput");
         if (!textarea) return;
-        const aboveInner = $("taskComposeAboveInner");
+        const inlineSlot = $("taskComposeInlineSlot");
         const belowInner = $("taskComposeBelowInner");
-        if (tone === "red" && aboveInner) {
-            if (textarea.parentElement !== aboveInner) aboveInner.appendChild(textarea);
+        if (tone === "red" && inlineSlot) {
+            if (textarea.parentElement !== inlineSlot) inlineSlot.appendChild(textarea);
             textarea.placeholder = "Что сделали по задаче";
         } else if (belowInner) {
             if (textarea.parentElement !== belowInner) belowInner.appendChild(textarea);
@@ -7967,19 +7994,20 @@
         const bar = $("taskComposeBar");
         if (bar) {
             bar.classList.remove("tone-green", "tone-yellow", "tone-red");
+            bar.classList.toggle("is-empty", !tone);
             if (tone) bar.classList.add("tone-" + tone);
         }
         const trigger = $("taskVerdictTrigger");
-        if (trigger) trigger.classList.toggle("is-narrow", tone === "yellow");
+        if (trigger) trigger.classList.toggle("is-narrow", tone === "yellow" || tone === "red");
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const extraWrap = $("taskExtraFieldWrap");
-        const extraLabelEl = $("taskExtraLabel");
-        if (extraLabelEl) extraLabelEl.textContent = extraLabel;
+        const extraInput = $("taskExtraInput");
+        if (extraInput) extraInput.placeholder = extraLabel;
         if (extraWrap) extraWrap.classList.toggle("hidden", tone !== "yellow");
         positionCommentField(tone);
-        const aboveRow = $("taskComposeAboveRow");
+        const inlineSlot = $("taskComposeInlineSlot");
+        if (inlineSlot) inlineSlot.classList.toggle("is-filled", tone === "yellow" || tone === "red");
         const belowRow = $("taskComposeBelowRow");
-        if (aboveRow) aboveRow.classList.toggle("is-expanded", tone === "yellow" || tone === "red");
         if (belowRow) belowRow.classList.toggle("is-expanded", tone === "yellow" && Boolean(extraValue));
     }
 
@@ -8690,8 +8718,12 @@
         const now = new Date().toISOString();
         const nextPayload = {
             ...taskPayload(row),
+            // Deliberately drop the previous verdict/comment/extra_value/
+            // completed_by_* -- that completion is already preserved as its
+            // own wms_task_history row. Carrying it forward here made the
+            // compose form look like a verdict had already been picked for
+            // the new cycle.
             wms_review: {
-                ...taskReviewPayload(row),
                 manual_reopen_at: now,
                 manual_reopen_by_id: user.id || null,
                 manual_reopen_by_name: user.name || null,

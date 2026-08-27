@@ -530,12 +530,20 @@
         .task-chat-verdict { color: #242038; font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
         .task-chat-comment { color: #64748b; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
         .task-chat-comment em { font-style: italic; }
-        .task-chat-row-verdict { background: #fef3c7; }
-        .task-chat-row-verdict:hover { background: #fde68a; }
-        .task-chat-row-verdict .task-chat-verdict,
-        .task-chat-row-verdict .task-chat-actor { color: #713f12; }
-        .task-chat-row-forecast { background: #fee2e2; }
-        .task-chat-row-forecast:hover { background: #fecaca; }
+        .task-chat-row-yellow { background: #fef3c7; }
+        .task-chat-row-yellow:hover { background: #fde68a; }
+        .task-chat-row-yellow .task-chat-verdict,
+        .task-chat-row-yellow .task-chat-actor { color: #713f12; }
+        .task-chat-row-green { background: #dcfce7; }
+        .task-chat-row-green:hover { background: #bbf7d0; }
+        .task-chat-row-green .task-chat-verdict,
+        .task-chat-row-green .task-chat-actor { color: #14532d; }
+        .task-chat-row-red { background: #fee2e2; }
+        .task-chat-row-red:hover { background: #fecaca; }
+        .task-chat-row-red .task-chat-verdict,
+        .task-chat-row-red .task-chat-actor { color: #7f1d1d; }
+        .task-chat-row-forecast .task-chat-verdict,
+        .task-chat-row-forecast .task-chat-comment { color: #dc2626; }
         .task-tare-more { margin-top: 8px; width: 100%; justify-content: center; }
         .task-form { display: grid; gap: 10px; min-width: 0; padding: 14px; border-top: 1px solid #e2e8f0; background: #fafbfd; border-radius: 0 0 16px 16px; }
         .task-form label { color: #334155; font-size: 13px; font-weight: 900; }
@@ -552,17 +560,29 @@
         .task-compose-row-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .32s cubic-bezier(.22,.9,.28,1.05); margin-bottom: 0; }
         .task-compose-row-collapse.is-expanded { grid-template-rows: 1fr; margin-bottom: 8px; }
         .task-compose-row-inner { overflow: hidden; min-height: 0; }
-        .task-compose-bar { position: relative; display: flex; align-items: flex-end; gap: 8px; border: 1px solid #dbe3ec; border-radius: 22px; background: #fff; padding: 6px; }
+        .task-compose-bar { position: relative; display: flex; align-items: center; gap: 8px; border: 1px solid #dbe3ec; border-radius: 22px; background: #fff; padding: 6px; }
         .task-compose-bar::before { content: ""; position: absolute; inset: 0; border-radius: 22px; background: transparent; clip-path: circle(0% at 36px 50%); transition: clip-path .55s cubic-bezier(.16,.85,.24,1.05); pointer-events: none; }
+        .task-compose-spacer { flex-grow: 0; flex-shrink: 1; flex-basis: 0; transition: flex-grow .4s cubic-bezier(.22,.9,.28,1.05); }
+        .task-compose-bar.is-empty .task-compose-spacer { flex-grow: 1; }
+        .task-compose-inline-slot { flex-grow: 0; flex-shrink: 1; flex-basis: 0; min-width: 0; overflow: hidden; transition: flex-grow .32s cubic-bezier(.22,.9,.28,1.05); }
+        .task-compose-inline-slot.is-filled { flex: 1 1 auto; }
+        .task-compose-inline-field { width: 100%; }
+        .task-compose-inline-field input,
+        .task-compose-inline-slot textarea { width: 100%; box-sizing: border-box; border: 0; background: transparent; padding: 9px 10px; font: inherit; color: #242038; resize: none; min-height: 0; line-height: 1.3; }
+        .task-compose-inline-field input:focus,
+        .task-compose-inline-slot textarea:focus { outline: none; }
         .task-compose-bar > * { position: relative; z-index: 1; }
         .task-compose-bar.tone-green::before { background: #dcfce7; clip-path: circle(150% at 36px 50%); }
         .task-compose-bar.tone-yellow::before { background: #fef3c7; clip-path: circle(150% at 36px 50%); }
         .task-compose-bar.tone-red::before { background: #fee2e2; clip-path: circle(150% at 36px 50%); }
+        .task-compose-bar.tone-green .task-verdict-trigger { background: #86efac; color: #14532d; }
+        .task-compose-bar.tone-yellow .task-verdict-trigger { background: #fde047; color: #713f12; }
+        .task-compose-bar.tone-red .task-verdict-trigger { background: #fca5a5; color: #7f1d1d; }
         .task-compose-bar .task-compose-input { flex: 1 1 auto; min-height: 42px; max-height: 160px; resize: none; border-radius: 18px; padding: 10px 14px; line-height: 1.35; overflow-y: auto; }
-        .task-compose-send { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 0; background: #16a34a; color: #fff; font-size: 17px; font-weight: 900; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .12s ease, background .12s ease; }
-        .task-compose-send:hover:not(:disabled) { background: #15803d; transform: scale(1.05); }
-        .task-compose-send:disabled { opacity: .4; background: #94a3b8; cursor: not-allowed; transform: none; }
-        @keyframes taskComposeSendPop { 0% { transform: scale(1); } 40% { transform: scale(1.22); } 65% { transform: scale(.92); } 100% { transform: scale(1); } }
+        .task-compose-send { display: none; flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 0; background: #16a34a; color: #fff; font-size: 17px; font-weight: 900; cursor: pointer; align-items: center; justify-content: center; transition: transform .12s ease, background .12s ease; }
+        .task-compose-send.is-visible { display: inline-flex; }
+        .task-compose-send:hover { background: #15803d; transform: scale(1.05); }
+        @keyframes taskComposeSendPop { 0% { transform: scale(.4); opacity: 0; } 55% { transform: scale(1.2); opacity: 1; } 75% { transform: scale(.9); } 100% { transform: scale(1); } }
         .task-compose-send.is-pop { animation: taskComposeSendPop .4s cubic-bezier(.3,1.4,.4,1.1); }
         .task-verdict-picker { position: relative; flex: 0 0 auto; }
         .task-verdict-native-select { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
