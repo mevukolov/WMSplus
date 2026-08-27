@@ -883,6 +883,14 @@
         return date.toISOString().slice(0, 10);
     }
 
+    // Same idea as addDays() but keeps the time-of-day instead of truncating
+    // to a date, for the "Прогнозируемая дата списания" history line.
+    function addDaysToTimestamp(iso, days) {
+        const ts = iso ? Date.parse(iso) : NaN;
+        if (!Number.isFinite(ts)) return "";
+        return new Date(ts + Number(days || 0) * 86400000).toISOString();
+    }
+
     function formatRuDate(isoDate) {
         const match = normalizeText(isoDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
         return match ? match[3] + "." + match[2] + "." + match[1] : isoDate || "-";
@@ -1593,6 +1601,7 @@
         setFlowModalOpen("achievementDetailModal", false);
         setFlowModalOpen("achievementsModal", false);
         setFlowModalOpen("specialInfoModal", false);
+        setFlowModalOpen("allTareShkModal", false);
         setFlowModalOpen("prespisokModal", false);
         if (state.prespisok && state.prespisok.clockTimer) {
             clearInterval(state.prespisok.clockTimer);
@@ -6909,8 +6918,6 @@
     }
 
     function taskDetailInfo(row) {
-        const tags = reviewTags(row);
-        const assignee = [normalizeText(row.assignee_name), normalizeText(row.assignee_employee_id)].filter(Boolean).join(" / ") || "Не назначен";
         const isIncomingFlow = isIncomingFlowRequestTask(row);
         const taskItemList = taskItems(row);
         const targetId = isIncomingFlow
@@ -6920,17 +6927,11 @@
             : normalizeIdentifier(taskItemList[0] && taskItemList[0].shk) || normalizeIdentifier(row.source_shk_ids && row.source_shk_ids[0]);
         const items = [
             taskInfoItem(isTareTask(row) ? "Искомая тара" : "Искомый ШК", targetId),
-            taskInfoItem("Стоимость", formatMoney(row.source_price_sum)),
         ];
         if (isIncomingFlow) {
             items.push(taskInfoItem("ЛО-отправитель", incomingFlowSender(row)));
             items.push(taskInfoItem("Дата запроса", incomingFlowRequestDate(row)));
-        } else {
-            items.push(taskInfoItem("Дата списания", formatRuDate(row.due_date)));
-            items.push(taskInfoItem("Дата выгрузки", formatRuDate(row.upload_effective_date)));
         }
-        items.push(taskInfoItem("Последнее движение", formatRuDateTime(row.source_last_movement_at)));
-        items.push(taskInfoItem("Исполнитель", assignee));
         const itemName = taskItemName(row);
         if (isSingleShkTask(row) && itemName) items.splice(1, 0, taskInfoItem("Наименование", itemName));
         const routeLabel = normalizeText(taskPayload(row).route_label);
@@ -7007,19 +7008,56 @@
         return Boolean(markedAsTare && tare && tare !== "0" && ids.length);
     }
 
+    const TASK_TARE_PREVIEW_LIMIT = 5;
+
+    function taskTareRowHtml(item) {
+        return "<button class='task-tare-row' type='button' data-copy-single-shk='" + escapeHtml(item.shk) + "' title='Скопировать этот ШК'>"
+            + "<span class='task-tare-shk'>" + escapeHtml(item.shk || "-") + "</span>"
+            + "<span class='task-tare-meta'>" + escapeHtml(item.status || "-") + "</span>"
+            + "<span class='task-tare-price'>" + escapeHtml(formatMoney(item.price)) + "</span>"
+            + "</button>";
+    }
+
     function taskTareInfoBox(row) {
         if (!isTareTask(row)) return "";
         const items = taskItems(row);
         const ids = items.map((item) => item.shk).filter(Boolean).join("\n");
-        const rows = items.map((item) => "<button class='task-tare-row' type='button' data-copy-single-shk='" + escapeHtml(item.shk) + "' title='Скопировать этот ШК'>"
-            + "<span class='task-tare-shk'>" + escapeHtml(item.shk || "-") + "</span>"
-            + "<span class='task-tare-meta'>" + escapeHtml(item.status || "-") + "</span>"
-            + "<span class='task-tare-price'>" + escapeHtml(formatMoney(item.price)) + "</span>"
-            + "</button>").join("");
+        const preview = items.slice(0, TASK_TARE_PREVIEW_LIMIT);
+        const rows = preview.map(taskTareRowHtml).join("");
+        const hiddenCount = items.length - preview.length;
         return "<div class='task-tare-box'>"
-            + "<div class='task-tare-head'><strong>ШК в таре</strong><button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(ids) + "'>Скопировать все</button></div>"
+            + "<div class='task-tare-head'><strong>ШК в таре · " + items.length + "</strong><button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(ids) + "'>Скопировать все</button></div>"
             + "<div class='task-tare-list'>" + (rows || "<div class='task-tare-meta'>ШК не найдены</div>") + "</div>"
+            + (hiddenCount > 0 ? "<button id='showAllTareShkBtn' class='btn btn-outline task-tare-more' type='button'>Показать все " + items.length + "</button>" : "")
             + "</div>";
+    }
+
+    function renderAllTareShkModal(row) {
+        const target = $("allTareShkWrap");
+        if (!target) return;
+        const items = taskItems(row);
+        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>ШК в таре</h3><p class='work-subtitle'>Всего " + items.length + ".</p></div><button id='closeAllTareShk' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
+            + "<div class='task-tare-list'>" + (items.map(taskTareRowHtml).join("") || "<div class='task-tare-meta'>ШК не найдены</div>") + "</div>";
+        $("closeAllTareShk").addEventListener("click", closeAllTareShkModal);
+        target.querySelectorAll("[data-copy-single-shk]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const text = normalizeIdentifier(button.dataset.copySingleShk);
+                if (!text) return;
+                const copied = await copyText(text);
+                toast(copied ? "ШК скопирован." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+            });
+        });
+    }
+
+    function openAllTareShkModal(id) {
+        const row = findTaskRow(id);
+        if (!row || !isTareTask(row)) return;
+        renderAllTareShkModal(row);
+        setFlowModalOpen("allTareShkModal", true);
+    }
+
+    function closeAllTareShkModal() {
+        setFlowModalOpen("allTareShkModal", false);
     }
 
     function incomingFlowShkInfoBox(row) {
@@ -7116,10 +7154,16 @@
         // system verdict) is credited to "Система" in Кто/Вердикт -- the
         // real person who ran the actualization goes in the comment instead,
         // per how this should read for reviewers scanning the feed.
+        const isForecast = item.event_type === "task_predicted_writeoff";
+        const isStatusLine = item.event_type === "task_last_movement_status";
         const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
-        const isSystem = isSystemClosed || (!rawActorName && !rawActorId);
-        const actorDisplay = isSystemClosed ? "Система" : (rawActorName || rawActorId || "Система");
-        const verdict = isSystemClosed
+        const isSystem = isSystemClosed || isForecast || isStatusLine || (!rawActorName && !rawActorId);
+        const actorDisplay = (isSystemClosed || isForecast || isStatusLine) ? "Система" : (rawActorName || rawActorId || "Система");
+        const verdict = isForecast
+            ? "Прогнозируемая дата списания"
+            : isStatusLine
+            ? "Статус ШК"
+            : isSystemClosed
             ? "Закрыто автоматически"
             : (normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран" ? payload.verdict : taskHistoryEventLabel(item.event_type));
         const commentParts = [];
@@ -7129,12 +7173,62 @@
         }
         if (normalizeText(payload.comment)) commentParts.push(payload.comment);
         if (payload.reopen_after) commentParts.push("до " + formatRuDateTime(payload.reopen_after));
-        return "<div class='task-chat-row'>"
+        const rowClass = "task-chat-row" + (isForecast ? " task-chat-row-forecast" : "");
+        return "<div class='" + rowClass + "'>"
             + "<div class='task-chat-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
             + "<div class='task-chat-actor'>" + taskHistoryAvatarHtml(rawActorId, rawActorName, isSystem) + "<span>" + escapeHtml(actorDisplay) + "</span></div>"
             + "<div class='task-chat-verdict'>" + escapeHtml(verdict) + "</div>"
             + "<div class='task-chat-comment'>" + escapeHtml(commentParts.join(" · ") || "—") + "</div>"
             + "</div>";
+    }
+
+    // Not real history rows -- computed live from the task's current items
+    // and the live writeoff terms, so they always reflect the latest terms
+    // even for tasks uploaded before those terms last changed. Rendered
+    // alongside real history in chronological order like any other entry.
+    function synthesizeForecastHistoryEntries(row) {
+        const entries = [];
+        const items = taskItems(row);
+        if (!items.length) return entries;
+        let lastMovement = null;
+        items.forEach((item) => {
+            const parsed = parseDateTime(item.movement);
+            if (!parsed.iso) return;
+            if (!lastMovement || parsed.ts > lastMovement.ts) lastMovement = { ts: parsed.ts, iso: parsed.iso, mx: normalizeText(item.mx) };
+        });
+        if (lastMovement) {
+            entries.push({
+                created_at: lastMovement.iso,
+                event_type: "task_last_movement_status",
+                actor_name: "",
+                actor_employee_id: "",
+                payload: { comment: lastMovement.mx || "Склад не указан" },
+            });
+        }
+        const termMap = activeWriteoffStatusTerms();
+        let predicted = null;
+        items.forEach((item) => {
+            const parsed = parseDateTime(item.movement);
+            if (!parsed.iso) return;
+            const statusKey = normalizeWriteoffTermKey(item.status, "status");
+            const term = statusKey ? termMap.get(statusKey) : null;
+            const days = term ? settingNumber(term.days_without_movement, null) : null;
+            if (!term || !Number.isFinite(days)) return;
+            const predictedIso = addDaysToTimestamp(parsed.iso, days);
+            const predictedTs = predictedIso ? Date.parse(predictedIso) : NaN;
+            if (!Number.isFinite(predictedTs)) return;
+            if (!predicted || predictedTs < predicted.ts) predicted = { ts: predictedTs, iso: predictedIso };
+        });
+        if (predicted) {
+            entries.push({
+                created_at: predicted.iso,
+                event_type: "task_predicted_writeoff",
+                actor_name: "",
+                actor_employee_id: "",
+                payload: { comment: "Автосписание складом по товару без движения" },
+            });
+        }
+        return entries;
     }
 
     // wms_task_history only has rows since 2026-08-24. For anything the task
@@ -7183,6 +7277,7 @@
         if (!target) return;
         const merged = (historyRows || [])
             .concat(synthesizeLegacyHistoryEntries(row, historyRows))
+            .concat(synthesizeForecastHistoryEntries(row))
             .filter((item) => item && item.created_at)
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         target.className = "task-history-feed-wrap";
@@ -7237,18 +7332,23 @@
                 + (savedReview.extra_label || savedReview.extra_value ? "<br><br><strong>" + escapeHtml(savedReview.extra_label || "Доп. поле") + ":</strong><br>" + escapeHtml(savedReview.extra_value || "-") : "")
                 + (savedReview.completed_by_name || savedReview.completed_by_id ? "<br><br><strong>Кто поставил вердикт:</strong><br>" + escapeHtml([savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / ")) : "")
                 + "</div>"
-            : "<div class='task-form'>"
-                + "<label for='taskCommentInput'>" + (incomingFlow ? "Комментарий ОПП" : "Комментарий") + "</label>"
-                + "<textarea id='taskCommentInput' placeholder='Что сделали по задаче'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
-                + "<label for='taskVerdictInput'>" + (incomingFlow ? "Вложение" : "Вердикт") + "</label>"
-                + "<select id='taskVerdictInput'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
-                + (incomingFlow ? "<label for='taskGuiltyIdInput'>ID виновного</label><input id='taskGuiltyIdInput' type='text' inputmode='numeric' pattern='\\d{5,8}' maxlength='8' value='" + escapeHtml(savedReview.guilty_id || "") + "' placeholder='5-8 цифр'>" : "")
-                + "<div id='taskExtraFieldWrap' class='" + (extraLabel ? "" : "hidden") + "'><label id='taskExtraLabel' for='taskExtraInput'>" + escapeHtml(extraLabel) + "</label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
-                + "<button id='completeTaskBtn' class='btn btn-rect task-complete-btn' type='button' disabled>Завершить задачу</button>"
+            : "<div class='task-form task-compose'>"
+                + "<div class='task-compose-extra'>"
+                + (incomingFlow ? "<div class='task-compose-field'><label for='taskGuiltyIdInput'>ID виновного</label><input id='taskGuiltyIdInput' type='text' inputmode='numeric' pattern='\\d{5,8}' maxlength='8' value='" + escapeHtml(savedReview.guilty_id || "") + "' placeholder='5-8 цифр'></div>" : "")
+                + "<div id='taskExtraFieldWrap' class='task-compose-field" + (extraLabel ? "" : " hidden") + "'><label id='taskExtraLabel' for='taskExtraInput'>" + escapeHtml(extraLabel) + "</label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
+                + "</div>"
+                + "<div class='task-compose-bar'>"
+                + "<select id='taskVerdictInput' class='task-compose-verdict' aria-label='" + (incomingFlow ? "Вложение" : "Вердикт") + "'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
+                + "<textarea id='taskCommentInput' class='task-compose-input' rows='1' aria-label='" + (incomingFlow ? "Комментарий ОПП" : "Комментарий") + "' placeholder='" + (incomingFlow ? "Комментарий ОПП" : "Что сделали по задаче") + "'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
+                + "<button id='completeTaskBtn' class='task-compose-send' type='button' disabled title='Завершить задачу' aria-label='Завершить задачу'>✓</button>"
+                + "</div>"
                 + "<div id='taskDetailStatus' class='review-status'></div>"
                 + "<div id='taskWritebackConflictActions' class='task-writeback-conflict hidden'></div>"
                 + "</div>";
-        target.innerHTML = "<div class='task-detail-head'><div><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='review-table-subtitle'>" + escapeHtml(row.task_type || "-") + "</div></div>" + taskDetailActionButtons(row, readOnly) + "</div>"
+        target.innerHTML = "<div class='task-detail-head'><div>"
+            + "<div class='task-detail-created'>Создано " + escapeHtml(formatRuDateTime(row.created_at)) + "</div>"
+            + "<div class='task-detail-title-row'><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='task-detail-price'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</div></div>"
+            + "<div class='review-table-subtitle'>" + escapeHtml(row.task_type || "-") + "</div></div>" + taskDetailActionButtons(row, readOnly) + "</div>"
             + "<div class='task-detail-body'>"
             + "<div class='task-info-grid'>" + taskDetailInfo(row) + "</div>"
             + taskTagsBox(row)
@@ -7288,6 +7388,8 @@
         target.querySelectorAll("[data-special-tag]").forEach((button) => {
             button.addEventListener("click", () => openSpecialInfoModal(row.id, button.dataset.specialTag || ""));
         });
+        const showAllTareBtn = $("showAllTareShkBtn");
+        if (showAllTareBtn) showAllTareBtn.addEventListener("click", () => openAllTareShkModal(row.id));
         if (readOnly) return;
         const editBtn = $("editTareTaskBtn");
         if (editBtn) editBtn.addEventListener("click", () => openEditTareTaskModal(row.id));
@@ -7298,12 +7400,20 @@
             if (el) {
                 el.addEventListener(id === "taskVerdictInput" ? "change" : "input", () => {
                     if (id === "taskGuiltyIdInput") el.value = normalizeGuiltyId(el.value);
+                    if (id === "taskCommentInput") autoGrowTextarea(el);
                     updateTaskDetailForm();
                 });
             }
         });
+        autoGrowTextarea($("taskCommentInput"));
         $("completeTaskBtn").addEventListener("click", () => { void completeTaskFromDetail(row.id); });
         updateTaskDetailForm();
+    }
+
+    function autoGrowTextarea(el) {
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = el.scrollHeight + "px";
     }
 
     function closeEditTareTaskModal() {

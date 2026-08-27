@@ -357,7 +357,8 @@
         #editTareTaskModal,
         #deferTaskModal,
         #reopenConfirmModal,
-        #splitShkConfirmModal { z-index: 4400; }
+        #splitShkConfirmModal,
+        #allTareShkModal { z-index: 4400; }
         #achievementDetailModal { z-index: 4420; }
         .tasks-flow-card {
             width: min(920px, 100%);
@@ -450,9 +451,12 @@
         .review-filter-empty-note { color: #94a3b8; font-size: 12px; line-height: 1.35; }
         .task-detail-card { width: min(860px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
         .task-detail-head { padding: 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
-        .task-detail-title { margin: 0; color: #242038; font-size: 24px; line-height: 1.1; }
+        .task-detail-created { color: #94a3b8; font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+        .task-detail-title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+        .task-detail-title { margin: 0; color: #242038; font-size: 22px; line-height: 1.1; }
         .task-detail-title.copyable { cursor: copy; }
         .task-detail-title.copyable:hover { color: var(--accent); }
+        .task-detail-price { font-size: 18px; font-weight: 900; color: #15803d; background: #ecfdf3; border: 1px solid #bbf7d0; border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
         .task-detail-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
         .task-detail-body { padding: 18px; overflow: auto; }
         .task-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -502,6 +506,11 @@
         .task-chat-avatar-system { background: #94a3b8; }
         .task-chat-verdict { color: #713f12; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
         .task-chat-comment { color: #78716c; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+        .task-chat-row-forecast .task-chat-time,
+        .task-chat-row-forecast .task-chat-actor,
+        .task-chat-row-forecast .task-chat-verdict,
+        .task-chat-row-forecast .task-chat-comment { color: #dc2626; font-style: italic; }
+        .task-tare-more { margin-top: 8px; width: 100%; justify-content: center; }
         .task-form { margin-top: 14px; display: grid; gap: 10px; min-width: 0; }
         .task-form label { color: #334155; font-size: 13px; font-weight: 900; }
         .task-form textarea, .task-form select, .task-form input { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; border: 1px solid #dbe3ec; border-radius: 14px; padding: 11px 12px; background: #fff; color: #242038; font: inherit; }
@@ -509,6 +518,16 @@
         .task-complete-btn { min-height: 56px; justify-content: center; font-size: 16px; background: #16a34a; border-color: #16a34a; }
         .task-complete-btn:hover { background: #15803d; border-color: #15803d; }
         .task-complete-btn:disabled { opacity: .48; background: #94a3b8; border-color: #94a3b8; cursor: not-allowed; transform: none; box-shadow: none; }
+        .task-compose-extra { display: flex; flex-wrap: wrap; gap: 8px; }
+        .task-compose-field { flex: 1 1 180px; min-width: 0; display: grid; gap: 4px; }
+        .task-compose-field label { font-size: 11px; }
+        .task-compose-field input { padding: 8px 10px; border-radius: 12px; }
+        .task-compose-bar { display: flex; align-items: flex-end; gap: 8px; border: 1px solid #dbe3ec; border-radius: 22px; background: #fff; padding: 6px; }
+        .task-compose-bar .task-compose-verdict { flex: 0 0 auto; width: auto; max-width: 150px; border-radius: 999px; padding: 9px 24px 9px 12px; font-size: 12px; font-weight: 800; color: #475569; background: #f1f5f9; border-color: transparent; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+        .task-compose-bar .task-compose-input { flex: 1 1 auto; min-height: 0; max-height: 160px; resize: none; border-radius: 18px; padding: 9px 14px; line-height: 1.35; overflow-y: auto; }
+        .task-compose-send { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 0; background: #16a34a; color: #fff; font-size: 17px; font-weight: 900; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .12s ease, background .12s ease; }
+        .task-compose-send:hover { background: #15803d; transform: scale(1.05); }
+        .task-compose-send:disabled { opacity: .4; background: #94a3b8; cursor: not-allowed; transform: none; }
         .task-writeback-conflict { border: 1px solid #fed7aa; border-radius: 16px; background: #fff7ed; padding: 12px; color: #9a3412; }
         .task-writeback-note { font-size: 13px; font-weight: 800; line-height: 1.4; overflow-wrap: anywhere; }
         #achievementLayer { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: max(18px, env(safe-area-inset-top)) 16px 0; overflow: hidden; }
@@ -1422,6 +1441,10 @@
 
 <section id="specialInfoModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div id="specialInfoWrap" class="tasks-flow-card task-small-card"></div>
+</section>
+
+<section id="allTareShkModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div id="allTareShkWrap" class="tasks-flow-card task-small-card"></div>
 </section>
 
 <section id="editTareTaskModal" class="tasks-flow-modal upload-work" aria-hidden="true">
