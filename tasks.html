@@ -862,6 +862,8 @@
         .quick-no-shk-center { flex: 1; display: grid; place-items: center; text-align: center; }
         .quick-no-shk-start { min-width: min(460px, 86vw); min-height: 88px; border: 0; border-radius: 26px; background: #86efac; color: #102018; font-size: clamp(26px, 4vw, 48px); font-weight: 1000; cursor: pointer; box-shadow: 0 28px 80px rgba(34,197,94,.28); transition: transform .16s ease, box-shadow .16s ease; }
         .quick-no-shk-start:hover { transform: translateY(-6px) scale(1.035); box-shadow: 0 34px 100px rgba(34,197,94,.38); }
+        .quick-no-shk-countdown { font-size: clamp(90px, 16vw, 180px); font-weight: 1000; line-height: 1; color: #86efac; text-shadow: 0 28px 80px rgba(34,197,94,.4); animation: quickNoShkCountdownPulse .5s ease; }
+        @keyframes quickNoShkCountdownPulse { from { transform: scale(1.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         .quick-no-shk-file { display: grid; gap: 14px; max-width: 760px; margin: auto; }
         .quick-no-shk-hud { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
         .quick-no-shk-hud div { border-radius: 18px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.16); padding: 12px 14px; color: #fff; }

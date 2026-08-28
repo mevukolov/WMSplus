@@ -3037,6 +3037,7 @@
 
     function resetQuickNoShkState(keepPhotos) {
         if (state.quickNoShk && state.quickNoShk.clockTimer) clearInterval(state.quickNoShk.clockTimer);
+        if (state.quickNoShk && state.quickNoShk.countdownTimer) clearInterval(state.quickNoShk.countdownTimer);
         const cachedSupersetRows = loadQuickNoShkSupersetCache();
         state.quickNoShk = {
             loading: false,
@@ -3044,6 +3045,8 @@
             index: 0,
             actions: [],
             started: false,
+            countdown: 0,
+            countdownTimer: null,
             processing: false,
             photoCache: keepPhotos && state.quickNoShk ? (state.quickNoShk.photoCache || {}) : {},
             cardInfoCache: keepPhotos && state.quickNoShk ? (state.quickNoShk.cardInfoCache || {}) : {},
@@ -3432,6 +3435,10 @@
             clearInterval(state.quickNoShk.clockTimer);
             state.quickNoShk.clockTimer = null;
         }
+        if (state.quickNoShk && state.quickNoShk.countdownTimer) {
+            clearInterval(state.quickNoShk.countdownTimer);
+            state.quickNoShk.countdownTimer = null;
+        }
         setFlowModalOpen("quickNoShkModal", false);
     }
 
@@ -3466,21 +3473,54 @@
             bindQuickNoShkClose();
             return;
         }
+        if (state.quickNoShk.countdown > 0) {
+            target.innerHTML = quickNoShkTopHtml("Прогружаю фото и названия, пока идёт отсчёт...")
+                + "<section class='quick-no-shk-panel'><div class='quick-no-shk-center'><div><div class='quick-no-shk-countdown'>" + escapeHtml(String(state.quickNoShk.countdown)) + "</div><p class='quick-no-shk-subtitle'>Грузим фото и названия заранее, чтобы не ждать на каждой карточке.</p></div></div></section>";
+            bindQuickNoShkClose();
+            return;
+        }
         if (!state.quickNoShk.started) {
             target.innerHTML = quickNoShkTopHtml("Готово к быстрой проверке: " + items.length + " ШК. Фото берется по Код НМ, вердикт закрывает задачу системно.")
                 + "<section class='quick-no-shk-panel'><div class='quick-no-shk-center'><div><button id='startQuickNoShk' class='quick-no-shk-start' type='button'>Начать</button><p class='quick-no-shk-subtitle'>Попаданий: " + items.length + ". НМ заполнены у всех целей.</p></div></div></section>";
             bindQuickNoShkClose();
-            $("startQuickNoShk").addEventListener("click", () => {
-                state.quickNoShk.started = true;
-                state.quickNoShk.index = 0;
-                state.quickNoShk.timerStartedAt = Date.now();
-                state.quickNoShk.itemTimerStartedAt = Date.now();
-                startQuickNoShkClock();
-                renderQuickNoShkPlay();
-            });
+            $("startQuickNoShk").addEventListener("click", () => { startQuickNoShkCountdown(); });
             return;
         }
         renderQuickNoShkPlay();
+    }
+
+    const QUICK_NO_SHK_COUNTDOWN_SECONDS = 3;
+    const QUICK_NO_SHK_BULK_PRELOAD_CAP = 40;
+
+    // Preloading only the next 4 items (preloadQuickNoShkPhotos) meant the
+    // very first card after "Начать" always paid the full photo+card-info
+    // fetch latency with nothing to show. Firing a much wider batch during
+    // the countdown instead means most of that work is already done by the
+    // time the first card renders.
+    async function preloadQuickNoShkBulk() {
+        const items = (state.quickNoShk.items || []).slice(0, QUICK_NO_SHK_BULK_PRELOAD_CAP);
+        await Promise.all(items.flatMap((item) => [loadQuickNoShkPhoto(item), loadQuickNoShkCardInfo(item)]));
+    }
+
+    function startQuickNoShkCountdown() {
+        void preloadQuickNoShkBulk();
+        state.quickNoShk.countdown = QUICK_NO_SHK_COUNTDOWN_SECONDS;
+        renderQuickNoShk();
+        state.quickNoShk.countdownTimer = setInterval(() => {
+            state.quickNoShk.countdown -= 1;
+            if (state.quickNoShk.countdown > 0) {
+                renderQuickNoShk();
+                return;
+            }
+            clearInterval(state.quickNoShk.countdownTimer);
+            state.quickNoShk.countdownTimer = null;
+            state.quickNoShk.started = true;
+            state.quickNoShk.index = 0;
+            state.quickNoShk.timerStartedAt = Date.now();
+            state.quickNoShk.itemTimerStartedAt = Date.now();
+            startQuickNoShkClock();
+            renderQuickNoShkPlay();
+        }, 1000);
     }
 
     function quickNoShkSupersetNeededShks() {
@@ -3641,9 +3681,6 @@
         const parts = [];
         if (info.name) parts.push("<div><span>Название WB</span><strong>" + escapeHtml(info.name) + "</strong></div>");
         if (info.brand) parts.push("<div><span>Бренд</span><strong>" + escapeHtml(info.brand) + "</strong></div>");
-        if (Array.isArray(info.sizes) && info.sizes.length) {
-            parts.push("<div><span>Размеры карточки</span><strong>" + escapeHtml(info.sizes.join(", ")) + "</strong></div>");
-        }
         return parts.length ? "<div class='quick-no-shk-wb-info'>" + parts.join("") + "</div>" : "";
     }
 
@@ -4006,7 +4043,11 @@
                 keptActive = true;
             }
             const decisionMs = quickNoShkItemElapsedMs();
-            if (decisionMs > 0 && decisionMs < QUICK_NO_SHK_STREAK_THRESHOLD_MS) state.quickNoShk.streak += 1;
+            // "Не найден" takes real deliberation (confirming absence, not
+            // just pattern-matching a photo), so it shouldn't be judged by
+            // the same speed bar as "Есть" -- any deliberate "не найден"
+            // keeps the combo alive, only "Есть" is speed-gated.
+            if (!found || (decisionMs > 0 && decisionMs < QUICK_NO_SHK_STREAK_THRESHOLD_MS)) state.quickNoShk.streak += 1;
             else state.quickNoShk.streak = 0;
             state.quickNoShk.bestStreak = Math.max(state.quickNoShk.bestStreak, state.quickNoShk.streak);
             state.quickNoShk.lastActionKey = actionKey + ":" + Date.now();
