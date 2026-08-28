@@ -11817,10 +11817,22 @@
         // effectively minutes per photo. Racing a much larger wave means the
         // real host (wherever it lands) is almost always caught in the
         // first round.
+        const list = urls || [];
+        if (!list.length) return "";
         const batchSize = 300;
-        for (let i = 0; i < (urls || []).length; i += batchSize) {
-            const found = await firstFulfilled(urls.slice(i, i + batchSize).map((url) => probeImageUrl(url, 1300)));
-            if (found) return found;
+        // A whole probe wave lands inside one ~1.3s window -- if the
+        // network hiccups (wifi/VPN reconnect, DNS blip) right then, every
+        // single URL in that wave fails at once and the real host, however
+        // reachable a moment later, never gets a second chance. One retry
+        // after a short pause rides out that kind of transient blip without
+        // meaningfully slowing down the genuine "no photo exists" case.
+        const maxAttempts = 2;
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            for (let i = 0; i < list.length; i += batchSize) {
+                const found = await firstFulfilled(list.slice(i, i + batchSize).map((url) => probeImageUrl(url, 1300)));
+                if (found) return found;
+            }
+            if (attempt < maxAttempts - 1) await new Promise((resolve) => setTimeout(resolve, 900));
         }
         return "";
     }
