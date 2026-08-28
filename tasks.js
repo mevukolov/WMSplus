@@ -7174,6 +7174,7 @@
         task_auto_reopened: "Переоткрыто автоматически",
         task_system_closed: "Закрыто системой (актуализация)",
         task_prespisok_second_line: "Передано на вторую линию предсписка",
+        task_prespisok_uploaded: "ШК в предсписке",
     };
 
     function taskHistoryEventLabel(eventType) {
@@ -7224,15 +7225,18 @@
         const isForecast = item.event_type === "task_predicted_writeoff";
         const isStatusLine = item.event_type === "task_last_movement_status";
         const isCreated = item.event_type === "task_created";
+        const isUploadMarker = item.event_type === "task_prespisok_uploaded";
         const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
-        const isSystem = isSystemClosed || isForecast || isStatusLine || isCreated || (!rawActorName && !rawActorId);
-        const actorDisplay = (isSystemClosed || isForecast || isStatusLine || isCreated) ? "Система" : (rawActorName || rawActorId || "Система");
+        const isSystem = isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker || (!rawActorName && !rawActorId);
+        const actorDisplay = (isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker) ? "Система" : (rawActorName || rawActorId || "Система");
         const verdict = isForecast
             ? "Прогнозируемая дата списания"
             : isStatusLine
             ? (normalizeText(payload.status_code) || "Статус ШК")
             : isCreated
             ? "Создана задача"
+            : isUploadMarker
+            ? "ШК в предсписке"
             : isSystemClosed
             ? "Закрыто автоматически"
             : (normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран" ? payload.verdict : taskHistoryEventLabel(item.event_type));
@@ -7386,6 +7390,36 @@
         };
     }
 
+    // "ШК в предсписке" marker: wms_prespisok_runs.shk_ids/tare_ids already
+    // mirror the run's uploaded item list (written once per upload, no new
+    // write path -- see the migration comment), so this is just a lookup.
+    async function fetchPrespisokUploadMarkersForTask(db, row) {
+        if (!db || !row) return [];
+        const tareId = normalizeIdentifier(row.source_tare_id);
+        const shkIds = Array.isArray(row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
+        if (!tareId && !shkIds.length) return [];
+        try {
+            let query = db.from(WMS_PRESPISOK_RUNS_TABLE).select("id,started_at,created_at");
+            query = tareId ? query.contains("tare_ids", [tareId]) : query.contains("shk_ids", [shkIds[0]]);
+            const { data, error } = await query.order("started_at", { ascending: true }).limit(10);
+            if (error) throw error;
+            return Array.isArray(data) ? data : [];
+        } catch (error) {
+            console.warn("prespisok upload marker fetch skipped:", error);
+            return [];
+        }
+    }
+
+    function prespisokUploadMarkerToHistoryEntry(run) {
+        return {
+            created_at: run.started_at || run.created_at,
+            event_type: "task_prespisok_uploaded",
+            actor_name: "Система",
+            actor_employee_id: "",
+            payload: {},
+        };
+    }
+
     // wms_task_history only has rows since 2026-08-24. For anything the task
     // itself remembers from before that (or from a write path that skipped
     // history for some other reason) we reconstruct one entry per gap from
@@ -7473,12 +7507,15 @@
 
     async function loadAndRenderTaskDetailHistory(row) {
         const db = supabaseDb();
-        const [historyRows, prespisokActions] = await Promise.all([
+        const [historyRows, prespisokActions, uploadMarkers] = await Promise.all([
             loadTaskDetailHistory(row.id),
             fetchPrespisokActionsForTask(db, row),
+            fetchPrespisokUploadMarkersForTask(db, row),
         ]);
         if (!state.taskDetail || state.taskDetail.rowId !== row.id) return;
-        renderTaskDetailHistoryFeed(historyRows, row, prespisokActions.map(prespisokActionToHistoryEntry));
+        const extraRows = prespisokActions.map(prespisokActionToHistoryEntry)
+            .concat(uploadMarkers.map(prespisokUploadMarkerToHistoryEntry));
+        renderTaskDetailHistoryFeed(historyRows, row, extraRows);
     }
 
     function taskDetailActionButtons(row, readOnly) {
@@ -13568,6 +13605,12 @@
         if (!db || !state.prespisok.runId) return;
         const user = currentWmsUser();
         const existingRun = state.prespisok.remoteRun || {};
+        const shkIds = [];
+        const tareIds = [];
+        (state.prespisok.items || []).forEach((item) => {
+            if (item.type === "tare" && item.id) tareIds.push(item.id);
+            (item.rows || []).forEach((row) => { if (row.shk) shkIds.push(row.shk); });
+        });
         const payload = {
             id: state.prespisok.runId,
             wh_id: WH_ID,
@@ -13582,6 +13625,11 @@
             operator_name: existingRun.operator_name || user.name || null,
             started_at: state.prespisok.startedAt || new Date().toISOString(),
             finished_at: statusValue === "completed" ? new Date().toISOString() : null,
+            // Lets any task detail card look up "was this ШК uploaded into
+            // предсписок" without a new write -- these mirror data already
+            // present in payload.items below, just as indexed columns.
+            shk_ids: shkIds,
+            tare_ids: tareIds,
             payload: prespisokCompactPayload(),
         };
         try {
