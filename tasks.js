@@ -11404,9 +11404,9 @@
     function extractMissingColumnName(error) {
         const text = String((error && (error.message || error.details)) || "");
         const match = text.match(/column\s+([^\s]+)\s+does not exist/i)
-            || text.match(/could not find(?:\s+the)?\s+"?([a-z0-9_.]+)"?\s+column/i);
+            || text.match(/could not find(?:\s+the)?\s+['"]?([a-z0-9_.]+)['"]?\s+column/i);
         if (!match || !match[1]) return "";
-        const parts = String(match[1]).replace(/"/g, "").split(".");
+        const parts = String(match[1]).replace(/['"]/g, "").split(".");
         return parts[parts.length - 1] || "";
     }
 
