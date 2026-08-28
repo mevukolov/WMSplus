@@ -2901,21 +2901,30 @@
             source_payload: nextPayload,
             updated_at: now,
         };
+        // Guard against re-closing (and re-writing history for) a task that
+        // another operator's actualization run already closed since this
+        // one's candidate list was built -- neq() makes the update a no-op
+        // instead of a duplicate "Закрыто автоматически" row.
         const { data, error } = await db
             .from(WMS_TASKS_TABLE)
             .update(payload)
             .eq("id", row.id)
+            .neq("task_status", "Завершено")
             .select("id,source_payload,task_status,opp_verdict,assignee_employee_id,assignee_name,completed_at,reopen_after,updated_at")
-            .single();
+            .maybeSingle();
         if (error) throw error;
-        refreshTaskRow(row.id, data || payload);
+        if (!data) {
+            state.review.rows = (state.review.rows || []).filter((item) => item.id !== row.id);
+            return null;
+        }
+        refreshTaskRow(row.id, data);
         state.review.rows = (state.review.rows || []).filter((item) => item.id !== row.id);
-        void writeTaskHistory({ ...row, ...payload, ...(data || {}) }, "task_system_closed", {
+        void writeTaskHistory({ ...row, ...payload, ...data }, "task_system_closed", {
             title: displayTaskTitle(row),
             verdict: SYSTEM_MOVEMENT_VERDICT,
             comment: note || "Подтверждено движение по Superset",
         });
-        return data || payload;
+        return data;
     }
 
     async function runLimitedPool(items, limit, worker, onProgress) {
