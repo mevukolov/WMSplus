@@ -4518,7 +4518,26 @@
         setFlowModalOpen("noShkReviewModal", false);
     }
 
+    // 'Разбор завершен' has no purge/archive -- completed tasks accumulate
+    // forever (8700+ rows and counting), so an unbounded fetch here was the
+    // single heaviest query in the app and routinely blew the anon role's 3s
+    // statement_timeout. Nobody actually browses years of closed tasks in
+    // this list, so capping to the most recently-touched rows is a real
+    // functional non-loss, not just a technical workaround.
+    const INACTIVE_TASK_ROW_LIMIT = 1000;
+
     async function fetchWmsTaskRows(db, mode) {
+        if (mode === "inactive") {
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .select(WMS_TASK_SELECT_COLUMNS)
+                .eq("is_deleted", false)
+                .in("task_status", ["Завершено", "Отложено"])
+                .order("updated_at", { ascending: false })
+                .limit(INACTIVE_TASK_ROW_LIMIT);
+            if (error) throw error;
+            return Array.isArray(data) ? data : [];
+        }
         const pageSize = 1000;
         const maxRows = 20000;
         const rows = [];
@@ -4528,7 +4547,6 @@
                 .select(WMS_TASK_SELECT_COLUMNS)
                 .eq("is_deleted", false);
             if (mode === "active") query = query.or("task_status.is.null,task_status.neq.Завершено");
-            if (mode === "inactive") query = query.in("task_status", ["Завершено", "Отложено"]);
             const { data, error } = await query
                 .order("source_price_sum", { ascending: false, nullsFirst: false })
                 .range(from, from + pageSize - 1);
@@ -7155,6 +7173,7 @@
         task_reopened: "Переоткрыто вручную",
         task_auto_reopened: "Переоткрыто автоматически",
         task_system_closed: "Закрыто системой (актуализация)",
+        task_prespisok_second_line: "Передано на вторую линию предсписка",
     };
 
     function taskHistoryEventLabel(eventType) {
@@ -7302,6 +7321,71 @@
         return entries;
     }
 
+    const NO_SHK_RESULT_LABELS = {};
+    NO_SHK_RESULT_LABELS[SYSTEM_NO_SHK_FOUND_VERDICT] = "Обнаружено без ШК";
+    NO_SHK_RESULT_LABELS[SYSTEM_NO_SHK_NOT_FOUND_VERDICT] = "Не найдено без ШК";
+
+    // "Быстрая проверка Без ШК" never wrote to wms_task_history -- its
+    // result lives only in source_payload.no_shk_review(_history). Reading
+    // it back here means it doesn't need a schema change to show up
+    // alongside real history rows.
+    function synthesizeNoShkHistoryEntries(row) {
+        const payload = taskPayload(row);
+        const checks = [];
+        if (payload.no_shk_review && typeof payload.no_shk_review === "object" && !Array.isArray(payload.no_shk_review)) checks.push(payload.no_shk_review);
+        if (Array.isArray(payload.no_shk_review_history)) checks.push(...payload.no_shk_review_history);
+        const seen = new Set();
+        const entries = [];
+        checks.forEach((check) => {
+            if (!check || !check.checked_at) return;
+            const key = check.checked_at + "|" + normalizeText(check.shk);
+            if (seen.has(key)) return;
+            seen.add(key);
+            const label = NO_SHK_RESULT_LABELS[check.result] || normalizeText(check.result);
+            if (!label) return;
+            entries.push({
+                created_at: check.checked_at,
+                event_type: "task_no_shk_checked",
+                actor_name: check.checked_by_name,
+                actor_employee_id: check.checked_by_id,
+                payload: { verdict: label, comment: normalizeText(check.name) ? "Проверка Без ШК: " + check.name : "Проверка Без ШК" },
+            });
+        });
+        return entries;
+    }
+
+    // Предсписок decisions live in wms_prespisok_actions, keyed by
+    // shk/tare rather than task_id -- most of them never produce a
+    // wms_tasks row at all. Fetched here and folded into the same feed so
+    // the same ШК shows the same history whether you open it from the
+    // task card or from предсписок itself.
+    async function fetchPrespisokActionsForTask(db, row) {
+        if (!db || !row) return [];
+        const tareId = normalizeIdentifier(row.source_tare_id);
+        const shkIds = Array.isArray(row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
+        if (!tareId && !shkIds.length) return [];
+        try {
+            let query = db.from(WMS_PRESPISOK_ACTIONS_TABLE).select("verdict,extra_value,created_at,operator_id,operator_name");
+            query = tareId ? query.eq("source_tare_id", tareId) : query.contains("source_shk_ids", [shkIds[0]]);
+            const { data, error } = await query.order("created_at", { ascending: true });
+            if (error) throw error;
+            return Array.isArray(data) ? data : [];
+        } catch (error) {
+            console.warn("prespisok action history fetch skipped:", error);
+            return [];
+        }
+    }
+
+    function prespisokActionToHistoryEntry(action) {
+        return {
+            created_at: action.created_at,
+            event_type: "task_prespisok_action",
+            actor_name: action.operator_name,
+            actor_employee_id: action.operator_id,
+            payload: { verdict: "Предсписок: " + normalizeText(action.verdict), comment: normalizeText(action.extra_value) },
+        };
+    }
+
     // wms_task_history only has rows since 2026-08-24. For anything the task
     // itself remembers from before that (or from a write path that skipped
     // history for some other reason) we reconstruct one entry per gap from
@@ -7312,7 +7396,7 @@
         const presentTypes = new Set((realHistoryRows || []).map((item) => item.event_type));
         const entries = [];
         const verdict = normalizeText(review.verdict || review.attachment || row.opp_verdict);
-        if (verdict && verdict !== "Не выбран" && !presentTypes.has("task_completed") && !presentTypes.has("task_system_closed")) {
+        if (verdict && verdict !== "Не выбран" && !presentTypes.has("task_completed") && !presentTypes.has("task_system_closed") && !presentTypes.has("task_deferred")) {
             const actor = taskCompletionActor(row);
             entries.push({
                 created_at: review.completed_at || row.completed_at || row.updated_at,
@@ -7364,12 +7448,14 @@
         setTimeout(cleanup, 500);
     }
 
-    function renderTaskDetailHistoryFeed(historyRows, row) {
+    function renderTaskDetailHistoryFeed(historyRows, row, extraRows) {
         const target = $("taskDetailHistoryFeed");
         if (!target) return;
         const merged = (historyRows || [])
             .concat(synthesizeLegacyHistoryEntries(row, historyRows))
             .concat(synthesizeForecastHistoryEntries(row))
+            .concat(synthesizeNoShkHistoryEntries(row))
+            .concat(extraRows || [])
             .filter((item) => item && item.created_at)
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         animateTaskDetailCardResize(() => {
@@ -7386,9 +7472,13 @@
     }
 
     async function loadAndRenderTaskDetailHistory(row) {
-        const historyRows = await loadTaskDetailHistory(row.id);
+        const db = supabaseDb();
+        const [historyRows, prespisokActions] = await Promise.all([
+            loadTaskDetailHistory(row.id),
+            fetchPrespisokActionsForTask(db, row),
+        ]);
         if (!state.taskDetail || state.taskDetail.rowId !== row.id) return;
-        renderTaskDetailHistoryFeed(historyRows, row);
+        renderTaskDetailHistoryFeed(historyRows, row, prespisokActions.map(prespisokActionToHistoryEntry));
     }
 
     function taskDetailActionButtons(row, readOnly) {
@@ -7424,13 +7514,20 @@
             + "<select id='taskVerdictInput' class='task-verdict-native-select' aria-hidden='true' tabindex='-1'>" + verdictOptions.map((option) => "<option value='" + escapeHtml(option) + "' " + (option === formVerdict ? "selected" : "") + ">" + escapeHtml(option) + "</option>").join("") + "</select>"
             + "<div id='taskVerdictPopup' class='task-verdict-popup'>" + taskVerdictOptionsHtml(verdictOptions, formVerdict) + "</div>"
             + "</div>";
+        // Regular (non-incoming-flow) read-only tasks show nothing here --
+        // the verdict/comment/who-completed-it is already in the history
+        // feed above, and duplicating it in a second box read the same
+        // information twice. Incoming-flow keeps its summary box since it
+        // has one field (ID виновного) the history feed doesn't render.
         const reviewBlock = readOnly
-            ? "<div class='task-description-box copyable' data-copy-value='" + escapeHtml(readOnlyReviewLines.join("\n")) + "' title='Нажми, чтобы скопировать'><strong>Комментарий:</strong><br>" + escapeHtml(savedReview.comment || "-")
-                + "<br><br><strong>" + (incomingFlow ? "Вложение" : "Вердикт") + ":</strong><br>" + escapeHtml(verdict || "-")
-                + (incomingFlow ? "<br><br><strong>ID виновного:</strong><br>" + escapeHtml(savedReview.guilty_id || "-") : "")
-                + (savedReview.extra_label || savedReview.extra_value ? "<br><br><strong>" + escapeHtml(savedReview.extra_label || "Доп. поле") + ":</strong><br>" + escapeHtml(savedReview.extra_value || "-") : "")
-                + (savedReview.completed_by_name || savedReview.completed_by_id ? "<br><br><strong>Кто поставил вердикт:</strong><br>" + escapeHtml([savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / ")) : "")
-                + "</div>"
+            ? (incomingFlow
+                ? "<div class='task-description-box copyable' data-copy-value='" + escapeHtml(readOnlyReviewLines.join("\n")) + "' title='Нажми, чтобы скопировать'><strong>Комментарий:</strong><br>" + escapeHtml(savedReview.comment || "-")
+                    + "<br><br><strong>Вложение:</strong><br>" + escapeHtml(verdict || "-")
+                    + "<br><br><strong>ID виновного:</strong><br>" + escapeHtml(savedReview.guilty_id || "-")
+                    + (savedReview.extra_label || savedReview.extra_value ? "<br><br><strong>" + escapeHtml(savedReview.extra_label || "Доп. поле") + ":</strong><br>" + escapeHtml(savedReview.extra_value || "-") : "")
+                    + (savedReview.completed_by_name || savedReview.completed_by_id ? "<br><br><strong>Кто поставил вердикт:</strong><br>" + escapeHtml([savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / ")) : "")
+                    + "</div>"
+                : "")
             : incomingFlow
             ? "<div class='task-form task-compose'>"
                 + "<div class='task-compose-extra'>"
@@ -7999,13 +8096,16 @@
         const bar = $("taskComposeBar");
         if (bar) {
             bar.classList.remove("tone-green", "tone-yellow", "tone-red");
-            // Green needs no inline field, so it stays centered like the
-            // empty state; yellow/red need room for the field, so the
-            // centering spacers collapse and the trigger (sized to its own
-            // text, never truncated) settles to the left.
-            bar.classList.toggle("is-centered", !tone || tone === "green");
+            // Green needs no other input at all, so the trigger itself
+            // stretches to fill the row (left edge to the checkmark).
+            // Yellow/red need room for the inline field, so the centering
+            // spacers collapse and the trigger (sized to its own text,
+            // never truncated) settles to the left instead.
+            bar.classList.toggle("is-centered", !tone);
             if (tone) bar.classList.add("tone-" + tone);
         }
+        const picker = $("taskVerdictPicker");
+        if (picker) picker.classList.toggle("is-full", tone === "green");
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const extraWrap = $("taskExtraFieldWrap");
         const extraInput = $("taskExtraInput");
@@ -11749,7 +11849,6 @@
             writeoff_date_source: writeoffInfo.source,
         };
         if (writeoffInfo.basis) sourcePayload.writeoff_date_basis = writeoffInfo.basis;
-        if (writeoffInfo.candidates && writeoffInfo.candidates.length) sourcePayload.writeoff_date_candidates = writeoffInfo.candidates.slice(0, 80);
         if (specialInfos.length) sourcePayload.special_infos = specialInfos;
         return {
             module: options.module,
@@ -13390,6 +13489,19 @@
         });
         const { data, error } = await db.rpc(SAVE_RPC, { p_tasks: [task], p_run: {} });
         if (error) throw error;
+        const { data: savedRow } = await db
+            .from(WMS_TASKS_TABLE)
+            .select("id")
+            .eq("source_module", task.source_module)
+            .eq("source_id", task.source_id)
+            .eq("task_type", task.task_type)
+            .maybeSingle();
+        if (savedRow && savedRow.id) {
+            void writeTaskHistory({ id: savedRow.id }, "task_prespisok_second_line", {
+                action: actionLabel,
+                extra_value: extraValue || "",
+            });
+        }
         return { response: data, task };
     }
 
