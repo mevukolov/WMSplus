@@ -3046,6 +3046,7 @@
             started: false,
             processing: false,
             photoCache: keepPhotos && state.quickNoShk ? (state.quickNoShk.photoCache || {}) : {},
+            cardInfoCache: keepPhotos && state.quickNoShk ? (state.quickNoShk.cardInfoCache || {}) : {},
             pureCandidates: [],
             supersetRows: cachedSupersetRows,
             supersetByShk: latestSupersetByShk(cachedSupersetRows),
@@ -3631,6 +3632,30 @@
         if (current && current.key === item.key && $("quickNoShkModal") && $("quickNoShkModal").classList.contains("active")) renderQuickNoShkPlay();
     }
 
+    function quickNoShkCardInfoHtml(item) {
+        const nm = normalizeIdentifier(item && item.nm);
+        const hasCache = nm && Object.prototype.hasOwnProperty.call(state.quickNoShk.cardInfoCache, nm);
+        const info = hasCache ? state.quickNoShk.cardInfoCache[nm] : null;
+        if (!hasCache) return "<div class='quick-no-shk-wb-info quick-no-shk-wb-info-loading'>Смотрю карточку на WB...</div>";
+        if (!info || !info.found) return "";
+        const parts = [];
+        if (info.name) parts.push("<div><span>Название WB</span><strong>" + escapeHtml(info.name) + "</strong></div>");
+        if (info.brand) parts.push("<div><span>Бренд</span><strong>" + escapeHtml(info.brand) + "</strong></div>");
+        if (Array.isArray(info.sizes) && info.sizes.length) {
+            parts.push("<div><span>Размеры карточки</span><strong>" + escapeHtml(info.sizes.join(", ")) + "</strong></div>");
+        }
+        return parts.length ? "<div class='quick-no-shk-wb-info'>" + parts.join("") + "</div>" : "";
+    }
+
+    async function loadQuickNoShkCardInfo(item) {
+        const nm = normalizeIdentifier(item && item.nm);
+        if (!nm || Object.prototype.hasOwnProperty.call(state.quickNoShk.cardInfoCache, nm)) return;
+        const info = await fetchWbCardInfo(nm);
+        state.quickNoShk.cardInfoCache[nm] = info;
+        const current = currentQuickNoShkItem();
+        if (current && current.key === item.key && $("quickNoShkModal") && $("quickNoShkModal").classList.contains("active")) renderQuickNoShkPlay();
+    }
+
     async function preloadQuickNoShkPhotos() {
         if (state.quickNoShk.preloading) return;
         state.quickNoShk.preloading = true;
@@ -3645,6 +3670,7 @@
                 next.push(item);
             }
             await Promise.all(next.map((item) => loadQuickNoShkPhoto(item)));
+            await Promise.all(next.map((item) => loadQuickNoShkCardInfo(item)));
         } finally {
             state.quickNoShk.preloading = false;
         }
@@ -3678,6 +3704,7 @@
             + "<aside class='quick-no-shk-side'>"
             + "<h3>" + escapeHtml(item.shk) + "</h3>"
             + "<p class='quick-no-shk-name'>" + escapeHtml(item.name || "Наименование не найдено") + "</p>"
+            + quickNoShkCardInfoHtml(item)
             + "<div class='quick-no-shk-info'>"
             + "<div><span>Код НМ</span><strong>" + escapeHtml(item.nm || "-") + "</strong></div>"
             + "<div><span>Стоимость</span><strong>" + escapeHtml(formatMoney(item.price)) + "</strong></div>"
@@ -3699,6 +3726,7 @@
             });
         });
         void loadQuickNoShkPhoto(item);
+        void loadQuickNoShkCardInfo(item);
         void preloadQuickNoShkPhotos();
         updateQuickNoShkTimers();
     }
@@ -11707,6 +11735,28 @@
             if (found) return found;
         }
         return "";
+    }
+
+    // card.wb.ru (WB's own unofficial product-detail API) doesn't send CORS
+    // headers, so a direct browser fetch() to it is blocked -- routed
+    // through the wb-card-lookup edge function instead, which does the same
+    // request server-to-server (no CORS involved) and re-serves it with our
+    // own CORS headers. Sizes come back as the card's full size list; WB
+    // doesn't expose which barcode belongs to which size anywhere in this
+    // API, so there's no way to narrow it down to the checked ШК specifically.
+    async function fetchWbCardInfo(nm) {
+        const digits = normalizeNmDigits(nm);
+        if (!digits) return null;
+        const db = supabaseDb();
+        if (!db) return null;
+        try {
+            const { data, error } = await db.functions.invoke("wb-card-lookup", { body: { nm: digits } });
+            if (error) throw error;
+            return data && data.ok ? data : null;
+        } catch (error) {
+            console.warn("wb card lookup failed:", error);
+            return null;
+        }
     }
 
     function taskItemFromSourceRow(row) {
