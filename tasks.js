@@ -722,6 +722,7 @@
             items: [],
             index: 0,
             actions: [],
+            debugMode: false,
             excludedCount: 0,
             fileName: "",
             runId: "",
@@ -1622,6 +1623,7 @@
         setFlowModalOpen("achievementsModal", false);
         setFlowModalOpen("specialInfoModal", false);
         setFlowModalOpen("allTareShkModal", false);
+        setFlowModalOpen("debugSandboxModal", false);
         setFlowModalOpen("prespisokModal", false);
         if (state.prespisok && state.prespisok.clockTimer) {
             clearInterval(state.prespisok.clockTimer);
@@ -3041,6 +3043,7 @@
         const cachedSupersetRows = loadQuickNoShkSupersetCache();
         state.quickNoShk = {
             loading: false,
+            debugMode: false,
             items: [],
             index: 0,
             actions: [],
@@ -3390,15 +3393,18 @@
     }
 
     function quickNoShkTopHtml(subtitle) {
+        const debugBadge = state.quickNoShk && state.quickNoShk.debugMode
+            ? "<div class='debug-sandbox-badge'>⚠ ОТЛАДКА — ничего не сохраняется</div>" : "";
         return "<div class='quick-no-shk-top'>"
-            + "<div><p class='quick-no-shk-kicker'>ОПП // быстрый без ШК</p><h2 class='quick-no-shk-title'>Без ШК</h2><p class='quick-no-shk-subtitle'>" + escapeHtml(subtitle || "Фото, быстрый глазной контроль и безопасный системный вердикт.") + "</p></div>"
+            + "<div><p class='quick-no-shk-kicker'>ОПП // быстрый без ШК</p><h2 class='quick-no-shk-title'>Без ШК</h2><p class='quick-no-shk-subtitle'>" + escapeHtml(subtitle || "Фото, быстрый глазной контроль и безопасный системный вердикт.") + "</p>" + debugBadge + "</div>"
             + "<button id='closeQuickNoShk' class='btn btn-square prespisok-close' type='button' aria-label='Закрыть'>×</button>"
             + "</div>";
     }
 
-    async function openQuickNoShkModal() {
+    async function openQuickNoShkModal(debugMode) {
         closeFlowModals();
         resetQuickNoShkState(true);
+        state.quickNoShk.debugMode = Boolean(debugMode);
         const loadToken = Date.now() + ":" + Math.random().toString(16).slice(2);
         state.quickNoShk.loading = true;
         state.quickNoShk.loadToken = loadToken;
@@ -3665,11 +3671,18 @@
     async function loadQuickNoShkPhoto(item) {
         const nm = normalizeIdentifier(item && item.nm);
         if (!nm || Object.prototype.hasOwnProperty.call(state.quickNoShk.photoCache, nm)) return;
-        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 1, maxHosts: 30 });
+        // WB currently runs 52 basket hosts (DNS-checked live), and dropping
+        // the dead .wb.ru alias above frees up enough of the 300-URL probe
+        // batch to cover all of them in one round -- was capped at 30,
+        // silently missing photos sharded onto basket-31..52.
+        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 1, maxHosts: 60 });
         const found = await findFirstLoadableImage(urls);
         state.quickNoShk.photoCache[nm] = found || "";
         const current = currentQuickNoShkItem();
-        if (current && current.key === item.key && $("quickNoShkModal") && $("quickNoShkModal").classList.contains("active")) renderQuickNoShkPlay();
+        // Guard on `started`: the countdown-time bulk preload calls this
+        // for item[0] too, and without this check its resolution would
+        // render the play card straight over the countdown screen.
+        if (state.quickNoShk.started && current && current.key === item.key && $("quickNoShkModal") && $("quickNoShkModal").classList.contains("active")) renderQuickNoShkPlay();
     }
 
     function quickNoShkCardInfoHtml(item) {
@@ -3690,7 +3703,7 @@
         const info = await fetchWbCardInfo(nm);
         state.quickNoShk.cardInfoCache[nm] = info;
         const current = currentQuickNoShkItem();
-        if (current && current.key === item.key && $("quickNoShkModal") && $("quickNoShkModal").classList.contains("active")) renderQuickNoShkPlay();
+        if (state.quickNoShk.started && current && current.key === item.key && $("quickNoShkModal") && $("quickNoShkModal").classList.contains("active")) renderQuickNoShkPlay();
     }
 
     async function preloadQuickNoShkPhotos() {
@@ -3802,6 +3815,10 @@
     }
 
     async function completeTaskBySystemNoShk(row, item, verdict, note) {
+        // Debug sandbox: no wms_tasks write, and no refreshTaskRow either --
+        // that mutates the shared in-memory review cache, which would make
+        // a real task look completed locally even without a DB write.
+        if (state.quickNoShk.debugMode) return null;
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
         const user = currentWmsUser();
@@ -3885,6 +3902,7 @@
     }
 
     async function markTaskNoShkCheckedWithoutClosing(row, item, verdict, note) {
+        if (state.quickNoShk.debugMode) return null;
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
         const user = currentWmsUser();
@@ -3926,6 +3944,7 @@
     }
 
     async function updatePureNoShkFound(item) {
+        if (state.quickNoShk.debugMode) return false;
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
         const row = item && item.pure_row ? item.pure_row : {};
@@ -3964,6 +3983,7 @@
     }
 
     async function markPureNoShkNotFound(item) {
+        if (state.quickNoShk.debugMode) return false;
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
         const row = item && item.pure_row ? item.pure_row : {};
@@ -4444,7 +4464,9 @@
     async function loadNoShkResultPhoto(row) {
         const nm = noShkPureNm(row);
         if (!nm || Object.prototype.hasOwnProperty.call(state.noShkReview.photoCache, nm)) return;
-        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 1, maxHosts: 18 });
+        // Same host-coverage fix as loadQuickNoShkPhoto -- was capped even
+        // lower here (18) and missing most of WB's 52 real basket hosts.
+        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 1, maxHosts: 60 });
         const found = await findFirstLoadableImage(urls);
         state.noShkReview.photoCache[nm] = found || "";
         if (!$("noShkReviewModal") || !$("noShkReviewModal").classList.contains("active")) return;
@@ -8489,6 +8511,7 @@
     }
 
     async function evaluatePrespisokAchievements(record) {
+        if (state.prespisok.debugMode) return;
         await unlockAchievement("prespisok_first", { run_date: state.today });
         const count = await countCompletedPrespisokRuns();
         if (count >= 10) await unlockAchievement("prespisok_10", { count });
@@ -8503,6 +8526,7 @@
     }
 
     async function evaluateQuickNoShkAchievements() {
+        if (state.quickNoShk.debugMode) return;
         const actions = state.quickNoShk.actions || [];
         const elapsed = quickNoShkElapsedMs();
         if (actions.length >= 150 && elapsed > 0 && elapsed < 10 * 60 * 1000) {
@@ -10018,6 +10042,26 @@
             state.staffStats.loading = false;
             renderStaffStatsModal();
         }
+    }
+
+    function openDebugSandboxModal() {
+        if (!ensureDevelopmentAccess("Отладка")) return;
+        closeFlowModals();
+        setFlowModalOpen("debugSandboxModal", true);
+    }
+
+    function closeDebugSandboxModal() {
+        setFlowModalOpen("debugSandboxModal", false);
+    }
+
+    function openQuickNoShkDebugModal() {
+        if (!ensureDevelopmentAccess("Отладка")) return;
+        if (state.quickNoShk && state.quickNoShk.started && !state.quickNoShk.debugMode) {
+            toast("Сначала закрой активную быструю проверку.", "error");
+            return;
+        }
+        closeDebugSandboxModal();
+        void openQuickNoShkModal(true);
     }
 
     function openStaffStatsModal() {
@@ -11692,10 +11736,13 @@
         const part = Math.floor(article / 1000);
         const urls = [];
         const hosts = [];
+        // basket-XX.wb.ru only resolves for a handful of low host numbers
+        // (DNS-checked live: basket-01/10 resolve, basket-20+ don't) --
+        // it's a legacy partial alias, not a full mirror of .wbbasket.ru.
+        // Including it doubled every URL for no real coverage, which ate
+        // into the batch budget that should go to more real hosts instead.
         for (let i = 1; i <= maxHosts; i += 1) {
-            const idx = String(i).padStart(2, "0");
-            hosts.push("https://basket-" + idx + ".wbbasket.ru");
-            hosts.push("https://basket-" + idx + ".wb.ru");
+            hosts.push("https://basket-" + String(i).padStart(2, "0") + ".wbbasket.ru");
         }
         for (let imageIndex = 1; imageIndex <= maxPics; imageIndex += 1) {
             ["big", "c516x688"].forEach((size) => {
@@ -12691,6 +12738,10 @@
     }
 
     function persistPrespisokState() {
+        // Debug sandbox must not leak into the real localStorage slot --
+        // a real session resuming via loadPrespisokState() would otherwise
+        // pick up the fake debug items/actions instead of its own.
+        if (state.prespisok.debugMode) return;
         try {
             localStorage.setItem(prespisokStorageKey(), JSON.stringify(serializePrespisokState()));
         } catch (error) {
@@ -12734,6 +12785,7 @@
         state.prespisok.items = [];
         state.prespisok.index = 0;
         state.prespisok.actions = [];
+        state.prespisok.debugMode = false;
         state.prespisok.excludedCount = 0;
         state.prespisok.fileName = "";
         state.prespisok.runId = uuidValue();
@@ -12958,7 +13010,62 @@
         state.prespisok.clockTimer = null;
         if (state.prespisok.syncTimer) clearInterval(state.prespisok.syncTimer);
         state.prespisok.syncTimer = null;
+        // Debug sandbox never persists (persistPrespisokState no-ops for it),
+        // so the fake items/actions would otherwise sit in state.prespisok
+        // and leak into the next real openPrespisokModal() call, which
+        // doesn't unconditionally reset -- it's built to resume real
+        // progress across a close/reopen.
+        if (state.prespisok.debugMode) resetPrespisokState();
         setFlowModalOpen("prespisokModal", false);
+    }
+
+    // Debug sandbox: skips the upload step entirely, reading the most
+    // recent REAL run's already-stored item list (payload.items_full,
+    // same field the normal remote-rejoin path already trusts) instead.
+    // Read-only -- every write reachable from applyPrespisokAction
+    // (insertPrespisokAction, upsertPrespisokRun, createPrespisokTask,
+    // persistPrespisokState) self-guards on state.prespisok.debugMode.
+    async function openPrespisokDebugModal() {
+        if (!ensureDevelopmentAccess("Отладка")) return;
+        if (state.prespisok.items.length && !state.prespisok.finished && !state.prespisok.debugMode) {
+            toast("Сначала закрой активный предсписок.", "error");
+            return;
+        }
+        closeFlowModals();
+        resetPrespisokState();
+        state.prespisok.debugMode = true;
+        setFlowModalOpen("prespisokModal", true);
+        const target = $("prespisokWrap");
+        if (target) target.innerHTML = prespisokTopHtml("Отладка: читаю последний реальный запуск предсписка, без записи.") + "<div class='prespisok-center'><div class='prespisok-wait'>Загружаю данные</div></div>";
+        const db = supabaseDb();
+        let items = [];
+        if (db) {
+            try {
+                const { data, error } = await db
+                    .from(WMS_PRESPISOK_RUNS_TABLE)
+                    .select("id,payload")
+                    .order("started_at", { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                if (error) throw error;
+                const payload = data && data.payload && typeof data.payload === "object" ? data.payload : {};
+                items = Array.isArray(payload.items_full) ? payload.items_full : [];
+            } catch (error) {
+                console.warn("prespisok debug fetch failed:", error);
+            }
+        }
+        if (!state.prespisok.debugMode || !$("prespisokModal") || !$("prespisokModal").classList.contains("active")) return;
+        if (!items.length) {
+            if (target) target.innerHTML = prespisokTopHtml("Отладка: нет данных.") + "<div class='prespisok-center'><div class='prespisok-wait'>Ни одного реального запуска предсписка еще не было — нечего показать.</div></div>";
+            bindPrespisokClose();
+            return;
+        }
+        state.prespisok.items = items;
+        state.prespisok.index = 0;
+        state.prespisok.startedAt = new Date().toISOString();
+        state.prespisok.timerStartedAt = Date.now();
+        state.prespisok.itemTimerStartedAt = Date.now();
+        renderPrespisokPlay();
     }
 
     function prespisokMoneyStats() {
@@ -13001,8 +13108,10 @@
     }
 
     function prespisokTopHtml(subtitle) {
+        const debugBadge = state.prespisok && state.prespisok.debugMode
+            ? "<div class='debug-sandbox-badge'>⚠ ОТЛАДКА — ничего не сохраняется</div>" : "";
         return "<div class='prespisok-top'>"
-            + "<div><p class='prespisok-kicker'>Финальная проверка перед списанием</p><h2 class='prespisok-title'>Предсписок</h2><p class='prespisok-subtitle'>" + escapeHtml(subtitle || (PRESPISOK_TEST_MODE ? "Тестовый режим: запуск доступен в любое время. Боевой таймер пока сидит в углу и делает вид, что не обиделся." : "Окно разбора: 14:30-20:00. Тут не склад, тут арена последнего шанса.")) + "</p></div>"
+            + "<div><p class='prespisok-kicker'>Финальная проверка перед списанием</p><h2 class='prespisok-title'>Предсписок</h2><p class='prespisok-subtitle'>" + escapeHtml(subtitle || (PRESPISOK_TEST_MODE ? "Тестовый режим: запуск доступен в любое время. Боевой таймер пока сидит в углу и делает вид, что не обиделся." : "Окно разбора: 14:30-20:00. Тут не склад, тут арена последнего шанса.")) + "</p>" + debugBadge + "</div>"
             + "<div class='prespisok-top-right'>" + prespisokTopStatsHtml() + "<button id='closePrespisok' class='btn btn-square prespisok-close' type='button' aria-label='Закрыть'>×</button></div>"
             + "</div>";
     }
@@ -13583,6 +13692,9 @@
     }
 
     async function createPrespisokTask(item, actionLabel, extraValue) {
+        // Debug sandbox: fake a successful response (so task_created reads
+        // right in the UI) without touching wms_tasks or wms_task_history.
+        if (state.prespisok.debugMode) return { response: null, task: null };
         const db = supabaseDb();
         if (!db) throw new Error("Supabase недоступен.");
         const actor = currentWmsUser();
@@ -13643,7 +13755,7 @@
     }
 
     async function applyPrespisokAction(actionKey, extraValue) {
-        await syncPrespisokRunActions();
+        if (!state.prespisok.debugMode) await syncPrespisokRunActions();
         const item = currentPrespisokItem();
         if (!item) return;
         const itemKey = prespisokItemKey(item);
@@ -13701,6 +13813,7 @@
     }
 
     async function upsertPrespisokRun(statusValue) {
+        if (state.prespisok.debugMode) return;
         const db = supabaseDb();
         if (!db || !state.prespisok.runId) return;
         const user = currentWmsUser();
@@ -13742,6 +13855,7 @@
     }
 
     async function insertPrespisokAction(action) {
+        if (state.prespisok.debugMode) return;
         const db = supabaseDb();
         if (!db) return;
         const user = action.actor || currentWmsUser();
@@ -13781,6 +13895,10 @@
             actions: state.prespisok.actions.length,
             elapsed_ms: prespisokElapsedMs(),
         };
+        // Debug sandbox: keep the record for the finish screen's own stats,
+        // but never touch the real leaderboard (shared localStorage cache
+        // visible to everyone, not just this browser tab).
+        if (state.prespisok.debugMode) return record;
         const rows = loadPrespisokLeaderboard().filter((row) => !(row.date === record.date && row.employee_id === record.employee_id));
         rows.push(record);
         rows.sort((a, b) => prespisokLeaderboardScore(a) - prespisokLeaderboardScore(b));
@@ -14567,6 +14685,10 @@
     function initEvents() {
         $("openStatusPilotUploads").addEventListener("click", openStatusPilotModal);
         $("openStaffStats").addEventListener("click", openStaffStatsModal);
+        $("openDebugSandbox").addEventListener("click", openDebugSandboxModal);
+        $("closeDebugSandbox").addEventListener("click", closeDebugSandboxModal);
+        $("openQuickNoShkDebug").addEventListener("click", openQuickNoShkDebugModal);
+        $("openPrespisokDebug").addEventListener("click", () => { void openPrespisokDebugModal(); });
         $("openFlow").addEventListener("click", () => { void showFlowPage(); });
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
