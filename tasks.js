@@ -15231,6 +15231,7 @@
         $("openQuickNoShkDebug").addEventListener("click", openQuickNoShkDebugModal);
         $("openPrespisokDebug").addEventListener("click", () => { void openPrespisokDebugModal(); });
         $("openFlow").addEventListener("click", () => { void showFlowPage(); });
+        $("startFlowBanner").addEventListener("click", () => { void showFlowPage(); });
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
         $("openRequests").addEventListener("click", showRequestsPage);

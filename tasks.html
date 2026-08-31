@@ -45,6 +45,11 @@
         .task-search-meta { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
         .task-search-empty { padding: 12px; color: #64748b; font-size: 13px; line-height: 1.35; }
         .tasks-home-groups { display: grid; gap: 16px; }
+        .flow-home-banner { margin-bottom: 18px; padding: 22px; border-radius: 18px; background: linear-gradient(120deg, #623cea, #8b5cf6); color: #fff; text-align: center; }
+        .flow-home-banner.is-disabled { opacity: .5; pointer-events: none; }
+        .flow-home-banner-kicker { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .8; margin-bottom: 10px; }
+        .flow-home-banner-btn { font-size: 22px; padding: 16px 36px; border-radius: 16px; background: #fff; color: #623cea; border: 0; font-weight: 800; cursor: pointer; }
+        .flow-home-banner-btn:hover { transform: translateY(-2px); }
         .tasks-home-group { border: 1px solid rgba(15,23,42,.08); border-radius: 24px; background: rgba(255,255,255,.72); box-shadow: var(--shadow-sm); padding: 16px; animation: tasksRiseIn .24s ease-out both; }
         .tasks-home-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
         .tasks-home-group-title { margin: 0; color: var(--accent-dark); font-size: 22px; line-height: 1; letter-spacing: -.02em; }
@@ -1151,6 +1156,10 @@
     </section>
 
     <section id="tasksHome" class="tasks-home-groups">
+        <div class="flow-home-banner" data-dev-only>
+            <span class="flow-home-banner-kicker">Флоу</span>
+            <button id="startFlowBanner" class="flow-home-banner-btn" type="button">Дай мне задачу</button>
+        </div>
         <div class="tasks-home-group">
             <div class="tasks-home-group-head">
                 <div>
