@@ -765,52 +765,69 @@
         .prespisok-file-panel, .prespisok-play-panel, .prespisok-finish-panel { position: relative; z-index: 1; margin-top: 28px; border: 1px solid rgba(255,255,255,.14); border-radius: 28px; background: rgba(255,255,255,.1); box-shadow: 0 26px 80px rgba(0,0,0,.22); padding: clamp(18px, 3vw, 30px); backdrop-filter: blur(14px); }
         .prespisok-file-drop { display: grid; place-items: center; min-height: 220px; border: 2px dashed rgba(255,255,255,.28); border-radius: 22px; background: rgba(255,255,255,.08); text-align: center; }
         .prespisok-file-drop label { display: inline-flex; align-items: center; justify-content: center; border-radius: 18px; background: #facc15; color: #24172c; padding: 16px 22px; font-size: 18px; font-weight: 1000; cursor: pointer; }
-        .prespisok-hud { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+        .prespisok-hud { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0 6px; }
         .prespisok-hud-card { border-radius: 18px; background: rgba(255,255,255,.12); padding: 14px; border: 1px solid rgba(255,255,255,.12); }
         .prespisok-hud-card span { display: block; color: rgba(255,255,255,.64); font-size: 12px; font-weight: 900; text-transform: uppercase; }
         .prespisok-hud-card strong { display: block; margin-top: 5px; color: #fff; font-size: 24px; line-height: 1; }
         .prespisok-item-timer-card { transition: transform .25s ease, background .25s ease, box-shadow .25s ease; }
         .prespisok-item-timer-card strong { font-size: 30px; }
         .prespisok-item-timer-card.warn { background: rgba(250,204,21,.22); box-shadow: 0 0 34px rgba(250,204,21,.18); transform: scale(1.03); }
-        .prespisok-item-timer-card.danger { background: rgba(239,68,68,.26); box-shadow: 0 0 44px rgba(239,68,68,.24); transform: scale(1.07); animation: prespisokShake .34s linear infinite; }
-        .prespisok-item-timer-card.doom { background: rgba(69,10,10,.78); box-shadow: 0 0 66px rgba(127,29,29,.46); transform: scale(1.13); animation: prespisokPanic .18s linear infinite; }
+        .prespisok-item-timer-card.danger { background: rgba(239,68,68,.3); box-shadow: 0 0 50px rgba(239,68,68,.34); animation: prespisokShake .3s linear infinite; }
+        .prespisok-item-timer-card.doom { background: rgba(69,10,10,.82); box-shadow: 0 0 80px rgba(127,29,29,.58); animation: prespisokPanic .15s linear infinite; }
         .prespisok-item-timer-card.kick { animation: prespisokKick .7s cubic-bezier(.2,1.8,.2,1); }
 
-        /* Minimal play-screen header + borderless timer strip (point 1/1.1) */
+        /* Minimal play-screen header (point 1) */
         .prespisok-play-top { position: relative; z-index: 2; text-align: center; padding-top: 2px; }
         .prespisok-play-title { margin: 0; font-size: clamp(24px, 3.6vw, 38px); font-weight: 1000; letter-spacing: -.03em; color: #fff; }
         .prespisok-play-close { position: absolute; top: -2px; right: 0; }
         .prespisok-play-top .debug-sandbox-badge { margin: 8px auto 0; max-width: max-content; }
-        .prespisok-play-hud { text-align: center; margin: 14px 0 22px; }
-        .prespisok-play-hud-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: clamp(16px, 4vw, 40px); }
-        .prespisok-play-hud-stat { padding: 4px 6px; border-radius: 16px; transition: transform .25s ease, background .25s ease, box-shadow .25s ease; }
-        .prespisok-play-hud-stat span { display: block; color: rgba(255,255,255,.55); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
-        .prespisok-play-hud-stat strong { display: block; margin-top: 5px; font-family: ui-serif, Georgia, "Times New Roman", serif; font-weight: 800; font-size: clamp(20px, 2.6vw, 28px); color: #fff; letter-spacing: -.01em; }
-        .prespisok-play-hud-stat strong small { font-family: inherit; font-size: 12px; font-weight: 700; opacity: .68; }
-        .prespisok-play-hud .prespisok-item-timer-card strong { font-size: clamp(24px, 3.2vw, 34px); }
-        .prespisok-streak-badge { margin: 12px auto 0; display: inline-block; padding: 8px 18px; border-radius: 999px; background: linear-gradient(120deg, #f97316, #facc15); color: #431407; font-weight: 1000; font-size: 15px; box-shadow: 0 10px 26px rgba(249,115,22,.4); animation: qnsStreakPop .38s cubic-bezier(.2,1.3,.3,1.2); }
+        .prespisok-streak-bar { margin: 10px auto 0; display: flex; align-items: center; gap: 10px; width: min(280px, 84%); }
+        .prespisok-streak-bar span { white-space: nowrap; font-weight: 1000; font-size: 13px; color: #fde68a; }
+        .prespisok-streak-track { flex: 1 1 auto; height: 8px; border-radius: 999px; background: rgba(255,255,255,.14); overflow: hidden; }
+        .prespisok-streak-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #f97316, #facc15); transition: width 1s linear; box-shadow: 0 0 10px rgba(249,115,22,.5); }
 
-        /* Card stage + docked counters (points 4/5/6) */
-        .prespisok-stage { display: grid; grid-template-columns: minmax(90px, 150px) minmax(0, 1fr) minmax(90px, 150px); gap: 16px; align-items: start; }
-        .prespisok-stage-side { display: flex; align-items: center; justify-content: center; min-height: 96px; }
-        .prespisok-stage-center { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
-        .prespisok-stage-below { display: flex; justify-content: center; }
-        .prespisok-counter { border-radius: 18px; padding: 12px 16px; text-align: center; transition: transform .2s ease; }
-        .prespisok-counter span { display: block; font-size: 11px; font-weight: 1000; text-transform: uppercase; letter-spacing: .08em; opacity: .78; }
-        .prespisok-counter strong { display: block; margin-top: 5px; font-size: clamp(18px, 2.2vw, 24px); line-height: 1; }
-        .prespisok-counter-writeoff { background: rgba(239,68,68,.18); border: 1px solid rgba(239,68,68,.36); color: #fecaca; }
-        .prespisok-counter-saved { background: rgba(34,197,94,.18); border: 1px solid rgba(34,197,94,.36); color: #bbf7d0; }
-        .prespisok-counter-task { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22); color: #fff; }
+        /* Card sits alone, centered -- unaffected by the docked counters (point 1/9) */
+        .prespisok-card-stage { display: flex; justify-content: center; }
+
+        /* Counters magnetized to the modal's own edges, laconic (no boxes) (points 4/9) */
+        .prespisok-counter-dock { position: fixed; z-index: 20; pointer-events: none; }
+        .prespisok-counter-dock-left { left: clamp(12px, 3vw, 34px); top: 50%; transform: translateY(-50%); }
+        .prespisok-counter-dock-right { right: clamp(12px, 3vw, 34px); top: 50%; transform: translateY(-50%); }
+        .prespisok-counter-dock-bottom { left: 50%; bottom: clamp(10px, 2vw, 22px); transform: translateX(-50%); }
+        .prespisok-counter { text-align: center; transition: transform .2s ease; }
+        .prespisok-counter span { display: block; font-size: 11px; font-weight: 1000; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.55); }
+        .prespisok-counter strong { display: block; margin-top: 4px; font-size: clamp(18px, 2.2vw, 25px); line-height: 1; }
+        .prespisok-counter-writeoff strong { color: #fca5a5; text-shadow: 0 0 18px rgba(239,68,68,.35); }
+        .prespisok-counter-saved strong { color: #86efac; text-shadow: 0 0 18px rgba(34,197,94,.35); }
+        .prespisok-counter-task strong { color: #fde047; text-shadow: 0 0 18px rgba(250,204,21,.35); }
         .prespisok-counter.pop { animation: prespisokCounterPop .5s cubic-bezier(.2,1.6,.3,1.1); }
-        @keyframes prespisokCounterPop { 0% { transform: scale(1); } 45% { transform: scale(1.3); } 100% { transform: scale(1); } }
-
-        /* Bombastic exit animations (points 4/5/6/7) */
-        .prespisok-card-exit-burn { animation: prespisokBurnDown .76s cubic-bezier(.5,0,.75,0) forwards; pointer-events: none; }
-        @keyframes prespisokBurnDown {
-            0% { transform: translateY(0) scale(1) rotate(0deg); filter: brightness(1) saturate(1); opacity: 1; }
-            28% { transform: translateY(8px) scale(1.015) rotate(-.6deg); filter: brightness(1.2) saturate(1.4) hue-rotate(-10deg); box-shadow: 0 0 70px rgba(249,115,22,.6); }
-            100% { transform: translateY(240px) scale(.76) rotate(2deg); filter: brightness(.25) saturate(0) blur(3px); opacity: 0; }
+        @keyframes prespisokCounterPop { 0% { transform: scale(1); } 45% { transform: scale(1.32); } 100% { transform: scale(1); } }
+        @media (max-width: 760px) {
+            /* Narrow screens: all three counters settle into one row along
+               the bottom edge instead of the sides, so nothing overlaps
+               the header/HUD or the card. */
+            .prespisok-counter-dock-left { left: 10px; top: auto; bottom: 10px; transform: none; }
+            .prespisok-counter-dock-right { right: 10px; top: auto; bottom: 10px; transform: none; }
+            .prespisok-counter-dock-bottom { bottom: 10px; }
+            .prespisok-counter strong { font-size: 15px; }
         }
+
+        /* Bombastic exit animations (points 5/6/7) */
+        .prespisok-card-exit-burn { position: relative; overflow: hidden; animation: prespisokBurnShake .82s ease-in-out forwards; }
+        @keyframes prespisokBurnShake {
+            0% { transform: translateY(0) rotate(0deg); }
+            20% { transform: translateY(-3px) rotate(-.4deg); }
+            40% { transform: translateY(2px) rotate(.3deg); }
+            60% { transform: translateY(-2px) rotate(-.2deg); }
+            80% { transform: translateY(3px) rotate(.2deg); }
+            100% { transform: translateY(10px) rotate(0deg); opacity: .1; }
+        }
+        /* Climbs from the bottom edge upward, consuming the card like an
+           ember line through paper, instead of darkening it all at once. */
+        .prespisok-burn-overlay { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; border-radius: inherit; pointer-events: none; z-index: 5; background: linear-gradient(to top, #140400 0%, #431407 32%, #f97316 66%, #fde68a 82%, rgba(253,230,138,0) 100%); box-shadow: 0 -20px 55px rgba(249,115,22,.55); animation: prespisokBurnRise .82s cubic-bezier(.4,0,.6,1) forwards; }
+        @keyframes prespisokBurnRise { 0% { height: 0%; opacity: .97; } 75% { height: 96%; opacity: .98; } 100% { height: 100%; opacity: 1; } }
+        .prespisok-burn-overlay::after { content: ""; position: absolute; left: -6%; right: -6%; top: -14px; height: 26px; background: radial-gradient(ellipse at center, rgba(253,224,71,.9), rgba(249,115,22,.5) 55%, transparent 75%); filter: blur(3px); animation: prespisokBurnFlicker .28s ease-in-out infinite alternate; }
+        @keyframes prespisokBurnFlicker { 0% { opacity: .7; transform: scaleX(1) translateY(0); } 100% { opacity: 1; transform: scaleX(1.05) translateY(-2px); } }
         .prespisok-card-exit-sparkle { animation: prespisokSparkleRight .72s cubic-bezier(.3,0,.4,1) forwards; pointer-events: none; }
         @keyframes prespisokSparkleRight {
             0% { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; filter: brightness(1); }
@@ -822,8 +839,12 @@
             0% { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; }
             100% { transform: translateX(-280px) scale(.88) rotate(-3deg); opacity: 0; }
         }
-        .prespisok-flash-overlay { position: fixed; inset: 0; z-index: 9997; pointer-events: none; background: radial-gradient(circle at var(--fx,50%) var(--fy,50%), rgba(255,255,255,.92), rgba(255,255,255,0) 62%); opacity: 0; animation: prespisokFlash .5s ease forwards; }
-        @keyframes prespisokFlash { 0% { opacity: 0; } 16% { opacity: .88; } 100% { opacity: 0; } }
+        /* Full-background color wash, red/green/yellow by verdict (point 6) */
+        .prespisok-bg-flash { position: fixed; inset: 0; z-index: 9996; pointer-events: none; opacity: 0; animation: prespisokBgFlash .7s ease forwards; }
+        .prespisok-bg-flash-red { background: radial-gradient(circle at 50% 55%, rgba(239,68,68,.55), rgba(239,68,68,0) 70%); }
+        .prespisok-bg-flash-green { background: radial-gradient(circle at 50% 55%, rgba(34,197,94,.5), rgba(34,197,94,0) 70%); }
+        .prespisok-bg-flash-yellow { background: radial-gradient(circle at 50% 55%, rgba(250,204,21,.5), rgba(250,204,21,0) 70%); }
+        @keyframes prespisokBgFlash { 0% { opacity: 0; } 18% { opacity: 1; } 100% { opacity: 0; } }
 
         .prespisok-play-panel { max-height: calc(100dvh - 172px); overflow: auto; }
         .prespisok-task-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 18px; align-items: start; }
@@ -841,7 +862,6 @@
         .prespisok-info strong { display: block; margin-top: 4px; color: #242038; overflow-wrap: anywhere; }
         .prespisok-items { margin-top: 14px; max-height: 210px; overflow: auto; border-radius: 16px; border: 1px solid #e2e8f0; }
         .prespisok-item-line { display: grid; grid-template-columns: minmax(120px, .75fr) minmax(0, 1fr) auto; gap: 8px; padding: 9px 10px; border-bottom: 1px solid #edf2f7; font-size: 12px; }
-        .prespisok-snark { border-radius: 22px; background: #24172c; color: #fff; padding: 18px; line-height: 1.45; font-size: 17px; font-weight: 900; }
         .prespisok-actions { display: grid; gap: 10px; margin-top: 14px; }
         .prespisok-action-btn { border: 0; border-radius: 16px; padding: 15px 16px; background: #fff; color: #24172c; text-align: left; font-weight: 1000; cursor: pointer; box-shadow: var(--shadow-sm); transition: transform .14s ease, background .14s ease, box-shadow .14s ease; }
         .prespisok-action-btn:hover, .prespisok-action-btn.active { transform: translateY(-5px) scale(1.025); background: #facc15; box-shadow: 0 20px 46px rgba(250,204,21,.28); }
@@ -880,7 +900,6 @@
         .prespisok-wrap.is-playing .prespisok-items { max-height: 130px; margin-top: 8px; border-radius: 12px; }
         .prespisok-wrap.is-playing .prespisok-item-line { padding: 6px 8px; }
         .prespisok-wrap.is-playing .prespisok-history { margin-top: 8px; padding: 9px; border-radius: 12px; font-size: 12px; }
-        .prespisok-wrap.is-playing .prespisok-snark { padding: 12px; border-radius: 16px; font-size: 14px; line-height: 1.3; }
         .prespisok-wrap.is-playing .status-line { margin-top: 8px; padding: 9px 10px; }
         .prespisok-wrap.is-playing .prespisok-actions { flex: 1 1 auto; min-height: 0; overflow: auto; gap: 7px; margin-top: 9px; padding-right: 2px; }
         .prespisok-wrap.is-playing .prespisok-action-btn { padding: 10px 12px; border-radius: 12px; font-size: 13px; }
@@ -1013,12 +1032,11 @@
         .no-shk-success h3 { margin: 0; font-size: clamp(42px, 7vw, 92px); line-height: .88; letter-spacing: -.07em; }
         .no-shk-success p { margin: 14px auto 0; max-width: 760px; color: rgba(255,255,255,.84); font-size: 20px; font-weight: 900; }
         .no-shk-photo-preview { max-width: min(720px, 90vw); max-height: 76dvh; object-fit: contain; display: block; margin: 10px auto 0; border-radius: 18px; background: #fff; }
-        @keyframes prespisokShake { 0%,100% { transform: scale(1.07) translateX(0); } 25% { transform: scale(1.08) translateX(-2px); } 75% { transform: scale(1.08) translateX(2px); } }
-        @keyframes prespisokPanic { 0%,100% { transform: scale(1.13) translate(0,0) rotate(0deg); } 25% { transform: scale(1.15) translate(-3px,1px) rotate(-1deg); } 50% { transform: scale(1.14) translate(3px,-1px) rotate(1deg); } 75% { transform: scale(1.16) translate(-1px,3px) rotate(-.5deg); } }
+        @keyframes prespisokShake { 0%,100% { transform: scale(1.08) translate(0,0) rotate(0deg); } 15% { transform: scale(1.12) translate(-6px,2px) rotate(-2deg); } 30% { transform: scale(1.1) translate(5px,-3px) rotate(2deg); } 45% { transform: scale(1.13) translate(-5px,3px) rotate(-1.5deg); } 60% { transform: scale(1.11) translate(6px,-2px) rotate(1.5deg); } 75% { transform: scale(1.13) translate(-4px,2px) rotate(-2deg); } 90% { transform: scale(1.1) translate(4px,-2px) rotate(1deg); } }
+        @keyframes prespisokPanic { 0%,100% { transform: scale(1.18) translate(0,0) rotate(0deg); } 12% { transform: scale(1.25) translate(-8px,4px) rotate(-3deg); } 25% { transform: scale(1.2) translate(7px,-5px) rotate(3deg); } 37% { transform: scale(1.28) translate(-7px,5px) rotate(-2.5deg); } 50% { transform: scale(1.22) translate(8px,-4px) rotate(2.5deg); } 62% { transform: scale(1.27) translate(-6px,3px) rotate(-3deg); } 75% { transform: scale(1.21) translate(6px,-6px) rotate(2deg); } 87% { transform: scale(1.29) translate(-5px,4px) rotate(-2deg); } }
         @keyframes prespisokKick { 0% { transform: scale(.7) rotate(-6deg); opacity: .4; } 55% { transform: scale(1.22) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
-        @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-stage, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .quick-no-shk-game, .quick-no-shk-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; }
-            .prespisok-stage-side { min-height: 0; }
-            .prespisok-stage-left { order: 2; } .prespisok-stage-center { order: 1; } .prespisok-stage-right { order: 3; } .quick-no-shk-wrap { overflow: auto; } .quick-no-shk-panel { overflow: visible; } .quick-no-shk-photo { max-height: 42dvh; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }
+        @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .quick-no-shk-game, .quick-no-shk-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; }
+            .quick-no-shk-wrap { overflow: auto; } .quick-no-shk-panel { overflow: visible; } .quick-no-shk-photo { max-height: 42dvh; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }
         @media (max-width: 1120px) { .journal-action-list { max-height: none; } }
         @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

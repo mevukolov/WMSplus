@@ -492,64 +492,6 @@
             maxMultiplier: 1.16,
         },
     };
-    const PRESPISOK_SNARK = {
-        openers: [
-            "Работаем.",
-            "Следующий.",
-            "Не зависаем.",
-            "Проверяем быстро.",
-            "Еще один кандидат.",
-            "Склад опять шутит.",
-            "Без героизма.",
-            "Смотри по факту.",
-            "Время идет.",
-            "Не корми списание.",
-            "ОПП на сцене.",
-            "Погнали.",
-        ],
-        needles: [
-            "Цена перед тобой.",
-            "Дата списания рядом.",
-            "Движение есть — фиксируй.",
-            "Ссылка нужна нормальная.",
-            "Не тяни.",
-            "Очередь сама не похудеет.",
-            "Проверил — жми.",
-            "Тара не оправдание.",
-            "ШК не святой.",
-            "Excel переживет.",
-            "Ревизия потом спросит.",
-            "Меньше пауз.",
-        ],
-        spikes: [
-            "Списание уже облизывается.",
-            "Товар спрятался плохо.",
-            "Тара мутная.",
-            "Статус подозрительный.",
-            "Деньги не казенные. Хотя стоп.",
-            "Строк много, нервов мало.",
-            "Алиби слабое.",
-            "WMS опять с покерфейсом.",
-            "Складовой фольклор не принимаем.",
-            "Кандидат расслабился зря.",
-            "ШК решил пожить бесплатно.",
-            "Проверка короткая. Надеюсь.",
-        ],
-        closers: [
-            "Дальше.",
-            "Жалость оставь принтеру.",
-            "Фиксируй.",
-            "Без театра.",
-            "ШК, цена, решение.",
-            "Сделай чисто.",
-            "Сомневаешься — проверь.",
-            "Предсписок не самоунизится.",
-            "Бьем по бардаку.",
-            "Не растягивай.",
-            "Паника подождет.",
-            "Следующий ждет.",
-        ],
-    };
     const MASTER_SLOTS = [
         { key: "main", title: "Товары без движения - В заказе", kind: "pmPrimary", modules: ["pm", "presort", "marketplace", "pc", "wmi_mp_pc"] },
         { key: "noOrder", title: "Без заказа", kind: "pmPrimary", modules: ["no_order"] },
@@ -13339,22 +13281,24 @@
             + "</div>";
     }
 
-    // Borderless timer/progress strip -- keeps the exact fresh/warn/danger/doom
-    // tone escalation and kick-pop (.prespisok-item-timer-card + prespisokShake/
-    // Panic/Kick keyframes), just without the old bordered tile box.
+    // Same bordered-tile look every other HUD in the app uses
+    // (.prespisok-hud-card, shared with quick-no-shk's own HUD tiles) --
+    // keeps the exact fresh/warn/danger/doom tone escalation and kick-pop
+    // (.prespisok-item-timer-card + prespisokShake/Panic/Kick keyframes).
     function prespisokPlayHudHtml(progress, total, itemElapsed, kick) {
         const streak = prespisokStreakStats();
-        const streakBadge = streak.current >= 2
-            ? "<div class='prespisok-streak-badge'>🔥 Комбо ×" + streak.current + "</div>"
+        const remainingPct = Math.max(0, 100 - (itemElapsed / PRESPISOK_STREAK_THRESHOLD_MS) * 100);
+        // Drains as time passes on the current item -- once it empties the
+        // combo breaks, so it doubles as a "decide fast" nudge.
+        const streakBar = streak.current >= 1
+            ? "<div class='prespisok-streak-bar' id='prespisokStreakBar'><span>🔥 Комбо ×" + streak.current + "</span><div class='prespisok-streak-track'><div class='prespisok-streak-fill' id='prespisokStreakFill' style='width:" + remainingPct.toFixed(1) + "%'></div></div></div>"
             : "";
-        return "<div class='prespisok-play-hud'>"
-            + "<div class='prespisok-play-hud-row'>"
-            + "<div class='prespisok-play-hud-stat'><span>Общее время</span><strong id='prespisokTotalTimer'>" + escapeHtml(formatDuration(prespisokElapsedMs())) + "</strong></div>"
-            + "<div id='prespisokItemTimerCard' class='prespisok-play-hud-stat prespisok-item-timer-card " + escapeHtml(prespisokItemTimerTone(itemElapsed) + kick) + "'><span>Текущая цель</span><strong id='prespisokItemTimer'>" + escapeHtml(formatDuration(itemElapsed)) + "</strong></div>"
-            + "<div class='prespisok-play-hud-stat'><span>Прогресс</span><strong>" + progress + "/" + total + (state.prespisok.excludedCount ? " <small>· " + state.prespisok.excludedCount + " искл.</small>" : "") + "</strong></div>"
+        return "<div class='prespisok-hud'>"
+            + "<div class='prespisok-hud-card'><span>Общее время</span><strong id='prespisokTotalTimer'>" + escapeHtml(formatDuration(prespisokElapsedMs())) + "</strong></div>"
+            + "<div id='prespisokItemTimerCard' class='prespisok-hud-card prespisok-item-timer-card " + escapeHtml(prespisokItemTimerTone(itemElapsed) + kick) + "'><span>Текущая цель</span><strong id='prespisokItemTimer'>" + escapeHtml(formatDuration(itemElapsed)) + "</strong></div>"
+            + "<div class='prespisok-hud-card'><span>Прогресс</span><strong>" + progress + "/" + total + (state.prespisok.excludedCount ? " <small>· " + state.prespisok.excludedCount + " искл.</small>" : "") + "</strong></div>"
             + "</div>"
-            + streakBadge
-            + "</div>";
+            + streakBar;
     }
 
     function prespisokCounterHtml(kind, label, value) {
@@ -13369,48 +13313,77 @@
         return "";
     }
 
+    // Same radial-burst shape as quickNoShkBurstParticlesHtml, but biased
+    // to launch mostly upward (embers rising off the burning card) instead
+    // of a full-circle burst.
+    function prespisokEmberParticlesHtml(count, color) {
+        return Array.from({ length: count }, (_item, index) => {
+            const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.15;
+            const radius = 46 + Math.random() * 150;
+            const x = Math.cos(angle) * radius * 0.55;
+            const y = Math.sin(angle) * radius;
+            const size = 4 + Math.random() * 8;
+            const delay = Math.random() * 0.3;
+            return "<i class='quick-no-shk-particle' style='--x:" + x.toFixed(1) + "px;--y:" + y.toFixed(1) + "px;--size:" + size.toFixed(1) + "px;--delay:" + delay.toFixed(2) + "s;--c:" + color + "'></i>";
+        }).join("");
+    }
+
     // Plays the exit animation on the card that's still on screen (before
-    // renderPrespisokPlay swaps in the next item), pops the matching counter
-    // to its new value, and resolves once the animation is done so the caller
-    // can advance to the next item right as the old card finishes leaving.
+    // renderPrespisokPlay swaps in the next item), flashes the background
+    // in the verdict's color, pops the matching counter to its new value,
+    // and resolves once the animation is done so the caller can advance to
+    // the next item right as the old card finishes leaving.
     function playPrespisokExitAnimation(actionKey) {
         const kind = prespisokExitKindForAction(actionKey);
         const card = $("prespisokCard");
         if (!kind || !card) return Promise.resolve();
         const rect = card.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
         let particleColor = "#f97316";
         let exitClass = "prespisok-card-exit-burn";
-        let particleCount = 18;
-        let duration = 760;
+        let particleCount = 22;
+        let duration = 820;
         let counterKind = "writeoff";
+        let flashTone = "red";
+        let burstY = rect.bottom;
         if (kind === "sparkle") {
             particleColor = "#facc15";
             exitClass = "prespisok-card-exit-sparkle";
-            particleCount = 28;
+            particleCount = 30;
             duration = 720;
             counterKind = "saved";
-            const flash = document.createElement("div");
-            flash.className = "prespisok-flash-overlay";
-            flash.style.setProperty("--fx", cx + "px");
-            flash.style.setProperty("--fy", cy + "px");
-            document.body.appendChild(flash);
-            window.setTimeout(() => flash.remove(), 520);
+            flashTone = "green";
+            burstY = rect.top + rect.height / 2;
         } else if (kind === "slide") {
-            particleColor = "#818cf8";
+            particleColor = "#facc15";
             exitClass = "prespisok-card-exit-slide";
-            particleCount = 14;
+            particleCount = 16;
             duration = 620;
             counterKind = "task";
+            flashTone = "yellow";
+            burstY = rect.top + rect.height / 2;
         }
+        const flash = document.createElement("div");
+        flash.className = "prespisok-bg-flash prespisok-bg-flash-" + flashTone;
+        document.body.appendChild(flash);
+        window.setTimeout(() => flash.remove(), 700);
         const burst = document.createElement("div");
         burst.className = "quick-no-shk-burst";
-        burst.innerHTML = quickNoShkBurstParticlesHtml(particleCount, particleColor);
+        burst.innerHTML = kind === "burn"
+            ? prespisokEmberParticlesHtml(particleCount, particleColor)
+            : quickNoShkBurstParticlesHtml(particleCount, particleColor);
         burst.style.left = cx + "px";
-        burst.style.top = cy + "px";
+        burst.style.top = burstY + "px";
         document.body.appendChild(burst);
-        window.setTimeout(() => burst.remove(), 800);
+        window.setTimeout(() => burst.remove(), 900);
+        if (kind === "burn") {
+            // Consumes the card content from the bottom edge upward, like
+            // an ember line climbing through paper, rather than just
+            // darkening the whole card at once.
+            const overlay = document.createElement("div");
+            overlay.className = "prespisok-burn-overlay";
+            card.appendChild(overlay);
+        }
         card.classList.add(exitClass);
         const idBase = "prespisokCounter" + counterKind.charAt(0).toUpperCase() + counterKind.slice(1);
         const counterEl = $(idBase);
@@ -13836,12 +13809,6 @@
         await upsertPrespisokRun("in_progress");
     }
 
-    function prespisokSnark(item) {
-        const seed = normalizeText(item && item.key).split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) + (state.prespisok.index || 0);
-        const pick = (list, salt) => list[(seed + salt) % list.length];
-        return pick(PRESPISOK_SNARK.openers, 0) + " " + pick(PRESPISOK_SNARK.spikes, 3) + " " + pick(PRESPISOK_SNARK.needles, 7) + " " + pick(PRESPISOK_SNARK.closers, 19);
-    }
-
     // Three verdicts for every item now, price only changes whether
     // "Автосписание" needs a justifying comment -- collapsed from the old
     // 2/6-option split (release/writeoff/request folded into "Создать
@@ -13852,7 +13819,7 @@
         return [
             { key: "auto_writeoff", label: "Автосписание", tone: "red", needsExtra: expensive, extraLabel: "Укажите комментарий к автосписанию", extraPlaceholder: "Что проверили и почему допускаем автосписание", createsTask: false },
             { key: "movement", label: "Движение", tone: "green", needsExtra: false, createsTask: false },
-            { key: "task", label: "Создать задачу", tone: "", needsExtra: false, createsTask: true },
+            { key: "task", label: "Создать задачу", tone: "yellow", needsExtra: false, createsTask: true },
         ];
     }
 
@@ -13896,9 +13863,8 @@
         // strip and dark page shell (prespisokTopHtml, #prespisokModal's own
         // background) as-is per the "фон остаётся тёмным" instruction.
         const rawActions = prespisokActionsForItem(item);
-        const pickerOptions = [{ key: "", label: "Выбрать решение" }].concat(rawActions);
+        const pickerOptions = [{ key: "", label: "Вердикт" }].concat(rawActions);
         if (!pickerOptions.some((option) => option.key === state.prespisok.selectedAction)) state.prespisok.selectedAction = "";
-        const cheapHint = (Number(item.price) || 0) < 1000 ? "<div class='status-line good'>Цена меньше 1000 ₽. Сценарий: проверить на «Без ШК».</div>" : "";
         const predictedTs = parseDateTime(item.predictedWriteoffAt).ts;
         const countdownHtml = predictedTs
             ? "<div class='task-detail-countdown " + writeoffCountdownTone(predictedTs) + "'>" + escapeHtml(formatWriteoffCountdown(predictedTs)) + "</div>"
@@ -13911,39 +13877,39 @@
                 + "</div>"
             : "";
         const moneyStats = prespisokMoneyStats();
+        // Counters are fixed to the modal's own edges (prespisokCounterHtml
+        // callers below), not laid out next to the card -- the card sits in
+        // its own centered stage untouched by their width.
         target.innerHTML = prespisokPlayTopHtml()
             + "<section class='prespisok-play-panel'>"
             + prespisokPlayHudHtml(progress, total, itemElapsed, kick)
-            + "<div class='prespisok-stage'>"
-            + "<div class='prespisok-stage-side prespisok-stage-left'>" + prespisokCounterHtml("task", "Создано", String(moneyStats.taskCount || 0)) + "</div>"
-            + "<div class='prespisok-stage-center'>"
+            + "<div class='prespisok-counter-dock prespisok-counter-dock-left'>" + prespisokCounterHtml("task", "Вторая линия", String(moneyStats.taskCount || 0)) + "</div>"
+            + "<div class='prespisok-counter-dock prespisok-counter-dock-right'>" + prespisokCounterHtml("saved", "Спасено", formatMoney(moneyStats.saved)) + "</div>"
+            + "<div class='prespisok-counter-dock prespisok-counter-dock-bottom'>" + prespisokCounterHtml("writeoff", "Списано", formatMoney(moneyStats.writeoff)) + "</div>"
+            + "<div class='prespisok-card-stage'>"
             + "<div id='prespisokCard' class='tasks-flow-card task-detail-card prespisok-detail-card'>"
             + "<div class='task-detail-head'><div>"
             + "<div class='task-detail-title-row'>" + prespisokItemHeadingHtml(item) + "<div class='task-detail-price' style='" + priceStyle(item.price) + "'>" + escapeHtml(formatMoney(item.price)) + "</div>" + countdownHtml + "</div>"
             + "<div class='review-table-subtitle'>" + escapeHtml(item.type === "tare" ? "Задача на тару" : "Задача на ШК") + " · " + escapeHtml(item.tareType || "тип тары не указан") + "</div>"
             + "</div></div>"
             + "<div class='task-detail-body'>"
-            + cheapHint
             + tareBoxHtml
-            + "<div class='prespisok-snark'>" + escapeHtml(prespisokSnark(item)) + "</div>"
             + "<div class='task-chat-panel'>"
             + "<div id='prespisokDetailHistoryFeed' class='task-chat-history'>Загрузка истории…</div>"
             + "<div class='task-form task-compose'>"
-            + "<div id='prespisokExtraWrap' class='task-compose-extra hidden'>"
-            + "<div class='task-compose-field'><label id='prespisokExtraLabel' for='prespisokExtraInput'></label><input id='prespisokExtraInput' type='text'></div>"
-            + "</div>"
-            + "<div class='task-compose-bar' id='prespisokComposeBar'>"
+            + "<div class='task-compose-bar is-centered' id='prespisokComposeBar'>"
+            + "<div class='task-compose-spacer'></div>"
             + prespisokVerdictPickerHtml(pickerOptions, state.prespisok.selectedAction)
+            + "<div class='task-compose-spacer'></div>"
+            + "<div id='prespisokComposeInlineSlot' class='task-compose-inline-slot'>"
+            + "<div id='prespisokExtraWrap' class='task-compose-inline-field hidden'><input id='prespisokExtraInput' type='text'></div>"
+            + "</div>"
             + "<button id='submitPrespisokAction' class='task-compose-send' type='button' disabled title='Принять вердикт' aria-label='Принять вердикт'>✓</button>"
             + "</div>"
             + "<div id='prespisokActionStatus' class='review-status'></div>"
             + "</div>"
             + "</div>"
             + "</div>"
-            + "</div>"
-            + "<div class='prespisok-stage-below'>" + prespisokCounterHtml("writeoff", "Списано", formatMoney(moneyStats.writeoff)) + "</div>"
-            + "</div>"
-            + "<div class='prespisok-stage-side prespisok-stage-right'>" + prespisokCounterHtml("saved", "Спасено", formatMoney(moneyStats.saved)) + "</div>"
             + "</div>"
             + "</section>";
         bindPrespisokClose();
@@ -14028,7 +13994,7 @@
         nativeSelect.value = value;
         const item = currentPrespisokItem();
         const actions = item ? prespisokActionsForItem(item) : [];
-        const label = (actions.find((action) => action.key === value) || {}).label || "Выбрать решение";
+        const label = (actions.find((action) => action.key === value) || {}).label || "Вердикт";
         const labelEl = $("prespisokVerdictTriggerLabel");
         if (labelEl) labelEl.textContent = label;
         const popup = $("prespisokVerdictPopup");
@@ -14053,21 +14019,26 @@
         state.prespisok.selectedAction = actionDef ? actionKey : "";
         const needsExtra = Boolean(actionDef && actionDef.needsExtra);
         const extraWrap = $("prespisokExtraWrap");
-        const extraLabelEl = $("prespisokExtraLabel");
         const extraInput = $("prespisokExtraInput");
         if (extraWrap) extraWrap.classList.toggle("hidden", !needsExtra);
-        if (needsExtra && extraLabelEl) extraLabelEl.textContent = actionDef.extraLabel || "";
         if (needsExtra && extraInput) extraInput.placeholder = actionDef.extraPlaceholder || "";
+        // Same is-full/is-centered split as tasks' own compose bar: the
+        // trigger stretches full-width when nothing extra is needed
+        // (movement/task), and the default "Вердикт" placeholder sits
+        // centered via the row's spacers, same as tasks' "Не выбран".
         const picker = $("prespisokVerdictPicker");
         if (picker) picker.classList.toggle("is-full", Boolean(actionDef) && !needsExtra);
         const bar = $("prespisokComposeBar");
         if (bar) {
-            bar.classList.remove("tone-green", "tone-red");
+            bar.classList.remove("tone-green", "tone-red", "tone-yellow");
+            bar.classList.toggle("is-centered", !actionDef);
             if (actionDef && actionDef.tone) bar.classList.add("tone-" + actionDef.tone);
         }
+        const inlineSlot = $("prespisokComposeInlineSlot");
+        if (inlineSlot) inlineSlot.classList.toggle("is-filled", needsExtra);
         const extra = normalizeText(extraInput && extraInput.value);
         const missing = [];
-        if (!actionDef) missing.push("Решение");
+        if (!actionDef) missing.push("Вердикт");
         if (needsExtra && !extra) missing.push(actionDef.extraLabel || "Доп. поле");
         const button = $("submitPrespisokAction");
         if (button) {
@@ -14155,7 +14126,12 @@
         if (itemTimer) itemTimer.textContent = formatDuration(itemElapsed);
         if (itemCard) {
             const kick = state.prespisok.itemTimerKick && Date.now() - state.prespisok.itemTimerKick < 1400 ? " kick" : "";
-            itemCard.className = "prespisok-play-hud-stat prespisok-item-timer-card " + prespisokItemTimerTone(itemElapsed) + kick;
+            itemCard.className = "prespisok-hud-card prespisok-item-timer-card " + prespisokItemTimerTone(itemElapsed) + kick;
+        }
+        const streakFill = $("prespisokStreakFill");
+        if (streakFill) {
+            const remainingPct = Math.max(0, 100 - (itemElapsed / PRESPISOK_STREAK_THRESHOLD_MS) * 100);
+            streakFill.style.width = remainingPct.toFixed(1) + "%";
         }
         setTimeout(updatePrespisokTimer, 1000);
     }
