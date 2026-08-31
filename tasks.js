@@ -577,6 +577,7 @@
             scored: [],
             currentRowId: "",
             currentScore: null,
+            embedded: false,
             status: "Флоу еще не запускался.",
             statusTone: "",
             claiming: false,
@@ -5556,6 +5557,24 @@
     function closeFlowTaskCard() {
         state.flow.taskCardRowId = "";
         setFlowModalOpen("flowTaskModal", false);
+    }
+
+    // Toggles #taskDetailModal between the classic floating overlay and
+    // Флоу's inline card (see the .is-flow-embedded CSS added in Task 1).
+    // Does not touch renderTaskDetail or any of its ~15 hardcoded element
+    // IDs -- same DOM node, same function, only its own wrapper's CSS class
+    // changes.
+    function setFlowEmbeddedMode(active) {
+        state.flow.embedded = Boolean(active);
+        const modal = $("taskDetailModal");
+        if (modal) modal.classList.toggle("is-flow-embedded", state.flow.embedded);
+    }
+
+    function flowWhyBoxHtml(score) {
+        if (!score || !Array.isArray(score.reasons) || !score.reasons.length) return "";
+        return "<div class='flow-why-box'><strong>Почему эта задача</strong>"
+            + score.reasons.slice(0, 8).map((reason) => "<div class='flow-reason'>" + escapeHtml(reason) + "</div>").join("")
+            + "</div>";
     }
 
     function openTaskDetailFromFlow(id) {
