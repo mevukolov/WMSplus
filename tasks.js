@@ -5400,7 +5400,8 @@
         }
         const currentRow = state.flow.currentRowId ? findTaskRow(state.flow.currentRowId) : null;
         if (currentRow && isActiveReviewTask(currentRow)) {
-            openFlowTaskCard(currentRow.id);
+            setFlowEmbeddedMode(true);
+            openTaskDetail(currentRow.id, "flow");
             return;
         }
         state.flow.claiming = true;
@@ -5423,7 +5424,8 @@
             state.flow.status = "Задача выдана и закреплена на " + flowSettingNumber("lockTtlMinutes", 15) + " минут: " + displayTaskTitle(row) + ".";
             state.flow.statusTone = "good";
             renderFlowPage();
-            openFlowTaskCard(row.id);
+            setFlowEmbeddedMode(true);
+            openTaskDetail(row.id, "flow");
         } catch (error) {
             console.error("flow claim failed:", error);
             if (normalizeText(error && error.message) !== "Задача уже открыта другим сотрудником.") {
@@ -6868,6 +6870,7 @@
             state.taskDetail.countdownTimer = null;
         }
         setFlowModalOpen("taskDetailModal", false);
+        if (state.flow.embedded) setFlowEmbeddedMode(false);
     }
 
     const TASK_CELEBRATION_ICONS = { green: "✓", yellow: "◴", red: "✕" };
@@ -7815,6 +7818,7 @@
             + "<div class='task-detail-title-row'><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='task-detail-price' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</div>" + countdownHtml + "</div>"
             + "<div class='review-table-subtitle'>" + escapeHtml(row.task_type || "-") + "</div></div>" + taskDetailActionButtons(row, readOnly) + "</div>"
             + "<div class='task-detail-body'>"
+            + (state.flow.embedded && state.taskDetail.source === "flow" ? flowWhyBoxHtml(state.flow.currentScore) : "")
             + "<div class='task-info-grid'>" + taskDetailInfo(row) + "</div>"
             + taskTagsBox(row)
             + incomingFlowShkInfoBox(row)
