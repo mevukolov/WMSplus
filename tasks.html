@@ -766,28 +766,38 @@
         .prespisok-file-drop { display: grid; place-items: center; min-height: 220px; border: 2px dashed rgba(255,255,255,.28); border-radius: 22px; background: rgba(255,255,255,.08); text-align: center; }
         .prespisok-file-drop label { display: inline-flex; align-items: center; justify-content: center; border-radius: 18px; background: #facc15; color: #24172c; padding: 16px 22px; font-size: 18px; font-weight: 1000; cursor: pointer; }
         .prespisok-hud { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0 6px; }
-        .prespisok-hud-card { border-radius: 18px; background: rgba(255,255,255,.12); padding: 14px; border: 1px solid rgba(255,255,255,.12); }
-        .prespisok-hud-card span { display: block; color: rgba(255,255,255,.64); font-size: 12px; font-weight: 900; text-transform: uppercase; }
-        .prespisok-hud-card strong { display: block; margin-top: 5px; color: #fff; font-size: 24px; line-height: 1; }
-        .prespisok-item-timer-card { transition: transform .25s ease, background .25s ease, box-shadow .25s ease; }
-        .prespisok-item-timer-card strong { font-size: 30px; }
-        .prespisok-item-timer-card.warn { background: rgba(250,204,21,.22); box-shadow: 0 0 34px rgba(250,204,21,.18); transform: scale(1.03); }
-        .prespisok-item-timer-card.danger { background: rgba(239,68,68,.3); box-shadow: 0 0 50px rgba(239,68,68,.34); animation: prespisokShake .3s linear infinite; }
-        .prespisok-item-timer-card.doom { background: rgba(69,10,10,.82); box-shadow: 0 0 80px rgba(127,29,29,.58); animation: prespisokPanic .15s linear infinite; }
+        .prespisok-hud-card { padding: 6px 4px; text-align: center; }
+        .prespisok-hud-card span { display: block; color: rgba(255,255,255,.55); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+        .prespisok-hud-card strong { display: block; margin-top: 6px; color: #fff; font-size: 28px; line-height: 1; }
+        .prespisok-item-timer-card { transition: transform .25s ease; }
+        .prespisok-item-timer-card strong { font-size: 34px; transition: color .3s ease; }
+        .prespisok-item-timer-card.warn strong { color: #fde047; }
+        .prespisok-item-timer-card.danger strong { color: #fb923c; }
+        .prespisok-item-timer-card.doom strong { color: #f87171; text-shadow: 0 0 22px rgba(248,113,113,.6); }
         .prespisok-item-timer-card.kick { animation: prespisokKick .7s cubic-bezier(.2,1.8,.2,1); }
+        /* Continuous shake from warn onward, amplitude driven entirely by
+           --shake-amp (prespisokShakeIntensity) -- no per-tone jump, no cap. */
+        .prespisok-item-timer-card.warn, .prespisok-item-timer-card.danger, .prespisok-item-timer-card.doom { animation: prespisokShakeDynamic .5s ease-in-out infinite; }
 
         /* Minimal play-screen header (point 1) */
         .prespisok-play-top { position: relative; z-index: 2; text-align: center; padding-top: 2px; }
         .prespisok-play-title { margin: 0; font-size: clamp(24px, 3.6vw, 38px); font-weight: 1000; letter-spacing: -.03em; color: #fff; }
         .prespisok-play-close { position: absolute; top: -2px; right: 0; }
         .prespisok-play-top .debug-sandbox-badge { margin: 8px auto 0; max-width: max-content; }
-        .prespisok-streak-bar { margin: 10px auto 0; display: flex; align-items: center; gap: 10px; width: min(280px, 84%); }
-        .prespisok-streak-bar span { white-space: nowrap; font-weight: 1000; font-size: 13px; color: #fde68a; }
-        .prespisok-streak-track { flex: 1 1 auto; height: 8px; border-radius: 999px; background: rgba(255,255,255,.14); overflow: hidden; }
+        /* Full-bleed to the true viewport width regardless of the panel's
+           own padding (point 1 -- "на всю ширину модалки"). */
+        .prespisok-streak-bar { position: relative; left: 50%; width: 100vw; margin: 12px 0 0 -50vw; padding: 0 clamp(14px, 4vw, 40px); box-sizing: border-box; text-align: center; }
+        .prespisok-streak-track { height: 8px; border-radius: 999px; background: rgba(255,255,255,.14); overflow: hidden; }
         .prespisok-streak-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #f97316, #facc15); transition: width 1s linear; box-shadow: 0 0 10px rgba(249,115,22,.5); }
+        .prespisok-streak-label { margin-top: 8px; font-weight: 1000; font-size: 15px; color: #fde68a; animation: qnsStreakPop .38s cubic-bezier(.2,1.3,.3,1.2); }
 
-        /* Card sits alone, centered -- unaffected by the docked counters (point 1/9) */
+        /* Card sits alone, vertically+horizontally centered, unaffected by
+           the docked counters (points 1/2/9). margin:auto on the card
+           itself (not align-items) so it degrades to top-aligned/scrollable
+           instead of clipping if it's ever taller than the stage. */
         .prespisok-card-stage { display: flex; justify-content: center; }
+        .prespisok-card-stage .prespisok-detail-card { margin-top: auto; margin-bottom: auto; }
+        .prespisok-wrap.is-playing .prespisok-card-stage { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
         /* Counters magnetized to the modal's own edges, laconic (no boxes) (points 4/9) */
         .prespisok-counter-dock { position: fixed; z-index: 20; pointer-events: none; }
@@ -812,39 +822,77 @@
             .prespisok-counter strong { font-size: 15px; }
         }
 
-        /* Bombastic exit animations (points 5/6/7) */
-        .prespisok-card-exit-burn { position: relative; overflow: hidden; animation: prespisokBurnShake .82s ease-in-out forwards; }
-        @keyframes prespisokBurnShake {
-            0% { transform: translateY(0) rotate(0deg); }
-            20% { transform: translateY(-3px) rotate(-.4deg); }
-            40% { transform: translateY(2px) rotate(.3deg); }
-            60% { transform: translateY(-2px) rotate(-.2deg); }
-            80% { transform: translateY(3px) rotate(.2deg); }
-            100% { transform: translateY(10px) rotate(0deg); opacity: .1; }
+        /* Armed state: a verdict is picked but not yet confirmed -- a ring
+           in the verdict's color crawls from bottom-center up to the top,
+           and autospisanie additionally tints the card itself (points 5/6). */
+        @property --ring-p { syntax: '<number>'; inherits: true; initial-value: 0; }
+        .prespisok-detail-card.prespisok-card-armed { position: relative; }
+        .prespisok-detail-card.prespisok-card-armed::before {
+            content: "";
+            position: absolute;
+            inset: -3px;
+            border-radius: inherit;
+            padding: 3px;
+            background: conic-gradient(from 180deg at 50% 100%, var(--ring-color, #ef4444) 0deg, var(--ring-color, #ef4444) calc(var(--ring-p, 0) * 1.8deg), transparent calc(var(--ring-p, 0) * 1.8deg));
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+            z-index: 6;
+            animation: prespisokRingCrawl 1.3s ease-in-out infinite;
+        }
+        @keyframes prespisokRingCrawl { 0% { --ring-p: 6; } 100% { --ring-p: 100; } }
+        .prespisok-detail-card.is-armed-red { background: #fff2f1; transition: background .3s ease; }
+
+        /* Bombastic exit animations (points 3/4) */
+        .prespisok-card-exit-burn { position: relative; overflow: hidden; animation: prespisokBurnDown .9s cubic-bezier(.36,0,.4,1) forwards; }
+        @keyframes prespisokBurnDown {
+            0% { transform: translateY(0) scale(1) rotate(0deg); }
+            12% { transform: translateY(-14px) scale(1.03) rotate(-1.2deg); }
+            32% { transform: translateY(30px) scale(.98) rotate(1deg); }
+            55% { transform: translateY(110px) scale(.92) rotate(-1.6deg); }
+            78% { transform: translateY(190px) scale(.82) rotate(1.2deg); }
+            100% { transform: translateY(280px) scale(.68) rotate(2deg); opacity: 0; }
         }
         /* Climbs from the bottom edge upward, consuming the card like an
            ember line through paper, instead of darkening it all at once. */
-        .prespisok-burn-overlay { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; border-radius: inherit; pointer-events: none; z-index: 5; background: linear-gradient(to top, #140400 0%, #431407 32%, #f97316 66%, #fde68a 82%, rgba(253,230,138,0) 100%); box-shadow: 0 -20px 55px rgba(249,115,22,.55); animation: prespisokBurnRise .82s cubic-bezier(.4,0,.6,1) forwards; }
+        .prespisok-burn-overlay { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; border-radius: inherit; pointer-events: none; z-index: 5; background: linear-gradient(to top, #140400 0%, #431407 32%, #f97316 66%, #fde68a 82%, rgba(253,230,138,0) 100%); box-shadow: 0 -20px 55px rgba(249,115,22,.55); animation: prespisokBurnRise .9s cubic-bezier(.4,0,.6,1) forwards; }
         @keyframes prespisokBurnRise { 0% { height: 0%; opacity: .97; } 75% { height: 96%; opacity: .98; } 100% { height: 100%; opacity: 1; } }
         .prespisok-burn-overlay::after { content: ""; position: absolute; left: -6%; right: -6%; top: -14px; height: 26px; background: radial-gradient(ellipse at center, rgba(253,224,71,.9), rgba(249,115,22,.5) 55%, transparent 75%); filter: blur(3px); animation: prespisokBurnFlicker .28s ease-in-out infinite alternate; }
         @keyframes prespisokBurnFlicker { 0% { opacity: .7; transform: scaleX(1) translateY(0); } 100% { opacity: 1; transform: scaleX(1.05) translateY(-2px); } }
-        .prespisok-card-exit-sparkle { animation: prespisokSparkleRight .72s cubic-bezier(.3,0,.4,1) forwards; pointer-events: none; }
+        .prespisok-card-exit-sparkle { animation: prespisokSparkleRight .82s cubic-bezier(.3,0,.3,1) forwards; pointer-events: none; }
         @keyframes prespisokSparkleRight {
             0% { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; filter: brightness(1); }
-            22% { transform: translateX(-10px) scale(1.04) rotate(-1deg); filter: brightness(1.5); box-shadow: 0 0 90px rgba(250,204,21,.65); }
-            100% { transform: translateX(280px) scale(.85) rotate(4deg); opacity: 0; filter: brightness(1.7); }
+            15% { transform: translateX(-24px) scale(1.09) rotate(-3deg); filter: brightness(1.3); }
+            35% { transform: translateX(50px) scale(.94) rotate(2deg); filter: brightness(1.5); box-shadow: 0 0 90px rgba(250,204,21,.65); }
+            58% { transform: translateX(190px) scale(1.06) rotate(5deg); }
+            80% { transform: translateX(280px) scale(.93) rotate(3deg); opacity: 1; }
+            100% { transform: translateX(360px) scale(.8) rotate(6deg); opacity: 0; filter: brightness(1.7); }
         }
-        .prespisok-card-exit-slide { animation: prespisokSlideLeft .62s cubic-bezier(.3,0,.4,1) forwards; pointer-events: none; }
+        .prespisok-card-exit-slide { animation: prespisokSlideLeft .78s cubic-bezier(.3,0,.3,1) forwards; pointer-events: none; }
         @keyframes prespisokSlideLeft {
             0% { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; }
-            100% { transform: translateX(-280px) scale(.88) rotate(-3deg); opacity: 0; }
+            15% { transform: translateX(20px) scale(1.06) rotate(2deg); }
+            38% { transform: translateX(-80px) scale(.96) rotate(-2.5deg); }
+            62% { transform: translateX(-220px) scale(1.04) rotate(-4.5deg); }
+            100% { transform: translateX(-360px) scale(.8) rotate(-5deg); opacity: 0; }
         }
-        /* Full-background color wash, red/green/yellow by verdict (point 6) */
-        .prespisok-bg-flash { position: fixed; inset: 0; z-index: 9996; pointer-events: none; opacity: 0; animation: prespisokBgFlash .7s ease forwards; }
-        .prespisok-bg-flash-red { background: radial-gradient(circle at 50% 55%, rgba(239,68,68,.55), rgba(239,68,68,0) 70%); }
-        .prespisok-bg-flash-green { background: radial-gradient(circle at 50% 55%, rgba(34,197,94,.5), rgba(34,197,94,0) 70%); }
-        .prespisok-bg-flash-yellow { background: radial-gradient(circle at 50% 55%, rgba(250,204,21,.5), rgba(250,204,21,0) 70%); }
-        @keyframes prespisokBgFlash { 0% { opacity: 0; } 18% { opacity: 1; } 100% { opacity: 0; } }
+        /* Full-background color wash, red/green/yellow by verdict (points 3/6) */
+        .prespisok-bg-flash { position: fixed; inset: 0; z-index: 9996; pointer-events: none; opacity: 0; animation: prespisokBgFlash .75s ease forwards; }
+        .prespisok-bg-flash-red { background: radial-gradient(circle at 50% 50%, rgba(239,68,68,.8), rgba(239,68,68,.15) 55%, rgba(239,68,68,0) 92%); }
+        .prespisok-bg-flash-green { background: radial-gradient(circle at 50% 50%, rgba(34,197,94,.75), rgba(34,197,94,.14) 55%, rgba(34,197,94,0) 92%); }
+        .prespisok-bg-flash-yellow { background: radial-gradient(circle at 50% 50%, rgba(250,204,21,.75), rgba(250,204,21,.14) 55%, rgba(250,204,21,0) 92%); }
+        @keyframes prespisokBgFlash { 0% { opacity: 0; } 16% { opacity: 1; } 100% { opacity: 0; } }
+
+        /* Combo multiplier popups (point 8) */
+        .prespisok-combo-popup { position: fixed; z-index: 9998; pointer-events: none; font-size: clamp(38px, 7vw, 76px); font-weight: 1000; background: linear-gradient(120deg, #f97316, #facc15); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 6px 22px rgba(249,115,22,.55)); animation: prespisokComboPop 1.1s cubic-bezier(.2,1.6,.3,1) forwards; }
+        @keyframes prespisokComboPop {
+            0% { opacity: 0; transform: translate(-50%,-50%) rotate(var(--rot,0deg)) scale(.2); }
+            18% { opacity: 1; transform: translate(-50%,-50%) rotate(var(--rot,0deg)) scale(1.3); }
+            34% { transform: translate(-50%,-50%) rotate(var(--rot,0deg)) scale(1); }
+            78% { opacity: 1; transform: translate(-50%,-50%) rotate(var(--rot,0deg)) scale(1.05); }
+            100% { opacity: 0; transform: translate(-50%,-50%) rotate(var(--rot,0deg)) scale(1.55) translateY(-50px); }
+        }
 
         .prespisok-play-panel { max-height: calc(100dvh - 172px); overflow: auto; }
         .prespisok-task-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 18px; align-items: start; }
@@ -1032,8 +1080,18 @@
         .no-shk-success h3 { margin: 0; font-size: clamp(42px, 7vw, 92px); line-height: .88; letter-spacing: -.07em; }
         .no-shk-success p { margin: 14px auto 0; max-width: 760px; color: rgba(255,255,255,.84); font-size: 20px; font-weight: 900; }
         .no-shk-photo-preview { max-width: min(720px, 90vw); max-height: 76dvh; object-fit: contain; display: block; margin: 10px auto 0; border-radius: 18px; background: #fff; }
-        @keyframes prespisokShake { 0%,100% { transform: scale(1.08) translate(0,0) rotate(0deg); } 15% { transform: scale(1.12) translate(-6px,2px) rotate(-2deg); } 30% { transform: scale(1.1) translate(5px,-3px) rotate(2deg); } 45% { transform: scale(1.13) translate(-5px,3px) rotate(-1.5deg); } 60% { transform: scale(1.11) translate(6px,-2px) rotate(1.5deg); } 75% { transform: scale(1.13) translate(-4px,2px) rotate(-2deg); } 90% { transform: scale(1.1) translate(4px,-2px) rotate(1deg); } }
-        @keyframes prespisokPanic { 0%,100% { transform: scale(1.18) translate(0,0) rotate(0deg); } 12% { transform: scale(1.25) translate(-8px,4px) rotate(-3deg); } 25% { transform: scale(1.2) translate(7px,-5px) rotate(3deg); } 37% { transform: scale(1.28) translate(-7px,5px) rotate(-2.5deg); } 50% { transform: scale(1.22) translate(8px,-4px) rotate(2.5deg); } 62% { transform: scale(1.27) translate(-6px,3px) rotate(-3deg); } 75% { transform: scale(1.21) translate(6px,-6px) rotate(2deg); } 87% { transform: scale(1.29) translate(-5px,4px) rotate(-2deg); } }
+        /* Amplitude is entirely --shake-amp (set from JS via
+           prespisokShakeIntensity) -- 0 at the warn threshold, growing
+           continuously through danger/doom and beyond, never capped. */
+        @keyframes prespisokShakeDynamic {
+            0%,100% { transform: scale(calc(1 + var(--shake-amp, 0) * .045)) translate(0,0) rotate(0deg); }
+            15% { transform: scale(calc(1 + var(--shake-amp, 0) * .05)) translate(calc(var(--shake-amp, 0) * -3px), calc(var(--shake-amp, 0) * 1.2px)) rotate(calc(var(--shake-amp, 0) * -1.1deg)); }
+            30% { transform: scale(calc(1 + var(--shake-amp, 0) * .048)) translate(calc(var(--shake-amp, 0) * 2.6px), calc(var(--shake-amp, 0) * -1.6px)) rotate(calc(var(--shake-amp, 0) * 1deg)); }
+            45% { transform: scale(calc(1 + var(--shake-amp, 0) * .052)) translate(calc(var(--shake-amp, 0) * -2.2px), calc(var(--shake-amp, 0) * 1.6px)) rotate(calc(var(--shake-amp, 0) * -.9deg)); }
+            60% { transform: scale(calc(1 + var(--shake-amp, 0) * .049)) translate(calc(var(--shake-amp, 0) * 3.1px), calc(var(--shake-amp, 0) * -1.1px)) rotate(calc(var(--shake-amp, 0) * .85deg)); }
+            75% { transform: scale(calc(1 + var(--shake-amp, 0) * .051)) translate(calc(var(--shake-amp, 0) * -2.6px), calc(var(--shake-amp, 0) * 1.1px)) rotate(calc(var(--shake-amp, 0) * -1deg)); }
+            90% { transform: scale(calc(1 + var(--shake-amp, 0) * .047)) translate(calc(var(--shake-amp, 0) * 2.1px), calc(var(--shake-amp, 0) * -1px)) rotate(calc(var(--shake-amp, 0) * .65deg)); }
+        }
         @keyframes prespisokKick { 0% { transform: scale(.7) rotate(-6deg); opacity: .4; } 55% { transform: scale(1.22) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
         @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .quick-no-shk-game, .quick-no-shk-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; }
             .quick-no-shk-wrap { overflow: auto; } .quick-no-shk-panel { overflow: visible; } .quick-no-shk-photo { max-height: 42dvh; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }

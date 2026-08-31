@@ -12801,6 +12801,16 @@
         return "fresh";
     }
 
+    // Continuous shake intensity, not a per-tone step -- 0 right at the
+    // warn threshold (1min), growing smoothly through danger/doom and
+    // never plateauing (sqrt so it keeps climbing without exploding at
+    // extreme durations). Drives --shake-amp on the timer tile so the
+    // CSS keyframe amplitude scales with it directly.
+    function prespisokShakeIntensity(ms) {
+        const minutes = (Number(ms) || 0) / 60000;
+        return Math.sqrt(Math.max(0, minutes - 1));
+    }
+
     function formatDuration(ms) {
         const total = Math.max(Math.floor((Number(ms) || 0) / 1000), 0);
         const hours = Math.floor(total / 3600);
@@ -13281,21 +13291,24 @@
             + "</div>";
     }
 
-    // Same bordered-tile look every other HUD in the app uses
-    // (.prespisok-hud-card, shared with quick-no-shk's own HUD tiles) --
-    // keeps the exact fresh/warn/danger/doom tone escalation and kick-pop
-    // (.prespisok-item-timer-card + prespisokShake/Panic/Kick keyframes).
+    // Borderless HUD tiles -- font a bit bigger, "Текущая цель" colored
+    // by the same fresh/warn/danger/doom tone escalation (text-color-only
+    // now, no box), continuous shake amplitude via --shake-amp (see
+    // prespisokShakeIntensity).
     function prespisokPlayHudHtml(progress, total, itemElapsed, kick) {
         const streak = prespisokStreakStats();
         const remainingPct = Math.max(0, 100 - (itemElapsed / PRESPISOK_STREAK_THRESHOLD_MS) * 100);
-        // Drains as time passes on the current item -- once it empties the
-        // combo breaks, so it doubles as a "decide fast" nudge.
+        const shakeAmp = prespisokShakeIntensity(itemElapsed);
+        // Track first, "Комбо ×N" label pops in below it.
         const streakBar = streak.current >= 1
-            ? "<div class='prespisok-streak-bar' id='prespisokStreakBar'><span>🔥 Комбо ×" + streak.current + "</span><div class='prespisok-streak-track'><div class='prespisok-streak-fill' id='prespisokStreakFill' style='width:" + remainingPct.toFixed(1) + "%'></div></div></div>"
+            ? "<div class='prespisok-streak-bar' id='prespisokStreakBar'>"
+                + "<div class='prespisok-streak-track'><div class='prespisok-streak-fill' id='prespisokStreakFill' style='width:" + remainingPct.toFixed(1) + "%'></div></div>"
+                + "<div class='prespisok-streak-label' id='prespisokStreakLabel'>🔥 Комбо ×" + streak.current + "</div>"
+                + "</div>"
             : "";
         return "<div class='prespisok-hud'>"
             + "<div class='prespisok-hud-card'><span>Общее время</span><strong id='prespisokTotalTimer'>" + escapeHtml(formatDuration(prespisokElapsedMs())) + "</strong></div>"
-            + "<div id='prespisokItemTimerCard' class='prespisok-hud-card prespisok-item-timer-card " + escapeHtml(prespisokItemTimerTone(itemElapsed) + kick) + "'><span>Текущая цель</span><strong id='prespisokItemTimer'>" + escapeHtml(formatDuration(itemElapsed)) + "</strong></div>"
+            + "<div id='prespisokItemTimerCard' class='prespisok-hud-card prespisok-item-timer-card " + escapeHtml(prespisokItemTimerTone(itemElapsed) + kick) + "' style='--shake-amp:" + shakeAmp.toFixed(2) + "'><span>Текущая цель</span><strong id='prespisokItemTimer'>" + escapeHtml(formatDuration(itemElapsed)) + "</strong></div>"
             + "<div class='prespisok-hud-card'><span>Прогресс</span><strong>" + progress + "/" + total + (state.prespisok.excludedCount ? " <small>· " + state.prespisok.excludedCount + " искл.</small>" : "") + "</strong></div>"
             + "</div>"
             + streakBar;
@@ -13342,7 +13355,7 @@
         let particleColor = "#f97316";
         let exitClass = "prespisok-card-exit-burn";
         let particleCount = 22;
-        let duration = 820;
+        let duration = 900;
         let counterKind = "writeoff";
         let flashTone = "red";
         let burstY = rect.bottom;
@@ -13350,7 +13363,7 @@
             particleColor = "#facc15";
             exitClass = "prespisok-card-exit-sparkle";
             particleCount = 30;
-            duration = 720;
+            duration = 820;
             counterKind = "saved";
             flashTone = "green";
             burstY = rect.top + rect.height / 2;
@@ -13358,7 +13371,7 @@
             particleColor = "#facc15";
             exitClass = "prespisok-card-exit-slide";
             particleCount = 16;
-            duration = 620;
+            duration = 780;
             counterKind = "task";
             flashTone = "yellow";
             burstY = rect.top + rect.height / 2;
@@ -13366,7 +13379,7 @@
         const flash = document.createElement("div");
         flash.className = "prespisok-bg-flash prespisok-bg-flash-" + flashTone;
         document.body.appendChild(flash);
-        window.setTimeout(() => flash.remove(), 700);
+        window.setTimeout(() => flash.remove(), 760);
         const burst = document.createElement("div");
         burst.className = "quick-no-shk-burst";
         burst.innerHTML = kind === "burn"
@@ -13384,6 +13397,8 @@
             overlay.className = "prespisok-burn-overlay";
             card.appendChild(overlay);
         }
+        // Confirmed now -- the armed ring was for "picked but not sent yet".
+        card.classList.remove("prespisok-card-armed", "is-armed-red");
         card.classList.add(exitClass);
         const idBase = "prespisokCounter" + counterKind.charAt(0).toUpperCase() + counterKind.slice(1);
         const counterEl = $(idBase);
@@ -13396,6 +13411,21 @@
             counterEl.classList.add("pop");
         }
         return new Promise((resolve) => window.setTimeout(resolve, duration));
+    }
+
+    // Big "xN" that pops up at a random spot on screen each time the combo
+    // extends -- purely decorative, fire-and-forget alongside the exit
+    // animation.
+    function playPrespisokComboPopup(streakCount) {
+        if (streakCount < 2) return;
+        const popup = document.createElement("div");
+        popup.className = "prespisok-combo-popup";
+        popup.textContent = "×" + streakCount;
+        popup.style.left = (14 + Math.random() * 68).toFixed(1) + "%";
+        popup.style.top = (16 + Math.random() * 54).toFixed(1) + "%";
+        popup.style.setProperty("--rot", ((Math.random() * 18) - 9).toFixed(1) + "deg");
+        document.body.appendChild(popup);
+        window.setTimeout(() => popup.remove(), 1150);
     }
 
     function renderPrespisok() {
@@ -14036,6 +14066,17 @@
         }
         const inlineSlot = $("prespisokComposeInlineSlot");
         if (inlineSlot) inlineSlot.classList.toggle("is-filled", needsExtra);
+        // Armed-but-unconfirmed state: a ring in the verdict's color crawls
+        // up the card, and autospisanie additionally tints the card red.
+        const cardEl = $("prespisokCard");
+        if (cardEl) {
+            cardEl.classList.toggle("prespisok-card-armed", Boolean(actionDef));
+            cardEl.classList.toggle("is-armed-red", Boolean(actionDef) && actionDef.tone === "red");
+            if (actionDef && actionDef.tone) {
+                const ringColors = { red: "#ef4444", green: "#22c55e", yellow: "#facc15" };
+                cardEl.style.setProperty("--ring-color", ringColors[actionDef.tone] || "#ef4444");
+            }
+        }
         const extra = normalizeText(extraInput && extraInput.value);
         const missing = [];
         if (!actionDef) missing.push("Вердикт");
@@ -14127,6 +14168,7 @@
         if (itemCard) {
             const kick = state.prespisok.itemTimerKick && Date.now() - state.prespisok.itemTimerKick < 1400 ? " kick" : "";
             itemCard.className = "prespisok-hud-card prespisok-item-timer-card " + prespisokItemTimerTone(itemElapsed) + kick;
+            itemCard.style.setProperty("--shake-amp", prespisokShakeIntensity(itemElapsed).toFixed(2));
         }
         const streakFill = $("prespisokStreakFill");
         if (streakFill) {
@@ -14255,6 +14297,7 @@
             await insertPrespisokAction(action);
             await upsertPrespisokRun("in_progress");
             persistPrespisokState();
+            playPrespisokComboPopup(prespisokStreakStats().current);
             await playPrespisokExitAnimation(actionKey);
             renderPrespisokPlay();
         } catch (error) {
