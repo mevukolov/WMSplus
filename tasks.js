@@ -6,6 +6,15 @@
     const SETTINGS_TABLE = "wms_manual_upload_settings";
     const WMS_TASKS_TABLE = "wms_tasks";
     const WMS_TASK_SELECT_COLUMNS = "id,source_module,source_id,source_row_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at";
+    // Same as WMS_TASK_SELECT_COLUMNS but source_payload replaced with just
+    // the small precomputed fields Review/Requests table rendering and
+    // filtering actually read (see taskItemName/taskStatusCodeLabel/
+    // taskMovementStatusOptions/taskRouteLabel/isTareTask) -- task_items
+    // itself (the ~4MB/2500-active-rows part) is never selected here.
+    // Task detail, actualization, quick-no-shk eligibility, and Flow
+    // scoring all need the real task_items and fetch it separately (see
+    // ensureFullActiveTasksLoaded / openTaskDetail).
+    const WMS_TASK_LIST_COLUMNS = "id,source_module,source_id,source_row_id,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,item_name:source_payload->>item_name,entity_type:source_payload->>entity_type,status_code_label:source_payload->>status_code_label,movement_status_options:source_payload->movement_status_options,route_label:source_payload->>route_label,route_label_camel:source_payload->>routeLabel,parking:source_payload->>parking,place:source_payload->>place";
     // Achievement counting only ever reads a handful of flat fields plus the
     // actor's id/name (buried in source_payload.wms_review). The full
     // WMS_TASK_SELECT_COLUMNS row -- source_payload especially, which carries
@@ -595,6 +604,23 @@
             loading: false,
             loaded: false,
             loadPromise: null,
+            // ensureFullActiveTasksLoaded() upgrades rows (above) to carry
+            // real task_items in place (merged into the SAME row objects by
+            // id) instead of keeping a second parallel array -- two arrays
+            // for the same tasks risked drifting apart (one holding a stale
+            // opp_verdict/task_status the other already updated), and worse,
+            // a handful of write paths (enrichTaskNomenclatureFromSuperset,
+            // updateTareTaskItems, applyQuickNoShkAction's completion calls)
+            // build their next source_payload by spreading the in-memory
+            // row's payload and writing it back whole -- if that row were
+            // still light, the write would silently wipe wms_review/
+            // writeoff_date/etc from the DB, not just show a thin list row.
+            // One array, upgraded once, is the only version of this that's
+            // safe by construction rather than by remembering to redirect
+            // every consumer correctly.
+            fullLoading: false,
+            fullLoaded: false,
+            fullLoadPromise: null,
             activeSection: "",
             modalMode: "",
             sort: { key: "price", dir: "desc" },
@@ -1977,7 +2003,7 @@
             await loadFlowSettings();
             if (!state.shift.current) await loadShiftState();
             await Promise.all([
-                ensureReviewTasksLoaded(),
+                ensureFullActiveTasksLoaded(),
                 loadFlowEmployeeStats(),
             ]);
             refreshFlowQueue();
@@ -2024,7 +2050,7 @@
         $("inactivePage").classList.remove("active");
         $("reviewPage").classList.add("active");
         renderReview();
-        void loadReviewTasks();
+        void ensureReviewTasksLoaded();
     }
 
     function showRequestsPage() {
@@ -2037,7 +2063,7 @@
         $("inactivePage").classList.remove("active");
         $("requestsPage").classList.add("active");
         renderRequests();
-        void loadReviewTasks();
+        void ensureReviewTasksLoaded();
     }
 
     function showInactivePage() {
@@ -2234,6 +2260,11 @@
             renderReview();
             try {
                 state.review.rows = await fetchReviewTaskRows(db);
+                // Fresh light rows -- any earlier upgrade-to-full is gone
+                // with them, so the next actualization/quick-no-shk/Flow
+                // entry needs to re-run ensureFullActiveTasksLoaded()
+                // rather than trusting a stale "already full" flag.
+                state.review.fullLoaded = false;
                 state.review.loaded = true;
                 const grouped = reviewGroupedRows();
                 if (!state.review.activeSection || !(grouped.get(state.review.activeSection) || []).length) {
@@ -2265,6 +2296,50 @@
         }
     }
 
+    async function ensureFullActiveTasksLoaded() {
+        if (state.review.fullLoaded && !state.review.fullLoading && !state.review.fullLoadPromise) return;
+        if (state.review.fullLoadPromise) {
+            await state.review.fullLoadPromise;
+            return;
+        }
+        const db = supabaseDb();
+        if (!db) return;
+        state.review.fullLoadPromise = (async () => {
+            state.review.fullLoading = true;
+            try {
+                const fullRows = await fetchWmsTaskRows(db, "active-full");
+                const existingById = new Map((state.review.rows || []).map((row) => [row.id, row]));
+                const merged = [];
+                fullRows.forEach((full) => {
+                    const existing = existingById.get(full.id);
+                    if (existing) {
+                        // Same object reference as before -- any other code
+                        // still holding it (e.g. an open task-detail row)
+                        // sees the upgrade too, not just this array.
+                        Object.assign(existing, full);
+                        delete existing.__isLight;
+                        merged.push(existing);
+                        existingById.delete(full.id);
+                    } else {
+                        merged.push(full);
+                    }
+                });
+                // Rows the full active fetch didn't return (requests,
+                // предсписок tasks -- filtered out of "active review" but
+                // still legitimately in the light list) stay as they were.
+                existingById.forEach((row) => merged.push(row));
+                state.review.rows = merged;
+                state.review.fullLoaded = true;
+            } catch (error) {
+                console.error("full active tasks load failed:", error);
+            } finally {
+                state.review.fullLoading = false;
+                state.review.fullLoadPromise = null;
+            }
+        })();
+        await state.review.fullLoadPromise;
+    }
+
     async function fetchReviewTaskRows(db) {
         const rows = await fetchWmsTaskRows(db, "active");
         return rows.filter(isActiveReviewTask);
@@ -2293,6 +2368,7 @@
         setActualizeStatus("Сначала скопируйте список активных ШК.");
         setFlowModalOpen("actualizeTasksModal", true);
         if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
+        await ensureFullActiveTasksLoaded();
     }
 
     function closeActualizeTasksModal() {
@@ -2312,6 +2388,7 @@
 
     async function copyActiveShkForActualize() {
         if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
+        await ensureFullActiveTasksLoaded();
         const ids = activeTaskShkList();
         if (!ids.length) {
             setActualizeStatus("Активных ШК в задачах не нашел.", "error");
@@ -2326,6 +2403,7 @@
     async function handleActualizeSupersetFile(file) {
         if (!file) return;
         if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
+        await ensureFullActiveTasksLoaded();
         setActualizeStatus("Читаю Superset...");
         try {
             const rows = await readSupersetRows(file);
@@ -3411,8 +3489,12 @@
         setFlowModalOpen("quickNoShkModal", true);
         renderQuickNoShkLoading();
         try {
+            // Needs task_items to check ШК eligibility -- goes straight for
+            // the full active fetch (unchanged size/shape from before this
+            // session's split) rather than also paying for the light one,
+            // which nothing here reads.
             const [, pureRows] = await Promise.all([
-                ensureReviewTasksLoaded(),
+                ensureFullActiveTasksLoaded(),
                 fetchQuickNoShkPureCandidates(),
             ]);
             if (state.quickNoShk.loadToken !== loadToken || !$("quickNoShkModal").classList.contains("active")) return;
@@ -4626,6 +4708,29 @@
     // functional non-loss, not just a technical workaround.
     const INACTIVE_TASK_ROW_LIMIT = 1000;
 
+    // Reshapes a WMS_TASK_LIST_COLUMNS row (source_payload never selected,
+    // just its small precomputed sub-fields as top-level aliases) into the
+    // same {source_payload: {...}} shape taskPayload()/taskItemName()/
+    // taskStatusCodeLabel()/taskMovementStatusOptions()/taskRouteLabel()/
+    // isTareTask() already know how to read -- so every list/filter
+    // consumer keeps working unchanged, just against the lean fields
+    // instead of the full blob. task_items is genuinely absent here;
+    // taskItems() on a light row falls through to its source_shk_ids
+    // synthetic-item fallback (already existed for exactly this kind of
+    // "no payload" case).
+    function hydrateLightTaskRow(row) {
+        const payload = {
+            item_name: row.item_name || "",
+            entity_type: row.entity_type || "",
+            status_code_label: row.status_code_label || "",
+            route_label: row.route_label || row.route_label_camel || row.parking || row.place || "",
+        };
+        if (Array.isArray(row.movement_status_options)) payload.movement_status_options = row.movement_status_options;
+        row.source_payload = payload;
+        row.__isLight = true;
+        return row;
+    }
+
     async function fetchWmsTaskRows(db, mode) {
         if (mode === "inactive") {
             const { data, error } = await db
@@ -4638,20 +4743,23 @@
             if (error) throw error;
             return Array.isArray(data) ? data : [];
         }
+        const isLightActive = mode === "active";
+        const selectColumns = isLightActive ? WMS_TASK_LIST_COLUMNS : WMS_TASK_SELECT_COLUMNS;
         const pageSize = 1000;
         const maxRows = 20000;
         const rows = [];
         for (let from = 0; from < maxRows; from += pageSize) {
             let query = db
                 .from(WMS_TASKS_TABLE)
-                .select(WMS_TASK_SELECT_COLUMNS)
+                .select(selectColumns)
                 .eq("is_deleted", false);
-            if (mode === "active") query = query.or("task_status.is.null,task_status.neq.Завершено");
+            if (isLightActive || mode === "active-full") query = query.or("task_status.is.null,task_status.neq.Завершено");
             const { data, error } = await query
                 .order("source_price_sum", { ascending: false, nullsFirst: false })
                 .range(from, from + pageSize - 1);
             if (error) throw error;
             const batch = Array.isArray(data) ? data : [];
+            if (isLightActive) batch.forEach(hydrateLightTaskRow);
             rows.push(...batch);
             if (batch.length < pageSize) break;
         }
@@ -6739,8 +6847,34 @@
             || null;
     }
 
-    function openTaskDetail(id, source) {
-        const row = findTaskRow(id);
+    // Rows from the lightweight list fetch (see hydrateLightTaskRow) don't
+    // carry task_items/full source_payload -- fetch the one row's full data
+    // by id (cheap, single row) and merge it into the SAME object findTaskRow
+    // returns, so the array it lives in (state.review.rows/inactive.rows/
+    // taskSearch.rows) is upgraded in place too, not just this render.
+    async function hydrateFullTaskRow(row) {
+        const db = supabaseDb();
+        if (!db) return row;
+        try {
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .select(WMS_TASK_SELECT_COLUMNS)
+                .eq("id", row.id)
+                .maybeSingle();
+            if (error) throw error;
+            if (data) {
+                Object.assign(row, data);
+                delete row.__isLight;
+            }
+            return row;
+        } catch (error) {
+            console.warn("task detail hydrate failed:", error);
+            return row;
+        }
+    }
+
+    async function openTaskDetail(id, source) {
+        let row = findTaskRow(id);
         if (!row) return;
         if (source !== "inactive" && state.flow.allowConflictOpenId !== id && flowRowIsLockedForOther(row, currentFlowEmployee())) {
             openFlowConflictModal(id);
@@ -6749,8 +6883,14 @@
         state.flow.allowConflictOpenId = "";
         if (state.taskDetail && state.taskDetail.countdownTimer) clearInterval(state.taskDetail.countdownTimer);
         state.taskDetail = { rowId: id, source: source || "review", editRowId: "", deferRowId: "", reopenRowId: "", splitRowId: "", splitShk: "", expensiveConfirmRowId: "", countdownTimer: null };
-        renderTaskDetail(row);
         setFlowModalOpen("taskDetailModal", true);
+        if (row.__isLight) {
+            const wrap = $("taskDetailWrap");
+            if (wrap) wrap.innerHTML = "<div class='empty-state'>Загружаю карточку…</div>";
+            row = await hydrateFullTaskRow(row);
+            if (!state.taskDetail || state.taskDetail.rowId !== id) return;
+        }
+        renderTaskDetail(row);
     }
 
     function closeTaskDetail() {
