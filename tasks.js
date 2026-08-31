@@ -13550,22 +13550,6 @@
         return pick(PRESPISOK_SNARK.openers, 0) + " " + pick(PRESPISOK_SNARK.spikes, 3) + " " + pick(PRESPISOK_SNARK.needles, 7) + " " + pick(PRESPISOK_SNARK.closers, 19);
     }
 
-    function prespisokHistoryHtml(item) {
-        const history = state.prespisok.history || {};
-        const rows = [];
-        if (item.type === "tare" && history.byTare && Array.isArray(history.byTare[item.id])) rows.push(...history.byTare[item.id]);
-        (item.rows || []).forEach((row) => {
-            const found = history.byShk && history.byShk[row.shk] ? history.byShk[row.shk] : [];
-            rows.push(...found);
-        });
-        const unique = [];
-        const seen = new Set();
-        rows.forEach((row) => { if (row && row.id && !seen.has(row.id)) { seen.add(row.id); unique.push(row); } });
-        if (!unique.length) return "<div class='prespisok-history'><strong>История разборов</strong><br>По этим ШК/таре разборов не найдено. Белое пятно на карте, только без романтики.</div>";
-        const lines = unique.slice(0, 6).map((row) => "- " + (row.source || "WMS+") + " · " + row.title + " · " + (row.verdict || row.status || "-") + " · " + formatRuDateTime(row.updated_at)).join("\n");
-        return "<div class='prespisok-history copyable' data-copy-value='" + escapeHtml(lines) + "' title='Нажми, чтобы скопировать'><strong>История разборов</strong>\n" + escapeHtml(lines) + (unique.length > 6 ? "\n+" + (unique.length - 6) + " еще" : "") + "</div>";
-    }
-
     function prespisokActionsForItem(item) {
         if ((Number(item.price) || 0) < 1000) return [
             { key: "movement", label: "Движение", needsExtra: false, createsTask: false },
@@ -13583,11 +13567,11 @@
 
     function prespisokItemHeadingHtml(item) {
         if (!item) return "";
-        if (item.type !== "tare") return "<h3>" + escapeHtml(item.title) + "</h3>";
+        if (item.type !== "tare") return "<h3 class='task-detail-title'>" + escapeHtml(item.title) + "</h3>";
         const shks = (item.rows || []).map((row) => row.shk).filter(Boolean);
         const visible = shks.slice(0, 5).join(", ");
         const tail = shks.length > 5 ? " +" + (shks.length - 5) : "";
-        return "<h3>ШК в таре: " + escapeHtml(visible + tail) + "</h3><p class='prespisok-entity-subtitle'>Тара: " + escapeHtml(item.id) + "</p>";
+        return "<h3 class='task-detail-title'>ШК в таре: " + escapeHtml(visible + tail) + "</h3><p class='prespisok-entity-subtitle'>Тара: " + escapeHtml(item.id) + "</p>";
     }
 
     function renderPrespisokPlay() {
@@ -13613,40 +13597,66 @@
         void reservePrespisokItem(item);
         const progress = (state.prespisok.actions || []).length;
         const total = state.prespisok.items.length;
-        const rowsHtml = (item.rows || []).map((row) => "<div class='prespisok-item-line'><strong>" + escapeHtml(row.shk) + "</strong><span>" + escapeHtml(row.status || "-") + "</span><span>" + escapeHtml(formatMoney(row.price)) + "</span></div>").join("");
-        const actions = prespisokActionsForItem(item);
-        const cheapHint = (Number(item.price) || 0) < 1000 ? "<div class='status-line good'>Цена меньше 1000 ₽. Сценарий: проверить на “Без ШК”.</div>" : "";
         const itemElapsed = prespisokItemElapsedMs();
         const kick = state.prespisok.itemTimerKick && Date.now() - state.prespisok.itemTimerKick < 1400 ? " kick" : "";
+        // Same picker/compose/info-grid/tare-box/history-feed shell as the
+        // task detail card (renderTaskDetail) -- only the field values and
+        // the verdict-option list are предсписок-specific. Kept the HUD
+        // strip and dark page shell (prespisokTopHtml, #prespisokModal's own
+        // background) as-is per the "фон остаётся тёмным" instruction.
+        const rawActions = prespisokActionsForItem(item);
+        const pickerOptions = [{ key: "", label: "Выбрать решение" }].concat(rawActions);
+        if (!pickerOptions.some((option) => option.key === state.prespisok.selectedAction)) state.prespisok.selectedAction = "";
+        const cheapHint = (Number(item.price) || 0) < 1000 ? "<div class='status-line good'>Цена меньше 1000 ₽. Сценарий: проверить на «Без ШК».</div>" : "";
+        const predictedTs = parseDateTime(item.predictedWriteoffAt).ts;
+        const countdownHtml = predictedTs
+            ? "<div class='task-detail-countdown " + writeoffCountdownTone(predictedTs) + "'>" + escapeHtml(formatWriteoffCountdown(predictedTs)) + "</div>"
+            : "";
+        const tareIds = (item.rows || []).map((row) => row.shk).filter(Boolean);
+        const tareBoxHtml = item.type === "tare"
+            ? "<div class='task-tare-box'>"
+                + "<div class='task-tare-head'><strong>ШК в таре · " + item.rows.length + "</strong><div class='task-tare-head-actions'><button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(tareIds.join("\n")) + "'>Скопировать все</button></div></div>"
+                + "<div class='task-tare-list'>" + (item.rows || []).map(taskTareRowHtml).join("") + "</div>"
+                + "</div>"
+            : "";
         target.innerHTML = prespisokTopHtml("Таймер идет. Если закрыть режим, прогресс сохранится, но персонаж будет осуждать молча.")
             + "<section class='prespisok-play-panel'>"
             + "<div class='prespisok-hud'>"
             + "<div id='prespisokItemTimerCard' class='prespisok-hud-card prespisok-item-timer-card " + escapeHtml(prespisokItemTimerTone(itemElapsed) + kick) + "'><span>Текущая цель</span><strong id='prespisokItemTimer'>" + escapeHtml(formatDuration(itemElapsed)) + "</strong></div>"
             + "<div class='prespisok-hud-card'><span>Прогресс</span><strong>" + progress + "/" + total + "</strong></div>"
             + "<div class='prespisok-hud-card'><span>Исключения</span><strong>" + state.prespisok.excludedCount + "</strong></div>"
-            + "<div class='prespisok-hud-card'><span>Цена цели</span><strong>" + escapeHtml(formatMoney(item.price)) + "</strong></div>"
             + "</div>"
-            + "<div class='prespisok-task-card'>"
-            + "<article class='prespisok-task-main'>"
-            + prespisokItemHeadingHtml(item)
-            + "<div class='prespisok-badge-row'><span class='prespisok-badge hot'>" + escapeHtml(item.type === "tare" ? "Задача на тару" : "Задача на ШК") + "</span><span class='prespisok-badge gold'>Списание: " + escapeHtml(formatPrespisokWriteoffAt(item.predictedWriteoffAt)) + "</span><span class='prespisok-badge'>" + escapeHtml(item.tareType || "тип тары не указан") + "</span></div>"
-            + "<div class='prespisok-info-grid'>"
-            + "<div class='prespisok-info'><span>Последний статус</span><strong>" + escapeHtml(item.status || "-") + "</strong></div>"
-            + "<div class='prespisok-info'><span>Дата статуса</span><strong>" + escapeHtml(formatRuDateTime(item.lastStatusAt)) + "</strong></div>"
-            + "<div class='prespisok-info'><span>Где находится тара</span><strong>" + escapeHtml((item.rows[0] && item.rows[0].tare_place) || "-") + "</strong></div>"
-            + "<div class='prespisok-info'><span>Офис назначения</span><strong>" + escapeHtml((item.rows[0] && item.rows[0].destination_office) || "-") + "</strong></div>"
+            + "<div class='tasks-flow-card task-detail-card prespisok-detail-card'>"
+            + "<div class='task-detail-head'><div>"
+            + "<div class='task-detail-title-row'>" + prespisokItemHeadingHtml(item) + "<div class='task-detail-price' style='" + priceStyle(item.price) + "'>" + escapeHtml(formatMoney(item.price)) + "</div>" + countdownHtml + "</div>"
+            + "<div class='review-table-subtitle'>" + escapeHtml(item.type === "tare" ? "Задача на тару" : "Задача на ШК") + " · " + escapeHtml(item.tareType || "тип тары не указан") + "</div>"
+            + "</div></div>"
+            + "<div class='task-detail-body'>"
+            + "<div class='task-info-grid'>"
+            + taskInfoItem("Последний статус", item.status)
+            + taskInfoItem("Дата статуса", formatRuDateTime(item.lastStatusAt))
+            + taskInfoItem("Где находится тара", item.rows[0] && item.rows[0].tare_place)
+            + taskInfoItem("Офис назначения", item.rows[0] && item.rows[0].destination_office)
             + "</div>"
-            + (item.type === "tare" ? "<div class='prespisok-items'>" + rowsHtml + "</div>" : "")
-            + prespisokHistoryHtml(item)
-            + "</article>"
-            + "<aside class='prespisok-side'>"
-            + "<div class='prespisok-snark'>" + escapeHtml(prespisokSnark(item)) + "</div>"
             + cheapHint
-            + "<div class='prespisok-actions'>" + actions.map((action) => "<button class='prespisok-action-btn' type='button' data-prespisok-action='" + escapeHtml(action.key) + "'>" + escapeHtml(action.label) + "</button>").join("") + "</div>"
-            + "<div id='prespisokExtraWrap' class='prespisok-extra hidden'></div>"
+            + tareBoxHtml
+            + "<div class='prespisok-snark'>" + escapeHtml(prespisokSnark(item)) + "</div>"
+            + "<div class='task-chat-panel'>"
+            + "<div id='prespisokDetailHistoryFeed' class='task-chat-history'>Загрузка истории…</div>"
+            + "<div class='task-form task-compose'>"
+            + "<div id='prespisokExtraWrap' class='task-compose-extra hidden'>"
+            + "<div class='task-compose-field'><label id='prespisokExtraLabel' for='prespisokExtraInput'></label><input id='prespisokExtraInput' type='text'></div>"
+            + "</div>"
+            + "<div class='task-compose-bar' id='prespisokComposeBar'>"
+            + prespisokVerdictPickerHtml(pickerOptions, state.prespisok.selectedAction)
+            + "<button id='submitPrespisokAction' class='task-compose-send' type='button' disabled title='Принять вердикт' aria-label='Принять вердикт'>✓</button>"
+            + "</div>"
             + "<div id='prespisokActionStatus' class='review-status'></div>"
-            + "</aside>"
-            + "</div></section>";
+            + "</div>"
+            + "</div>"
+            + "</div>"
+            + "</div>"
+            + "</section>";
         bindPrespisokClose();
         target.querySelectorAll("[data-copy-value]").forEach((field) => {
             field.addEventListener("click", async () => {
@@ -13656,10 +13666,163 @@
                 toast(copied ? "Скопировано." : "Браузер заблокировал копирование.", copied ? "success" : "error");
             });
         });
-        target.querySelectorAll("[data-prespisok-action]").forEach((button) => {
-            button.addEventListener("click", () => selectPrespisokAction(button.dataset.prespisokAction || ""));
+        target.querySelectorAll("[data-copy-shk]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const text = button.dataset.copyShk || "";
+                if (!text) return;
+                const copied = await copyText(text);
+                toast(copied ? "Список ШК скопирован." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+            });
         });
+        target.querySelectorAll("[data-copy-single-shk]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const text = normalizeIdentifier(button.dataset.copySingleShk);
+                if (!text) return;
+                const copied = await copyText(text);
+                toast(copied ? "ШК скопирован." : "Браузер заблокировал копирование.", copied ? "success" : "error");
+            });
+        });
+        const verdictTrigger = $("prespisokVerdictTrigger");
+        if (verdictTrigger) verdictTrigger.addEventListener("click", () => {
+            const picker = $("prespisokVerdictPicker");
+            if (picker && picker.classList.contains("is-open")) closePrespisokVerdictPicker();
+            else openPrespisokVerdictPicker();
+        });
+        const verdictPopup = $("prespisokVerdictPopup");
+        if (verdictPopup) verdictPopup.querySelectorAll(".task-verdict-option").forEach((button) => {
+            button.addEventListener("click", () => selectPrespisokVerdictOption(button.dataset.value || ""));
+        });
+        document.removeEventListener("click", prespisokVerdictOutsideClick);
+        document.addEventListener("click", prespisokVerdictOutsideClick);
+        const verdictSelect = $("prespisokVerdictInput");
+        if (verdictSelect) verdictSelect.addEventListener("change", updatePrespisokComposeForm);
+        const extraInput = $("prespisokExtraInput");
+        if (extraInput) extraInput.addEventListener("input", updatePrespisokComposeForm);
+        const submitBtn = $("submitPrespisokAction");
+        if (submitBtn) submitBtn.addEventListener("click", () => {
+            const extra = normalizeText($("prespisokExtraInput") && $("prespisokExtraInput").value);
+            void applyPrespisokAction(state.prespisok.selectedAction, extra);
+        });
+        updatePrespisokComposeForm();
+        void loadAndRenderPrespisokDetailHistory(item);
         updatePrespisokTimer();
+    }
+
+    function prespisokVerdictPickerHtml(options, selectedKey) {
+        const selectedLabel = (options.find((option) => option.key === selectedKey) || options[0]).label;
+        return "<div class='task-verdict-picker' id='prespisokVerdictPicker'>"
+            + "<button type='button' id='prespisokVerdictTrigger' class='task-verdict-trigger' aria-label='Решение'><span id='prespisokVerdictTriggerLabel' class='task-verdict-trigger-label'>" + escapeHtml(selectedLabel) + "</span><span class='task-verdict-chevron' aria-hidden='true'>▾</span></button>"
+            + "<select id='prespisokVerdictInput' class='task-verdict-native-select' aria-hidden='true' tabindex='-1'>" + options.map((option) => "<option value='" + escapeHtml(option.key) + "' " + (option.key === selectedKey ? "selected" : "") + ">" + escapeHtml(option.label) + "</option>").join("") + "</select>"
+            + "<div id='prespisokVerdictPopup' class='task-verdict-popup'>" + options.filter((option) => option.key).map((option) => "<button type='button' class='task-verdict-option" + (option.key === selectedKey ? " is-selected" : "") + "' data-value='" + escapeHtml(option.key) + "'>" + escapeHtml(option.label) + "</button>").join("") + "</div>"
+            + "</div>";
+    }
+
+    function openPrespisokVerdictPicker() {
+        const picker = $("prespisokVerdictPicker");
+        if (picker) picker.classList.add("is-open");
+    }
+
+    function closePrespisokVerdictPicker() {
+        const picker = $("prespisokVerdictPicker");
+        if (picker) picker.classList.remove("is-open");
+    }
+
+    function prespisokVerdictOutsideClick(event) {
+        const picker = $("prespisokVerdictPicker");
+        if (!picker || !picker.classList.contains("is-open")) return;
+        if (!picker.contains(event.target)) closePrespisokVerdictPicker();
+    }
+
+    function selectPrespisokVerdictOption(value) {
+        const nativeSelect = $("prespisokVerdictInput");
+        if (!nativeSelect) return;
+        nativeSelect.value = value;
+        const item = currentPrespisokItem();
+        const actions = item ? prespisokActionsForItem(item) : [];
+        const label = (actions.find((action) => action.key === value) || {}).label || "Выбрать решение";
+        const labelEl = $("prespisokVerdictTriggerLabel");
+        if (labelEl) labelEl.textContent = label;
+        const popup = $("prespisokVerdictPopup");
+        if (popup) popup.querySelectorAll(".task-verdict-option").forEach((button) => {
+            button.classList.toggle("is-selected", button.dataset.value === value);
+        });
+        closePrespisokVerdictPicker();
+        const trigger = $("prespisokVerdictTrigger");
+        if (trigger) {
+            trigger.classList.remove("is-pop");
+            void trigger.offsetWidth;
+            trigger.classList.add("is-pop");
+        }
+        nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function updatePrespisokComposeForm() {
+        const item = currentPrespisokItem();
+        const actions = item ? prespisokActionsForItem(item) : [];
+        const actionKey = normalizeText($("prespisokVerdictInput") && $("prespisokVerdictInput").value);
+        const actionDef = actions.find((action) => action.key === actionKey);
+        state.prespisok.selectedAction = actionDef ? actionKey : "";
+        const needsExtra = Boolean(actionDef && actionDef.needsExtra);
+        const extraWrap = $("prespisokExtraWrap");
+        const extraLabelEl = $("prespisokExtraLabel");
+        const extraInput = $("prespisokExtraInput");
+        if (extraWrap) extraWrap.classList.toggle("hidden", !needsExtra);
+        if (needsExtra && extraLabelEl) extraLabelEl.textContent = actionDef.extraLabel || "";
+        if (needsExtra && extraInput) extraInput.placeholder = actionDef.extraPlaceholder || "";
+        const picker = $("prespisokVerdictPicker");
+        if (picker) picker.classList.toggle("is-full", Boolean(actionDef) && !needsExtra);
+        const extra = normalizeText(extraInput && extraInput.value);
+        const missing = [];
+        if (!actionDef) missing.push("Решение");
+        if (needsExtra && !extra) missing.push(actionDef.extraLabel || "Доп. поле");
+        const button = $("submitPrespisokAction");
+        if (button) {
+            const ready = !missing.length && !state.prespisok.processing;
+            const wasVisible = button.classList.contains("is-visible");
+            button.disabled = !ready;
+            button.classList.toggle("is-visible", ready);
+            button.title = missing.length ? "Не заполнено: " + missing.join(", ") : "";
+            if (ready && !wasVisible) {
+                button.classList.remove("is-pop");
+                void button.offsetWidth;
+                button.classList.add("is-pop");
+            }
+        }
+    }
+
+    // Same history feed component tasks use (taskHistoryFeedItemHtml),
+    // fed from state.prespisok.history -- real wms_tasks rows already
+    // matched to this item's ШК/тара by loadPrespisokHistory at file-load
+    // time, so this stays a pure read/reshape, no new fetch.
+    async function loadAndRenderPrespisokDetailHistory(item) {
+        const target = $("prespisokDetailHistoryFeed");
+        if (!target) return;
+        const history = state.prespisok.history || {};
+        const rows = [];
+        if (item.type === "tare" && history.byTare && Array.isArray(history.byTare[item.id])) rows.push(...history.byTare[item.id]);
+        (item.rows || []).forEach((row) => {
+            const found = history.byShk && history.byShk[row.shk] ? history.byShk[row.shk] : [];
+            rows.push(...found);
+        });
+        const seen = new Set();
+        const entries = rows
+            .filter((row) => row && row.id && row.updated_at && !seen.has(row.id) && seen.add(row.id))
+            .map((row) => ({
+                created_at: row.updated_at,
+                event_type: "prespisok_history_ref",
+                actor_name: row.assignee || row.source || "WMS+",
+                actor_employee_id: "",
+                payload: { verdict: row.title + (row.verdict || row.status ? " — " + (row.verdict || row.status) : "") },
+            }))
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        if (!$("prespisokDetailHistoryFeed")) return;
+        if (!entries.length) {
+            target.innerHTML = "<strong>История</strong><div class='task-chat-empty'>По этим ШК/таре разборов не найдено.</div>";
+            return;
+        }
+        target.innerHTML = "<strong>История</strong>"
+            + "<div class='task-chat-head'><div>Дата</div><div>Сотрудник</div><div>Событие</div><div>Комментарий</div></div>"
+            + "<div class='task-history-feed'>" + entries.map(taskHistoryFeedItemHtml).join("") + "</div>";
     }
 
     function updatePrespisokTimer() {
@@ -13675,27 +13838,6 @@
             itemCard.className = "prespisok-hud-card prespisok-item-timer-card " + prespisokItemTimerTone(itemElapsed) + kick;
         }
         setTimeout(updatePrespisokTimer, 1000);
-    }
-
-    function selectPrespisokAction(actionKey) {
-        const item = currentPrespisokItem();
-        if (!item) return;
-        const action = prespisokActionsForItem(item).find((candidate) => candidate.key === actionKey);
-        if (!action) return;
-        state.prespisok.selectedAction = actionKey;
-        document.querySelectorAll("[data-prespisok-action]").forEach((button) => button.classList.toggle("active", button.dataset.prespisokAction === actionKey));
-        const wrap = $("prespisokExtraWrap");
-        if (!wrap) return;
-        if (action.needsExtra) {
-            wrap.classList.remove("hidden");
-            wrap.innerHTML = "<label for='prespisokExtraInput'>" + escapeHtml(action.extraLabel) + "</label><input id='prespisokExtraInput' type='text' placeholder='" + escapeHtml(action.extraPlaceholder || "Ссылка или направление") + "'><button id='submitPrespisokAction' class='prespisok-submit' type='button' disabled>Принять вердикт</button>";
-            $("prespisokExtraInput").addEventListener("input", () => { $("submitPrespisokAction").disabled = !normalizeText($("prespisokExtraInput").value); });
-            $("submitPrespisokAction").addEventListener("click", () => { void applyPrespisokAction(actionKey, normalizeText($("prespisokExtraInput").value)); });
-        } else {
-            wrap.classList.remove("hidden");
-            wrap.innerHTML = "<button id='submitPrespisokAction' class='prespisok-submit' type='button'>Принять вердикт</button>";
-            $("submitPrespisokAction").addEventListener("click", () => { void applyPrespisokAction(actionKey, ""); });
-        }
     }
 
     function prespisokActionLabel(actionKey, item) {
@@ -13807,6 +13949,7 @@
             };
             state.prespisok.actions.push(action);
             if (state.prespisok.reservations) delete state.prespisok.reservations[itemKey];
+            state.prespisok.selectedAction = "";
             state.prespisok.index += 1;
             state.prespisok.elapsedBeforeMs = prespisokElapsedMs();
             state.prespisok.itemElapsedBeforeMs = 0;
