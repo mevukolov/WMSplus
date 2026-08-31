@@ -775,6 +775,56 @@
         .prespisok-item-timer-card.danger { background: rgba(239,68,68,.26); box-shadow: 0 0 44px rgba(239,68,68,.24); transform: scale(1.07); animation: prespisokShake .34s linear infinite; }
         .prespisok-item-timer-card.doom { background: rgba(69,10,10,.78); box-shadow: 0 0 66px rgba(127,29,29,.46); transform: scale(1.13); animation: prespisokPanic .18s linear infinite; }
         .prespisok-item-timer-card.kick { animation: prespisokKick .7s cubic-bezier(.2,1.8,.2,1); }
+
+        /* Minimal play-screen header + borderless timer strip (point 1/1.1) */
+        .prespisok-play-top { position: relative; z-index: 2; text-align: center; padding-top: 2px; }
+        .prespisok-play-title { margin: 0; font-size: clamp(24px, 3.6vw, 38px); font-weight: 1000; letter-spacing: -.03em; color: #fff; }
+        .prespisok-play-close { position: absolute; top: -2px; right: 0; }
+        .prespisok-play-top .debug-sandbox-badge { margin: 8px auto 0; max-width: max-content; }
+        .prespisok-play-hud { text-align: center; margin: 14px 0 22px; }
+        .prespisok-play-hud-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: clamp(16px, 4vw, 40px); }
+        .prespisok-play-hud-stat { padding: 4px 6px; border-radius: 16px; transition: transform .25s ease, background .25s ease, box-shadow .25s ease; }
+        .prespisok-play-hud-stat span { display: block; color: rgba(255,255,255,.55); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+        .prespisok-play-hud-stat strong { display: block; margin-top: 5px; font-family: ui-serif, Georgia, "Times New Roman", serif; font-weight: 800; font-size: clamp(20px, 2.6vw, 28px); color: #fff; letter-spacing: -.01em; }
+        .prespisok-play-hud-stat strong small { font-family: inherit; font-size: 12px; font-weight: 700; opacity: .68; }
+        .prespisok-play-hud .prespisok-item-timer-card strong { font-size: clamp(24px, 3.2vw, 34px); }
+        .prespisok-streak-badge { margin: 12px auto 0; display: inline-block; padding: 8px 18px; border-radius: 999px; background: linear-gradient(120deg, #f97316, #facc15); color: #431407; font-weight: 1000; font-size: 15px; box-shadow: 0 10px 26px rgba(249,115,22,.4); animation: qnsStreakPop .38s cubic-bezier(.2,1.3,.3,1.2); }
+
+        /* Card stage + docked counters (points 4/5/6) */
+        .prespisok-stage { display: grid; grid-template-columns: minmax(90px, 150px) minmax(0, 1fr) minmax(90px, 150px); gap: 16px; align-items: start; }
+        .prespisok-stage-side { display: flex; align-items: center; justify-content: center; min-height: 96px; }
+        .prespisok-stage-center { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+        .prespisok-stage-below { display: flex; justify-content: center; }
+        .prespisok-counter { border-radius: 18px; padding: 12px 16px; text-align: center; transition: transform .2s ease; }
+        .prespisok-counter span { display: block; font-size: 11px; font-weight: 1000; text-transform: uppercase; letter-spacing: .08em; opacity: .78; }
+        .prespisok-counter strong { display: block; margin-top: 5px; font-size: clamp(18px, 2.2vw, 24px); line-height: 1; }
+        .prespisok-counter-writeoff { background: rgba(239,68,68,.18); border: 1px solid rgba(239,68,68,.36); color: #fecaca; }
+        .prespisok-counter-saved { background: rgba(34,197,94,.18); border: 1px solid rgba(34,197,94,.36); color: #bbf7d0; }
+        .prespisok-counter-task { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22); color: #fff; }
+        .prespisok-counter.pop { animation: prespisokCounterPop .5s cubic-bezier(.2,1.6,.3,1.1); }
+        @keyframes prespisokCounterPop { 0% { transform: scale(1); } 45% { transform: scale(1.3); } 100% { transform: scale(1); } }
+
+        /* Bombastic exit animations (points 4/5/6/7) */
+        .prespisok-card-exit-burn { animation: prespisokBurnDown .76s cubic-bezier(.5,0,.75,0) forwards; pointer-events: none; }
+        @keyframes prespisokBurnDown {
+            0% { transform: translateY(0) scale(1) rotate(0deg); filter: brightness(1) saturate(1); opacity: 1; }
+            28% { transform: translateY(8px) scale(1.015) rotate(-.6deg); filter: brightness(1.2) saturate(1.4) hue-rotate(-10deg); box-shadow: 0 0 70px rgba(249,115,22,.6); }
+            100% { transform: translateY(240px) scale(.76) rotate(2deg); filter: brightness(.25) saturate(0) blur(3px); opacity: 0; }
+        }
+        .prespisok-card-exit-sparkle { animation: prespisokSparkleRight .72s cubic-bezier(.3,0,.4,1) forwards; pointer-events: none; }
+        @keyframes prespisokSparkleRight {
+            0% { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; filter: brightness(1); }
+            22% { transform: translateX(-10px) scale(1.04) rotate(-1deg); filter: brightness(1.5); box-shadow: 0 0 90px rgba(250,204,21,.65); }
+            100% { transform: translateX(280px) scale(.85) rotate(4deg); opacity: 0; filter: brightness(1.7); }
+        }
+        .prespisok-card-exit-slide { animation: prespisokSlideLeft .62s cubic-bezier(.3,0,.4,1) forwards; pointer-events: none; }
+        @keyframes prespisokSlideLeft {
+            0% { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; }
+            100% { transform: translateX(-280px) scale(.88) rotate(-3deg); opacity: 0; }
+        }
+        .prespisok-flash-overlay { position: fixed; inset: 0; z-index: 9997; pointer-events: none; background: radial-gradient(circle at var(--fx,50%) var(--fy,50%), rgba(255,255,255,.92), rgba(255,255,255,0) 62%); opacity: 0; animation: prespisokFlash .5s ease forwards; }
+        @keyframes prespisokFlash { 0% { opacity: 0; } 16% { opacity: .88; } 100% { opacity: 0; } }
+
         .prespisok-play-panel { max-height: calc(100dvh - 172px); overflow: auto; }
         .prespisok-task-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 18px; align-items: start; }
         .prespisok-task-main, .prespisok-side { border-radius: 24px; background: rgba(255,255,255,.94); color: #242038; padding: 20px; }
@@ -966,7 +1016,9 @@
         @keyframes prespisokShake { 0%,100% { transform: scale(1.07) translateX(0); } 25% { transform: scale(1.08) translateX(-2px); } 75% { transform: scale(1.08) translateX(2px); } }
         @keyframes prespisokPanic { 0%,100% { transform: scale(1.13) translate(0,0) rotate(0deg); } 25% { transform: scale(1.15) translate(-3px,1px) rotate(-1deg); } 50% { transform: scale(1.14) translate(3px,-1px) rotate(1deg); } 75% { transform: scale(1.16) translate(-1px,3px) rotate(-.5deg); } }
         @keyframes prespisokKick { 0% { transform: scale(.7) rotate(-6deg); opacity: .4; } 55% { transform: scale(1.22) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
-        @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .quick-no-shk-game, .quick-no-shk-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; } .quick-no-shk-wrap { overflow: auto; } .quick-no-shk-panel { overflow: visible; } .quick-no-shk-photo { max-height: 42dvh; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }
+        @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-stage, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .quick-no-shk-game, .quick-no-shk-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; }
+            .prespisok-stage-side { min-height: 0; }
+            .prespisok-stage-left { order: 2; } .prespisok-stage-center { order: 1; } .prespisok-stage-right { order: 3; } .quick-no-shk-wrap { overflow: auto; } .quick-no-shk-panel { overflow: visible; } .quick-no-shk-photo { max-height: 42dvh; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }
         @media (max-width: 1120px) { .journal-action-list { max-height: none; } }
         @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

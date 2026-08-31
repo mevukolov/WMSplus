@@ -65,6 +65,9 @@
     const QUICK_NO_SHK_STREAK_THRESHOLD_MS = 6000;
     const QUICK_NO_SHK_TIMER_WARN_MS = 8000;
     const QUICK_NO_SHK_TIMER_HOT_MS = 16000;
+    // Предсписок items need reading tare/history before deciding, so the
+    // "fast" bar sits well above quick-no-shk's photo-check threshold.
+    const PRESPISOK_STREAK_THRESHOLD_MS = 25000;
     const NO_SHK_SEARCH_LIMIT = 120;
     const NO_SHK_PHOTO_PREVIEW_LIMIT = 18;
     const NO_SHK_FOUND_COMMENT = "Разбор Без ШК: товар опознан в WMS+.";
@@ -6889,6 +6892,11 @@
             if (wrap) wrap.innerHTML = "<div class='empty-state'>Загружаю карточку…</div>";
             row = await hydrateFullTaskRow(row);
             if (!state.taskDetail || state.taskDetail.rowId !== id) return;
+            // Same height-FLIP the history feed already uses (measure before,
+            // render, animate the jump) instead of snapping straight from the
+            // one-line loading placeholder to the full card.
+            animateTaskDetailCardResize(() => renderTaskDetail(row));
+            return;
         }
         renderTaskDetail(row);
     }
@@ -13247,7 +13255,7 @@
     }
 
     function prespisokMoneyStats() {
-        const result = { saved: 0, writeoff: 0, savedCount: 0, writeoffCount: 0, autoWriteoffCount: 0 };
+        const result = { saved: 0, writeoff: 0, savedCount: 0, writeoffCount: 0, autoWriteoffCount: 0, taskCount: 0 };
         (state.prespisok.actions || []).forEach((action) => {
             const key = normalizeText(action.action_key);
             const verdict = normalizeForMatch(action.verdict);
@@ -13262,9 +13270,28 @@
                 result.writeoff += price;
                 result.writeoffCount += shkCount;
                 if (key === "auto_writeoff" || verdict === "автосписание") result.autoWriteoffCount += shkCount;
+                return;
             }
+            if (key === "task") result.taskCount += 1;
         });
         return result;
+    }
+
+    // Streak is derived from the actions already recorded (item_elapsed_ms
+    // per action) rather than tracked as separate incremented state, same
+    // reasoning as prespisokMoneyStats() above -- one source of truth, no
+    // risk of the counter drifting from the action log.
+    function prespisokStreakStats() {
+        const actions = state.prespisok.actions || [];
+        let current = 0;
+        let best = 0;
+        actions.forEach((action) => {
+            const ms = Number(action.item_elapsed_ms);
+            if (Number.isFinite(ms) && ms < PRESPISOK_STREAK_THRESHOLD_MS) current += 1;
+            else current = 0;
+            if (current > best) best = current;
+        });
+        return { current, best };
     }
 
     function prespisokTopStatsHtml() {
@@ -13297,6 +13324,105 @@
     function setPrespisokPlayMode(enabled) {
         const target = $("prespisokWrap");
         if (target) target.classList.toggle("is-playing", Boolean(enabled));
+    }
+
+    // Minimal header for the active-item play screen only -- prespisokTopHtml
+    // (kicker/subtitle/top stats) stays as-is for the setup/wait/finish
+    // screens that still use it.
+    function prespisokPlayTopHtml() {
+        const debugBadge = state.prespisok && state.prespisok.debugMode
+            ? "<div class='debug-sandbox-badge'>⚠ ОТЛАДКА — ничего не сохраняется</div>" : "";
+        return "<div class='prespisok-play-top'>"
+            + "<h2 class='prespisok-play-title'>Предсписок</h2>"
+            + debugBadge
+            + "<button id='closePrespisok' class='btn btn-square prespisok-close prespisok-play-close' type='button' aria-label='Закрыть'>×</button>"
+            + "</div>";
+    }
+
+    // Borderless timer/progress strip -- keeps the exact fresh/warn/danger/doom
+    // tone escalation and kick-pop (.prespisok-item-timer-card + prespisokShake/
+    // Panic/Kick keyframes), just without the old bordered tile box.
+    function prespisokPlayHudHtml(progress, total, itemElapsed, kick) {
+        const streak = prespisokStreakStats();
+        const streakBadge = streak.current >= 2
+            ? "<div class='prespisok-streak-badge'>🔥 Комбо ×" + streak.current + "</div>"
+            : "";
+        return "<div class='prespisok-play-hud'>"
+            + "<div class='prespisok-play-hud-row'>"
+            + "<div class='prespisok-play-hud-stat'><span>Общее время</span><strong id='prespisokTotalTimer'>" + escapeHtml(formatDuration(prespisokElapsedMs())) + "</strong></div>"
+            + "<div id='prespisokItemTimerCard' class='prespisok-play-hud-stat prespisok-item-timer-card " + escapeHtml(prespisokItemTimerTone(itemElapsed) + kick) + "'><span>Текущая цель</span><strong id='prespisokItemTimer'>" + escapeHtml(formatDuration(itemElapsed)) + "</strong></div>"
+            + "<div class='prespisok-play-hud-stat'><span>Прогресс</span><strong>" + progress + "/" + total + (state.prespisok.excludedCount ? " <small>· " + state.prespisok.excludedCount + " искл.</small>" : "") + "</strong></div>"
+            + "</div>"
+            + streakBadge
+            + "</div>";
+    }
+
+    function prespisokCounterHtml(kind, label, value) {
+        const idBase = "prespisokCounter" + kind.charAt(0).toUpperCase() + kind.slice(1);
+        return "<div id='" + idBase + "' class='prespisok-counter prespisok-counter-" + kind + "'><span>" + escapeHtml(label) + "</span><strong id='" + idBase + "Value'>" + escapeHtml(value) + "</strong></div>";
+    }
+
+    function prespisokExitKindForAction(actionKey) {
+        if (actionKey === "auto_writeoff") return "burn";
+        if (actionKey === "movement") return "sparkle";
+        if (actionKey === "task") return "slide";
+        return "";
+    }
+
+    // Plays the exit animation on the card that's still on screen (before
+    // renderPrespisokPlay swaps in the next item), pops the matching counter
+    // to its new value, and resolves once the animation is done so the caller
+    // can advance to the next item right as the old card finishes leaving.
+    function playPrespisokExitAnimation(actionKey) {
+        const kind = prespisokExitKindForAction(actionKey);
+        const card = $("prespisokCard");
+        if (!kind || !card) return Promise.resolve();
+        const rect = card.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        let particleColor = "#f97316";
+        let exitClass = "prespisok-card-exit-burn";
+        let particleCount = 18;
+        let duration = 760;
+        let counterKind = "writeoff";
+        if (kind === "sparkle") {
+            particleColor = "#facc15";
+            exitClass = "prespisok-card-exit-sparkle";
+            particleCount = 28;
+            duration = 720;
+            counterKind = "saved";
+            const flash = document.createElement("div");
+            flash.className = "prespisok-flash-overlay";
+            flash.style.setProperty("--fx", cx + "px");
+            flash.style.setProperty("--fy", cy + "px");
+            document.body.appendChild(flash);
+            window.setTimeout(() => flash.remove(), 520);
+        } else if (kind === "slide") {
+            particleColor = "#818cf8";
+            exitClass = "prespisok-card-exit-slide";
+            particleCount = 14;
+            duration = 620;
+            counterKind = "task";
+        }
+        const burst = document.createElement("div");
+        burst.className = "quick-no-shk-burst";
+        burst.innerHTML = quickNoShkBurstParticlesHtml(particleCount, particleColor);
+        burst.style.left = cx + "px";
+        burst.style.top = cy + "px";
+        document.body.appendChild(burst);
+        window.setTimeout(() => burst.remove(), 800);
+        card.classList.add(exitClass);
+        const idBase = "prespisokCounter" + counterKind.charAt(0).toUpperCase() + counterKind.slice(1);
+        const counterEl = $(idBase);
+        const valueEl = $(idBase + "Value");
+        if (counterEl && valueEl) {
+            const stats = prespisokMoneyStats();
+            valueEl.textContent = counterKind === "task" ? String(stats.taskCount || 0) : formatMoney(counterKind === "saved" ? stats.saved : stats.writeoff);
+            counterEl.classList.remove("pop");
+            void counterEl.offsetWidth;
+            counterEl.classList.add("pop");
+        }
+        return new Promise((resolve) => window.setTimeout(resolve, duration));
     }
 
     function renderPrespisok() {
@@ -13716,18 +13842,17 @@
         return pick(PRESPISOK_SNARK.openers, 0) + " " + pick(PRESPISOK_SNARK.spikes, 3) + " " + pick(PRESPISOK_SNARK.needles, 7) + " " + pick(PRESPISOK_SNARK.closers, 19);
     }
 
+    // Three verdicts for every item now, price only changes whether
+    // "Автосписание" needs a justifying comment -- collapsed from the old
+    // 2/6-option split (release/writeoff/request folded into "Создать
+    // задачу", which already existed as its own createsTask option, so
+    // second-line task creation is unchanged).
     function prespisokActionsForItem(item) {
-        if ((Number(item.price) || 0) < 1000) return [
-            { key: "movement", label: "Движение", needsExtra: false, createsTask: false },
-            { key: "auto_writeoff", label: "Автосписание", needsExtra: false, createsTask: false },
-        ];
+        const expensive = (Number(item.price) || 0) >= 1000;
         return [
-            { key: "movement", label: "Движение", needsExtra: true, extraLabel: "Укажите комментарий к движению", extraPlaceholder: "Что проверили и почему закрываем как движение", createsTask: false },
-            { key: "auto_writeoff", label: "Автосписание", needsExtra: true, extraLabel: "Укажите комментарий к автосписанию", extraPlaceholder: "Что проверили и почему допускаем автосписание", createsTask: false },
-            { key: "release", label: "Нужен релиз", needsExtra: true, extraLabel: "Вставьте ссылку на запрос релиза", createsTask: true },
-            { key: "writeoff", label: "Нужно списание", needsExtra: true, extraLabel: "Вставьте ссылку", createsTask: true },
-            { key: "request", label: "Отправлен запрос", needsExtra: true, extraLabel: "Вставьте ссылку или направление запроса", createsTask: true },
-            { key: "task", label: "Создать задачу", needsExtra: false, createsTask: true },
+            { key: "auto_writeoff", label: "Автосписание", tone: "red", needsExtra: expensive, extraLabel: "Укажите комментарий к автосписанию", extraPlaceholder: "Что проверили и почему допускаем автосписание", createsTask: false },
+            { key: "movement", label: "Движение", tone: "green", needsExtra: false, createsTask: false },
+            { key: "task", label: "Создать задачу", tone: "", needsExtra: false, createsTask: true },
         ];
     }
 
@@ -13785,25 +13910,19 @@
                 + "<div class='task-tare-list'>" + (item.rows || []).map(taskTareRowHtml).join("") + "</div>"
                 + "</div>"
             : "";
-        target.innerHTML = prespisokTopHtml("Таймер идет. Если закрыть режим, прогресс сохранится, но персонаж будет осуждать молча.")
+        const moneyStats = prespisokMoneyStats();
+        target.innerHTML = prespisokPlayTopHtml()
             + "<section class='prespisok-play-panel'>"
-            + "<div class='prespisok-hud'>"
-            + "<div id='prespisokItemTimerCard' class='prespisok-hud-card prespisok-item-timer-card " + escapeHtml(prespisokItemTimerTone(itemElapsed) + kick) + "'><span>Текущая цель</span><strong id='prespisokItemTimer'>" + escapeHtml(formatDuration(itemElapsed)) + "</strong></div>"
-            + "<div class='prespisok-hud-card'><span>Прогресс</span><strong>" + progress + "/" + total + "</strong></div>"
-            + "<div class='prespisok-hud-card'><span>Исключения</span><strong>" + state.prespisok.excludedCount + "</strong></div>"
-            + "</div>"
-            + "<div class='tasks-flow-card task-detail-card prespisok-detail-card'>"
+            + prespisokPlayHudHtml(progress, total, itemElapsed, kick)
+            + "<div class='prespisok-stage'>"
+            + "<div class='prespisok-stage-side prespisok-stage-left'>" + prespisokCounterHtml("task", "Создано", String(moneyStats.taskCount || 0)) + "</div>"
+            + "<div class='prespisok-stage-center'>"
+            + "<div id='prespisokCard' class='tasks-flow-card task-detail-card prespisok-detail-card'>"
             + "<div class='task-detail-head'><div>"
             + "<div class='task-detail-title-row'>" + prespisokItemHeadingHtml(item) + "<div class='task-detail-price' style='" + priceStyle(item.price) + "'>" + escapeHtml(formatMoney(item.price)) + "</div>" + countdownHtml + "</div>"
             + "<div class='review-table-subtitle'>" + escapeHtml(item.type === "tare" ? "Задача на тару" : "Задача на ШК") + " · " + escapeHtml(item.tareType || "тип тары не указан") + "</div>"
             + "</div></div>"
             + "<div class='task-detail-body'>"
-            + "<div class='task-info-grid'>"
-            + taskInfoItem("Последний статус", item.status)
-            + taskInfoItem("Дата статуса", formatRuDateTime(item.lastStatusAt))
-            + taskInfoItem("Где находится тара", item.rows[0] && item.rows[0].tare_place)
-            + taskInfoItem("Офис назначения", item.rows[0] && item.rows[0].destination_office)
-            + "</div>"
             + cheapHint
             + tareBoxHtml
             + "<div class='prespisok-snark'>" + escapeHtml(prespisokSnark(item)) + "</div>"
@@ -13821,6 +13940,10 @@
             + "</div>"
             + "</div>"
             + "</div>"
+            + "</div>"
+            + "<div class='prespisok-stage-below'>" + prespisokCounterHtml("writeoff", "Списано", formatMoney(moneyStats.writeoff)) + "</div>"
+            + "</div>"
+            + "<div class='prespisok-stage-side prespisok-stage-right'>" + prespisokCounterHtml("saved", "Спасено", formatMoney(moneyStats.saved)) + "</div>"
             + "</div>"
             + "</section>";
         bindPrespisokClose();
@@ -13937,6 +14060,11 @@
         if (needsExtra && extraInput) extraInput.placeholder = actionDef.extraPlaceholder || "";
         const picker = $("prespisokVerdictPicker");
         if (picker) picker.classList.toggle("is-full", Boolean(actionDef) && !needsExtra);
+        const bar = $("prespisokComposeBar");
+        if (bar) {
+            bar.classList.remove("tone-green", "tone-red");
+            if (actionDef && actionDef.tone) bar.classList.add("tone-" + actionDef.tone);
+        }
         const extra = normalizeText(extraInput && extraInput.value);
         const missing = [];
         if (!actionDef) missing.push("Решение");
@@ -13983,7 +14111,33 @@
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         if (!$("prespisokDetailHistoryFeed")) return;
         if (!entries.length) {
-            target.innerHTML = "<strong>История</strong><div class='task-chat-empty'>По этим ШК/таре разборов не найдено.</div>";
+            // No real matched history -- build the same two-line story tasks'
+            // own synthesizeForecastHistoryEntries shows: last movement
+            // (3-letter status + date) then the "ШК в предсписке" marker,
+            // through the same taskHistoryFeedItemHtml renderer.
+            const synthEntries = [];
+            const newestRow = (item.rows || [])[0];
+            const lastStatusIso = parseDateTime(item.lastStatusAt).iso;
+            if (lastStatusIso) {
+                synthEntries.push({
+                    created_at: lastStatusIso,
+                    event_type: "task_last_movement_status",
+                    actor_name: "",
+                    actor_employee_id: "",
+                    payload: { comment: (newestRow && (newestRow.tare_place || newestRow.destination_office)) || "Склад не указан", status_code: latinStatusCode(item.status) },
+                });
+            }
+            synthEntries.push({
+                created_at: state.prespisok.startedAt || new Date().toISOString(),
+                event_type: "task_prespisok_uploaded",
+                actor_name: "Система",
+                actor_employee_id: "",
+                payload: {},
+            });
+            synthEntries.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            target.innerHTML = "<strong>История</strong>"
+                + "<div class='task-chat-head'><div>Дата</div><div>Сотрудник</div><div>Событие</div><div>Комментарий</div></div>"
+                + "<div class='task-history-feed'>" + synthEntries.map(taskHistoryFeedItemHtml).join("") + "</div>";
             return;
         }
         target.innerHTML = "<strong>История</strong>"
@@ -14001,7 +14155,7 @@
         if (itemTimer) itemTimer.textContent = formatDuration(itemElapsed);
         if (itemCard) {
             const kick = state.prespisok.itemTimerKick && Date.now() - state.prespisok.itemTimerKick < 1400 ? " kick" : "";
-            itemCard.className = "prespisok-hud-card prespisok-item-timer-card " + prespisokItemTimerTone(itemElapsed) + kick;
+            itemCard.className = "prespisok-play-hud-stat prespisok-item-timer-card " + prespisokItemTimerTone(itemElapsed) + kick;
         }
         setTimeout(updatePrespisokTimer, 1000);
     }
@@ -14125,6 +14279,7 @@
             await insertPrespisokAction(action);
             await upsertPrespisokRun("in_progress");
             persistPrespisokState();
+            await playPrespisokExitAnimation(actionKey);
             renderPrespisokPlay();
         } catch (error) {
             console.error("prespisok action failed:", error);
