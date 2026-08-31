@@ -6840,6 +6840,14 @@
     }
 
     async function openTaskDetail(id, source) {
+        // Guard against a dangling Флоу embedded session: taskDetailModal is only
+        // ever opened from this function (grep confirms no other call site sets
+        // it active), so this single check covers every path in regardless of how
+        // the previous embedded session was left -- the card's own "×"
+        // (closeTaskDetail), closeFlowModals() (used by showHome/showFlowPage/
+        // showUploads/showReviewPage/showRequestsPage/showInactivePage), or any
+        // future closer that doesn't happen to also reset embedded mode.
+        if (source !== "flow" && state.flow.embedded) setFlowEmbeddedMode(false);
         let row = findTaskRow(id);
         if (!row) return;
         if (source !== "inactive" && state.flow.allowConflictOpenId !== id && flowRowIsLockedForOther(row, currentFlowEmployee())) {
