@@ -5984,6 +5984,8 @@
     }
 
     function taskMovementStatusOptions(row) {
+        const precomputed = taskPayload(row).movement_status_options;
+        if (Array.isArray(precomputed)) return precomputed;
         const result = new Set();
         taskItems(row).forEach((item) => {
             const code = latinStatusCode(item.status);
@@ -11673,6 +11675,8 @@
     }
 
     function taskStatusCodeLabel(row) {
+        const precomputed = taskPayload(row).status_code_label;
+        if (typeof precomputed === "string") return precomputed;
         const codes = Array.from(new Set(taskItems(row).map((item) => latinStatusCode(item.status)).filter(Boolean)));
         if (!codes.length) return "";
         return codes.length <= 3 ? codes.join("/") : codes.slice(0, 3).join("/") + "+" + (codes.length - 3);
@@ -12037,10 +12041,20 @@
         const taskItems = taskItemsFromSourceRows(options.rows);
         const itemName = itemNameFromRows(options.rows);
         const writeoffInfo = writeoffDateInfoForRows(options.rows, options.dueDate);
+        // Precomputed so list views (Review/Requests table, filter
+        // dropdowns) can be answered from a few bytes instead of needing
+        // the full task_items array -- see taskStatusCodeLabel/
+        // taskMovementStatusOptions, which prefer these when present and
+        // only fall back to scanning task_items for rows written before
+        // this existed.
+        const statusCodes = Array.from(new Set(taskItems.map((item) => latinStatusCode(item.status)).filter(Boolean)));
+        const movementStatusOptions = Array.from(new Set(taskItems.map((item) => latinStatusCode(item.status) || normalizeText(item.status)).filter(Boolean)));
         const sourcePayload = {
             ...(options.payload || {}),
             task_items: taskItems,
             item_name: itemName || (options.payload && options.payload.item_name) || "",
+            status_code_label: statusCodes.length ? (statusCodes.length <= 3 ? statusCodes.join("/") : statusCodes.slice(0, 3).join("/") + "+" + (statusCodes.length - 3)) : "",
+            movement_status_options: movementStatusOptions,
             writeoff_date: writeoffInfo.date || "",
             writeoff_date_source: writeoffInfo.source,
         };
