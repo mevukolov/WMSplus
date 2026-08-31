@@ -13722,28 +13722,58 @@
         }
     }
 
-    function addPrespisokHistory(history, row) {
+    // Batched sibling of loadTaskDetailHistory(id) -- предсписок can match
+    // dozens of tasks in one file, so fetch all of their real history rows
+    // in chunked .in() calls instead of one query per task.
+    async function loadTaskHistoryForIds(ids) {
+        const db = supabaseDb();
+        const byTaskId = {};
+        if (!db || !ids || !ids.length) return byTaskId;
+        for (const chunk of chunkArray(ids, 80)) {
+            const read = await readOptionalRows(db, FLOW_HISTORY_TABLE, (query) => query
+                .select("*")
+                .in("task_id", chunk)
+                .order("created_at", { ascending: true })
+                .limit(5000));
+            if (read.ok) (read.rows || []).forEach((row) => {
+                if (!byTaskId[row.task_id]) byTaskId[row.task_id] = [];
+                byTaskId[row.task_id].push(row);
+            });
+        }
+        return byTaskId;
+    }
+
+    // Indexes one matched task's FULL event list (not a one-line summary)
+    // under every shk/tare it touches. Stores {taskId, entries} records so
+    // loadAndRenderPrespisokDetailHistory can dedupe by task before
+    // flattening -- a tare item's rows commonly belong to the same task,
+    // and without dedupe that task's timeline would repeat once per row.
+    function indexPrespisokTaskHistory(history, row, entries) {
         if (!row || !row.id) return;
-        const entry = {
-            id: row.id,
-            source: normalizeText(row.__history_source) || "WMS+",
-            title: displayTaskTitle(row),
-            task_type: row.task_type,
-            status: taskStatus(row),
-            verdict: normalizeText(row.opp_verdict),
-            assignee: [normalizeText(row.assignee_name), normalizeText(row.assignee_employee_id)].filter(Boolean).join(" / "),
-            updated_at: row.updated_at,
-            completed_at: row.completed_at || row.finalized_at,
-        };
+        const record = { taskId: row.id, entries };
         (Array.isArray(row.source_shk_ids) ? row.source_shk_ids : []).map(normalizeIdentifier).filter(Boolean).forEach((shk) => {
             if (!history.byShk[shk]) history.byShk[shk] = [];
-            history.byShk[shk].push(entry);
+            history.byShk[shk].push(record);
         });
         const tare = normalizeIdentifier(row.source_tare_id);
         if (tare) {
             if (!history.byTare[tare]) history.byTare[tare] = [];
-            history.byTare[tare].push(entry);
+            history.byTare[tare].push(record);
         }
+    }
+
+    // Same 4-source merge the task's own detail card uses
+    // (renderTaskDetailHistoryFeed): real wms_task_history rows +
+    // synthesizeLegacyHistoryEntries + synthesizeForecastHistoryEntries +
+    // synthesizeNoShkHistoryEntries -- so a ШК shows the identical
+    // timeline whether opened from the task card or from предсписок.
+    function prespisokFullTaskHistoryEntries(row, realHistoryRows) {
+        const real = realHistoryRows || [];
+        return real
+            .concat(synthesizeLegacyHistoryEntries(row, real))
+            .concat(synthesizeForecastHistoryEntries(row))
+            .concat(synthesizeNoShkHistoryEntries(row))
+            .filter((entry) => entry && entry.created_at);
     }
 
     async function loadPrespisokHistory(items) {
@@ -13753,14 +13783,20 @@
         const shks = Array.from(new Set(items.flatMap((item) => item.rows.map((row) => row.shk)).map(normalizeIdentifier).filter(Boolean)));
         const tares = Array.from(new Set(items.filter((item) => item.type === "tare").map((item) => item.id).map(normalizeIdentifier).filter(Boolean)));
         try {
+            const matchedTasks = new Map();
             for (const chunk of chunkArray(shks, 80)) {
                 const { data, error } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).overlaps("source_shk_ids", chunk).order("updated_at", { ascending: false }).limit(1000);
-                if (!error) (data || []).forEach((row) => addPrespisokHistory(history, { ...row, __history_source: "WMS+" }));
+                if (!error) (data || []).forEach((row) => matchedTasks.set(row.id, row));
             }
             for (const chunk of chunkArray(tares, 80)) {
                 const { data, error } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).in("source_tare_id", chunk).order("updated_at", { ascending: false }).limit(1000);
-                if (!error) (data || []).forEach((row) => addPrespisokHistory(history, { ...row, __history_source: "WMS+" }));
+                if (!error) (data || []).forEach((row) => matchedTasks.set(row.id, row));
             }
+            const historyByTaskId = await loadTaskHistoryForIds(Array.from(matchedTasks.keys()));
+            matchedTasks.forEach((row, taskId) => {
+                const entries = prespisokFullTaskHistoryEntries(row, historyByTaskId[taskId]);
+                indexPrespisokTaskHistory(history, row, entries);
+            });
         } catch (error) {
             console.warn("prespisok history failed:", error);
         }
@@ -14114,23 +14150,23 @@
         const target = $("prespisokDetailHistoryFeed");
         if (!target) return;
         const history = state.prespisok.history || {};
-        const rows = [];
-        if (item.type === "tare" && history.byTare && Array.isArray(history.byTare[item.id])) rows.push(...history.byTare[item.id]);
+        const records = [];
+        if (item.type === "tare" && history.byTare && Array.isArray(history.byTare[item.id])) records.push(...history.byTare[item.id]);
         (item.rows || []).forEach((row) => {
             const found = history.byShk && history.byShk[row.shk] ? history.byShk[row.shk] : [];
-            rows.push(...found);
+            records.push(...found);
         });
-        const seen = new Set();
-        const entries = rows
-            .filter((row) => row && row.id && row.updated_at && !seen.has(row.id) && seen.add(row.id))
-            .map((row) => ({
-                created_at: row.updated_at,
-                event_type: "prespisok_history_ref",
-                actor_name: row.assignee || row.source || "WMS+",
-                actor_employee_id: "",
-                payload: { verdict: row.title + (row.verdict || row.status ? " — " + (row.verdict || row.status) : "") },
-            }))
-            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        // Dedupe by task, not by event -- a tare item's rows often belong
+        // to the same task, and each matched task's full timeline is
+        // already indexed under every shk/tare it touches (see
+        // indexPrespisokTaskHistory), so without this a shared task's
+        // events would repeat once per matching row.
+        const seenTasks = new Set();
+        const entries = records
+            .filter((record) => record && record.taskId && !seenTasks.has(record.taskId) && seenTasks.add(record.taskId))
+            .flatMap((record) => record.entries || [])
+            .filter((entry) => entry && entry.created_at)
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         if (!$("prespisokDetailHistoryFeed")) return;
         if (!entries.length) {
             // No real matched history -- build the same two-line story tasks'
