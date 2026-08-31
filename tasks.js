@@ -13203,6 +13203,10 @@
         state.prespisok.startedAt = new Date().toISOString();
         state.prespisok.timerStartedAt = Date.now();
         state.prespisok.itemTimerStartedAt = Date.now();
+        // Same real-history fetch the upload path does -- without it every
+        // item here would fall back to the synthetic 2-line history too.
+        state.prespisok.history = await loadPrespisokHistory(items);
+        if (!state.prespisok.debugMode || !$("prespisokModal") || !$("prespisokModal").classList.contains("active")) return;
         renderPrespisokPlay();
     }
 
@@ -13519,6 +13523,12 @@
             renderPrespisok();
             return;
         }
+        // applyPrespisokRemoteRun(run, true) resets history to {} -- unlike
+        // handlePrespisokFile (the "upload it yourself" path), joining
+        // someone else's already-running session never re-fetched it, so
+        // every item's detail card fell back to the synthetic 2-line
+        // history instead of the real matched wms_tasks history.
+        state.prespisok.history = await loadPrespisokHistory(state.prespisok.items);
         persistPrespisokState();
         renderPrespisokPlay();
     }
