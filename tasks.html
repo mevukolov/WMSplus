@@ -360,6 +360,19 @@
             animation: tasksModalOut .22s cubic-bezier(.4,0,.7,1) both;
         }
         .tasks-flow-modal.upload-work.active { display: flex; }
+        .tasks-flow-modal.upload-work.is-flow-embedded {
+            position: static;
+            inset: auto;
+            width: 100%;
+            min-height: 0;
+            z-index: auto;
+            padding: 0;
+            background: transparent;
+            backdrop-filter: none;
+            animation: none;
+        }
+        .tasks-flow-modal.upload-work.is-flow-embedded.active { display: flex; }
+        .is-flow-embedded .task-detail-card { width: 100%; max-height: none; margin: 0; }
         #taskDetailModal { z-index: 4300; }
         #specialInfoModal { z-index: 4450; }
         #prespisokSecondLineModal { z-index: 4250; }
@@ -469,6 +482,9 @@
         .task-celebration-yellow { background: #f59e0b; }
         .task-celebration-red { background: #dc2626; }
         .task-celebration-icon { font-size: 104px; line-height: 1; color: #fff; font-weight: 900; animation: taskCelebrationIconPop .5s .15s cubic-bezier(.2,1.6,.3,1.1) both; }
+        .flow-why-box { margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: #f1f5f9; }
+        .flow-why-box strong { display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+        .flow-why-box .flow-reason { font-size: 13px; color: #334155; padding: 2px 0; }
         @keyframes taskCelebrationIconPop { 0% { transform: scale(.3) rotate(-15deg); opacity: 0; } 60% { transform: scale(1.18) rotate(5deg); opacity: 1; } 100% { transform: scale(1) rotate(0); } }
         .task-detail-head { padding: 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
         .task-detail-created { color: #94a3b8; font-size: 11px; font-weight: 700; margin-bottom: 4px; }
