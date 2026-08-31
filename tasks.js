@@ -13363,7 +13363,7 @@
             particleColor = "#facc15";
             exitClass = "prespisok-card-exit-sparkle";
             particleCount = 30;
-            duration = 820;
+            duration = 680;
             counterKind = "saved";
             flashTone = "green";
             burstY = rect.top + rect.height / 2;
@@ -13371,7 +13371,7 @@
             particleColor = "#facc15";
             exitClass = "prespisok-card-exit-slide";
             particleCount = 16;
-            duration = 780;
+            duration = 640;
             counterKind = "task";
             flashTone = "yellow";
             burstY = rect.top + rect.height / 2;
