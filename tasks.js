@@ -12044,6 +12044,18 @@
             writeoff_date: writeoffInfo.date || "",
             writeoff_date_source: writeoffInfo.source,
         };
+        // A handful of callers also stuff the raw source rows into
+        // payload.row/payload.rows (same data task_items above is built
+        // from). taskItems() only reads them as a last-resort fallback
+        // when task_items is empty -- checked live: 0 of 12175 tasks
+        // actually need that fallback -- so this is pure duplicate weight
+        // (task_items alone is ~40% of active source_payload; rows/row
+        // together are another ~40%) on every fetch that touches
+        // wms_tasks. Client-only: doesn't touch incoming-flow-request
+        // rows, which are written by a separate ingestion pipeline and
+        // genuinely read payload.row/payload.rows (firstTextFromPayload).
+        delete sourcePayload.row;
+        delete sourcePayload.rows;
         if (writeoffInfo.basis) sourcePayload.writeoff_date_basis = writeoffInfo.basis;
         if (specialInfos.length) sourcePayload.special_infos = specialInfos;
         return {
