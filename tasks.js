@@ -5696,7 +5696,7 @@
             refreshFlowQueue();
             renderFlowPage();
             toast("Скип записан. Беру следующую.", "success");
-            void issueNextFlowTask();
+            advanceFlowAfterResolution();
         } catch (error) {
             console.error("flow skip failed:", error);
             if (status) status.textContent = "Не удалось скипнуть: " + (error && error.message ? error.message : String(error));
@@ -7764,7 +7764,8 @@
             return "<div class='task-detail-actions'><button id='reopenTaskBtn' class='btn btn-square' type='button' title='Переоткрыть задачу'>↻</button><button id='closeTaskDetail' class='btn btn-square' type='button'>×</button></div>";
         }
         const defer = isPrespisokTask(row) ? "" : "<button id='openDeferTaskBtn' class='btn btn-square' type='button' title='Отложить'>◴</button>";
-        return "<div class='task-detail-actions'>" + defer + "<button id='closeTaskDetail' class='btn btn-square' type='button'>×</button></div>";
+        const flowSkip = (state.flow.embedded && state.taskDetail.source === "flow") ? "<button id='flowSkipFromEmbedded' class='btn btn-square' type='button' title='Скипнуть с причиной'>⏭</button>" : "";
+        return "<div class='task-detail-actions'>" + defer + flowSkip + "<button id='closeTaskDetail' class='btn btn-square' type='button'>×</button></div>";
     }
 
     function renderTaskDetail(row) {
@@ -7864,6 +7865,8 @@
         }
         void loadAndRenderTaskDetailHistory(row);
         $("closeTaskDetail").addEventListener("click", closeTaskDetail);
+        const flowSkipBtn = $("flowSkipFromEmbedded");
+        if (flowSkipBtn) flowSkipBtn.addEventListener("click", () => openFlowSkipModal(row.id));
         target.querySelectorAll("[data-copy-value]").forEach((field) => {
             field.addEventListener("click", async () => {
                 const text = field.dataset.copyValue || "";
