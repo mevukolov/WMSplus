@@ -5410,6 +5410,15 @@
         renderFlowPage();
         try {
             await ensureReviewTasksLoaded();
+            const prespisokCandidate = flowPrespisokCandidate();
+            if (prespisokCandidate) {
+                state.flow.claiming = false;
+                state.flow.status = "Открываю предсписок: осталось " + prespisokCandidate.remaining + ".";
+                state.flow.statusTone = "good";
+                renderFlowPage();
+                enterPrespisokFromFlow();
+                return;
+            }
             const scored = refreshFlowQueue();
             const next = scored[0];
             if (!next) {
@@ -5597,6 +5606,29 @@
     function requestFlowExit() {
         closeTaskDetail();
         showHome();
+    }
+
+    // Предсписок does not score per-ШК in flowScoreTask -- it isn't a
+    // wms_tasks row. It participates in Флоу's rotation as a single slot:
+    // present whenever the window is open and there's real local work left.
+    // Safe to call on every issueNextFlowTask() pass even though
+    // loadPrespisokState() overwrites state.prespisok from localStorage --
+    // this only runs while предсписок's own UI is closed (Флоу never calls
+    // it once handed off), and предсписок persists after every action, so
+    // localStorage is always a faithful mirror of state.prespisok whenever
+    // this executes.
+    function flowPrespisokCandidate() {
+        const info = prespisokWindowInfo();
+        if (!info.inWindow) return null;
+        const hasLocalRun = Boolean(loadPrespisokState());
+        if (!hasLocalRun) return null;
+        const remaining = Math.max((state.prespisok.items || []).length - (state.prespisok.actions || []).length, 0);
+        if (!remaining) return null;
+        return { remaining };
+    }
+
+    function enterPrespisokFromFlow() {
+        void openPrespisokModal();
     }
 
     function openTaskDetailFromFlow(id) {
@@ -13222,6 +13254,7 @@
         // progress across a close/reopen.
         if (state.prespisok.debugMode) resetPrespisokState();
         setFlowModalOpen("prespisokModal", false);
+        if (state.view === "flow") void issueNextFlowTask();
     }
 
     // Debug sandbox: skips the upload step entirely, reading the most
