@@ -5424,6 +5424,14 @@
         const currentRow = state.flow.currentRowId ? findTaskRow(state.flow.currentRowId) : null;
         if (currentRow && isActiveReviewTask(currentRow)) {
             setFlowEmbeddedMode(true);
+            // Re-render the Флоу page here too -- this branch bypasses the
+            // try/finally below (which is what normally repaints
+            // #flowCurrent via renderFlowPage), so without this call
+            // renderFlowCurrent()'s embedded-mode suppression (see above)
+            // never runs and its competing "Открыть flow-карточку" button
+            // stays visible next to the embedded card it would silently
+            // knock out of embedded mode.
+            renderFlowPage();
             void openTaskDetail(currentRow.id, "flow").then(scrollFlowEmbeddedCardIntoView);
             return;
         }
