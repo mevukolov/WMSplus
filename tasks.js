@@ -1577,6 +1577,7 @@
         setFlowModalOpen("backfillCalendarModal", false);
         setFlowModalOpen("reviewSectionModal", false);
         setFlowModalOpen("taskDetailModal", false);
+        if (state.flow.embedded) setFlowEmbeddedMode(false);
         setFlowModalOpen("flowTaskModal", false);
         setFlowModalOpen("flowSkipModal", false);
         setFlowModalOpen("flowConflictModal", false);
@@ -6980,8 +6981,11 @@
             clearInterval(state.taskDetail.countdownTimer);
             state.taskDetail.countdownTimer = null;
         }
-        setFlowModalOpen("taskDetailModal", false);
+        // Reset embedded mode before triggering the close animation/class
+        // removal below -- otherwise the card briefly looks like a centered
+        // classic overlay for ~260ms while is-closing plays.
         if (state.flow.embedded) setFlowEmbeddedMode(false);
+        setFlowModalOpen("taskDetailModal", false);
     }
 
     const TASK_CELEBRATION_ICONS = { green: "✓", yellow: "◴", red: "✕" };
