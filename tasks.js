@@ -5579,6 +5579,17 @@
             + "</div>";
     }
 
+    // After a verdict/skip resolves inside the embedded card, stay in
+    // embedded mode and immediately claim+show the next task -- this is
+    // what makes Флоу feel like one continuous feed instead of "resolve,
+    // then click Получить задачу again".
+    function advanceFlowAfterResolution() {
+        if (!state.flow.embedded) { closeTaskDetail(); return; }
+        state.flow.currentRowId = "";
+        state.flow.currentScore = null;
+        void issueNextFlowTask();
+    }
+
     function openTaskDetailFromFlow(id) {
         const row = findTaskRow(id);
         if (!row) return;
@@ -8952,8 +8963,9 @@
                 renderFlowPage();
             }
             if (!isDeferred) void evaluateTaskCompletionAchievements(completedForAchievements, { source: "manual_task_complete" });
-            if (!incomingFlow && tone) void playTaskCompletionCelebration(tone).then(closeTaskDetail);
-            else closeTaskDetail();
+            const afterCelebration = state.flow.embedded ? advanceFlowAfterResolution : closeTaskDetail;
+            if (!incomingFlow && tone) void playTaskCompletionCelebration(tone).then(afterCelebration);
+            else afterCelebration();
         } catch (error) {
             console.error("wms task complete failed:", error);
             if (status) status.textContent = "Не удалось завершить задачу: " + (error && error.message ? error.message : String(error));
@@ -9064,7 +9076,8 @@
             setReviewStatus("Задача отложена до " + formatRuDateTime(reopenAfter) + ".", "good");
             renderReview();
             refreshOpenSectionModal();
-            void playTaskCompletionCelebration("yellow").then(closeTaskDetail);
+            const afterCelebration = state.flow.embedded ? advanceFlowAfterResolution : closeTaskDetail;
+            void playTaskCompletionCelebration("yellow").then(afterCelebration);
         } catch (error) {
             console.error("wms task defer failed:", error);
             if (status) status.textContent = "Не удалось отложить задачу: " + (error && error.message ? error.message : String(error));
