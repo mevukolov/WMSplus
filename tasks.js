@@ -5696,7 +5696,7 @@
             refreshFlowQueue();
             renderFlowPage();
             toast("Скип записан. Беру следующую.", "success");
-            advanceFlowAfterResolution();
+            void issueNextFlowTask();
         } catch (error) {
             console.error("flow skip failed:", error);
             if (status) status.textContent = "Не удалось скипнуть: " + (error && error.message ? error.message : String(error));
