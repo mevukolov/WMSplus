@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+ — Тест печати</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="print-tspl.js" defer></script>
+    <script src="print_test.js" defer></script>
+</head>
+
+<body>
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title">Тест печати</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main style="max-width:520px;margin:24px auto;padding:0 16px;">
+    <label>Шаблон<br><select id="templateSelect" style="width:100%;"></select></label>
+    <div id="fieldInputs" style="display:flex;flex-direction:column;gap:10px;margin:16px 0;"></div>
+    <button id="printBtn" class="btn btn-rect" type="button" disabled>Печать</button>
+    <p id="printStatus" style="margin-top:12px;"></p>
+</main>
+</body>
+</html>
