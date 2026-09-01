@@ -6840,20 +6840,28 @@
     }
 
     async function openTaskDetail(id, source) {
-        // Guard against a dangling Флоу embedded session: taskDetailModal is only
-        // ever opened from this function (grep confirms no other call site sets
-        // it active), so this single check covers every path in regardless of how
-        // the previous embedded session was left -- the card's own "×"
-        // (closeTaskDetail), closeFlowModals() (used by showHome/showFlowPage/
-        // showUploads/showReviewPage/showRequestsPage/showInactivePage), or any
-        // future closer that doesn't happen to also reset embedded mode.
-        if (source !== "flow" && state.flow.embedded) setFlowEmbeddedMode(false);
         let row = findTaskRow(id);
         if (!row) return;
         if (source !== "inactive" && state.flow.allowConflictOpenId !== id && flowRowIsLockedForOther(row, currentFlowEmployee())) {
             openFlowConflictModal(id);
             return;
         }
+        // Guard against a dangling Флоу embedded session, placed here on the actual
+        // success path (after both early returns above) rather than at the top of
+        // the function: an early return (missing row, or a lock conflict that opens
+        // openFlowConflictModal on top) never touches taskDetailModal's content or
+        // visibility, so resetting embedded mode before those returns would strip
+        // the is-flow-embedded class off a card that's still showing, still valid,
+        // and about to reappear behind the conflict modal -- turning a self-consistent
+        // stale card into a visually broken one. taskDetailModal is only ever opened
+        // from this function (grep confirms no other call site sets it active), so
+        // this check still covers every path in regardless of how the previous
+        // embedded session was left -- the card's own "×" (closeTaskDetail),
+        // closeFlowModals() (used by showHome/showFlowPage/showUploads/
+        // showReviewPage/showRequestsPage/showInactivePage), or any future closer
+        // that doesn't happen to also reset embedded mode -- as long as this call
+        // actually proceeds to render.
+        if (source !== "flow" && state.flow.embedded) setFlowEmbeddedMode(false);
         state.flow.allowConflictOpenId = "";
         if (state.taskDetail && state.taskDetail.countdownTimer) clearInterval(state.taskDetail.countdownTimer);
         state.taskDetail = { rowId: id, source: source || "review", editRowId: "", deferRowId: "", reopenRowId: "", splitRowId: "", splitShk: "", expensiveConfirmRowId: "", countdownTimer: null };
