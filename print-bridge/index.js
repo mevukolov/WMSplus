@@ -18,9 +18,48 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !PRINTER_IP) {
 
 const client = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+const net = require("node:net");
+
+function sendToPrinter(tspl) {
+    return new Promise((resolve, reject) => {
+        const socket = net.createConnection({ host: PRINTER_IP, port: PRINTER_PORT }, () => {
+            socket.write(tspl, "utf8", () => {
+                socket.end();
+            });
+        });
+        socket.setTimeout(10000);
+        socket.on("timeout", () => {
+            socket.destroy();
+            reject(new Error("Таймаут соединения с принтером (" + PRINTER_IP + ":" + PRINTER_PORT + ")"));
+        });
+        socket.on("error", (error) => {
+            reject(new Error("Ошибка соединения с принтером: " + error.message));
+        });
+        socket.on("close", (hadError) => {
+            if (!hadError) resolve();
+        });
+    });
+}
+
 async function handleQueuedJob(job) {
-    console.log("[print-bridge] queued job seen:", job.id, "tspl length:", (job.tspl || "").length);
-    // Task 7 replaces this line with the actual TCP send + status update.
+    console.log("[print-bridge] printing job:", job.id);
+    try {
+        await sendToPrinter(job.tspl);
+        const { error } = await client
+            .from("print_jobs")
+            .update({ status: "printed", printed_at: new Date().toISOString() })
+            .eq("id", job.id)
+            .eq("status", "queued"); // avoid double-printing if both the realtime handler and the poll loop see the same job
+        if (error) console.error("[print-bridge] failed to mark job printed:", job.id, error.message);
+        else console.log("[print-bridge] job printed:", job.id);
+    } catch (error) {
+        console.error("[print-bridge] print failed:", job.id, error.message);
+        await client
+            .from("print_jobs")
+            .update({ status: "failed", error_message: error.message })
+            .eq("id", job.id)
+            .eq("status", "queued");
+    }
 }
 
 async function pollOnce() {
