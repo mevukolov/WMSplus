@@ -1,0 +1,14 @@
+{
+  "name": "wmsplus-print-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Relays queued WMS+ print_jobs rows to the warehouse's network thermal printer. One instance, always-on, on the warehouse LAN.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^17.4.2"
+  }
+}
