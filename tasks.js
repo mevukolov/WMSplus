@@ -14596,6 +14596,12 @@
             if (state.prespisok.clockTimer) clearInterval(state.prespisok.clockTimer);
             state.prespisok.clockTimer = null;
             setFlowModalOpen("prespisokModal", false);
+            // This button is a second exit point that bypasses
+            // closePrespisokModal() entirely (see its own handoff line) --
+            // mirrored here so finishing предсписок via its primary "done"
+            // button also hands control back to Флоу's loop when Флоу is
+            // what opened it.
+            if (state.view === "flow") void issueNextFlowTask();
         });
     }
 
