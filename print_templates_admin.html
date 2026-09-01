@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+ — Шаблоны этикеток</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="print_templates_admin.js" defer></script>
+</head>
+
+<body>
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title">Шаблоны этикеток</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main style="max-width:820px;margin:24px auto;padding:0 16px;">
+    <section style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="margin:0;">Шаблоны этикеток</h2>
+        <button id="newTemplateBtn" class="btn btn-outline" type="button">+ Новый шаблон</button>
+    </section>
+    <div id="templateList"></div>
+
+    <dialog id="templateEditor" style="width:min(680px,92vw);border-radius:16px;border:1px solid #e2e8f0;padding:0;">
+        <form method="dialog" style="padding:20px;display:flex;flex-direction:column;gap:12px;" id="templateForm">
+            <label>Название<br><input id="tplName" type="text" required style="width:100%;"></label>
+            <div style="display:flex;gap:12px;">
+                <label style="flex:1;">Ширина, мм<br><input id="tplWidth" type="number" value="50" required style="width:100%;"></label>
+                <label style="flex:1;">Высота, мм<br><input id="tplHeight" type="number" value="50" required style="width:100%;"></label>
+            </div>
+            <div>
+                <strong>Элементы</strong>
+                <div id="elementsList" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+                <button id="addElementBtn" type="button" class="btn btn-outline" style="margin-top:8px;">+ Элемент</button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+                <button id="cancelTemplateBtn" type="button" class="btn btn-outline">Отмена</button>
+                <button id="saveTemplateBtn" type="button" class="btn btn-rect">Сохранить</button>
+            </div>
+        </form>
+    </dialog>
+</main>
+</body>
+</html>
