@@ -5255,6 +5255,17 @@
     function renderFlowCurrent() {
         const target = $("flowCurrent");
         if (!target) return;
+        // While the embedded card is open (same state.flow.currentRowId
+        // window), this panel's "Открыть flow-карточку" button would reopen
+        // the very same task as a classic floating overlay via
+        // openTaskDetail(id, "review") -- silently dropping embedded mode,
+        // with no auto-advance afterward -- and its reasons list duplicates
+        // the embedded card's own why-box. Hide it entirely for that window.
+        if (state.flow.embedded) {
+            target.classList.remove("visible");
+            target.innerHTML = "";
+            return;
+        }
         const row = state.flow.currentRowId ? findTaskRow(state.flow.currentRowId) : null;
         const scored = state.flow.currentScore;
         target.classList.toggle("visible", Boolean(row));
