@@ -5399,6 +5399,12 @@
     async function issueNextFlowTask() {
         if (state.flow.claiming) return;
         if (!state.shift.current) {
+            // Reachable from advanceFlowAfterResolution()'s auto-claim path
+            // with the just-resolved task's embedded card still open (only
+            // its state.flow.currentRowId got cleared) -- don't leave that
+            // stale, still-interactive card up while bouncing to the shift
+            // modal.
+            if (state.flow.embedded) closeTaskDetail();
             toast("Сначала нужно открыть смену.", "error");
             openShiftOpeningModal();
             return;
@@ -5427,6 +5433,11 @@
             const scored = refreshFlowQueue();
             const next = scored[0];
             if (!next) {
+                // The just-resolved task's embedded card is still open here
+                // (nothing else closes it) -- close it so the user isn't
+                // left staring at a stale, fully interactive card (including
+                // a working skip button) once the queue is empty.
+                if (state.flow.embedded) closeTaskDetail();
                 state.flow.status = "Доступных задач для текущего сотрудника нет.";
                 state.flow.statusTone = "good";
                 return;
@@ -5442,6 +5453,10 @@
             openTaskDetail(row.id, "flow");
         } catch (error) {
             console.error("flow claim failed:", error);
+            // Claiming the next task failed (conflict or network error) --
+            // the previous, already-resolved task's embedded card is still
+            // open at this point and must not be left up and interactive.
+            if (state.flow.embedded) closeTaskDetail();
             if (normalizeText(error && error.message) !== "Задача уже открыта другим сотрудником.") {
                 state.flow.status = "Не удалось выдать задачу: " + (error && error.message ? error.message : String(error));
                 state.flow.statusTone = "error";
