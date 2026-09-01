@@ -5590,6 +5590,15 @@
         void issueNextFlowTask();
     }
 
+    // The embedded card's own "×" already calls closeTaskDetail (which
+    // resets embedded mode -- Task 4 Step 3). This wraps that with a return
+    // to the home screen so exiting Флоу doesn't strand the user on an
+    // empty Флоу page.
+    function requestFlowExit() {
+        closeTaskDetail();
+        showHome();
+    }
+
     function openTaskDetailFromFlow(id) {
         const row = findTaskRow(id);
         if (!row) return;
@@ -7864,7 +7873,10 @@
             state.taskDetail.countdownTimer = setInterval(() => updateTaskWriteoffCountdown(predictedTs), 30000);
         }
         void loadAndRenderTaskDetailHistory(row);
-        $("closeTaskDetail").addEventListener("click", closeTaskDetail);
+        $("closeTaskDetail").addEventListener("click", () => {
+            if (state.flow.embedded && state.taskDetail.source === "flow") requestFlowExit();
+            else closeTaskDetail();
+        });
         const flowSkipBtn = $("flowSkipFromEmbedded");
         if (flowSkipBtn) flowSkipBtn.addEventListener("click", () => openFlowSkipModal(row.id));
         target.querySelectorAll("[data-copy-value]").forEach((field) => {
