@@ -5412,7 +5412,7 @@
         const currentRow = state.flow.currentRowId ? findTaskRow(state.flow.currentRowId) : null;
         if (currentRow && isActiveReviewTask(currentRow)) {
             setFlowEmbeddedMode(true);
-            openTaskDetail(currentRow.id, "flow");
+            void openTaskDetail(currentRow.id, "flow").then(scrollFlowEmbeddedCardIntoView);
             return;
         }
         state.flow.claiming = true;
@@ -5450,7 +5450,7 @@
             state.flow.statusTone = "good";
             renderFlowPage();
             setFlowEmbeddedMode(true);
-            openTaskDetail(row.id, "flow");
+            void openTaskDetail(row.id, "flow").then(scrollFlowEmbeddedCardIntoView);
         } catch (error) {
             console.error("flow claim failed:", error);
             // Claiming the next task failed (conflict or network error) --
@@ -5599,6 +5599,17 @@
         state.flow.embedded = Boolean(active);
         const modal = $("taskDetailModal");
         if (modal) modal.classList.toggle("is-flow-embedded", state.flow.embedded);
+    }
+
+    // .is-flow-embedded (Task 1) drops #taskDetailModal's position:fixed so
+    // the card renders inline, after #flowPage's own header/stats/queue
+    // preview -- often 700-1000px down. Nothing else scrolls it into view,
+    // so call this right after the card is actually rendered (chained onto
+    // openTaskDetail()'s promise so it also covers the __isLight hydrate-
+    // then-render path, not just the synchronous one).
+    function scrollFlowEmbeddedCardIntoView() {
+        const wrap = $("taskDetailWrap");
+        if (wrap) wrap.scrollIntoView({ block: "start", behavior: "smooth" });
     }
 
     function flowWhyBoxHtml(score) {
