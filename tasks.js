@@ -591,6 +591,7 @@
             skipSaving: false,
             conflictRowId: "",
             allowConflictOpenId: "",
+            prespisokDeclined: false,
         },
         requests: {
             activeSection: "",
@@ -1934,6 +1935,10 @@
             return;
         }
         state.view = "flow";
+        // Fresh entry into Флоу: a decline from a previous session inside
+        // this same page load must not carry over -- offer предсписок again
+        // if it's still eligible (see closePrespisokModal()).
+        state.flow.prespisokDeclined = false;
         closeFlowModals();
         $("tasksHome").style.display = "none";
         $("uploadsPage").classList.remove("active");
@@ -5618,6 +5623,7 @@
     // localStorage is always a faithful mirror of state.prespisok whenever
     // this executes.
     function flowPrespisokCandidate() {
+        if (state.flow.prespisokDeclined) return null;
         const info = prespisokWindowInfo();
         if (!info.inWindow) return null;
         const hasLocalRun = Boolean(loadPrespisokState());
@@ -13254,6 +13260,12 @@
         // progress across a close/reopen.
         if (state.prespisok.debugMode) resetPrespisokState();
         setFlowModalOpen("prespisokModal", false);
+        // Exiting предсписок without finishing it must not just reopen it --
+        // flowPrespisokCandidate() would immediately re-offer the same run
+        // (nothing decrements "remaining" except finishing it), trapping the
+        // user in a reopen loop. Decline for the rest of this Флоу session;
+        // showFlowPage() resets the flag on fresh entry.
+        state.flow.prespisokDeclined = true;
         if (state.view === "flow") void issueNextFlowTask();
     }
 
