@@ -446,8 +446,7 @@
     const FLOW_SKIP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
     const FLOW_SCORE_VERSION = "flow-mvp-2026-08-24";
     const FLOW_ALLOWED_USER_IDS = new Set(["1034305"]);
-    const FLOW_STRICT_INCOMING_SECTIONS = new Set(["Запросы входящего потока", "Коробки на входе"]);
-    const FLOW_STRICT_OUTGOING_SECTIONS = new Set(["Списания AWH"]);
+    const FLOW_STRICT_SECTIONS = new Set(["Запросы входящего потока", "Коробки на входе", "Списания AWH"]);
     const DEFAULT_FLOW_SCORE_SETTINGS = {
         lockTtlMinutes: 15,
         weights: {
@@ -4986,28 +4985,21 @@
         return requestSectionName(row) || taskSectionName(row);
     }
 
+    // The task's own участок/section (one of the 14 SHIFT_ROSTER_ZONES
+    // values -- taskSectionName/requestSectionName always return one of
+    // those, there is no real "no section" case left to handle) IS the
+    // zone key now -- no more collapsing everything down to
+    // incoming/outgoing/neutral.
     function flowTaskZoneKey(row) {
-        const section = flowTaskSection(row);
-        if (FLOW_STRICT_INCOMING_SECTIONS.has(section)) return "incoming";
-        if (FLOW_STRICT_OUTGOING_SECTIONS.has(section)) return "outgoing";
-        const zone = normalizeForMatch(row && row.responsibility_zone);
-        if (zone.includes("вход")) return "incoming";
-        if (zone.includes("исход")) return "outgoing";
-        return "neutral";
+        return flowTaskSection(row);
     }
 
     function flowTaskZoneLabel(row) {
-        const key = flowTaskZoneKey(row);
-        if (key === "incoming") return "Входящий поток";
-        if (key === "outgoing") return "Исходящий поток";
-        return "Нет привязки";
+        return flowTaskSection(row);
     }
 
     function flowZonePolicy(row) {
-        const section = flowTaskSection(row);
-        if (FLOW_STRICT_INCOMING_SECTIONS.has(section) || FLOW_STRICT_OUTGOING_SECTIONS.has(section)) return "strict";
-        if (flowTaskZoneKey(row) === "neutral") return "neutral";
-        return "flexible";
+        return FLOW_STRICT_SECTIONS.has(flowTaskSection(row)) ? "strict" : "flexible";
     }
 
     function currentFlowEmployee() {
@@ -5037,11 +5029,7 @@
     function flowActor() {
         const user = currentWmsUser();
         const context = currentFlowEmployee();
-        const actorId = (context.zones.has("incoming") ? context.incomingId : "")
-            || (context.zones.has("outgoing") ? context.outgoingId : "")
-            || normalizeIdentifier(user.id)
-            || normalizeIdentifier(context.id)
-            || "";
+        const actorId = normalizeIdentifier(user.id) || normalizeIdentifier(context.id) || "";
         return { id: actorId, name: user.name || context.name || "" };
     }
 
@@ -5118,7 +5106,8 @@
     }
 
     function flowZoneCounts(rows) {
-        const counts = { incoming: 0, outgoing: 0, neutral: 0 };
+        const counts = {};
+        SHIFT_ROSTER_ZONES.forEach((zone) => { counts[zone] = 0; });
         (rows || []).filter(isActiveReviewTask).forEach((row) => {
             const key = flowTaskZoneKey(row);
             counts[key] = (counts[key] || 0) + 1;
@@ -5130,7 +5119,6 @@
         const policy = flowZonePolicy(row);
         const zone = flowTaskZoneKey(row);
         const zoneSettings = flowSettings().zone || {};
-        if (policy === "neutral") return { value: 1, label: "Без жесткой зоны" };
         const own = context.zones.has(zone);
         let raw = own ? settingNumber(zoneSettings.own, 1.18) : settingNumber(zoneSettings.otherFlexible, 0.82);
         const currentCount = Number(counts[zone]) || 0;
@@ -5365,7 +5353,7 @@
         const canIssue = hasShift && !state.flow.loading && !state.flow.claiming && (currentActive || (state.flow.scored || []).length > 0);
         const note = $("flowCommandNote");
         if (note) {
-            const zones = Array.from(context.zones).map((zone) => zone === "incoming" ? "входящий поток" : "исходящий поток");
+            const zones = Array.from(context.zones);
             const skillNote = state.flow.employeeStats.loaded ? " Личный коэффициент включен." : " Личная статистика пока не загружена.";
             const debugPrefix = state.flow.debugMode ? "⚠ ОТЛАДКА — ничего не сохраняется. " : "";
             note.textContent = debugPrefix + (hasShift
@@ -12370,13 +12358,9 @@
     function shiftAssigneeForZone(zone) {
         const shift = state.shift.current;
         if (!shift) return null;
-        const normalized = normalizeForMatch(zone);
-        const id = normalized.includes("вход")
-            ? shift.incoming_employee_id
-            : normalized.includes("исход")
-                ? shift.outgoing_employee_id
-                : "";
-        return id ? employeeById(id) : null;
+        const roster = Array.isArray(shift.roster) ? shift.roster : normalizeShiftRoster(shift);
+        const match = roster.find((entry) => entry.zones.includes(zone));
+        return match ? employeeById(match.employee_id) : null;
     }
 
     function candidateIdsForSpecial(preview) {
@@ -12497,7 +12481,7 @@
 
     function taskRecord(options) {
         const priority = taskPriority(options.price, options.forceHighPriority);
-        const assignee = shiftAssigneeForZone(options.responsibilityZone);
+        const assignee = shiftAssigneeForZone(taskSectionName({ task_type: options.taskType, title: options.title, source_module: options.sourceModule, upload_type: options.uploadType }));
         const sourceIds = (options.productIds || []).map(normalizeIdentifier).filter(Boolean);
         const specialMap = options.specialMap || new Map();
         const specialInfos = specialInfosForIds(sourceIds, specialMap);
