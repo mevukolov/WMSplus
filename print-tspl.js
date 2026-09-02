@@ -83,11 +83,10 @@ function buildTsplFromTemplate(template, data) {
         // this, content prints mirrored 180° and shifted to the opposite
         // corner from the x_mm/y_mm coordinates given.
         `DIRECTION 1`,
-        // Cyrillic text: the printer expects a single-byte codepage, not
-        // UTF-8 -- the bridge (print-bridge/index.js) re-encodes this
-        // whole command string as Windows-1251 bytes before sending, to
-        // match this codepage. Confirmed needed on-site (2026-09-02):
-        // without it, Cyrillic text printed as garbled glyphs.
+        // Cyrillic text: the printer expects Windows-1251 bytes, not
+        // UTF-8. buildTsplPayloadBase64() below does that re-encoding --
+        // confirmed needed on-site (2026-09-02): without it, Cyrillic
+        // text printed as garbled glyphs.
         `CODEPAGE 1251`,
         ...elements.map((element) => elementCommand(element, data || {})),
         `PRINT 1,1`,
@@ -95,8 +94,66 @@ function buildTsplFromTemplate(template, data) {
     return lines.join("\r\n") + "\r\n";
 }
 
+// CP1251 (Windows Cyrillic) byte for one Unicode code point. ASCII passes
+// through unchanged; А-я (U+0410-U+044F) is a contiguous block that maps
+// linearly to 0xC0-0xFF; Ё/ё and common "smart" punctuation sit outside
+// that block at fixed positions. Anything else falls back to "?" rather
+// than corrupting the byte stream with an unmappable character.
+const CP1251_PUNCTUATION = {
+    0x2018: 0x91, // '
+    0x2019: 0x92, // '
+    0x201c: 0x93, // "
+    0x201d: 0x94, // "
+    0x2013: 0x96, // –
+    0x2014: 0x97, // —
+    0x2026: 0x85, // …
+    0x2116: 0xb9, // №
+    0x00ab: 0xab, // «
+    0x00bb: 0xbb, // »
+};
+
+function cp1251ByteForCodePoint(cp) {
+    if (cp < 0x80) return cp;
+    if (cp === 0x0401) return 0xa8; // Ё
+    if (cp === 0x0451) return 0xb8; // ё
+    if (cp >= 0x0410 && cp <= 0x044f) return cp - 0x0410 + 0xc0; // А-я
+    if (Object.prototype.hasOwnProperty.call(CP1251_PUNCTUATION, cp)) return CP1251_PUNCTUATION[cp];
+    return 0x3f; // '?' -- unmappable character
+}
+
+function cp1251Encode(str) {
+    const bytes = [];
+    for (const ch of String(str == null ? "" : str)) {
+        bytes.push(cp1251ByteForCodePoint(ch.codePointAt(0)));
+    }
+    return bytes;
+}
+
+function bytesToBase64(bytes) {
+    // Node (tests, and any future server-side use) vs browser (production
+    // pages) -- pick whichever byte->base64 primitive is actually available.
+    if (typeof Buffer !== "undefined") {
+        return Buffer.from(bytes).toString("base64");
+    }
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+}
+
+// The actual value stored in print_jobs.tspl and sent to the bridge:
+// CP1251-encoded bytes, base64-wrapped so the text column can hold them
+// safely. The bridge only ever base64-decodes this and writes the raw
+// bytes -- it has no charset knowledge of its own. This is also the seam
+// a future "image" element type hooks into: BITMAP's raw pixel bytes
+// would join this same byte array before base64-encoding, with zero
+// changes needed on the bridge side.
+function buildTsplPayloadBase64(template, data) {
+    const tspl = buildTsplFromTemplate(template, data);
+    return bytesToBase64(cp1251Encode(tspl));
+}
+
 // Plain global-scope exports (this repo has no module system) plus a
 // CommonJS export so print-tspl.test.js (Node, no browser) can require it.
 if (typeof module !== "undefined" && module.exports) {
-    module.exports = { buildTsplFromTemplate, mmToDots, tsplEscape };
+    module.exports = { buildTsplFromTemplate, buildTsplPayloadBase64, cp1251Encode, bytesToBase64, mmToDots, tsplEscape };
 }

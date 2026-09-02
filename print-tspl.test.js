@@ -1,6 +1,6 @@
 // print-tspl.test.js — run with: node print-tspl.test.js
 const assert = require("node:assert");
-const { buildTsplFromTemplate, mmToDots, tsplEscape } = require("./print-tspl.js");
+const { buildTsplFromTemplate, buildTsplPayloadBase64, cp1251Encode, bytesToBase64, mmToDots, tsplEscape } = require("./print-tspl.js");
 
 function test(name, fn) {
     try {
@@ -59,6 +59,37 @@ test("buildTsplFromTemplate emits a QRCODE command for type=qr", () => {
 test("buildTsplFromTemplate throws on an unknown element type", () => {
     const template = { width_mm: 50, height_mm: 50, elements: [{ type: "bogus", x_mm: 0, y_mm: 0 }] };
     assert.throws(() => buildTsplFromTemplate(template, {}), /unknown element type/);
+});
+
+test("cp1251Encode passes ASCII through unchanged", () => {
+    assert.deepStrictEqual(cp1251Encode("PRINT 1,1"), [80, 82, 73, 78, 84, 32, 49, 44, 49]);
+});
+
+test("cp1251Encode maps СКЛАД to the correct Windows-1251 bytes", () => {
+    // Verified against iconv-lite's own win1251 encoder for the same input.
+    assert.deepStrictEqual(cp1251Encode("СКЛАД"), [0xd1, 0xca, 0xcb, 0xc0, 0xc4]);
+});
+
+test("cp1251Encode maps Ё/ё to their non-contiguous CP1251 slots", () => {
+    assert.deepStrictEqual(cp1251Encode("Ёё"), [0xa8, 0xb8]);
+});
+
+test("cp1251Encode falls back to '?' for unmappable characters", () => {
+    assert.deepStrictEqual(cp1251Encode("中"), [0x3f]);
+});
+
+test("bytesToBase64 round-trips through Buffer", () => {
+    const bytes = [0xd1, 0xca, 0xcb, 0xc0, 0xc4];
+    const b64 = bytesToBase64(bytes);
+    assert.deepStrictEqual(Array.from(Buffer.from(b64, "base64")), bytes);
+});
+
+test("buildTsplPayloadBase64 base64-decodes back to the CP1251-encoded TSPL text", () => {
+    const template = { width_mm: 50, height_mm: 50, elements: [{ type: "text", literal: "СКЛАД", x_mm: 0, y_mm: 0 }] };
+    const b64 = buildTsplPayloadBase64(template, {});
+    const decodedBytes = Array.from(Buffer.from(b64, "base64"));
+    const expectedBytes = cp1251Encode(buildTsplFromTemplate(template, {}));
+    assert.deepStrictEqual(decodedBytes, expectedBytes);
 });
 
 if (process.exitCode) {

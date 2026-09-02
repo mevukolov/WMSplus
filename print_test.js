@@ -55,7 +55,9 @@
         const status = document.getElementById("printStatus");
         if (!client || !selectedTemplate) return;
         const data = collectFieldData();
-        const tspl = buildTsplFromTemplate(selectedTemplate, data);
+        // Base64-wrapped CP1251 bytes, not plain text -- the bridge relays
+        // these bytes as-is, with zero charset knowledge of its own.
+        const tspl = buildTsplPayloadBase64(selectedTemplate, data);
         status.textContent = "Отправляю в очередь…";
         const user = JSON.parse(localStorage.getItem("user") || "{}");
         const { data: job, error } = await client
