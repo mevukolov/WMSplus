@@ -1755,17 +1755,31 @@
         entries.forEach((entry) => addShiftRosterRow(entry));
     }
 
+    // Merges by employee_id so the same person picked across multiple rows
+    // (with different zones checked in each) ends up as a single roster
+    // entry with the union of their zones, rather than a second entry whose
+    // zones would later be shadowed and silently lost by roster.find() --
+    // mirrors the merge normalizeShiftRoster() does for the legacy
+    // incoming/outgoing compatibility case above.
     function collectShiftRosterFromForm() {
         const rows = Array.from(document.querySelectorAll("#shiftRosterEditor .shift-roster-row"));
-        return rows.map((row) => {
+        const roster = [];
+        rows.forEach((row) => {
             const select = row.querySelector(".shift-roster-employee");
             const employeeId = select ? normalizeIdentifier(select.value) : "";
-            if (!employeeId) return null;
-            const employee = employeeById(employeeId);
+            if (!employeeId) return;
             const zones = Array.from(row.querySelectorAll(".shift-roster-zone input:checked")).map((input) => input.value);
-            if (!zones.length) return null;
-            return { employee_id: employeeId, full_name: employee ? employee.full_name : "", zones };
-        }).filter(Boolean);
+            if (!zones.length) return;
+            const existing = roster.find((entry) => entry.employee_id === employeeId);
+            if (existing) {
+                zones.forEach((zone) => { if (existing.zones.indexOf(zone) === -1) existing.zones.push(zone); });
+            } else {
+                const employee = employeeById(employeeId);
+                const uniqueZones = zones.filter((zone, index) => zones.indexOf(zone) === index);
+                roster.push({ employee_id: employeeId, full_name: employee ? employee.full_name : "", zones: uniqueZones });
+            }
+        });
+        return roster;
     }
 
     function renderShiftGate() {
@@ -2211,6 +2225,30 @@
         if (button) {
             button.disabled = !ready;
             button.title = ready ? "" : "Нужно добавить хотя бы одного человека с хотя бы одним участком и загрузить чистые списания.";
+        }
+        updateShiftRosterCoverageWarning(roster);
+    }
+
+    // Informational only -- an uncovered участок might be intentional some
+    // days, so this never touches saveShiftOpening's disabled state (that
+    // stays governed solely by updateShiftOpeningForm's `ready` check
+    // above). Just surfaces, live as the operator edits the roster, which
+    // of the 14 SHIFT_ROSTER_ZONES nobody in the current (unsaved) roster
+    // covers -- including the three FLOW_STRICT_SECTIONS, which silently
+    // vanish from the Флоу queue for the whole shift when uncovered.
+    function updateShiftRosterCoverageWarning(roster) {
+        const el = $("shiftRosterCoverageWarning");
+        if (!el) return;
+        const rosterRows = roster || collectShiftRosterFromForm();
+        const covered = new Set();
+        rosterRows.forEach((entry) => (entry.zones || []).forEach((zone) => covered.add(zone)));
+        const uncovered = SHIFT_ROSTER_ZONES.filter((zone) => !covered.has(zone));
+        if (uncovered.length) {
+            el.textContent = "Не закрыты участки: " + uncovered.join(", ");
+            el.style.display = "";
+        } else {
+            el.textContent = "";
+            el.style.display = "none";
         }
     }
 
