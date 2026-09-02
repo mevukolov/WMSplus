@@ -45,8 +45,12 @@
             </div>
             <div>
                 <strong>Элементы</strong>
-                <div id="elementsList" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
-                <button id="addElementBtn" type="button" class="btn btn-outline" style="margin-top:8px;">+ Элемент</button>
+                <p style="color:#64748b;font-size:13px;margin:4px 0 8px;">Перетаскивай блоки на этикетке мышью, кликни, чтобы изменить свойства.</p>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+                    <div id="labelCanvasWrap" style="position:relative;background:#f8fafc;border:1px solid #cbd5e1;border-radius:4px;flex-shrink:0;touch-action:none;"></div>
+                    <div id="elementProps" style="flex:1;min-width:220px;"></div>
+                </div>
+                <button id="addElementBtn" type="button" class="btn btn-outline" style="margin-top:12px;">+ Элемент</button>
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
                 <button id="cancelTemplateBtn" type="button" class="btn btn-outline">Отмена</button>
