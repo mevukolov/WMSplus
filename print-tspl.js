@@ -79,6 +79,10 @@ function buildTsplFromTemplate(template, data) {
         `SIZE ${widthMm} mm,${heightMm} mm`,
         `GAP 2 mm,0 mm`,
         `CLS`,
+        // Confirmed on-site against the real DA220 (2026-09-01): without
+        // this, content prints mirrored 180° and shifted to the opposite
+        // corner from the x_mm/y_mm coordinates given.
+        `DIRECTION 1`,
         ...elements.map((element) => elementCommand(element, data || {})),
         `PRINT 1,1`,
     ];
