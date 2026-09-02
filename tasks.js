@@ -740,6 +740,7 @@
             error: "",
             syncDisabled: false,
             cleaning: false,
+            loadPromise: null,
         },
     };
 
@@ -1012,7 +1013,24 @@
         return code === "42P01" || code === "PGRST205" || message.includes("does not exist") || message.includes("could not find the table") || message.includes("could not find the column");
     }
 
-    async function loadAchievements() {
+    // Thin wrapper so every caller (fire-and-forget or awaited) leaves a
+    // promise behind in state.achievements.loadPromise -- unlockAchievement's
+    // "already has it" check reads state.achievements.earned, which this
+    // fills in asynchronously, so anything that decides whether to grant an
+    // achievement must be able to wait for the in-flight load first (see
+    // ensureAchievementsLoaded) instead of racing it on a slow/cold load.
+    function loadAchievements() {
+        const promise = loadAchievementsRequest();
+        state.achievements.loadPromise = promise;
+        return promise;
+    }
+
+    async function ensureAchievementsLoaded() {
+        if (!state.achievements.loadPromise) return;
+        try { await state.achievements.loadPromise; } catch (error) { /* loadAchievementsRequest already handles/logs its own errors */ }
+    }
+
+    async function loadAchievementsRequest() {
         const actor = achievementActor();
         state.achievements.loading = true;
         state.achievements.error = "";
@@ -1042,7 +1060,20 @@
         } finally {
             state.achievements.loading = false;
             renderAchievementsModal();
-            void cleanupIneligibleTaskAchievements();
+            // Was: void cleanupIneligibleTaskAchievements() on every single
+            // load. That function hard-DELETEs from wms_achievements (no
+            // soft-delete, no audit trail) based on a recount that reads
+            // MUTABLE columns (opp_verdict, is_deleted -- routinely edited
+            // after the fact by scripts like fix_stale_verdict_after_reopen.sql)
+            // through a query that was also silently truncating at 10k rows
+            // (see fetchCompletedAchievementTasks) well below the warehouse's
+            // actual completed-task count. Together these were provably
+            // wiping real, previously-earned achievements with zero trace of
+            // it ever happening (confirmed for shift_100_tasks on a real
+            // employee). No longer runs automatically -- still callable by
+            // hand via WMSAchievementsDebug.recountEligibility for a
+            // deliberate, reviewable cleanup once revocation is redesigned
+            // with a soft-delete/audit trail and a properly-scoped query.
         }
     }
 
@@ -1087,6 +1118,12 @@
     }
 
     async function unlockAchievement(id, payload) {
+        // Guards every unlock decision on the in-flight loadAchievements()
+        // promise (if any) so a task completed right after page load can't
+        // race the initial fetch, see "already has it" as false, and
+        // re-grant (silently overwriting the real unlocked_at/payload via
+        // the upsert below) an achievement the user actually earned earlier.
+        await ensureAchievementsLoaded();
         const achievement = ACHIEVEMENT_BY_ID.get(id);
         if (!achievement || achievement.soon || state.achievements.earned.has(id)) return false;
         const actor = achievementActor();
@@ -1223,6 +1260,14 @@
             showCurrentUser: () => {
                 const actor = achievementActor();
                 return { user_id: actor.id, user_name: actor.name, local_key: achievementLocalKey(actor.id), local_count: localAchievementRows(actor.id).length, earned_count: state.achievements.earned.size };
+            },
+            // No longer runs automatically on every load -- see the comment
+            // at its old call site in loadAchievementsRequest(). Run by hand
+            // for a deliberate, reviewable recount/cleanup for the CURRENT
+            // user only.
+            recountEligibility: async () => {
+                await cleanupIneligibleTaskAchievements();
+                return { ok: true, user_id: achievementActor().id, earned_count: state.achievements.earned.size };
             },
         };
     }
@@ -8436,12 +8481,25 @@
         if (!db) return { ok: true, rows: [] };
         const user = achievementActor();
         try {
+            // This has to be a warehouse-wide fetch (filtering to "this user"
+            // happens client-side below via taskCompletedByMatches, which
+            // also matches on name as a fallback for historical rows with a
+            // broken assignee_employee_id -- see
+            // scripts/fix_wms_employees_rotated_names.sql) so a fixed row
+            // cap silently drops the OLDEST completed tasks warehouse-wide
+            // once total completions exceed it -- confirmed to already be
+            // happening in production (11k+ completed tasks vs. this cap),
+            // quietly excluding older tasks from every user's own recount
+            // and causing cleanupIneligibleTaskAchievements() to wrongly
+            // revoke real, previously-earned achievements. Raised well above
+            // current volume as an immediate mitigation; the real fix is a
+            // server-side per-user aggregate (RPC) with no cap at all.
             let query = db
                 .from(WMS_TASKS_TABLE)
                 .select(ACHIEVEMENT_TASK_LEAN_COLUMNS)
                 .eq("task_status", "Завершено")
                 .order("completed_at", { ascending: false, nullsFirst: false })
-                .limit(10000);
+                .limit(100000);
             const { data, error } = await query;
             if (error) throw error;
             const rows = (data || []).map(hydrateLeanAchievementRow);
