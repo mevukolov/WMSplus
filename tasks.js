@@ -1646,6 +1646,8 @@
         setFlowModalOpen("debugSandboxModal", false);
         setFlowModalOpen("noShkZoneModal", false);
         setFlowModalOpen("noShkZoneAdminModal", false);
+        setFlowModalOpen("noShkNewBoxModal", false);
+        setFlowModalOpen("noShkBoxDetailModal", false);
         setFlowModalOpen("prespisokModal", false);
         if (state.prespisok && state.prespisok.clockTimer) {
             clearInterval(state.prespisok.clockTimer);
