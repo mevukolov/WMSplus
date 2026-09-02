@@ -5432,7 +5432,7 @@
             // stays visible next to the embedded card it would silently
             // knock out of embedded mode.
             renderFlowPage();
-            void openTaskDetail(currentRow.id, "flow").then(scrollFlowEmbeddedCardIntoView);
+            openTaskDetail(currentRow.id, "flow");
             return;
         }
         state.flow.claiming = true;
@@ -5470,7 +5470,7 @@
             state.flow.statusTone = "good";
             renderFlowPage();
             setFlowEmbeddedMode(true);
-            void openTaskDetail(row.id, "flow").then(scrollFlowEmbeddedCardIntoView);
+            openTaskDetail(row.id, "flow");
         } catch (error) {
             console.error("flow claim failed:", error);
             // Claiming the next task failed (conflict or network error) --
@@ -5611,25 +5611,19 @@
     }
 
     // Toggles #taskDetailModal between the classic floating overlay and
-    // Флоу's inline card (see the .is-flow-embedded CSS added in Task 1).
-    // Does not touch renderTaskDetail or any of its ~15 hardcoded element
-    // IDs -- same DOM node, same function, only its own wrapper's CSS class
-    // changes.
+    // Флоу's full-screen version of the same overlay, with two side panels
+    // (.flow-why-panel / .flow-side-panel) shown alongside the card -- see
+    // the .is-flow-embedded CSS. Does not touch renderTaskDetail or any of
+    // its ~15 hardcoded element IDs -- same DOM node, same function, only
+    // its own wrapper's CSS class changes.
     function setFlowEmbeddedMode(active) {
         state.flow.embedded = Boolean(active);
         const modal = $("taskDetailModal");
         if (modal) modal.classList.toggle("is-flow-embedded", state.flow.embedded);
-    }
-
-    // .is-flow-embedded (Task 1) drops #taskDetailModal's position:fixed so
-    // the card renders inline, after #flowPage's own header/stats/queue
-    // preview -- often 700-1000px down. Nothing else scrolls it into view,
-    // so call this right after the card is actually rendered (chained onto
-    // openTaskDetail()'s promise so it also covers the __isLight hydrate-
-    // then-render path, not just the synchronous one).
-    function scrollFlowEmbeddedCardIntoView() {
-        const wrap = $("taskDetailWrap");
-        if (wrap) wrap.scrollIntoView({ block: "start", behavior: "smooth" });
+        if (!state.flow.embedded) {
+            const whyPanel = $("flowWhyPanel");
+            if (whyPanel) whyPanel.innerHTML = "";
+        }
     }
 
     function flowWhyBoxHtml(score) {
@@ -7942,7 +7936,6 @@
             + "<div class='task-detail-title-row'><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='task-detail-price' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</div>" + countdownHtml + "</div>"
             + "<div class='review-table-subtitle'>" + escapeHtml(row.task_type || "-") + "</div></div>" + taskDetailActionButtons(row, readOnly) + "</div>"
             + "<div class='task-detail-body'>"
-            + (state.flow.embedded && state.taskDetail.source === "flow" ? flowWhyBoxHtml(state.flow.currentScore) : "")
             + "<div class='task-info-grid'>" + taskDetailInfo(row) + "</div>"
             + taskTagsBox(row)
             + incomingFlowShkInfoBox(row)
@@ -7952,6 +7945,12 @@
             + reviewBlock
             + "</div>"
             + "</div>";
+        // Флоу's "why this task" box lives outside the card now (a sibling
+        // panel to its left, see .flow-why-panel in tasks.html) -- keep it
+        // in sync on every render, and clear it when not applicable so it
+        // never shows stale content once embedded mode/source changes.
+        const whyPanel = $("flowWhyPanel");
+        if (whyPanel) whyPanel.innerHTML = (state.flow.embedded && state.taskDetail.source === "flow") ? flowWhyBoxHtml(state.flow.currentScore) : "";
         if (state.taskDetail.countdownTimer) {
             clearInterval(state.taskDetail.countdownTimer);
             state.taskDetail.countdownTimer = null;

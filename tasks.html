@@ -365,19 +365,16 @@
             animation: tasksModalOut .22s cubic-bezier(.4,0,.7,1) both;
         }
         .tasks-flow-modal.upload-work.active { display: flex; }
-        .tasks-flow-modal.upload-work.is-flow-embedded {
-            position: static;
-            inset: auto;
-            width: 100%;
-            min-height: 0;
-            z-index: auto;
-            padding: 0;
-            background: transparent;
-            backdrop-filter: none;
-            animation: none;
-        }
-        .tasks-flow-modal.upload-work.is-flow-embedded.active { display: flex; }
-        .is-flow-embedded .task-detail-card { width: 100%; max-height: none; margin: 0; }
+        .flow-why-panel,
+        .flow-side-panel { display: none; }
+        /* Absolutely positioned (not flex siblings of the card) so the card
+           itself keeps the exact same centered layout/width it has in the
+           classic overlay -- these two panels float over the backdrop to
+           its left/right instead of competing with it for space. */
+        .is-flow-embedded .flow-why-panel,
+        .is-flow-embedded .flow-side-panel { display: block; position: absolute; top: 18px; bottom: 18px; width: clamp(0px, calc((100vw - 860px) / 2 - 40px), 260px); overflow: auto; }
+        .is-flow-embedded .flow-why-panel { left: 18px; }
+        .is-flow-embedded .flow-side-panel { right: 18px; }
         #taskDetailModal { z-index: 4300; }
         #specialInfoModal { z-index: 4450; }
         #prespisokSecondLineModal { z-index: 4250; }
@@ -1559,7 +1556,9 @@
 </section>
 
 <section id="taskDetailModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div id="flowWhyPanel" class="flow-why-panel"></div>
     <div id="taskDetailWrap" class="tasks-flow-card task-detail-card"></div>
+    <div id="flowSidePanel" class="flow-side-panel"></div>
 </section>
 
 <section id="flowTaskModal" class="tasks-flow-modal upload-work" aria-hidden="true">
