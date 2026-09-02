@@ -1756,6 +1756,19 @@
         entries.forEach((entry) => addShiftRosterRow(entry));
     }
 
+    function collectShiftRosterFromForm() {
+        const rows = Array.from(document.querySelectorAll("#shiftRosterEditor .shift-roster-row"));
+        return rows.map((row) => {
+            const select = row.querySelector(".shift-roster-employee");
+            const employeeId = select ? normalizeIdentifier(select.value) : "";
+            if (!employeeId) return null;
+            const employee = employeeById(employeeId);
+            const zones = Array.from(row.querySelectorAll(".shift-roster-zone input:checked")).map((input) => input.value);
+            if (!zones.length) return null;
+            return { employee_id: employeeId, full_name: employee ? employee.full_name : "", zones };
+        }).filter(Boolean);
+    }
+
     function renderShiftGate() {
         const banner = $("shiftGateBanner");
         const title = $("shiftGateTitle");
@@ -2168,18 +2181,9 @@
         el.className = "status-line" + (type ? " " + type : "");
     }
 
-    function fillShiftSelects() {
-        const options = "<option value=''>Выберите сотрудника</option>" + (state.shift.employees || [])
-            .map((employee) => "<option value='" + escapeHtml(employee.id) + "'>" + escapeHtml(employee.full_name + (employee.employee_id ? " · " + employee.employee_id : "")) + "</option>")
-            .join("");
-        if ($("shiftIncomingSelect")) $("shiftIncomingSelect").innerHTML = options;
-        if ($("shiftOutgoingSelect")) $("shiftOutgoingSelect").innerHTML = options;
-    }
-
     async function openShiftOpeningModal() {
         if (!state.shift.employees.length) await loadShiftState();
         closeFlowModals();
-        fillShiftSelects();
         renderShiftRosterEditor(normalizeShiftRoster(state.shift.current));
         state.shift.pureRows = [];
         state.shift.pureStats = null;
@@ -2202,13 +2206,12 @@
     }
 
     function updateShiftOpeningForm() {
-        const incoming = normalizeText($("shiftIncomingSelect") && $("shiftIncomingSelect").value);
-        const outgoing = normalizeText($("shiftOutgoingSelect") && $("shiftOutgoingSelect").value);
+        const roster = collectShiftRosterFromForm();
         const button = $("saveShiftOpening");
-        const ready = Boolean(incoming && outgoing && state.shift.purePrepared && !state.shift.saving);
+        const ready = Boolean(roster.length && state.shift.purePrepared && !state.shift.saving);
         if (button) {
             button.disabled = !ready;
-            button.title = ready ? "" : "Нужно выбрать ответственных и загрузить чистые списания.";
+            button.title = ready ? "" : "Нужно добавить хотя бы одного человека с хотя бы одним участком и загрузить чистые списания.";
         }
     }
 
@@ -2270,14 +2273,11 @@
     async function saveShiftOpening() {
         const db = supabaseDb();
         if (!db) return;
-        const incomingId = normalizeText($("shiftIncomingSelect") && $("shiftIncomingSelect").value);
-        const outgoingId = normalizeText($("shiftOutgoingSelect") && $("shiftOutgoingSelect").value);
-        if (!incomingId || !outgoingId || !state.shift.purePrepared) {
-            setShiftOpeningStatus("Нужно выбрать ответственных и загрузить чистые списания.", "error");
+        const roster = collectShiftRosterFromForm();
+        if (!roster.length || !state.shift.purePrepared) {
+            setShiftOpeningStatus("Нужно добавить хотя бы одного человека с хотя бы одним участком и загрузить чистые списания.", "error");
             return;
         }
-        const incoming = employeeById(incomingId);
-        const outgoing = employeeById(outgoingId);
         const button = $("saveShiftOpening");
         state.shift.saving = true;
         if (button) button.disabled = true;
@@ -2291,10 +2291,7 @@
                 shift_key: WH_ID + ":" + state.today,
                 shift_label: formatRuDate(state.today),
                 status: "opened",
-                incoming_employee_id: incomingId,
-                outgoing_employee_id: outgoingId,
-                incoming_process: "Входящий поток",
-                outgoing_process: "Исходящий поток",
+                roster,
                 file_uploaded: true,
                 file_name: state.shift.pureFileName || "",
                 opened_by: [user.name, user.id].filter(Boolean).join(" / ") || null,
@@ -2315,13 +2312,12 @@
             if (result.error) throw result.error;
             state.shift.current = {
                 ...(result.data || payload),
-                incoming_name: incoming ? incoming.full_name : "",
-                outgoing_name: outgoing ? outgoing.full_name : "",
+                roster: normalizeShiftRoster(result.data || payload),
             };
             renderShiftGate();
             closeShiftOpeningModal();
             toast("Смена открыта. Чистые списания обработаны: +" + pureImport.inserted_new + ", движение: " + pureImport.auto_marked_found + ".", "success");
-            void evaluateShiftAchievements(incomingId, outgoingId);
+            void evaluateShiftAchievements();
         } catch (error) {
             console.error("shift opening save failed:", error);
             setShiftOpeningStatus("Не удалось открыть смену: " + (error && error.message ? error.message : String(error)), "error");
@@ -15702,9 +15698,16 @@
         });
         $("openShiftFromBanner").addEventListener("click", () => { void openShiftOpeningModal(); });
         $("closeShiftOpening").addEventListener("click", closeShiftOpeningModal);
-        if ($("shiftIncomingSelect")) $("shiftIncomingSelect").addEventListener("change", updateShiftOpeningForm);
-        if ($("shiftOutgoingSelect")) $("shiftOutgoingSelect").addEventListener("change", updateShiftOpeningForm);
-        $("addShiftRosterRow").addEventListener("click", () => addShiftRosterRow(null));
+        $("addShiftRosterRow").addEventListener("click", () => { addShiftRosterRow(null); updateShiftOpeningForm(); });
+        // Delegated on the editor's stable container (not the rows
+        // themselves, which get created/removed dynamically) -- covers
+        // every employee-select change, every zone checkbox, and doubles
+        // as the "row removed" signal since removing a row changes what
+        // collectShiftRosterFromForm() would return.
+        $("shiftRosterEditor").addEventListener("change", updateShiftOpeningForm);
+        $("shiftRosterEditor").addEventListener("click", (event) => {
+            if (event.target.closest && event.target.closest(".shift-roster-remove")) updateShiftOpeningForm();
+        });
         $("shiftPureLossesFile").addEventListener("change", () => {
             const file = $("shiftPureLossesFile").files && $("shiftPureLossesFile").files[0];
             if (file) void handleShiftPureLossesFile(file);
