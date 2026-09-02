@@ -2746,6 +2746,19 @@
         let missing = 0;
         const plans = [];
         tasks.forEach((row) => {
+            // A light row (state.review.fullLoaded's known coverage gap --
+            // see ensureFullActiveTasksLoaded) has no real payload.task_items,
+            // so taskItems(row) falls back to synthesized barcode-only
+            // entries with price/status hardcoded empty. Enriching those
+            // with a name/nm and writing the result back as this task's new
+            // task_items would permanently destroy its real per-item price
+            // and status -- confirmed to have already happened in
+            // production for several "Упаковка" tasks (source_price_sum
+            // stayed correct since this function never touches it, but
+            // every item's own price silently became 0). Skip light rows
+            // entirely; whatever eventually hydrates them can enrich them
+            // on a later pass once their real items are actually loaded.
+            if (row.__isLight) return;
             const payload = taskPayload(row);
             const nmByShk = { ...taskNmByShk(row) };
             const nameByShk = { ...taskNameByShk(row) };
@@ -2767,6 +2780,12 @@
                 return nextItem;
             });
             if (!changed) return;
+            // Second, independent guard: if the row's own recorded total is
+            // real money but the items we're about to write sum to nothing,
+            // something upstream of the __isLight check above still handed
+            // us hollow items -- refuse to write rather than risk silently
+            // zeroing out real per-item prices again.
+            if (Number(row.source_price_sum) > 0 && sumTaskItems(items) === 0) return;
             plans.push({ row, items, nmByShk, nameByShk, payload });
         });
         const statusTarget = options && options.statusTarget ? $(options.statusTarget) : null;
@@ -7484,12 +7503,23 @@
         }
         if (normalizeText(payload.comment)) commentParts.push(payload.comment);
         if (payload.reopen_after) commentParts.push("до " + formatRuDateTime(payload.reopen_after));
+        // "Отправлен запрос"/"Отправлен на релиз"/"Отправлен на списание
+        // ревизией" all require pasting a link into the extra field
+        // (DEFERRED_VERDICT_FIELDS in task-verdicts.js) -- it was captured in
+        // payload.extra_value but never actually shown in this feed. Surface
+        // it as text and, when it looks like a real URL, make the whole row
+        // open it on click (handled by the delegated listener in initEvents).
+        const attachedLink = normalizeText(payload.extra_value);
+        const isClickableLink = /^https?:\/\//i.test(attachedLink);
+        if (attachedLink) commentParts.push(attachedLink);
         const historyTone = isSystem ? "" : (VERDICT_TONE[payload.verdict] || "yellow");
         const rowClass = "task-chat-row"
             + (isForecast ? " task-chat-row-forecast" : "")
-            + (historyTone ? " task-chat-row-" + historyTone : "");
+            + (historyTone ? " task-chat-row-" + historyTone : "")
+            + (isClickableLink ? " task-chat-row-linked" : "");
+        const linkAttr = isClickableLink ? " data-history-link='" + escapeHtml(attachedLink) + "' title='Открыть ссылку'" : "";
         const commentHtml = escapeHtml(commentParts.join(" · ") || "—");
-        return "<div class='" + rowClass + "'>"
+        return "<div class='" + rowClass + "'" + linkAttr + ">"
             + "<div class='task-chat-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
             + "<div class='task-chat-actor'>" + taskHistoryAvatarHtml(rawActorId, rawActorName, isSystem) + "<span>" + escapeHtml(actorDisplay) + "</span></div>"
             + "<div class='task-chat-verdict'>" + escapeHtml(verdict) + "</div>"
@@ -15396,6 +15426,13 @@
         $("achievementsWrap").addEventListener("click", (event) => {
             const button = event.target.closest && event.target.closest("[data-achievement-detail]");
             if (button) openAchievementDetail(button.dataset.achievementDetail);
+        });
+        // Bound once on the stable #taskDetailHistoryFeed container, not
+        // inside renderTaskDetailHistoryFeed (which replaces its innerHTML
+        // on every refresh) -- delegation means this survives every re-render.
+        $("taskDetailHistoryFeed").addEventListener("click", (event) => {
+            const row = event.target.closest && event.target.closest("[data-history-link]");
+            if (row) window.open(row.dataset.historyLink, "_blank", "noopener");
         });
         $("achievementDetailModal").addEventListener("click", (event) => { if (event.target === $("achievementDetailModal")) closeAchievementDetail(); });
         $("achievementsModal").addEventListener("click", (event) => { if (event.target === $("achievementsModal")) closeAchievementsModal(); });
