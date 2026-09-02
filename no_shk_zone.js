@@ -2,14 +2,17 @@
 // and box placement for the "Без ШК" zone. Loaded alongside tasks.js on
 // tasks.html but kept as its own file/closure since tasks.js is already
 // very large and this feature is self-contained: its own tables, its own
-// two modals, no interaction with tasks.js's own state.
+// modals, no interaction with tasks.js's own state.
 //
 // A "box" here is its own auto-numbered entity ("Короб без ШК {N}",
-// matching the existing printed-label text), not tied to any product SHK
-// -- these are exactly the items without a readable barcode. Boxes are
-// placed directly on a shelf at creation; there's no unassigned/staging
-// state and no move-between-shelves yet (remove + re-add is the way to
-// move one for now). Next step toward physical navigation: linking a real
+// matching the printed-label text), not tied to any product SHK -- these
+// are exactly the items without a readable barcode. Boxes are placed
+// directly on a shelf at creation; there's no unassigned/staging state and
+// no move-between-shelves yet (remove + re-add is the way to move one for
+// now). Printing reuses the existing print_label_templates -> print_jobs
+// pipeline (print-tspl.js / print-bridge) via a seeded template named
+// "Короб «Без ШК»" (see the 202609020003 migration) -- no separate print
+// infrastructure. Next step toward physical navigation: linking a real
 // task/SHK to a box.
 (function () {
     "use strict";
@@ -54,13 +57,18 @@
     }
 
     let racks = [];
+    let boxLabelTemplate = null;
+    let pendingBoxShelfId = "";
+    let activeBoxId = "";
+
+    const BOX_FIELDS = "id,box_number,shift_date,shift_type,box_type,area,responsible_name,created_at";
 
     async function loadZone() {
         const client = db();
         if (!client) return;
         const { data, error } = await client
             .from("wms_no_shk_racks")
-            .select("id,name,created_at,wms_no_shk_shelves(id,name,capacity,created_at,wms_no_shk_boxes(id,box_number,created_at))")
+            .select("id,name,created_at,wms_no_shk_shelves(id,name,capacity,created_at,wms_no_shk_boxes(" + BOX_FIELDS + "))")
             .order("created_at", { ascending: true })
             .order("created_at", { ascending: true, foreignTable: "wms_no_shk_shelves" });
         if (error) {
@@ -72,13 +80,29 @@
         racks = data || [];
         renderZoneView();
         renderAdminView();
+        if (!boxLabelTemplate) void loadBoxLabelTemplate();
+    }
+
+    async function loadBoxLabelTemplate() {
+        const client = db();
+        if (!client) return;
+        const { data, error } = await client
+            .from("print_label_templates")
+            .select("id,width_mm,height_mm,elements")
+            .eq("name", "Короб «Без ШК»")
+            .maybeSingle();
+        if (error || !data) {
+            console.error("[no_shk_zone] box label template not found:", error && error.message);
+            return;
+        }
+        boxLabelTemplate = data;
     }
 
     function shelfSkeuoHtml(shelf) {
         const boxes = (shelf.wms_no_shk_boxes || []).slice().sort((a, b) => a.box_number - b.box_number);
         const isFull = boxes.length >= shelf.capacity;
         const boxesHtml = boxes.map((box) => (
-            "<div class='no-shk-box' data-box-id='" + box.id + "' title='Короб без ШК " + box.box_number + " — нажми, чтобы убрать'>№" + box.box_number + "</div>"
+            "<div class='no-shk-box' data-box-id='" + box.id + "' title='Короб без ШК " + box.box_number + "'>№" + box.box_number + "</div>"
         )).join("");
         const addHtml = "<button type='button' class='no-shk-box-add' data-add-box-shelf='" + shelf.id + "'"
             + (isFull ? " disabled title='Полка заполнена'" : " title='Добавить короб'") + ">+</button>";
@@ -114,8 +138,8 @@
         wrap.innerHTML = racks.map((rack) => {
             const shelves = rack.wms_no_shk_shelves || [];
             const shelvesHtml = shelves.length
-                ? shelves.map(shelfSkeuoHtml).join("")
-                : "<p style='color:#f8fafc;font-size:13px;opacity:.85;'>Полок пока нет.</p>";
+                ? "<div class='no-shk-rack-frame'>" + shelves.map(shelfSkeuoHtml).join("") + "</div>"
+                : "<p style='color:#64748b;font-size:13px;'>Полок пока нет.</p>";
             return "<div class='no-shk-rack'>"
                 + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
                 + shelvesHtml
@@ -123,10 +147,10 @@
         }).join("");
 
         wrap.querySelectorAll("[data-add-box-shelf]").forEach((btn) => {
-            btn.addEventListener("click", () => void addBox(btn.dataset.addBoxShelf));
+            btn.addEventListener("click", () => openNewBoxModal(btn.dataset.addBoxShelf));
         });
         wrap.querySelectorAll("[data-box-id]").forEach((box) => {
-            box.addEventListener("click", () => void deleteBox(box.dataset.boxId));
+            box.addEventListener("click", () => openBoxDetailModal(box.dataset.boxId));
         });
     }
 
@@ -226,28 +250,164 @@
         return null;
     }
 
-    async function addBox(shelfId) {
-        const client = db();
-        if (!client) return;
+    function findBoxContext(boxId) {
+        for (const rack of racks) {
+            for (const shelf of rack.wms_no_shk_shelves || []) {
+                const box = (shelf.wms_no_shk_boxes || []).find((b) => b.id === boxId);
+                if (box) return { box, shelf, rack };
+            }
+        }
+        return null;
+    }
+
+    // ---- New box modal ----
+
+    function openNewBoxModal(shelfId) {
         const shelf = findShelf(shelfId);
-        // Defensive re-check against the last-loaded state -- the disabled
-        // button already prevents this in the common case, but two people
-        // could be looking at the same shelf at once.
         if (shelf && (shelf.wms_no_shk_boxes || []).length >= shelf.capacity) {
             alert("Полка уже заполнена (" + shelf.capacity + " " + boxWord(shelf.capacity) + ").");
             return;
         }
-        const { error } = await client.from("wms_no_shk_boxes").insert({ shelf_id: shelfId });
-        if (error) { alert("Не удалось добавить короб: " + error.message); return; }
+        pendingBoxShelfId = shelfId;
+        $("newBoxShiftDate").value = new Date().toISOString().slice(0, 10);
+        $("newBoxShiftType").value = "Дневная";
+        $("newBoxType").value = "Короб";
+        $("newBoxArea").value = "Сортировка";
+        $("newBoxResponsible").value = "";
+        $("noShkNewBoxStatus").textContent = "";
+        setZoneModalOpen("noShkNewBoxModal", true);
+    }
+
+    async function saveNewBox() {
+        const client = db();
+        if (!client || !pendingBoxShelfId) return;
+        const responsibleName = $("newBoxResponsible").value.trim();
+        if (!responsibleName) {
+            $("noShkNewBoxStatus").textContent = "Укажи, кто принёс короб.";
+            $("noShkNewBoxStatus").style.color = "#dc2626";
+            return;
+        }
+        const payload = {
+            shelf_id: pendingBoxShelfId,
+            shift_date: $("newBoxShiftDate").value || new Date().toISOString().slice(0, 10),
+            shift_type: $("newBoxShiftType").value,
+            box_type: $("newBoxType").value,
+            area: $("newBoxArea").value,
+            responsible_name: responsibleName,
+        };
+        const { error } = await client.from("wms_no_shk_boxes").insert(payload);
+        if (error) {
+            $("noShkNewBoxStatus").textContent = "Не удалось создать: " + error.message;
+            $("noShkNewBoxStatus").style.color = "#dc2626";
+            return;
+        }
+        setZoneModalOpen("noShkNewBoxModal", false);
         await loadZone();
     }
 
-    async function deleteBox(id) {
+    // ---- Box detail modal ----
+
+    function formatDateShort(isoDate) {
+        const parts = String(isoDate).split("-");
+        if (parts.length !== 3) return String(isoDate);
+        return parts[2] + "." + parts[1] + "." + parts[0].slice(2);
+    }
+
+    function addDays(isoDate, days) {
+        const d = new Date(isoDate + "T00:00:00Z");
+        d.setUTCDate(d.getUTCDate() + days);
+        return d.toISOString().slice(0, 10);
+    }
+
+    function computeDateLabel(box) {
+        if (box.shift_type === "Ночная") {
+            return formatDateShort(box.shift_date) + "-" + formatDateShort(addDays(box.shift_date, 1));
+        }
+        return formatDateShort(box.shift_date);
+    }
+
+    function boxCode(box) {
+        return "WMSP.BOX." + String(box.box_number).padStart(5, "0");
+    }
+
+    function openBoxDetailModal(boxId) {
+        const ctx = findBoxContext(boxId);
+        if (!ctx) return;
+        activeBoxId = boxId;
+        const { box, shelf, rack } = ctx;
+        $("noShkBoxDetailWrap").innerHTML = "<div style='display:flex;flex-direction:column;gap:6px;font-size:14px;'>"
+            + "<div><strong>Короб без ШК " + box.box_number + "</strong></div>"
+            + "<div>Дата: " + escapeHtmlLocal(computeDateLabel(box)) + " (" + escapeHtmlLocal(box.shift_type) + ")</div>"
+            + "<div>Тип: " + escapeHtmlLocal(box.box_type) + "</div>"
+            + "<div>Участок: " + escapeHtmlLocal(box.area) + "</div>"
+            + "<div>Ответственный: " + escapeHtmlLocal(box.responsible_name) + "</div>"
+            + "<div>Местоположение: " + escapeHtmlLocal(rack.name) + " — " + escapeHtmlLocal(shelf.name) + "</div>"
+            + "</div>";
+        $("noShkBoxDetailStatus").textContent = "";
+        setZoneModalOpen("noShkBoxDetailModal", true);
+    }
+
+    async function removeActiveBox() {
         const client = db();
-        if (!client || !confirm("Убрать этот короб с полки?")) return;
-        const { error } = await client.from("wms_no_shk_boxes").delete().eq("id", id);
-        if (error) { alert("Не удалось убрать короб: " + error.message); return; }
+        if (!client || !activeBoxId || !confirm("Убрать этот короб с полки?")) return;
+        const { error } = await client.from("wms_no_shk_boxes").delete().eq("id", activeBoxId);
+        if (error) {
+            $("noShkBoxDetailStatus").textContent = "Не удалось убрать: " + error.message;
+            $("noShkBoxDetailStatus").style.color = "#dc2626";
+            return;
+        }
+        setZoneModalOpen("noShkBoxDetailModal", false);
         await loadZone();
+    }
+
+    async function printActiveBox() {
+        const client = db();
+        const status = $("noShkBoxDetailStatus");
+        if (!client || !activeBoxId) return;
+        if (!boxLabelTemplate) await loadBoxLabelTemplate();
+        if (!boxLabelTemplate) {
+            status.textContent = "Шаблон этикетки «Короб «Без ШК»» не найден.";
+            status.style.color = "#dc2626";
+            return;
+        }
+        const ctx = findBoxContext(activeBoxId);
+        if (!ctx) return;
+        const box = ctx.box;
+        const data = {
+            box_code: boxCode(box),
+            box_number: String(box.box_number),
+            date_label: computeDateLabel(box),
+            area: box.area,
+            box_type: box.box_type,
+        };
+        const tspl = buildTsplPayloadBase64(boxLabelTemplate, data);
+        status.textContent = "Отправляю в очередь…";
+        status.style.color = "";
+        const user = JSON.parse(localStorage.getItem("user") || "{}");
+        const { data: job, error } = await client
+            .from("print_jobs")
+            .insert({ template_id: boxLabelTemplate.id, data, tspl, created_by: user.id || user.name || null })
+            .select("id,status")
+            .single();
+        if (error) {
+            status.textContent = "Ошибка постановки в очередь: " + error.message;
+            status.style.color = "#dc2626";
+            return;
+        }
+        status.textContent = "В очереди, жду принтер…";
+        const channel = client
+            .channel("no_shk_print_job_" + job.id)
+            .on("postgres_changes", { event: "UPDATE", schema: "public", table: "print_jobs", filter: "id=eq." + job.id }, (payload) => {
+                const row = payload.new;
+                if (row.status === "printed") {
+                    status.textContent = "Напечатано ✓";
+                    client.removeChannel(channel);
+                } else if (row.status === "failed") {
+                    status.textContent = "Ошибка: " + (row.error_message || "неизвестная ошибка моста");
+                    client.removeChannel(channel);
+                }
+            })
+            .subscribe();
     }
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -282,5 +442,19 @@
                 void addRack(name);
             });
         }
+
+        const closeNewBoxBtn = $("closeNoShkNewBox");
+        if (closeNewBoxBtn) closeNewBoxBtn.addEventListener("click", () => setZoneModalOpen("noShkNewBoxModal", false));
+        const cancelNewBoxBtn = $("cancelNewBoxBtn");
+        if (cancelNewBoxBtn) cancelNewBoxBtn.addEventListener("click", () => setZoneModalOpen("noShkNewBoxModal", false));
+        const saveNewBoxBtn = $("saveNewBoxBtn");
+        if (saveNewBoxBtn) saveNewBoxBtn.addEventListener("click", () => void saveNewBox());
+
+        const closeBoxDetailBtn = $("closeNoShkBoxDetail");
+        if (closeBoxDetailBtn) closeBoxDetailBtn.addEventListener("click", () => setZoneModalOpen("noShkBoxDetailModal", false));
+        const removeBoxBtn = $("removeNoShkBoxBtn");
+        if (removeBoxBtn) removeBoxBtn.addEventListener("click", () => void removeActiveBox());
+        const printBoxBtn = $("printNoShkBoxBtn");
+        if (printBoxBtn) printBoxBtn.addEventListener("click", () => void printActiveBox());
     });
 })();
