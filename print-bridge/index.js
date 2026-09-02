@@ -5,6 +5,7 @@
 "use strict";
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
+const iconv = require("iconv-lite");
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -23,7 +24,12 @@ const net = require("node:net");
 function sendToPrinter(tspl) {
     return new Promise((resolve, reject) => {
         const socket = net.createConnection({ host: PRINTER_IP, port: PRINTER_PORT }, () => {
-            socket.write(tspl, "utf8", () => {
+            // TSPL's CODEPAGE 1251 command (print-tspl.js) tells the
+            // printer to read Cyrillic text as Windows-1251 bytes, not
+            // UTF-8 -- so the bytes sent here must actually be Windows-1251,
+            // confirmed needed on-site (2026-09-02: UTF-8 bytes printed as
+            // garbled glyphs for Cyrillic text).
+            socket.write(iconv.encode(tspl, "win1251"), () => {
                 socket.end();
             });
         });

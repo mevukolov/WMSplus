@@ -33,7 +33,7 @@ test("buildTsplFromTemplate emits SIZE/GAP/CLS/PRINT around elements", () => {
         ],
     };
     const tspl = buildTsplFromTemplate(template, { title: "Тест" });
-    assert.ok(tspl.startsWith("SIZE 50 mm,50 mm\r\nGAP 2 mm,0 mm\r\nCLS\r\nDIRECTION 1\r\n"));
+    assert.ok(tspl.startsWith("SIZE 50 mm,50 mm\r\nGAP 2 mm,0 mm\r\nCLS\r\nDIRECTION 1\r\nCODEPAGE 1251\r\n"));
     assert.ok(tspl.includes('TEXT 40,40,"3",0,1,1,"Тест"'));
     assert.ok(tspl.trim().endsWith("PRINT 1,1"));
 });

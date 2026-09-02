@@ -83,6 +83,12 @@ function buildTsplFromTemplate(template, data) {
         // this, content prints mirrored 180° and shifted to the opposite
         // corner from the x_mm/y_mm coordinates given.
         `DIRECTION 1`,
+        // Cyrillic text: the printer expects a single-byte codepage, not
+        // UTF-8 -- the bridge (print-bridge/index.js) re-encodes this
+        // whole command string as Windows-1251 bytes before sending, to
+        // match this codepage. Confirmed needed on-site (2026-09-02):
+        // without it, Cyrillic text printed as garbled glyphs.
+        `CODEPAGE 1251`,
         ...elements.map((element) => elementCommand(element, data || {})),
         `PRINT 1,1`,
     ];
