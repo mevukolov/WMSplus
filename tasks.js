@@ -1720,6 +1720,42 @@
         return roster;
     }
 
+    const SHIFT_ROSTER_ZONES = REVIEW_SECTIONS.concat(REQUEST_SECTIONS);
+
+    function shiftRosterZoneCheckboxesHtml(selectedZones) {
+        const selected = new Set(selectedZones || []);
+        return SHIFT_ROSTER_ZONES.map((zone) => "<label class='shift-roster-zone'><input type='checkbox' value='" + escapeHtml(zone) + "'" + (selected.has(zone) ? " checked" : "") + ">" + escapeHtml(zone) + "</label>").join("");
+    }
+
+    function shiftRosterEmployeeOptionsHtml(selectedId) {
+        const options = "<option value=''>Выберите сотрудника</option>" + (state.shift.employees || [])
+            .map((employee) => "<option value='" + escapeHtml(employee.id || employee.employee_id) + "'" + ((employee.id || employee.employee_id) === selectedId ? " selected" : "") + ">" + escapeHtml(employee.full_name) + "</option>")
+            .join("");
+        return options;
+    }
+
+    function addShiftRosterRow(prefill) {
+        const container = $("shiftRosterEditor");
+        if (!container) return;
+        const row = document.createElement("div");
+        row.className = "shift-roster-row";
+        row.innerHTML = "<div class='shift-roster-row-head'>"
+            + "<select class='shift-roster-employee'>" + shiftRosterEmployeeOptionsHtml(prefill && prefill.employee_id) + "</select>"
+            + "<button class='btn btn-square shift-roster-remove' type='button' aria-label='Убрать'>×</button>"
+            + "</div>"
+            + "<div class='shift-roster-zones'>" + shiftRosterZoneCheckboxesHtml(prefill && prefill.zones) + "</div>";
+        container.appendChild(row);
+        row.querySelector(".shift-roster-remove").addEventListener("click", () => row.remove());
+    }
+
+    function renderShiftRosterEditor(rows) {
+        const container = $("shiftRosterEditor");
+        if (!container) return;
+        container.innerHTML = "";
+        const entries = Array.isArray(rows) && rows.length ? rows : [null];
+        entries.forEach((entry) => addShiftRosterRow(entry));
+    }
+
     function renderShiftGate() {
         const banner = $("shiftGateBanner");
         const title = $("shiftGateTitle");
@@ -2144,6 +2180,7 @@
         if (!state.shift.employees.length) await loadShiftState();
         closeFlowModals();
         fillShiftSelects();
+        renderShiftRosterEditor(normalizeShiftRoster(state.shift.current));
         state.shift.pureRows = [];
         state.shift.pureStats = null;
         state.shift.purePrepared = null;
@@ -15665,8 +15702,9 @@
         });
         $("openShiftFromBanner").addEventListener("click", () => { void openShiftOpeningModal(); });
         $("closeShiftOpening").addEventListener("click", closeShiftOpeningModal);
-        $("shiftIncomingSelect").addEventListener("change", updateShiftOpeningForm);
-        $("shiftOutgoingSelect").addEventListener("change", updateShiftOpeningForm);
+        if ($("shiftIncomingSelect")) $("shiftIncomingSelect").addEventListener("change", updateShiftOpeningForm);
+        if ($("shiftOutgoingSelect")) $("shiftOutgoingSelect").addEventListener("change", updateShiftOpeningForm);
+        $("addShiftRosterRow").addEventListener("click", () => addShiftRosterRow(null));
         $("shiftPureLossesFile").addEventListener("change", () => {
             const file = $("shiftPureLossesFile").files && $("shiftPureLossesFile").files[0];
             if (file) void handleShiftPureLossesFile(file);
