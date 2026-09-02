@@ -45,6 +45,15 @@
         .task-search-meta { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
         .task-search-empty { padding: 12px; color: #64748b; font-size: 13px; line-height: 1.35; }
         .tasks-home-groups { display: grid; gap: 16px; }
+        /* Hidden for now, per explicit request -- until Флоу Phase 1 is
+           fully done, entry stays limited to the pilot's own dev-only
+           "В разработке" card (#openFlow) and the Отладка sandbox, not this
+           prominent home-screen banner every user would see. */
+        .flow-home-banner { display: none; margin-bottom: 18px; padding: 22px; border-radius: 18px; background: linear-gradient(120deg, #623cea, #8b5cf6); color: #fff; text-align: center; }
+        .flow-home-banner.is-disabled { opacity: .5; pointer-events: none; }
+        .flow-home-banner-kicker { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .8; margin-bottom: 10px; }
+        .flow-home-banner-btn { font-size: 22px; padding: 16px 36px; border-radius: 16px; background: #fff; color: #623cea; border: 0; font-weight: 800; cursor: pointer; }
+        .flow-home-banner-btn:hover { transform: translateY(-2px); }
         .tasks-home-group { border: 1px solid rgba(15,23,42,.08); border-radius: 24px; background: rgba(255,255,255,.72); box-shadow: var(--shadow-sm); padding: 16px; animation: tasksRiseIn .24s ease-out both; }
         .tasks-home-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
         .tasks-home-group-title { margin: 0; color: var(--accent-dark); font-size: 22px; line-height: 1; letter-spacing: -.02em; }
@@ -360,6 +369,16 @@
             animation: tasksModalOut .22s cubic-bezier(.4,0,.7,1) both;
         }
         .tasks-flow-modal.upload-work.active { display: flex; }
+        .flow-why-panel,
+        .flow-side-panel { display: none; }
+        /* Absolutely positioned (not flex siblings of the card) so the card
+           itself keeps the exact same centered layout/width it has in the
+           classic overlay -- these two panels float over the backdrop to
+           its left/right instead of competing with it for space. */
+        .is-flow-embedded .flow-why-panel,
+        .is-flow-embedded .flow-side-panel { display: block; position: absolute; top: 18px; bottom: 18px; width: clamp(0px, calc((100vw - 860px) / 2 - 40px), 260px); overflow: auto; }
+        .is-flow-embedded .flow-why-panel { left: 18px; }
+        .is-flow-embedded .flow-side-panel { right: 18px; }
         #taskDetailModal { z-index: 4300; }
         #specialInfoModal { z-index: 4450; }
         #prespisokSecondLineModal { z-index: 4250; }
@@ -370,6 +389,7 @@
         #reopenConfirmModal,
         #splitShkConfirmModal,
         #allTareShkModal,
+        #flowSkipModal,
         #expensiveWriteoffModal { z-index: 4400; }
         #achievementDetailModal { z-index: 4420; }
         .tasks-flow-card {
@@ -469,6 +489,9 @@
         .task-celebration-yellow { background: #f59e0b; }
         .task-celebration-red { background: #dc2626; }
         .task-celebration-icon { font-size: 104px; line-height: 1; color: #fff; font-weight: 900; animation: taskCelebrationIconPop .5s .15s cubic-bezier(.2,1.6,.3,1.1) both; }
+        .flow-why-box { margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: #f1f5f9; }
+        .flow-why-box strong { display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+        .flow-why-box .flow-reason { font-size: 13px; color: #334155; padding: 2px 0; }
         @keyframes taskCelebrationIconPop { 0% { transform: scale(.3) rotate(-15deg); opacity: 0; } 60% { transform: scale(1.18) rotate(5deg); opacity: 1; } 100% { transform: scale(1) rotate(0); } }
         .task-detail-head { padding: 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
         .task-detail-created { color: #94a3b8; font-size: 11px; font-weight: 700; margin-bottom: 4px; }
@@ -1139,6 +1162,10 @@
     </section>
 
     <section id="tasksHome" class="tasks-home-groups">
+        <div class="flow-home-banner" data-dev-only>
+            <span class="flow-home-banner-kicker">Флоу</span>
+            <button id="startFlowBanner" class="flow-home-banner-btn" type="button">Дай мне задачу</button>
+        </div>
         <div class="tasks-home-group">
             <div class="tasks-home-group-head">
                 <div>
@@ -1538,7 +1565,9 @@
 </section>
 
 <section id="taskDetailModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div id="flowWhyPanel" class="flow-why-panel"></div>
     <div id="taskDetailWrap" class="tasks-flow-card task-detail-card"></div>
+    <div id="flowSidePanel" class="flow-side-panel"></div>
 </section>
 
 <section id="flowTaskModal" class="tasks-flow-modal upload-work" aria-hidden="true">
@@ -1662,6 +1691,11 @@
                 <span class="tasks-action-icon">◈</span>
                 <h2 class="tasks-action-title">Предсписок</h2>
                 <p class="tasks-action-text">Данные последнего реального запуска, без загрузки файла — без записи решения.</p>
+            </button>
+            <button id="openFlowDebug" class="tasks-action-card" type="button">
+                <span class="tasks-action-icon">↻</span>
+                <h2 class="tasks-action-title">Флоу</h2>
+                <p class="tasks-action-text">Реальная очередь и карточка — без клейма задачи и без записи вердикта/скипа.</p>
             </button>
         </div>
     </div>
