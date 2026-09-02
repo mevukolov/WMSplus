@@ -434,6 +434,20 @@
             flex-wrap: wrap;
             gap: 10px;
         }
+        @keyframes no-shk-box-in {
+            from { opacity: 0; transform: scale(.85) translateY(4px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes no-shk-box-pop {
+            0% { opacity: 0; transform: scale(.35) rotate(-10deg); }
+            55% { opacity: 1; transform: scale(1.14) rotate(4deg); }
+            80% { transform: scale(.96) rotate(-1deg); }
+            100% { opacity: 1; transform: scale(1) rotate(0); }
+        }
+        @keyframes no-shk-log-in {
+            from { opacity: 0; transform: translateX(-8px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
         .no-shk-box {
             width: 52px;
             height: 52px;
@@ -446,30 +460,14 @@
             font-weight: 700;
             color: #475569;
             cursor: pointer;
-            transition: background .12s ease;
+            transition: background .12s ease, transform .12s ease, box-shadow .12s ease;
+            animation: no-shk-box-in .3s ease-out both;
         }
-        .no-shk-box:hover { background: #c3cad6; }
-        .no-shk-box-add {
-            width: 52px;
-            height: 52px;
-            border: 2px dashed #cbd5e1;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #94a3b8;
-            font-size: 20px;
-            line-height: 1;
-            cursor: pointer;
-            background: #f8fafc;
-            transition: background .12s ease, border-color .12s ease;
-        }
-        .no-shk-box-add:hover { background: #eef2f7; border-color: #94a3b8; }
-        .no-shk-box-add:disabled {
-            opacity: .4;
-            cursor: not-allowed;
-            background: #f8fafc;
-            border-color: #cbd5e1;
+        .no-shk-box.is-new { animation: no-shk-box-pop .55s cubic-bezier(.34,1.56,.64,1) both; }
+        .no-shk-box:hover {
+            background: #c3cad6;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 10px rgba(15,23,42,.15);
         }
         .no-shk-floor {
             border: 2px dashed #cbd5e1;
@@ -485,8 +483,15 @@
             letter-spacing: .04em;
             margin: 0 0 10px;
         }
+        .no-shk-move-log-row {
+            animation: no-shk-log-in .22s ease-out both;
+        }
         .no-shk-move-log-row.ok { color: #15803d; }
         .no-shk-move-log-row.err { color: #b91c1c; }
+        @media (prefers-reduced-motion: reduce) {
+            .no-shk-box, .no-shk-box.is-new, .no-shk-move-log-row { animation: none; }
+            .no-shk-box:hover { transform: none; }
+        }
         .tasks-flow-card {
             width: min(920px, 100%);
             max-height: 88vh;

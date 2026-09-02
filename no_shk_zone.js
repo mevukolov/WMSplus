@@ -28,6 +28,28 @@
         return div.innerHTML;
     }
 
+    // Layout-independent scan input: same technique already used in
+    // barcode_generator.js/shk_generator.js/etc -- a scanner emulates a
+    // physical keyboard, so if the OS is on a Cyrillic (ЙЦУКЕН) layout the
+    // scanned ASCII codes come out as Cyrillic look-alike characters on the
+    // same key positions. Remap them back by character, not by re-reading
+    // hardware key codes (this repo has no such API layer), matching the
+    // existing per-file convention rather than inventing a new approach.
+    function buildRuToEnMap() {
+        const ruLow = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю.";
+        const enLow = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./";
+        const ruHigh = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
+        const enHigh = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
+        const map = {};
+        for (let i = 0; i < ruLow.length; i++) map[ruLow[i]] = enLow[i];
+        for (let i = 0; i < ruHigh.length; i++) map[ruHigh[i]] = enHigh[i];
+        return map;
+    }
+    const RU_TO_EN = buildRuToEnMap();
+    function ruToEnLayout(str) {
+        return String(str || "").split("").map((ch) => RU_TO_EN[ch] || ch).join("");
+    }
+
     // Same fixed-class animated overlay every other modal on this page
     // uses (see .tasks-flow-modal.upload-work in tasks.html), but tasks.js
     // keeps its own setFlowModalOpen()/closeFlowModals() private to its
@@ -57,6 +79,10 @@
 
     let racks = [];
     let floorBoxes = [];
+    // Boxes already rendered once get a calm fade on re-render; a box seen
+    // for the first time (just created, or freshly moved into view) gets
+    // the bouncier pop-in -- see .no-shk-box.is-new in tasks.html.
+    let seenBoxIds = new Set();
     let boxLabelTemplate = null;
     let shelfLabelTemplate = null;
     let activeBoxId = "";
@@ -108,12 +134,17 @@
         assign(data);
     }
 
+    function boxTileHtml(box, index) {
+        const isNew = !seenBoxIds.has(box.id);
+        const cls = "no-shk-box" + (isNew ? " is-new" : "");
+        const delay = Math.min(index, 10) * 30;
+        return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "' title='Короб без ШК " + box.box_number + "'>№" + box.box_number + "</div>";
+    }
+
     function shelfSkeuoHtml(shelf) {
         const boxes = (shelf.wms_no_shk_boxes || []).slice().sort((a, b) => a.box_number - b.box_number);
         const isFull = boxes.length >= shelf.capacity;
-        const boxesHtml = boxes.map((box) => (
-            "<div class='no-shk-box' data-box-id='" + box.id + "' title='Короб без ШК " + box.box_number + "'>№" + box.box_number + "</div>"
-        )).join("");
+        const boxesHtml = boxes.map(boxTileHtml).join("");
         return "<div class='no-shk-shelf'>"
             + "<div class='no-shk-shelf-head'>"
             + "<span>" + escapeHtmlLocal(shelf.name) + "</span>"
@@ -143,7 +174,7 @@
             + "<p class='no-shk-floor-title'>На полу" + (floorBoxes.length ? " (" + floorBoxes.length + ")" : "") + "</p>"
             + "<div class='no-shk-boxes-row'>"
             + (floorBoxes.length
-                ? floorBoxes.map((box) => "<div class='no-shk-box' data-box-id='" + box.id + "' title='Короб без ШК " + box.box_number + "'>№" + box.box_number + "</div>").join("")
+                ? floorBoxes.map(boxTileHtml).join("")
                 : "<span style='color:#94a3b8;font-size:12px;'>пусто</span>")
             + "</div></div>";
 
@@ -165,6 +196,11 @@
         wrap.querySelectorAll("[data-box-id]").forEach((box) => {
             box.addEventListener("click", () => openBoxDetailModal(box.dataset.boxId));
         });
+
+        const nextSeen = new Set();
+        floorBoxes.forEach((box) => nextSeen.add(box.id));
+        racks.forEach((rack) => (rack.wms_no_shk_shelves || []).forEach((shelf) => (shelf.wms_no_shk_boxes || []).forEach((box) => nextSeen.add(box.id))));
+        seenBoxIds = nextSeen;
     }
 
     function renderAdminView() {
@@ -588,12 +624,17 @@
         if (closeMoveBtn) closeMoveBtn.addEventListener("click", () => setZoneModalOpen("noShkMoveModal", false));
         const moveInput = $("noShkMoveScanInput");
         if (moveInput) {
+            let scanBuffer = "";
             moveInput.addEventListener("keydown", (event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                const value = moveInput.value;
-                moveInput.value = "";
-                void handleScan(value);
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    const code = ruToEnLayout(scanBuffer || moveInput.value).trim();
+                    scanBuffer = "";
+                    moveInput.value = "";
+                    void handleScan(code);
+                    return;
+                }
+                if (event.key.length === 1) scanBuffer += event.key;
             });
         }
     });
