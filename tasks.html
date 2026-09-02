@@ -393,6 +393,88 @@
         #expensiveWriteoffModal { z-index: 4400; }
         #achievementDetailModal { z-index: 4420; }
         #noShkZoneAdminModal { z-index: 4400; }
+        /* Зона «Без ШК» -- skeuomorphic rack/shelf/box visualization */
+        .no-shk-rack {
+            background: linear-gradient(180deg, #94a3b8, #64748b);
+            border-radius: 8px;
+            padding: 14px 16px 20px;
+            margin-bottom: 22px;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,.15), 0 2px 6px rgba(15,23,42,.18);
+        }
+        .no-shk-rack-title {
+            color: #f8fafc;
+            font-weight: 700;
+            font-size: 15px;
+            text-shadow: 0 1px 1px rgba(0,0,0,.25);
+            margin: 0 0 12px;
+            letter-spacing: .02em;
+        }
+        .no-shk-shelf {
+            background: linear-gradient(180deg, #e2e8f0, #cbd5e1);
+            border-radius: 4px;
+            padding: 10px 12px 14px;
+            margin-bottom: 16px;
+            box-shadow: 0 5px 6px rgba(15,23,42,.28), inset 0 1px 0 rgba(255,255,255,.65);
+        }
+        .no-shk-shelf:last-child { margin-bottom: 0; }
+        .no-shk-shelf-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #334155;
+            font-weight: 600;
+        }
+        .no-shk-shelf-fill { font-weight: 400; color: #64748b; }
+        .no-shk-shelf-fill.is-full { color: #b91c1c; font-weight: 600; }
+        .no-shk-boxes-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: flex-end;
+            min-height: 38px;
+        }
+        .no-shk-box {
+            width: 46px;
+            height: 36px;
+            background: linear-gradient(180deg, #d6a874, #b9895a);
+            border: 1px solid #8a6338;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: #4a3220;
+            box-shadow: 0 2px 3px rgba(15,23,42,.25);
+            position: relative;
+            cursor: pointer;
+        }
+        .no-shk-box::before {
+            content: "";
+            position: absolute;
+            top: 3px; left: 4px; right: 4px; height: 1px;
+            background: rgba(74,50,32,.35);
+        }
+        .no-shk-box-add {
+            width: 46px;
+            height: 36px;
+            border: 2px dashed #94a3b8;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #64748b;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            background: rgba(255,255,255,.5);
+        }
+        .no-shk-box-add:disabled {
+            opacity: .4;
+            cursor: not-allowed;
+        }
         .tasks-flow-card {
             width: min(920px, 100%);
             max-height: 88vh;
