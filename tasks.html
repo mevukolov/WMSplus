@@ -392,6 +392,7 @@
         #flowSkipModal,
         #expensiveWriteoffModal { z-index: 4400; }
         #achievementDetailModal { z-index: 4420; }
+        #noShkZoneAdminModal { z-index: 4400; }
         .tasks-flow-card {
             width: min(920px, 100%);
             max-height: 88vh;
@@ -1302,6 +1303,11 @@
                     <h2 class="tasks-action-title">Отладка</h2>
                     <p class="tasks-action-text">Проверка интерфейсов Без ШК и Предсписка на реальных данных, без записи.</p>
                 </button>
+                <button id="openNoShkZone" class="tasks-action-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">🗄</span>
+                    <h2 class="tasks-action-title">Зона «Без ШК»</h2>
+                    <p class="tasks-action-text">Стеллажи и полки физической зоны хранения товаров «Без ШК», их вместимость.</p>
+                </button>
             </div>
         </div>
     </section>
@@ -1701,6 +1707,40 @@
     </div>
 </section>
 
+<section id="noShkZoneModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Зона «Без ШК»</h3>
+                <p class="work-subtitle">Стеллажи и полки физической зоны хранения товаров «Без ШК». Пока только вместимость, без привязки конкретных коробов.</p>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <button id="editNoShkZoneBtn" class="btn btn-square" type="button" title="Управление стеллажами">✎</button>
+                <button id="closeNoShkZone" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+            </div>
+        </div>
+        <div id="noShkZoneWrap"></div>
+    </div>
+</section>
+
+<section id="noShkZoneAdminModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Управление стеллажами</h3>
+                <p class="work-subtitle">Добавляй стеллажи и полки, указывай вместимость каждой полки в коробах.</p>
+            </div>
+            <button id="closeNoShkZoneAdmin" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="noShkZoneAdminWrap"></div>
+        <div class="file-row" style="margin-top:12px;">
+            <label>Название нового стеллажа<br><input id="newRackName" type="text" placeholder="Стеллаж 3" style="width:220px;"></label>
+            <button id="addRackBtn" class="btn btn-rect" type="button" style="align-self:flex-end;">+ Стеллаж</button>
+        </div>
+        <div id="noShkZoneAdminStatus" class="review-status"></div>
+    </div>
+</section>
+
 <section id="writeoffTermsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card tasks-flow-card-wide">
         <div class="work-head">
@@ -1865,5 +1905,6 @@
 <script src="ui.js"></script>
 <script src="task-verdicts.js"></script>
 <script src="tasks.js"></script>
+<script src="no_shk_zone.js"></script>
 </body>
 </html>
