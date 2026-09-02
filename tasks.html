@@ -394,7 +394,8 @@
         #achievementDetailModal { z-index: 4420; }
         #noShkZoneAdminModal,
         #noShkNewBoxModal,
-        #noShkBoxDetailModal { z-index: 4400; }
+        #noShkBoxDetailModal,
+        #noShkMoveModal { z-index: 4400; }
         /* Зона «Без ШК» -- rack/shelf/box visualization: dark structural
            lines (posts + shelf planks) with light rounded box tiles,
            closer to a clean line drawing than a heavy skeuomorphic render. */
@@ -470,6 +471,22 @@
             background: #f8fafc;
             border-color: #cbd5e1;
         }
+        .no-shk-floor {
+            border: 2px dashed #cbd5e1;
+            border-radius: 6px;
+            padding: 12px 14px;
+            margin-bottom: 24px;
+        }
+        .no-shk-floor-title {
+            font-weight: 700;
+            font-size: 13px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            margin: 0 0 10px;
+        }
+        .no-shk-move-log-row.ok { color: #15803d; }
+        .no-shk-move-log-row.err { color: #b91c1c; }
         .tasks-flow-card {
             width: min(920px, 100%);
             max-height: 88vh;
@@ -1796,6 +1813,10 @@
                 <button id="closeNoShkZone" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
             </div>
         </div>
+        <div class="file-row" style="margin-top:0;">
+            <button id="openNewBoxBtn" class="btn btn-rect" type="button">+ Добавить короб</button>
+            <button id="openMoveBoxesBtn" class="btn btn-outline" type="button">Перемещение коробов</button>
+        </div>
         <div id="noShkZoneWrap"></div>
     </div>
 </section>
@@ -1823,7 +1844,7 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Новый короб</h3>
-                <p class="work-subtitle">Заполни данные — короб появится на выбранной полке.</p>
+                <p class="work-subtitle">Заполни данные — короб появится «На полу», дальше его нужно распечатать и разместить через «Перемещение коробов».</p>
             </div>
             <button id="closeNoShkNewBox" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
@@ -1867,10 +1888,25 @@
         </div>
         <div id="noShkBoxDetailWrap"></div>
         <div class="file-row" style="margin-top:12px;">
-            <button id="printNoShkBoxBtn" class="btn btn-rect" type="button">Распечатать этикетку</button>
+            <button id="printNoShkBoxBtn" class="btn btn-rect" type="button">Распечатать стикер</button>
             <button id="removeNoShkBoxBtn" class="btn btn-outline" type="button">Убрать с полки</button>
         </div>
         <div id="noShkBoxDetailStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="noShkMoveModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Перемещение коробов</h3>
+                <p class="work-subtitle">Сначала отсканируй этикетку полки, потом — коробов один за другим.</p>
+            </div>
+            <button id="closeNoShkMove" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <label>Скан<br><input id="noShkMoveScanInput" type="text" placeholder="Наведи сканер и пикай" autocomplete="off" style="width:100%;font-size:16px;"></label>
+        <div id="noShkMoveActiveShelf" style="margin-top:10px;font-weight:600;">Полка не выбрана</div>
+        <div id="noShkMoveLog" style="margin-top:10px;display:flex;flex-direction:column-reverse;gap:4px;max-height:240px;overflow:auto;font-size:13px;"></div>
     </div>
 </section>
 
