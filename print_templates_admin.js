@@ -72,8 +72,17 @@
 
     function elementBoxSizePx(element) {
         const type = element.type || "text";
-        if (type === "barcode") return { w: 90, h: Math.max(16, Math.round((element.height_mm || 10) * PX_PER_MM)) };
-        if (type === "qr") { const side = Math.max(24, Math.round((element.width_mm || 20) * PX_PER_MM)); return { w: side, h: side }; }
+        // width_mm/height_mm here are rough density knobs for print-tspl.js
+        // (QR cell size, barcode bar height) -- they do NOT linearly
+        // determine the real printed size (a QR's true size also depends
+        // on its content length/module count, which this editor doesn't
+        // know). Boxes are capped so a large width_mm can't visually
+        // swallow the canvas and block other elements from being selected
+        // or dragged -- confirmed as a real usability bug on-site
+        // (2026-09-02): an oversized QR box made a text element beneath
+        // it impossible to place correctly.
+        if (type === "barcode") return { w: 90, h: Math.min(60, Math.max(16, Math.round((element.height_mm || 10) * PX_PER_MM))) };
+        if (type === "qr") { const side = Math.min(90, Math.max(30, Math.round((element.width_mm || 20) * PX_PER_MM))); return { w: side, h: side }; }
         return { w: 70, h: 22 };
     }
 
