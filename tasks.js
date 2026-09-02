@@ -1678,6 +1678,48 @@
         return employee ? normalizeText(employee.full_name) : "";
     }
 
+    // The one place old two-named-role shifts (incoming_employee_id/
+    // outgoing_employee_id, no real `roster`) get read as an equivalent
+    // roster. Everything else in this file reads shift.roster only --
+    // never the two old fields directly -- so this is the single point
+    // that has to change if the old-shift compatibility mapping ever
+    // needs adjusting. The old model treated "Запросы входящего потока"
+    // and "Коробки на входе" as the incoming person's zones (see the old
+    // FLOW_STRICT_INCOMING_SECTIONS set) and everything else as the
+    // outgoing person's -- this reproduces that split exactly, so a shift
+    // opened before this change scores identically to before.
+    function normalizeShiftRoster(shift) {
+        if (!shift) return [];
+        if (Array.isArray(shift.roster) && shift.roster.length) {
+            return shift.roster.map((entry) => ({
+                employee_id: normalizeIdentifier(entry && entry.employee_id),
+                full_name: normalizeText(entry && entry.full_name),
+                zones: Array.isArray(entry && entry.zones) ? entry.zones.filter(Boolean) : [],
+            })).filter((entry) => entry.employee_id);
+        }
+        const roster = [];
+        const incomingId = normalizeIdentifier(shift.incoming_employee_id);
+        if (incomingId) {
+            roster.push({
+                employee_id: incomingId,
+                full_name: normalizeText(shift.incoming_name) || employeeNameById(incomingId),
+                zones: ["Запросы входящего потока", "Коробки на входе"],
+            });
+        }
+        const outgoingId = normalizeIdentifier(shift.outgoing_employee_id);
+        if (outgoingId) {
+            const outgoingZones = REVIEW_SECTIONS.concat(["Списания AWH"]);
+            const existing = roster.find((entry) => entry.employee_id === outgoingId);
+            if (existing) existing.zones = existing.zones.concat(outgoingZones);
+            else roster.push({
+                employee_id: outgoingId,
+                full_name: normalizeText(shift.outgoing_name) || employeeNameById(outgoingId),
+                zones: outgoingZones,
+            });
+        }
+        return roster;
+    }
+
     function renderShiftGate() {
         const banner = $("shiftGateBanner");
         const title = $("shiftGateTitle");
@@ -1739,6 +1781,7 @@
                     ...shift,
                     incoming_name: employeeNameById(shift.incoming_employee_id),
                     outgoing_name: employeeNameById(shift.outgoing_employee_id),
+                    roster: normalizeShiftRoster(shift),
                 } : null;
             } catch (error) {
                 console.error("wms shift state failed:", error);
