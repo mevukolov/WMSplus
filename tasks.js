@@ -5032,10 +5032,6 @@
         return flowTaskSection(row);
     }
 
-    function flowTaskZoneLabel(row) {
-        return flowTaskSection(row);
-    }
-
     function flowZonePolicy(row) {
         return FLOW_STRICT_SECTIONS.has(flowTaskSection(row)) ? "strict" : "flexible";
     }
@@ -5444,7 +5440,7 @@
         const route = taskRouteLabel(row);
         target.innerHTML = "<div class='flow-current-head'>"
             + "<div><h3 class='flow-current-title'>" + escapeHtml(displayTaskTitle(row)) + "</h3>"
-            + "<div class='flow-current-meta'>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route].filter(Boolean).join(" · ")) + "</div></div>"
+            + "<div class='flow-current-meta'>" + escapeHtml([flowTaskSection(row), route].filter(Boolean).join(" · ")) + "</div></div>"
             + "<span class='flow-score-pill'>Score " + escapeHtml(String(score.score)) + "</span>"
             + "</div>"
             + "<div class='flow-reasons'>" + score.reasons.slice(0, 8).map((reason) => "<div class='flow-reason'>" + escapeHtml(reason) + "</div>").join("") + "</div>"
@@ -5481,7 +5477,7 @@
             const group = item.group ? "Группа " + item.group.count : "";
             return "<div class='flow-queue-row'>"
                 + "<div><strong>" + escapeHtml(displayTaskTitle(row)) + "</strong>"
-                + "<span>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route, group, formatMoney(reviewPrice(row))].filter(Boolean).join(" · ")) + "</span></div>"
+                + "<span>" + escapeHtml([flowTaskSection(row), route, group, formatMoney(reviewPrice(row))].filter(Boolean).join(" · ")) + "</span></div>"
                 + "<span class='flow-level " + escapeHtml(item.level.key) + "'>" + escapeHtml(item.level.label + " · " + item.score) + "</span>"
                 + "</div>";
         }).join("");
@@ -5727,7 +5723,7 @@
             : "";
         target.innerHTML = "<div class='flow-task-hero'>"
             + "<div class='flow-task-head'><div><h3 class='flow-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</h3>"
-            + "<p class='flow-task-subtitle'>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route, lockText].filter(Boolean).join(" · ")) + "</p></div>"
+            + "<p class='flow-task-subtitle'>" + escapeHtml([flowTaskSection(row), route, lockText].filter(Boolean).join(" · ")) + "</p></div>"
             + "<button id='closeFlowTaskCard' class='btn btn-square' type='button'>×</button></div>"
             + "<div class='flow-task-score'>"
             + "<span>Score " + escapeHtml(String(score.score)) + "</span>"
