@@ -592,6 +592,7 @@
             conflictRowId: "",
             allowConflictOpenId: "",
             prespisokDeclined: false,
+            debugMode: false,
         },
         requests: {
             activeSection: "",
@@ -5228,9 +5229,10 @@
         if (note) {
             const zones = Array.from(context.zones).map((zone) => zone === "incoming" ? "входящий поток" : "исходящий поток");
             const skillNote = state.flow.employeeStats.loaded ? " Личный коэффициент включен." : " Личная статистика пока не загружена.";
-            note.textContent = hasShift
+            const debugPrefix = state.flow.debugMode ? "⚠ ОТЛАДКА — ничего не сохраняется. " : "";
+            note.textContent = debugPrefix + (hasShift
                 ? "Сотрудник: " + (context.name || context.id || "не определен") + ". Зоны: " + (zones.join(", ") || "не найден в смене") + ". Доступно задач: " + stats.available + "." + skillNote
-                : "Сначала открой смену: Флоу должен знать ответственных за зоны.";
+                : "Сначала открой смену: Флоу должен знать ответственных за зоны.");
         }
         const next = $("flowNextTask");
         if (next) {
@@ -5331,6 +5333,10 @@
     }
 
     async function writeTaskHistory(row, eventType, payload) {
+        // Флоу's debug sandbox (state.flow.debugMode) never calls
+        // claimFlowTask, so this guard only ever matters for the
+        // complete/defer/skip paths reachable from a debug session.
+        if (state.flow.debugMode) return;
         const db = supabaseDb();
         if (!db || !row || !row.id) return;
         const actor = flowActor();
@@ -5441,7 +5447,9 @@
         renderFlowPage();
         try {
             await ensureReviewTasksLoaded();
-            const prespisokCandidate = flowPrespisokCandidate();
+            // Debug sandbox stays self-contained -- don't hand off into
+            // предсписок's own (separately gated) real/debug modal mid-session.
+            const prespisokCandidate = state.flow.debugMode ? null : flowPrespisokCandidate();
             if (prespisokCandidate) {
                 state.flow.claiming = false;
                 state.flow.status = "Открываю предсписок: осталось " + prespisokCandidate.remaining + ".";
@@ -5462,11 +5470,15 @@
                 state.flow.statusTone = "good";
                 return;
             }
-            const row = await claimFlowTask(next.row, next);
+            // Debug sandbox never calls claimFlowTask -- no lock is written,
+            // so nothing needs releasing when the sandbox session ends.
+            const row = state.flow.debugMode ? next.row : await claimFlowTask(next.row, next);
             state.flow.currentRowId = row.id;
             state.flow.currentScore = next;
             refreshFlowQueue();
-            state.flow.status = "Задача выдана и закреплена на " + flowSettingNumber("lockTtlMinutes", 15) + " минут: " + displayTaskTitle(row) + ".";
+            state.flow.status = state.flow.debugMode
+                ? "Отладка: показываю задачу без клейма и без записи: " + displayTaskTitle(row) + "."
+                : "Задача выдана и закреплена на " + flowSettingNumber("lockTtlMinutes", 15) + " минут: " + displayTaskTitle(row) + ".";
             state.flow.statusTone = "good";
             renderFlowPage();
             setFlowEmbeddedMode(true);
@@ -5649,6 +5661,16 @@
     // to the home screen so exiting Флоу doesn't strand the user on an
     // empty Флоу page.
     function requestFlowExit() {
+        // A debug-picked row was never really claimed (no lock written) --
+        // unlike a real session, don't let it carry over as "the current
+        // task" into whatever real (non-debug) Флоу session comes next,
+        // since resuming it there would write a real verdict against a
+        // task the pilot never actually locked.
+        if (state.flow.debugMode) {
+            state.flow.currentRowId = "";
+            state.flow.currentScore = null;
+        }
+        state.flow.debugMode = false;
         closeTaskDetail();
         showHome();
     }
@@ -5763,15 +5785,19 @@
         };
         state.flow.skipSaving = true;
         updateFlowSkipForm();
-        if (status) status.textContent = "Сохраняю скип...";
+        if (status) status.textContent = state.flow.debugMode ? "Отладка: не записываю..." : "Сохраняю скип...";
         try {
-            const { data, error } = await db
-                .from(WMS_TASKS_TABLE)
-                .update(patch)
-                .eq("id", id)
-                .select(WMS_TASK_SELECT_COLUMNS)
-                .single();
-            if (error) throw error;
+            let data = null;
+            if (!state.flow.debugMode) {
+                const result = await db
+                    .from(WMS_TASKS_TABLE)
+                    .update(patch)
+                    .eq("id", id)
+                    .select(WMS_TASK_SELECT_COLUMNS)
+                    .single();
+                if (result.error) throw result.error;
+                data = result.data;
+            }
             refreshTaskRow(id, data || patch);
             void writeTaskHistory(findTaskRow(id) || row, "task_skipped", skipEvent);
             if (state.flow.currentRowId === id) {
@@ -5782,7 +5808,7 @@
             closeFlowTaskCard();
             refreshFlowQueue();
             renderFlowPage();
-            toast("Скип записан. Беру следующую.", "success");
+            toast(state.flow.debugMode ? "Отладка: скип не записан. Беру следующую." : "Скип записан. Беру следующую.", "success");
             void issueNextFlowTask();
         } catch (error) {
             console.error("flow skip failed:", error);
@@ -7950,7 +7976,10 @@
         // in sync on every render, and clear it when not applicable so it
         // never shows stale content once embedded mode/source changes.
         const whyPanel = $("flowWhyPanel");
-        if (whyPanel) whyPanel.innerHTML = (state.flow.embedded && state.taskDetail.source === "flow") ? flowWhyBoxHtml(state.flow.currentScore) : "";
+        if (whyPanel) {
+            const debugBadge = state.flow.debugMode ? "<div class='debug-sandbox-badge'>⚠ ОТЛАДКА — ничего не сохраняется</div>" : "";
+            whyPanel.innerHTML = (state.flow.embedded && state.taskDetail.source === "flow") ? (debugBadge + flowWhyBoxHtml(state.flow.currentScore)) : "";
+        }
         if (state.taskDetail.countdownTimer) {
             clearInterval(state.taskDetail.countdownTimer);
             state.taskDetail.countdownTimer = null;
@@ -8961,7 +8990,7 @@
             if (status) status.textContent = "Вердикт “" + SYSTEM_MOVEMENT_VERDICT + "” ставится только системой при актуализации движения.";
             return;
         }
-        if (incomingFlow && guiltyId === "1034305") void unlockAchievement("guilty_1034305", { task_id: id, source_id: row.source_id });
+        if (incomingFlow && guiltyId === "1034305" && !state.flow.debugMode) void unlockAchievement("guilty_1034305", { task_id: id, source_id: row.source_id });
         const tone = incomingFlow ? "" : (VERDICT_TONE[verdict] || "");
         const commentRequired = incomingFlow || tone === "red";
         if ((commentRequired && !comment) || verdict === "Не выбран" || (extraLabel && !extraValue) || guiltyIdError) {
@@ -8991,7 +9020,7 @@
         if (button) button.disabled = true;
         let writebackResponse = null;
         try {
-            if (!isDeferred && needsSourceWriteback(row) && !opts.skipSourceWriteback) {
+            if (!isDeferred && needsSourceWriteback(row) && !opts.skipSourceWriteback && !state.flow.debugMode) {
                 if (status) status.textContent = "Записываю результат в исходную таблицу...";
                 writebackResponse = await writeBackTaskToSource(row, reviewPayload, { overwrite: opts.overwriteSourceWriteback });
             } else if (opts.skipSourceWriteback) {
@@ -9024,15 +9053,19 @@
             source_payload: nextPayload,
             updated_at: now,
         };
-        if (status) status.textContent = "Сохраняю задачу...";
+        if (status) status.textContent = state.flow.debugMode ? "Отладка: не записываю..." : "Сохраняю задачу...";
         try {
-            const { data, error } = await db
-                .from(WMS_TASKS_TABLE)
-                .update(payload)
-                .eq("id", id)
-                .select("id,source_payload,task_status,opp_verdict,assignee_employee_id,assignee_name,completed_at,reopen_after,updated_at")
-                .single();
-            if (error) throw error;
+            let data = null;
+            if (!state.flow.debugMode) {
+                const result = await db
+                    .from(WMS_TASKS_TABLE)
+                    .update(payload)
+                    .eq("id", id)
+                    .select("id,source_payload,task_status,opp_verdict,assignee_employee_id,assignee_name,completed_at,reopen_after,updated_at")
+                    .single();
+                if (result.error) throw result.error;
+                data = result.data;
+            }
             const completedForAchievements = { ...row, ...payload, ...(data || {}) };
             const stateRow = (state.review.rows || []).find((item) => item.id === id);
             if (stateRow) Object.assign(stateRow, data || payload);
@@ -9063,7 +9096,7 @@
                 refreshFlowQueue();
                 renderFlowPage();
             }
-            if (!isDeferred) void evaluateTaskCompletionAchievements(completedForAchievements, { source: "manual_task_complete" });
+            if (!isDeferred && !state.flow.debugMode) void evaluateTaskCompletionAchievements(completedForAchievements, { source: "manual_task_complete" });
             const afterCelebration = state.flow.embedded ? advanceFlowAfterResolution : closeTaskDetail;
             if (!incomingFlow && tone) void playTaskCompletionCelebration(tone).then(afterCelebration);
             else afterCelebration();
@@ -9156,15 +9189,19 @@
             updated_at: now,
         };
         if (button) button.disabled = true;
-        if (status) status.textContent = "Откладываю задачу...";
+        if (status) status.textContent = state.flow.debugMode ? "Отладка: не записываю..." : "Откладываю задачу...";
         try {
-            const { data, error } = await db
-                .from(WMS_TASKS_TABLE)
-                .update(payload)
-                .eq("id", id)
-                .select("id,source_payload,task_status,completed_at,reopen_after,updated_at")
-                .single();
-            if (error) throw error;
+            let data = null;
+            if (!state.flow.debugMode) {
+                const result = await db
+                    .from(WMS_TASKS_TABLE)
+                    .update(payload)
+                    .eq("id", id)
+                    .select("id,source_payload,task_status,completed_at,reopen_after,updated_at")
+                    .single();
+                if (result.error) throw result.error;
+                data = result.data;
+            }
             void writeTaskHistory({ ...row, ...payload, ...(data || {}) }, "task_deferred", {
                 title: displayTaskTitle(row),
                 comment: reason,
@@ -10307,6 +10344,20 @@
         }
         closeDebugSandboxModal();
         void openQuickNoShkModal(true);
+    }
+
+    // Same "real data, read-only" sandbox pattern as предсписок/Без ШК above:
+    // the real scored queue and the real embedded card, but issueNextFlowTask
+    // skips claimFlowTask entirely (no lock written) while state.flow.debugMode
+    // is on, and every real verdict/defer/skip write it can reach short-
+    // circuits into a fake success instead of touching Supabase -- see the
+    // state.flow.debugMode checks in completeTaskFromDetail, deferTaskFromModal,
+    // skipFlowTaskFromModal and writeTaskHistory.
+    function openFlowDebugSandbox() {
+        if (!ensureDevelopmentAccess("Отладка")) return;
+        closeDebugSandboxModal();
+        state.flow.debugMode = true;
+        void showFlowPage();
     }
 
     function openStaffStatsModal() {
@@ -15396,6 +15447,7 @@
         $("closeDebugSandbox").addEventListener("click", closeDebugSandboxModal);
         $("openQuickNoShkDebug").addEventListener("click", openQuickNoShkDebugModal);
         $("openPrespisokDebug").addEventListener("click", () => { void openPrespisokDebugModal(); });
+        $("openFlowDebug").addEventListener("click", () => { void openFlowDebugSandbox(); });
         $("openFlow").addEventListener("click", () => { void showFlowPage(); });
         $("startFlowBanner").addEventListener("click", () => { void showFlowPage(); });
         $("openUploads").addEventListener("click", () => { void showUploads(); });
