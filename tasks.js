@@ -12053,7 +12053,15 @@
             mx: normalizeText(row && (row.mx || row.block)),
             movement: normalizeText(row && (row.last_movement || row.created_at || row.status_at)),
             row_number: row && row.row_number ? row.row_number : null,
-            raw: null,
+            // Was `null` (commit 41ac60a, 2026-08-24) -- silently dropped
+            // transfer/corrugated/previous_mx/shipment_block (anything not
+            // in the fixed whitelist above) from every task created since,
+            // with no other copy surviving once taskRecord's
+            // `delete sourcePayload.row/rows` (a separate, since-confirmed-
+            // safe-once-this-is-fixed egress optimization) ran. Preserve the
+            // full original row again so those fields (and any future ones)
+            // are never silently lost at creation time.
+            raw: row || {},
         };
     }
 
@@ -12390,6 +12398,16 @@
         });
     }
 
+    // Every caller here (presort/labeling, marketplace/pc, wmi_mp_pc,
+    // no_order/usd/tmm) reads "Передача" (row.transfer) as close to always
+    // empty/"0" for these statuses -- confirmed against production data
+    // (87-100% of recent tasks per affected task_type had source_tare_id
+    // "0"), so isGroupableIdentifier correctly rejected it and every
+    // barcode became its own single-row task instead of merging with its
+    // tare-mates. "Гофрокороб" (row.corrugated) is the real per-status
+    // container id for all of these -- ПМ and Почта are the only two
+    // statuses where "Передача" is the right key, and they never call this
+    // function (see buildPmPreview's own separate, untouched logic).
     function appendGroupedTasks(rows, options) {
         const tasks = [];
         const specialMap = options.specialMap || new Map();
@@ -12401,12 +12419,12 @@
         const singles = [];
         let groupedTareCount = 0;
         split.regular.forEach((row) => {
-            if (!isGroupableIdentifier(row.transfer)) { singles.push(row); return; }
-            const group = byTare.get(row.transfer) || [];
+            if (!isGroupableIdentifier(row.corrugated)) { singles.push(row); return; }
+            const group = byTare.get(row.corrugated) || [];
             group.push(row);
-            byTare.set(row.transfer, group);
+            byTare.set(row.corrugated, group);
         });
-        byTare.forEach((group, transfer) => {
+        byTare.forEach((group, tareKey) => {
             if (group.length > 1 || forceTareGrouping) {
                 groupedTareCount += 1;
                 const sorted = sortRowsByCreatedAt(group);
@@ -12416,8 +12434,8 @@
                     sourceModule: options.sourceModule,
                     uploadType: options.uploadType,
                     businessDate: options.businessDate,
-                    sourceId: options.sourcePrefix + ":tare:" + transfer + "|" + options.businessDate,
-                    title: taskTitleForTare(transfer),
+                    sourceId: options.sourcePrefix + ":tare:" + tareKey + "|" + options.businessDate,
+                    title: taskTitleForTare(tareKey),
                     taskType: options.taskType,
                     descriptionTaskType: options.descriptionTaskType || options.taskType,
                     column: options.column,
@@ -12425,12 +12443,12 @@
                     responsibilityZone: options.responsibilityZone,
                     productIds: sorted.map((row) => row.product),
                     rows: sorted,
-                    tareId: transfer,
+                    tareId: tareKey,
                     price,
                     forceHighPriority: options.forceHighPriority,
                     tags: options.tags,
                     specialMap,
-                    payload: { entity_type: "tare", tare_id: transfer, rows: sorted.slice(0, 40) },
+                    payload: { entity_type: "tare", tare_id: tareKey, rows: sorted.slice(0, 40) },
                     infoLines: ["ШК в таре:", ...sorted.map((row) => "- " + row.product + " / " + (row.product_status || "-") + " / " + formatMoney(row.price)), "Статус крайнего движения: " + (sorted[0].product_status || "-")],
                 }));
             } else singles.push(group[0]);
@@ -12450,13 +12468,13 @@
                 responsibilityZone: options.responsibilityZone,
                 productIds: [row.product],
                 rows: [row],
-                tareId: row.transfer,
+                tareId: row.corrugated,
                 price: row.price,
                 forceHighPriority: options.forceHighPriority,
                 tags: options.tags,
                 specialMap,
                 payload: { entity_type: specialMap.has(row.product) ? "special_shk" : "shk", row },
-                infoLines: ["Искомый ШК: " + row.product, "Тара: " + (row.transfer || "-"), "Блок/МХ: " + (row.mx || "-"), "Статус крайнего движения: " + (row.product_status || "-")],
+                infoLines: ["Искомый ШК: " + row.product, "Тара: " + (row.corrugated || "-"), "Блок/МХ: " + (row.mx || "-"), "Статус крайнего движения: " + (row.product_status || "-")],
             }));
         });
         return { tasks, groupedTareCount, singleCount: singles.length + split.special.length, specialCount: split.special.length };
@@ -13838,7 +13856,12 @@
     // and without dedupe that task's timeline would repeat once per row.
     function indexPrespisokTaskHistory(history, row, entries) {
         if (!row || !row.id) return;
-        const record = { taskId: row.id, entries };
+        // taskType/taskTitle ride along so loadAndRenderPrespisokDetailHistory
+        // can label which task a stretch of merged entries came from -- a
+        // тара is a reused physical container, not a stable task identity,
+        // so history.byTare can (and does, in production) collect several
+        // unrelated tasks' full timelines under one тара id.
+        const record = { taskId: row.id, taskType: normalizeText(row.task_type), taskTitle: displayTaskTitle(row), entries };
         (Array.isArray(row.source_shk_ids) ? row.source_shk_ids : []).map(normalizeIdentifier).filter(Boolean).forEach((shk) => {
             if (!history.byShk[shk]) history.byShk[shk] = [];
             history.byShk[shk].push(record);
@@ -14250,11 +14273,29 @@
         // indexPrespisokTaskHistory), so without this a shared task's
         // events would repeat once per matching row.
         const seenTasks = new Set();
+        const distinctTasks = new Set();
         const entries = records
             .filter((record) => record && record.taskId && !seenTasks.has(record.taskId) && seenTasks.add(record.taskId))
-            .flatMap((record) => record.entries || [])
+            .flatMap((record) => {
+                distinctTasks.add(record.taskId);
+                // Tag every entry with which task it came from -- entries
+                // themselves never carry a task id (they're the exact same
+                // shape rendered on a task's own single-task history feed),
+                // so this has to happen here, at the one place multiple
+                // tasks' entries get merged into one array.
+                return (record.entries || []).map((entry) => ({ ...entry, _sourceTaskId: record.taskId, _sourceTaskLabel: [record.taskType, record.taskTitle].filter(Boolean).join(" · ") }));
+            })
             .filter((entry) => entry && entry.created_at)
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        // A тара is a reused physical container, not a stable task identity
+        // -- history.byTare can legitimately collect several unrelated
+        // tasks' full timelines under one тара id (confirmed in production:
+        // 11 distinct tasks over a month for one тара). Merging them into one
+        // undivided feed reads like one task's history repeating/duplicating
+        // itself. Only insert dividers when more than one task is actually
+        // present -- the common case (one тара, one task) stays exactly as
+        // before.
+        const needsDividers = distinctTasks.size > 1;
         if (!$("prespisokDetailHistoryFeed")) return;
         if (!entries.length) {
             // No real matched history -- build the same two-line story tasks'
@@ -14286,9 +14327,17 @@
                 + "<div class='task-history-feed'>" + synthEntries.map(taskHistoryFeedItemHtml).join("") + "</div>";
             return;
         }
+        let previousTaskId = null;
+        const rowsHtml = entries.map((entry) => {
+            const divider = needsDividers && entry._sourceTaskId !== previousTaskId
+                ? "<div class='task-history-task-divider'>" + escapeHtml(entry._sourceTaskLabel || "Другая задача") + "</div>"
+                : "";
+            previousTaskId = entry._sourceTaskId;
+            return divider + taskHistoryFeedItemHtml(entry);
+        }).join("");
         target.innerHTML = "<strong>История</strong>"
             + "<div class='task-chat-head'><div>Дата</div><div>Сотрудник</div><div>Событие</div><div>Комментарий</div></div>"
-            + "<div class='task-history-feed'>" + entries.map(taskHistoryFeedItemHtml).join("") + "</div>";
+            + "<div class='task-history-feed'>" + rowsHtml + "</div>";
     }
 
     function updatePrespisokTimer() {
@@ -15427,10 +15476,17 @@
             const button = event.target.closest && event.target.closest("[data-achievement-detail]");
             if (button) openAchievementDetail(button.dataset.achievementDetail);
         });
-        // Bound once on the stable #taskDetailHistoryFeed container, not
-        // inside renderTaskDetailHistoryFeed (which replaces its innerHTML
-        // on every refresh) -- delegation means this survives every re-render.
-        $("taskDetailHistoryFeed").addEventListener("click", (event) => {
+        // #taskDetailHistoryFeed doesn't exist yet at init time -- it's
+        // only created inside #taskDetailWrap's innerHTML once a task is
+        // actually opened (renderTaskDetail), and gets replaced on every
+        // history refresh after that. #prespisokDetailHistoryFeed (a
+        // completely separate <section>, not nested under #taskDetailModal)
+        // renders the exact same [data-history-link] rows via the same
+        // taskHistoryFeedItemHtml. Bind on document -- a real element that
+        // always exists at init time and is an ancestor of both -- so one
+        // delegated listener covers every current and future container that
+        // renders these rows, surviving every open/close/re-render.
+        document.addEventListener("click", (event) => {
             const row = event.target.closest && event.target.closest("[data-history-link]");
             if (row) window.open(row.dataset.historyLink, "_blank", "noopener");
         });
