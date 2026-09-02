@@ -45,7 +45,11 @@
         .task-search-meta { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
         .task-search-empty { padding: 12px; color: #64748b; font-size: 13px; line-height: 1.35; }
         .tasks-home-groups { display: grid; gap: 16px; }
-        .flow-home-banner { margin-bottom: 18px; padding: 22px; border-radius: 18px; background: linear-gradient(120deg, #623cea, #8b5cf6); color: #fff; text-align: center; }
+        /* Hidden for now, per explicit request -- until Флоу Phase 1 is
+           fully done, entry stays limited to the pilot's own dev-only
+           "В разработке" card (#openFlow) and the Отладка sandbox, not this
+           prominent home-screen banner every user would see. */
+        .flow-home-banner { display: none; margin-bottom: 18px; padding: 22px; border-radius: 18px; background: linear-gradient(120deg, #623cea, #8b5cf6); color: #fff; text-align: center; }
         .flow-home-banner.is-disabled { opacity: .5; pointer-events: none; }
         .flow-home-banner-kicker { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .8; margin-bottom: 10px; }
         .flow-home-banner-btn { font-size: 22px; padding: 16px 36px; border-radius: 16px; background: #fff; color: #623cea; border: 0; font-weight: 800; cursor: pointer; }
