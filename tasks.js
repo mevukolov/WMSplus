@@ -5013,30 +5013,23 @@
     function currentFlowEmployee() {
         const user = currentWmsUser();
         const shift = state.shift.current || {};
+        const roster = Array.isArray(shift.roster) ? shift.roster : normalizeShiftRoster(shift);
         let id = normalizeIdentifier(user.id);
         const nameKey = normalizeForMatch(user.name);
-        const incomingId = normalizeIdentifier(shift.incoming_employee_id);
-        const outgoingId = normalizeIdentifier(shift.outgoing_employee_id);
-        const incomingName = normalizeForMatch(shift.incoming_name);
-        const outgoingName = normalizeForMatch(shift.outgoing_name);
         const zones = new Set();
-        if (id && incomingId && id === incomingId) zones.add("incoming");
-        if (id && outgoingId && id === outgoingId) zones.add("outgoing");
-        if (nameKey && incomingName && nameKey === incomingName) {
-            zones.add("incoming");
-            if (!id) id = incomingId;
-        }
-        if (nameKey && outgoingName && nameKey === outgoingName) {
-            zones.add("outgoing");
-            if (!id) id = outgoingId;
+        // Same double fallback (id, then name) the old two-role model used
+        // -- covers the known wms_employees full_name rotation issue where
+        // an employee's real id doesn't line up with what got stored.
+        const match = roster.find((entry) => (id && entry.employee_id === id) || (nameKey && normalizeForMatch(entry.full_name) === nameKey));
+        if (match) {
+            match.zones.forEach((zone) => zones.add(zone));
+            if (!id) id = match.employee_id;
         }
         if (!id) id = nameKey;
         return {
             id,
             name: user.name,
             zones,
-            incomingId,
-            outgoingId,
             inShift: zones.size > 0,
         };
     }
