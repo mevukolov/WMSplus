@@ -3062,12 +3062,28 @@
             const closePlans = [];
             const updatePlans = [];
             const splitTasks = [];
+            const lightSkipped = [];
             for (const candidate of candidates) {
                 const selected = selectedMovedEntries(candidate);
                 if (!selected.length) continue;
                 const row = findTaskRow(candidate.row.id) || candidate.row;
                 if (!isTareTask(row)) {
                     closePlans.push({ row, note: movementPlanNote("Подтверждено движение ШК", selected) });
+                    continue;
+                }
+                if (row.__isLight) {
+                    // ensureFullActiveTasksLoaded (awaited before this modal
+                    // opens) only hydrates rows its "active-full" fetch
+                    // covers -- anything outside that scope can still reach
+                    // here light, with taskItems(row) below only ever
+                    // returning hollow barcode-only stubs (no real
+                    // status/price/movement). Splitting or trimming a tare
+                    // task from those would create/overwrite real data with
+                    // that hollow set -- skip instead of risking it (see
+                    // updateTareTaskItems's own guard for the same failure
+                    // mode, which also protects the updatePlans branch
+                    // below). Reported to the operator below.
+                    lightSkipped.push(row);
                     continue;
                 }
                 const selectedShks = new Set(selected.map((entry) => normalizeIdentifier(entry.item.shk)));
@@ -3091,8 +3107,9 @@
                 }
             }
             const totalActions = closePlans.length + updatePlans.length + (splitTasks.length ? 1 : 0);
+            const lightSkippedNote = () => (lightSkipped.length ? " Пропущено (задача ещё не полностью загружена, повторите после обновления списка): " + lightSkipped.length + "." : "");
             if (!totalActions) {
-                setActualizeStatus("Нечего закрывать: все строки убраны из подтверждения.", "good");
+                setActualizeStatus(lightSkipped.length ? "Ничего не закрыто." + lightSkippedNote() : "Нечего закрывать: все строки убраны из подтверждения.", lightSkipped.length ? "error" : "good");
                 return;
             }
             if (splitTasks.length) {
@@ -3116,8 +3133,17 @@
             if (updatePlans.length) {
                 setActualizeStatus("Обновляю частичные тары: 0/" + updatePlans.length + "...");
                 await runLimitedPool(updatePlans, 5, async (plan) => {
-                    await updateTareTaskItems(plan.row, plan.items, plan.extraPayload);
-                    updated += 1;
+                    // One plan's guard rejection (updateTareTaskItems --
+                    // light row or hollow-vs-real-price mismatch) must not
+                    // abort the rest of the batch; isolate it and count it
+                    // as skipped instead.
+                    try {
+                        await updateTareTaskItems(plan.row, plan.items, plan.extraPayload);
+                        updated += 1;
+                    } catch (planError) {
+                        console.error("actualize: skipped one partial tare update:", planError);
+                        lightSkipped.push(plan.row);
+                    }
                 }, (done, total) => {
                     setActualizeStatus("Обновляю частичные тары: " + done + "/" + total + ". Закрыто задач: " + completed + ". Создано задач: " + created + ".");
                 });
@@ -3125,9 +3151,9 @@
             await loadReviewTasks();
             state.actualize.candidates = [];
             if ($("actualizeResults")) {
-                $("actualizeResults").innerHTML = "<div class='status-line good'>Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + ".</div>";
+                $("actualizeResults").innerHTML = "<div class='status-line good'>Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote() + "</div>";
             }
-            setActualizeStatus("Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + ".", "good");
+            setActualizeStatus("Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote(), lightSkipped.length ? "error" : "good");
             refreshOpenSectionModal();
         } catch (error) {
             console.error("actualize close movement failed:", error);
@@ -8311,6 +8337,15 @@
         });
     }
 
+    // Shared shape-builder for a task's task_items -- used both for fresh,
+    // not-yet-saved rows (trimTaskAfterSaleDuplicates, where a real trim can
+    // legitimately leave only zero-priced items behind) and for already
+    // -persisted rows (updateTareTaskItems, enrichTaskNomenclatureFromSuperset).
+    // Deliberately has no light-row/hollow-price guard of its own -- that
+    // check only makes sense against persisted state, so it lives in
+    // updateTareTaskItems (the actual repeated chokepoint for those
+    // callers), not here, where it would misfire on legitimate fresh-object
+    // trims.
     function payloadWithItems(row, items, extra) {
         const payload = taskPayload(row);
         const rows = itemsSourceRows(items);
@@ -8339,9 +8374,26 @@
         });
     }
 
+    // Shared write chokepoint for existing tasks' task_items (actualize
+    // close-movement, quick-no-shk close/mark, manual add/detach ШК all
+    // funnel through here) -- guarded centrally so every caller, present
+    // and future, is protected, not just whichever ones remember to check.
+    // Confirmed in production (commit 668babd, 2026-09-02): a light row
+    // (see hydrateLightTaskRow/__isLight) has no real task_items, so
+    // taskItems(row) falls back to synthesized barcode-only stubs with
+    // status/movement/price hardcoded empty -- writing those back here
+    // permanently destroys the task's real per-item data. Refuse loudly
+    // instead of silently corrupting it; callers already have their own
+    // try/catch + status-text handling for exactly this kind of failure.
     async function updateTareTaskItems(row, items, extraPayload) {
         const db = supabaseDb();
         if (!db || !row) return null;
+        if (row.__isLight) {
+            throw new Error("Задача ещё не полностью загружена (короткая карточка) -- запись task_items отменена, чтобы не потерять реальные данные. Обновите список и повторите.");
+        }
+        if (Number(row.source_price_sum) > 0 && sumTaskItems(items) === 0) {
+            throw new Error("Новый набор товаров задачи обнулил бы сумму, хотя у задачи есть реальная стоимость -- запись отменена, чтобы не потерять данные.");
+        }
         const price = sumTaskItems(items);
         const priority = taskPriority(price, false);
         const payload = {
