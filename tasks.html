@@ -597,11 +597,17 @@
             align-items: flex-start;
             width: 100%;
         }
-        .no-shk-move-overview .no-shk-rack { position: relative; transition: transform .4s cubic-bezier(.2,.8,.2,1); }
-        .no-shk-move-overview .no-shk-rack-frame { transition: transform .4s cubic-bezier(.2,.8,.2,1), opacity .4s ease; }
-        .no-shk-move-overview .no-shk-rack.is-dimmed { opacity: .25; filter: grayscale(.7); transform: scale(.85); transition: opacity .4s ease, filter .4s ease, transform .4s ease; }
-        .no-shk-move-overview .no-shk-rack.is-zoomed { z-index: 5; }
-        .no-shk-move-overview .no-shk-rack.is-zoomed .no-shk-rack-frame { transform: scale(1.8); border-color: #16a34a; }
+        .no-shk-move-overview .no-shk-rack { position: relative; }
+        .no-shk-move-overview .no-shk-rack.is-leaving { opacity: 0; transition: opacity .16s ease; }
+        @keyframes no-shk-rack-fade-in { from { opacity: 0; } to { opacity: 1; } }
+        .no-shk-move-overview .no-shk-rack.no-shk-rack-enter { animation: no-shk-rack-fade-in .3s ease-out both; }
+        /* Enlarged via `zoom`, not `transform: scale` -- zoom triggers a
+           real layout reflow, so the stage's own overflow handling stays
+           correct; the old transform-scale approach painted the rack
+           bigger without reflowing, letting it silently overrun the
+           stage's edge and get clipped (confirmed on-site). */
+        .no-shk-move-focused .no-shk-rack-frame { zoom: 1.35; border-color: #16a34a; }
+        .no-shk-move-focused .no-shk-rack-title { font-size: 17px; }
         .no-shk-move-shelf.is-target { border-bottom-color: #16a34a; background: #f0fdf4; transition: background .3s ease, border-color .3s ease; }
 
         /* Arcade-ish success feedback: a green wash filling out from the
@@ -615,7 +621,7 @@
             z-index: 15;
             opacity: 0;
         }
-        .no-shk-move-burst.is-active { animation: no-shk-burst-fill 950ms ease-out both; }
+        .no-shk-move-burst.is-active { animation: no-shk-burst-fill 600ms ease-out both; }
         @keyframes no-shk-burst-fill {
             0% { opacity: 0; background: radial-gradient(circle at 50% 2%, rgba(22,163,74,.5) 0%, rgba(22,163,74,0) 1%); }
             30% { opacity: 1; background: radial-gradient(circle at 50% 2%, rgba(22,163,74,.4) 0%, rgba(22,163,74,0) 65%); }
@@ -626,7 +632,7 @@
             background: linear-gradient(100deg, transparent 42%, rgba(255,255,255,.75) 50%, transparent 58%);
             transform: translateX(-140%);
         }
-        .no-shk-move-wave.is-active { animation: no-shk-wave-sweep 650ms ease-out both; }
+        .no-shk-move-wave.is-active { animation: no-shk-wave-sweep 450ms ease-out both; }
         @keyframes no-shk-wave-sweep {
             0% { opacity: 1; transform: translateX(-140%); }
             85% { opacity: 1; }
@@ -643,7 +649,7 @@
             pointer-events: none;
             z-index: 21;
             opacity: 0;
-            animation: no-shk-particle-fly 650ms cubic-bezier(.2,.8,.2,1) both;
+            animation: no-shk-particle-fly 450ms cubic-bezier(.2,.8,.2,1) both;
         }
         @keyframes no-shk-particle-fly {
             0% { opacity: 1; transform: translate(-50%, 0) scale(1); }
@@ -681,9 +687,9 @@
         @media (prefers-reduced-motion: reduce) {
             .no-shk-box, .no-shk-box.is-new, .no-shk-move-log-row { animation: none; }
             .no-shk-box:hover { transform: none; }
-            .no-shk-move-overview .no-shk-rack-frame,
-            .no-shk-move-overview .no-shk-rack.is-dimmed,
+            .no-shk-move-overview .no-shk-rack.is-leaving,
             .no-shk-move-check { transition: none; }
+            .no-shk-rack-enter { animation: none; opacity: 1; }
             .no-shk-move-burst.is-active, .no-shk-move-wave.is-active, .no-shk-particle, .no-shk-move-hud.is-shaking { animation: none; opacity: 0; }
         }
         .tasks-flow-card {
@@ -698,7 +704,7 @@
             animation: tasksModalIn .22s cubic-bezier(.2,.8,.2,1) both;
         }
         .tasks-flow-card-wide { width: min(1160px, 100%); }
-        .no-shk-modal-xl { width: min(1900px, 98vw); }
+        .no-shk-modal-xl { width: fit-content; max-width: min(1300px, 98vw); }
         .no-shk-move-card {
             width: 100vw;
             height: 100dvh;

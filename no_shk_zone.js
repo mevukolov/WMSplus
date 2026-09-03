@@ -644,7 +644,7 @@
         const el = $("noShkMoveCheck");
         if (!el) return;
         el.classList.add("is-visible");
-        setTimeout(() => el.classList.remove("is-visible"), 700);
+        setTimeout(() => el.classList.remove("is-visible"), 550);
     }
 
     // Small CSS-only particle burst from the checkmark -- a handful of dots
@@ -721,19 +721,69 @@
             + "</div>";
     }
 
+    // Focusing a rack used to keep every rack in the DOM and scale the
+    // target up via CSS transform inside the still-crowded flex-wrap grid
+    // -- a rack near the edge would scale past the stage boundary and get
+    // silently clipped (confirmed on-site). Now the target is the ONLY
+    // rack rendered while focused (nothing else to overflow into), other
+    // racks fade out first, and a FLIP transition (capture old position,
+    // render new, animate the delta away) makes the swap read as one
+    // smooth move-to-center instead of a jump cut.
     function renderMoveOverview(justPlacedBoxId) {
         const el = $("noShkMoveOverview");
         if (!el) return;
-        el.innerHTML = racks.map((rack) => {
-            const isTargetRack = moveActiveShelf && moveActiveShelf.rack.id === rack.id;
-            const isDimmed = moveActiveShelf && !isTargetRack;
-            const shelvesHtml = shelvesTopToBottom(rack).map((shelf) => moveShelfHtml(shelf, Boolean(moveActiveShelf && moveActiveShelf.id === shelf.id), justPlacedBoxId)).join("");
-            return "<div class='no-shk-rack" + (isTargetRack ? " is-zoomed" : "") + (isDimmed ? " is-dimmed" : "") + "'>"
+        const targetId = moveActiveShelf ? moveActiveShelf.rack.id : null;
+        let beforeRect = null;
+        if (targetId) {
+            const existing = el.querySelector("[data-rack-id='" + targetId + "']");
+            if (existing) beforeRect = existing.getBoundingClientRect();
+        }
+        const siblings = targetId ? Array.from(el.children).filter((child) => child.dataset.rackId !== targetId) : [];
+        if (siblings.length) {
+            siblings.forEach((child) => child.classList.add("is-leaving"));
+            setTimeout(() => finishRenderMoveOverview(justPlacedBoxId, beforeRect), 160);
+            return;
+        }
+        finishRenderMoveOverview(justPlacedBoxId, beforeRect);
+    }
+
+    function finishRenderMoveOverview(justPlacedBoxId, beforeRect) {
+        const el = $("noShkMoveOverview");
+        if (!el) return;
+        const targetId = moveActiveShelf ? moveActiveShelf.rack.id : null;
+
+        if (moveActiveShelf) {
+            const rack = moveActiveShelf.rack;
+            const shelvesHtml = shelvesTopToBottom(rack).map((shelf) => moveShelfHtml(shelf, moveActiveShelf.id === shelf.id, justPlacedBoxId)).join("");
+            el.innerHTML = "<div class='no-shk-rack no-shk-move-focused' data-rack-id='" + rack.id + "'>"
                 + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
                 + "<div class='no-shk-rack-frame' style='width:" + rackFrameWidthPx(rack) + "px;'>" + shelvesHtml + "</div>"
                 + "</div>";
-        }).join("");
+        } else {
+            el.innerHTML = racks.map((rack) => {
+                const shelvesHtml = shelvesTopToBottom(rack).map((shelf) => moveShelfHtml(shelf, false, null)).join("");
+                return "<div class='no-shk-rack no-shk-rack-enter' data-rack-id='" + rack.id + "'>"
+                    + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
+                    + "<div class='no-shk-rack-frame' style='width:" + rackFrameWidthPx(rack) + "px;'>" + shelvesHtml + "</div>"
+                    + "</div>";
+            }).join("");
+        }
         attachBoxTooltips(el);
+
+        if (beforeRect && targetId) {
+            const after = el.querySelector("[data-rack-id='" + targetId + "']");
+            if (after) {
+                const afterRect = after.getBoundingClientRect();
+                const dx = beforeRect.left + beforeRect.width / 2 - (afterRect.left + afterRect.width / 2);
+                const dy = beforeRect.top + beforeRect.height / 2 - (afterRect.top + afterRect.height / 2);
+                after.style.transition = "none";
+                after.style.transform = "translate(" + dx + "px," + dy + "px)";
+                void after.offsetWidth; // force reflow so the transition below actually animates
+                after.style.transition = "transform .4s cubic-bezier(.2,.8,.2,1)";
+                after.style.transform = "none";
+                after.addEventListener("transitionend", () => { after.style.transition = ""; after.style.transform = ""; }, { once: true });
+            }
+        }
     }
 
     async function handleScan(rawCode) {
@@ -782,7 +832,7 @@
                 moveStage = "shelf";
                 renderMoveOverview();
                 setMovePrompt("Отсканируйте полку");
-            }, 1300);
+            }, 700);
             return;
         }
         flashMoveError("Неизвестный код: " + code);
