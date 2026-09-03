@@ -460,19 +460,6 @@
         return formatDateShort(box.shift_date);
     }
 
-    // Day.month only (no year) -- matches the on-label date treatment,
-    // which is deliberately terser than the tooltip/detail view's
-    // day.month.year via computeDateLabel().
-    function formatDayMonth(isoDate) {
-        const parts = String(isoDate).split("-");
-        if (parts.length !== 3) return String(isoDate);
-        return parts[2] + "." + parts[1];
-    }
-
-    function shiftShortLabel(shiftType) {
-        return shiftType === "Ночная" ? "Ночь" : "День";
-    }
-
     function boxCode(box) {
         return "WMSP.BOX." + String(box.box_number).padStart(5, "0");
     }
@@ -531,10 +518,12 @@
             box_code: boxCode(box),
             box_number: String(box.box_number),
             box_type: box.box_type,
-            area_label: box.area,
-            shift_label: shiftShortLabel(box.shift_type),
-            date_line1: formatDayMonth(box.shift_date),
-            date_line2: box.shift_type === "Ночная" ? formatDayMonth(addDays(box.shift_date, 1)) : "",
+            area: box.area,
+            // Two lines instead of one "ДД.ММ.ГГ-ДД.ММ.ГГ" string -- that
+            // was wide enough to run off the label's right edge for a
+            // night shift. date_line2 stays empty for a day shift.
+            date_line1: formatDateShort(box.shift_date),
+            date_line2: box.shift_type === "Ночная" ? formatDateShort(addDays(box.shift_date, 1)) : "",
         };
         const tspl = buildTsplPayloadBase64(boxLabelTemplate, data);
         status.textContent = "Отправляю в очередь…";

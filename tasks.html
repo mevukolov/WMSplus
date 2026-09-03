@@ -473,15 +473,23 @@
             animation: no-shk-box-in .3s ease-out both;
         }
         .no-shk-box-number { position: relative; z-index: 1; font-size: 12px; font-weight: 700; color: #334155; }
-        .no-shk-box-date { position: relative; z-index: 1; font-size: 9px; color: #64748b; }
+        .no-shk-box-date {
+            position: relative;
+            z-index: 1;
+            font-size: 9px;
+            color: #334155;
+            background: rgba(255,255,255,.88);
+            border-radius: 3px;
+            padding: 0 4px;
+        }
         .no-shk-box::before {
             content: "";
             position: absolute;
             left: 50%;
             top: 0;
             bottom: 0;
-            width: 4px;
-            margin-left: -2px;
+            width: 8px;
+            margin-left: -4px;
         }
         .no-shk-box.area-sort::before { background: #facc15; }
         .no-shk-box.area-repack::before { background: #a78bfa; }
@@ -520,39 +528,59 @@
         }
         .no-shk-move-stage {
             position: relative;
-            min-height: 320px;
+            min-height: 420px;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 18px;
-            padding: 12px 0 24px;
+            padding: 12px 0 96px;
+            overflow: hidden;
         }
         .no-shk-move-overview {
             display: flex;
             flex-wrap: wrap;
             gap: 24px;
             justify-content: center;
+            align-items: flex-start;
             width: 100%;
         }
+        .no-shk-move-overview .no-shk-rack { position: relative; transition: transform .4s cubic-bezier(.2,.8,.2,1); }
         .no-shk-move-overview .no-shk-rack-frame { transition: transform .4s cubic-bezier(.2,.8,.2,1), opacity .4s ease; }
-        .no-shk-move-overview .no-shk-rack.is-dimmed { opacity: .3; filter: grayscale(.6); transition: opacity .4s ease, filter .4s ease; }
-        .no-shk-move-overview .no-shk-rack.is-zoomed .no-shk-rack-frame { transform: scale(1.18); border-color: #16a34a; }
+        .no-shk-move-overview .no-shk-rack.is-dimmed { opacity: .25; filter: grayscale(.7); transform: scale(.85); transition: opacity .4s ease, filter .4s ease, transform .4s ease; }
+        .no-shk-move-overview .no-shk-rack.is-zoomed { z-index: 5; }
+        .no-shk-move-overview .no-shk-rack.is-zoomed .no-shk-rack-frame { transform: scale(1.8); border-color: #16a34a; }
         .no-shk-move-shelf.is-target { border-bottom-color: #16a34a; background: #f0fdf4; transition: background .3s ease, border-color .3s ease; }
-        .no-shk-move-hud { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        /* Text sits ON TOP of the (now much bigger) zoomed rack as a fixed
+           overlay plate, anchored to the bottom of the stage, so the scaled
+           rack's own paint never covers it. */
+        .no-shk-move-hud {
+            position: absolute;
+            left: 50%;
+            bottom: 16px;
+            transform: translateX(-50%);
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 14px 28px;
+            max-width: min(90%, 520px);
+        }
         .no-shk-move-prompt {
-            font-size: 22px;
+            font-size: 20px;
             font-weight: 700;
             color: #0f172a;
             text-align: center;
         }
         .no-shk-move-check {
-            width: 56px;
-            height: 56px;
+            width: 48px;
+            height: 48px;
             border-radius: 50%;
             background: #16a34a;
             color: #fff;
-            font-size: 28px;
+            font-size: 24px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -562,7 +590,7 @@
         }
         .no-shk-move-check.is-visible { opacity: 1; transform: scale(1); }
         .no-shk-move-error {
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 600;
             color: #b91c1c;
             text-align: center;
