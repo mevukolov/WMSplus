@@ -400,7 +400,7 @@
         /* Зона «Без ШК» -- flat schematic rack/shelf/box diagram: no
            shadows, no gradients, thin structural lines in the app's own
            accent, boxes color-coded by area via a center stripe. */
-        .no-shk-modal-xl { width: min(1400px, 96vw); }
+        .no-shk-modal-xl { width: min(1900px, 98vw); }
         .no-shk-racks-row {
             display: flex;
             flex-wrap: wrap;
@@ -477,11 +477,17 @@
             position: relative;
             z-index: 1;
             font-size: 9px;
-            color: #334155;
-            background: rgba(255,255,255,.88);
-            border-radius: 3px;
-            padding: 0 4px;
+            font-weight: 600;
+            border-radius: 4px;
+            padding: 1px 5px;
+            transition: background .12s ease, color .12s ease;
         }
+        /* Tinted to match the box's own area stripe instead of a flat
+           white pill -- reads as part of the box, not a sticker on it. */
+        .no-shk-box.area-sort .no-shk-box-date { background: rgba(250,204,21,.32); color: #7c5e07; }
+        .no-shk-box.area-repack .no-shk-box-date { background: rgba(167,139,250,.32); color: #4c2f8f; }
+        .no-shk-box:hover.area-sort .no-shk-box-date { background: rgba(250,204,21,.5); }
+        .no-shk-box:hover.area-repack .no-shk-box-date { background: rgba(167,139,250,.5); }
         .no-shk-box::before {
             content: "";
             position: absolute;
@@ -599,12 +605,88 @@
             transition: opacity .2s ease;
         }
         .no-shk-move-error.is-visible { opacity: 1; }
+
+        /* Arcade-ish success feedback: a green wash filling out from the
+           prompt card to the stage edges, a white wave sweeping over it,
+           and a small particle burst -- all layered above the overview,
+           below the HUD card. */
+        .no-shk-move-burst, .no-shk-move-wave {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 15;
+            opacity: 0;
+        }
+        .no-shk-move-burst.is-active { animation: no-shk-burst-fill 950ms ease-out both; }
+        @keyframes no-shk-burst-fill {
+            0% { opacity: 0; background: radial-gradient(circle at 50% 88%, rgba(22,163,74,.5) 0%, rgba(22,163,74,0) 1%); }
+            30% { opacity: 1; background: radial-gradient(circle at 50% 88%, rgba(22,163,74,.4) 0%, rgba(22,163,74,0) 65%); }
+            100% { opacity: 0; background: radial-gradient(circle at 50% 88%, rgba(22,163,74,.4) 0%, rgba(22,163,74,0) 150%); }
+        }
+        .no-shk-move-wave {
+            z-index: 16;
+            background: linear-gradient(100deg, transparent 42%, rgba(255,255,255,.75) 50%, transparent 58%);
+            transform: translateX(-140%);
+        }
+        .no-shk-move-wave.is-active { animation: no-shk-wave-sweep 650ms ease-out both; }
+        @keyframes no-shk-wave-sweep {
+            0% { opacity: 1; transform: translateX(-140%); }
+            85% { opacity: 1; }
+            100% { opacity: 0; transform: translateX(140%); }
+        }
+        .no-shk-particle {
+            position: absolute;
+            left: 50%;
+            bottom: 92px;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #22c55e;
+            pointer-events: none;
+            z-index: 21;
+            opacity: 0;
+            animation: no-shk-particle-fly 650ms cubic-bezier(.2,.8,.2,1) both;
+        }
+        @keyframes no-shk-particle-fly {
+            0% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+            100% { opacity: 0; transform: translate(calc(-50% + var(--tx)), var(--ty)) scale(.3); }
+        }
+        @keyframes no-shk-hud-shake {
+            0%, 100% { transform: translateX(-50%); }
+            20% { transform: translateX(calc(-50% - 8px)); }
+            40% { transform: translateX(calc(-50% + 8px)); }
+            60% { transform: translateX(calc(-50% - 5px)); }
+            80% { transform: translateX(calc(-50% + 5px)); }
+        }
+        .no-shk-move-hud.is-shaking { animation: no-shk-hud-shake 400ms ease-in-out; }
+
+        /* Fast custom hover tooltip -- replaces the native title attribute,
+           which has a fixed, un-customizable OS delay. */
+        .no-shk-tooltip {
+            position: fixed;
+            z-index: 5000;
+            background: #0f172a;
+            color: #f8fafc;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 8px 10px;
+            border-radius: 8px;
+            white-space: pre-line;
+            pointer-events: none;
+            opacity: 0;
+            max-width: 220px;
+            transform: translate(-50%, calc(-100% - 8px));
+            transition: opacity .08s ease;
+        }
+        .no-shk-tooltip.is-visible { opacity: 1; }
+
         @media (prefers-reduced-motion: reduce) {
             .no-shk-box, .no-shk-box.is-new, .no-shk-move-log-row { animation: none; }
             .no-shk-box:hover { transform: none; }
             .no-shk-move-overview .no-shk-rack-frame,
             .no-shk-move-overview .no-shk-rack.is-dimmed,
             .no-shk-move-check { transition: none; }
+            .no-shk-move-burst.is-active, .no-shk-move-wave.is-active, .no-shk-particle, .no-shk-move-hud.is-shaking { animation: none; opacity: 0; }
         }
         .tasks-flow-card {
             width: min(920px, 100%);
@@ -2035,9 +2117,11 @@
             </div>
             <button id="closeNoShkMove" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="no-shk-move-stage">
+        <div id="noShkMoveStage" class="no-shk-move-stage">
             <div id="noShkMoveOverview" class="no-shk-move-overview"></div>
-            <div class="no-shk-move-hud">
+            <div id="noShkMoveBurst" class="no-shk-move-burst"></div>
+            <div id="noShkMoveWave" class="no-shk-move-wave"></div>
+            <div id="noShkMoveHud" class="no-shk-move-hud">
                 <div id="noShkMovePrompt" class="no-shk-move-prompt">Отсканируйте полку</div>
                 <div id="noShkMoveCheck" class="no-shk-move-check">✓</div>
                 <div id="noShkMoveError" class="no-shk-move-error"></div>
@@ -2046,6 +2130,8 @@
         <input id="noShkMoveScanInput" type="text" autocomplete="off" class="no-shk-move-hidden-input" aria-hidden="true" tabindex="-1">
     </div>
 </section>
+
+<div id="noShkTooltip" class="no-shk-tooltip" role="tooltip"></div>
 
 <section id="writeoffTermsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card tasks-flow-card-wide">

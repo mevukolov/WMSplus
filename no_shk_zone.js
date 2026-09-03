@@ -112,8 +112,8 @@
         const [racksRes, floorRes] = await Promise.all([
             client
                 .from("wms_no_shk_racks")
-                .select("id,name,rack_number,created_at,wms_no_shk_shelves(id,name,shelf_number,capacity,created_at,wms_no_shk_boxes(" + BOX_FIELDS + "))")
-                .order("created_at", { ascending: true })
+                .select("id,name,rack_number,position,created_at,wms_no_shk_shelves(id,name,shelf_number,capacity,created_at,wms_no_shk_boxes(" + BOX_FIELDS + "))")
+                .order("position", { ascending: true })
                 .order("created_at", { ascending: true, foreignTable: "wms_no_shk_shelves" }),
             client
                 .from("wms_no_shk_boxes")
@@ -166,10 +166,41 @@
         const isNew = !seenBoxIds.has(box.id);
         const cls = "no-shk-box " + areaClass(box.area) + (isNew ? " is-new" : "");
         const delay = Math.min(index, 10) * 30;
-        return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "' title='" + escapeHtmlLocal(boxTooltip(box)) + "'>"
+        return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "'>"
             + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
             + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span>"
             + "</div>";
+    }
+
+    // Native title-attribute tooltips have a fixed, un-customizable OS
+    // delay (~1s+) -- this is a small custom tooltip instead so hover
+    // feedback is fast, wired onto every rendered box tile in one pass.
+    let tooltipShowTimer = null;
+    function showBoxTooltip(el) {
+        const ctx = findBoxContext(el.dataset.boxId);
+        const tip = $("noShkTooltip");
+        if (!ctx || !tip) return;
+        tip.textContent = boxTooltip(ctx.box);
+        const rect = el.getBoundingClientRect();
+        tip.style.left = Math.round(rect.left + rect.width / 2) + "px";
+        tip.style.top = Math.round(rect.top) + "px";
+        tip.classList.add("is-visible");
+    }
+    function hideBoxTooltip() {
+        const tip = $("noShkTooltip");
+        if (tip) tip.classList.remove("is-visible");
+    }
+    function attachBoxTooltips(container) {
+        container.querySelectorAll("[data-box-id]").forEach((el) => {
+            el.addEventListener("mouseenter", () => {
+                clearTimeout(tooltipShowTimer);
+                tooltipShowTimer = setTimeout(() => showBoxTooltip(el), 80);
+            });
+            el.addEventListener("mouseleave", () => {
+                clearTimeout(tooltipShowTimer);
+                hideBoxTooltip();
+            });
+        });
     }
 
     function shelfSkeuoHtml(shelf) {
@@ -183,6 +214,14 @@
             + "</div>"
             + "<div class='no-shk-boxes-row'>" + (boxesHtml || "<span style='color:#94a3b8;font-size:12px;'>пусто</span>") + "</div>"
             + "</div>";
+    }
+
+    // Shelf 1 renders at the bottom, the highest-numbered shelf at the top
+    // -- matches how a physical rack is read, and how shelf_number is
+    // assigned (1 first). This is purely a display-order flip; shelf_number
+    // itself (and the printed WMSP.PLCE.WSHK code) is untouched.
+    function shelvesTopToBottom(rack) {
+        return (rack.wms_no_shk_shelves || []).slice().sort((a, b) => b.shelf_number - a.shelf_number);
     }
 
     // Rack width scales with its widest shelf's capacity, so a rack that
@@ -223,7 +262,7 @@
                 const shelves = rack.wms_no_shk_shelves || [];
                 const width = rackFrameWidthPx(rack);
                 const shelvesHtml = shelves.length
-                    ? "<div class='no-shk-rack-frame' style='width:" + width + "px;'>" + shelves.map(shelfSkeuoHtml).join("") + "</div>"
+                    ? "<div class='no-shk-rack-frame' style='width:" + width + "px;'>" + shelvesTopToBottom(rack).map(shelfSkeuoHtml).join("") + "</div>"
                     : "<p style='color:#64748b;font-size:13px;'>Полок пока нет.</p>";
                 return "<div class='no-shk-rack'>"
                     + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
@@ -237,6 +276,7 @@
         wrap.querySelectorAll("[data-box-id]").forEach((box) => {
             box.addEventListener("click", () => openBoxDetailModal(box.dataset.boxId));
         });
+        attachBoxTooltips(wrap);
 
         const nextSeen = new Set();
         floorBoxes.forEach((box) => nextSeen.add(box.id));
@@ -251,7 +291,7 @@
             wrap.innerHTML = "<p style='color:#64748b;'>Стеллажей пока нет — добавь первый ниже.</p>";
             return;
         }
-        wrap.innerHTML = racks.map((rack) => {
+        wrap.innerHTML = racks.map((rack, index) => {
             const shelves = rack.wms_no_shk_shelves || [];
             const shelvesHtml = shelves.map((shelf) => (
                 "<div class='card' style='padding:8px 12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'>"
@@ -265,7 +305,11 @@
             return "<div class='card' style='padding:14px;margin-bottom:12px;'>"
                 + "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>"
                 + "<h3 style='margin:0;'>" + escapeHtmlLocal(rack.name) + "</h3>"
+                + "<span style='display:flex;gap:6px;'>"
+                + "<button class='btn btn-square' type='button' data-move-rack='" + rack.id + "' data-dir='-1'" + (index === 0 ? " disabled" : "") + " title='Сдвинуть влево'>←</button>"
+                + "<button class='btn btn-square' type='button' data-move-rack='" + rack.id + "' data-dir='1'" + (index === racks.length - 1 ? " disabled" : "") + " title='Сдвинуть вправо'>→</button>"
                 + "<button class='btn btn-outline' type='button' data-delete-rack='" + rack.id + "'>Удалить стеллаж</button>"
+                + "</span>"
                 + "</div>"
                 + shelvesHtml
                 + "<div style='display:flex;gap:8px;align-items:flex-end;margin-top:8px;'>"
@@ -278,6 +322,9 @@
 
         wrap.querySelectorAll("[data-delete-rack]").forEach((btn) => {
             btn.addEventListener("click", () => deleteRack(btn.dataset.deleteRack));
+        });
+        wrap.querySelectorAll("[data-move-rack]").forEach((btn) => {
+            btn.addEventListener("click", () => void moveRack(btn.dataset.moveRack, Number(btn.dataset.dir)));
         });
         wrap.querySelectorAll("[data-delete-shelf]").forEach((btn) => {
             btn.addEventListener("click", () => deleteShelf(btn.dataset.deleteShelf));
@@ -308,7 +355,8 @@
     async function addRack(name) {
         const client = db();
         if (!client || !name) return;
-        const { data: rack, error } = await client.from("wms_no_shk_racks").insert({ name }).select("id").single();
+        const nextPosition = racks.reduce((max, r) => Math.max(max, r.position || 0), 0) + 1;
+        const { data: rack, error } = await client.from("wms_no_shk_racks").insert({ name, position: nextPosition }).select("id").single();
         if (error) { setAdminStatus("Не удалось добавить стеллаж: " + error.message, true); return; }
         const shelves = [];
         for (let i = 1; i <= DEFAULT_SHELVES_PER_RACK; i++) {
@@ -316,6 +364,26 @@
         }
         const { error: shelvesError } = await client.from("wms_no_shk_shelves").insert(shelves);
         if (shelvesError) { setAdminStatus("Стеллаж создан, но не удалось добавить полки: " + shelvesError.message, true); await loadZone(); return; }
+        setAdminStatus("");
+        await loadZone();
+    }
+
+    // Swaps this rack's position with its neighbor -- racks is already
+    // ordered by position (ascending), so index +/-1 is the neighbor to
+    // swap with. Never touches rack_number (baked into printed shelf
+    // labels) -- position is purely display order.
+    async function moveRack(id, direction) {
+        const client = db();
+        if (!client) return;
+        const index = racks.findIndex((r) => r.id === id);
+        const neighborIndex = index + direction;
+        if (index < 0 || neighborIndex < 0 || neighborIndex >= racks.length) return;
+        const rack = racks[index];
+        const neighbor = racks[neighborIndex];
+        const { error } = await client.from("wms_no_shk_racks").update({ position: neighbor.position }).eq("id", rack.id);
+        if (error) { setAdminStatus("Не удалось переставить: " + error.message, true); return; }
+        const { error: error2 } = await client.from("wms_no_shk_racks").update({ position: rack.position }).eq("id", neighbor.id);
+        if (error2) { setAdminStatus("Не удалось переставить: " + error2.message, true); return; }
         setAdminStatus("");
         await loadZone();
     }
@@ -524,6 +592,7 @@
             // night shift. date_line2 stays empty for a day shift.
             date_line1: formatDateShort(box.shift_date),
             date_line2: box.shift_type === "Ночная" ? formatDateShort(addDays(box.shift_date, 1)) : "",
+            shift: box.shift_type === "Ночная" ? "Ночь" : "День",
         };
         const tspl = buildTsplPayloadBase64(boxLabelTemplate, data);
         status.textContent = "Отправляю в очередь…";
@@ -578,6 +647,54 @@
         setTimeout(() => el.classList.remove("is-visible"), 700);
     }
 
+    // Small CSS-only particle burst from the checkmark -- a handful of dots
+    // flung out at random angles/distances and faded, arcade-style.
+    function spawnMoveParticles() {
+        const stage = $("noShkMoveStage");
+        if (!stage) return;
+        const count = 10;
+        for (let i = 0; i < count; i++) {
+            const particle = document.createElement("span");
+            particle.className = "no-shk-particle";
+            const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
+            const distance = 70 + Math.random() * 50;
+            particle.style.setProperty("--tx", Math.round(Math.cos(angle) * distance) + "px");
+            particle.style.setProperty("--ty", Math.round(Math.sin(angle) * distance) + "px");
+            particle.style.animationDelay = Math.round(Math.random() * 60) + "ms";
+            stage.appendChild(particle);
+            particle.addEventListener("animationend", () => particle.remove());
+        }
+    }
+
+    // The big "короб на месте" celebration: checkmark + a green wash that
+    // fills out from the prompt card to the stage's edges + a white wave
+    // sweeping across on top + a particle burst. All CSS-driven, triggered
+    // by toggling classes.
+    function flashPlacementSuccess() {
+        flashMoveCheck();
+        const burst = $("noShkMoveBurst");
+        const wave = $("noShkMoveWave");
+        if (burst) {
+            burst.classList.remove("is-active");
+            void burst.offsetWidth; // restart the animation if triggered again quickly
+            burst.classList.add("is-active");
+        }
+        if (wave) {
+            wave.classList.remove("is-active");
+            void wave.offsetWidth;
+            wave.classList.add("is-active");
+        }
+        spawnMoveParticles();
+    }
+
+    function shakeMoveHud() {
+        const hud = $("noShkMoveHud");
+        if (!hud) return;
+        hud.classList.remove("is-shaking");
+        void hud.offsetWidth;
+        hud.classList.add("is-shaking");
+    }
+
     function flashMoveError(message) {
         const el = $("noShkMoveError");
         if (!el) return;
@@ -585,6 +702,7 @@
         el.classList.add("is-visible");
         clearTimeout(el._hideTimer);
         el._hideTimer = setTimeout(() => el.classList.remove("is-visible"), 2200);
+        shakeMoveHud();
     }
 
     function moveShelfHtml(shelf, isTarget, justPlacedBoxId) {
@@ -592,7 +710,7 @@
         const isFull = boxes.length >= shelf.capacity;
         const boxesHtml = boxes.map((box) => {
             const cls = "no-shk-box " + areaClass(box.area) + (box.id === justPlacedBoxId ? " is-new" : "");
-            return "<div class='" + cls + "' title='" + escapeHtmlLocal(boxTooltip(box)) + "'>"
+            return "<div class='" + cls + "' data-box-id='" + box.id + "'>"
                 + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
                 + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span></div>";
         }).join("");
@@ -609,13 +727,13 @@
         el.innerHTML = racks.map((rack) => {
             const isTargetRack = moveActiveShelf && moveActiveShelf.rack.id === rack.id;
             const isDimmed = moveActiveShelf && !isTargetRack;
-            const shelves = rack.wms_no_shk_shelves || [];
-            const shelvesHtml = shelves.map((shelf) => moveShelfHtml(shelf, Boolean(moveActiveShelf && moveActiveShelf.id === shelf.id), justPlacedBoxId)).join("");
+            const shelvesHtml = shelvesTopToBottom(rack).map((shelf) => moveShelfHtml(shelf, Boolean(moveActiveShelf && moveActiveShelf.id === shelf.id), justPlacedBoxId)).join("");
             return "<div class='no-shk-rack" + (isTargetRack ? " is-zoomed" : "") + (isDimmed ? " is-dimmed" : "") + "'>"
                 + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
                 + "<div class='no-shk-rack-frame' style='width:" + rackFrameWidthPx(rack) + "px;'>" + shelvesHtml + "</div>"
                 + "</div>";
         }).join("");
+        attachBoxTooltips(el);
     }
 
     async function handleScan(rawCode) {
@@ -656,7 +774,7 @@
             const freshRack = racks.find((r) => r.id === moveActiveShelf.rack.id);
             const freshShelf = freshRack && (freshRack.wms_no_shk_shelves || []).find((s) => s.id === moveActiveShelf.id);
             if (freshRack && freshShelf) moveActiveShelf = { id: freshShelf.id, rack: freshRack, shelf: freshShelf };
-            flashMoveCheck();
+            flashPlacementSuccess();
             renderMoveOverview(box.id);
             setMovePrompt("Короб №" + boxNumber + " на месте ✓");
             setTimeout(() => {
