@@ -313,8 +313,8 @@
                 + "</div>"
                 + shelvesHtml
                 + "<div style='display:flex;gap:8px;align-items:flex-end;margin-top:8px;'>"
-                + "<label>Полка<br><input type='text' data-new-shelf-name='" + rack.id + "' placeholder='Полка " + (shelves.length + 1) + "' style='width:140px;'></label>"
-                + "<label>Вместимость<br><input type='number' data-new-shelf-capacity='" + rack.id + "' value='4' style='width:90px;'></label>"
+                + "<label>Полка<br><input type='text' class='input' data-new-shelf-name='" + rack.id + "' placeholder='Полка " + (shelves.length + 1) + "' style='width:130px;'></label>"
+                + "<label>Вместимость<br><input type='number' class='input' data-new-shelf-capacity='" + rack.id + "' value='4' style='width:80px;'></label>"
                 + "<button class='btn btn-outline' type='button' data-add-shelf='" + rack.id + "'>+ Полка</button>"
                 + "</div>"
                 + "</div>";
@@ -849,7 +849,7 @@
                 renderMoveOverview();
                 if (moveInput) moveInput.value = "";
                 setZoneModalOpen("noShkMoveModal", true);
-                setTimeout(() => moveInput && moveInput.focus(), 50);
+                setTimeout(() => moveInput && moveInput.focus({ preventScroll: true }), 50);
             });
         }
         const closeMoveBtn = $("closeNoShkMove");
@@ -869,10 +869,18 @@
             });
             // Keep the (visually hidden) scan input focused while the move
             // modal is open -- a stray click inside the modal shouldn't
-            // stop the scanner's keystrokes from being captured.
+            // stop the scanner's keystrokes from being captured. Two bugs
+            // this used to have: focus() with no options scrolls the page
+            // to the focused element even though it's visually hidden
+            // (fixed with preventScroll below), and re-focusing during the
+            // modal's own close animation fought the close button, making
+            // the modal seem impossible to leave (fixed by skipping while
+            // is-closing is present).
             document.addEventListener("focusout", () => {
                 const modal = $("noShkMoveModal");
-                if (modal && modal.classList.contains("active")) setTimeout(() => moveInput.focus(), 0);
+                if (modal && modal.classList.contains("active") && !modal.classList.contains("is-closing")) {
+                    setTimeout(() => moveInput.focus({ preventScroll: true }), 0);
+                }
             });
         }
 

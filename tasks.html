@@ -400,7 +400,6 @@
         /* Зона «Без ШК» -- flat schematic rack/shelf/box diagram: no
            shadows, no gradients, thin structural lines in the app's own
            accent, boxes color-coded by area via a center stripe. */
-        .no-shk-modal-xl { width: min(1900px, 98vw); }
         .no-shk-racks-row {
             display: flex;
             flex-wrap: wrap;
@@ -527,6 +526,8 @@
            keystrokes. */
         .no-shk-move-hidden-input {
             position: absolute;
+            top: 0;
+            left: 0;
             width: 1px;
             height: 1px;
             opacity: 0;
@@ -700,6 +701,7 @@
             animation: tasksModalIn .22s cubic-bezier(.2,.8,.2,1) both;
         }
         .tasks-flow-card-wide { width: min(1160px, 100%); }
+        .no-shk-modal-xl { width: min(1900px, 98vw); }
         .tasks-flow-card .module-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .tasks-flow-card .preview-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
         .backfill-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
@@ -2033,7 +2035,7 @@
         </div>
         <div id="noShkZoneAdminWrap"></div>
         <div class="file-row" style="margin-top:12px;">
-            <label>Название нового стеллажа<br><input id="newRackName" type="text" placeholder="Стеллаж 3" style="width:220px;"></label>
+            <label>Название нового стеллажа<br><input id="newRackName" type="text" class="input" placeholder="Стеллаж 3" style="width:220px;"></label>
             <button id="addRackBtn" class="btn btn-rect" type="button" style="align-self:flex-end;">+ Стеллаж</button>
         </div>
         <div id="noShkZoneAdminStatus" class="review-status"></div>
@@ -2050,26 +2052,32 @@
             <button id="closeNoShkNewBox" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
         <div style="display:flex;flex-direction:column;gap:12px;">
-            <label>Дата смены<br><input id="newBoxShiftDate" type="date" style="width:100%;"></label>
+            <label>Дата смены<br><input id="newBoxShiftDate" type="date" class="input" style="width:95%;"></label>
             <label>Смена<br>
-                <select id="newBoxShiftType" style="width:100%;">
-                    <option value="Дневная">Дневная</option>
-                    <option value="Ночная">Ночная</option>
-                </select>
+                <div class="select">
+                    <select id="newBoxShiftType">
+                        <option value="Дневная">Дневная</option>
+                        <option value="Ночная">Ночная</option>
+                    </select>
+                </div>
             </label>
             <label>Тип<br>
-                <select id="newBoxType" style="width:100%;">
-                    <option value="Короб">Короб</option>
-                    <option value="КГТ">КГТ</option>
-                </select>
+                <div class="select">
+                    <select id="newBoxType">
+                        <option value="Короб">Короб</option>
+                        <option value="КГТ">КГТ</option>
+                    </select>
+                </div>
             </label>
             <label>Участок<br>
-                <select id="newBoxArea" style="width:100%;">
-                    <option value="Сортировка">Сортировка</option>
-                    <option value="Переупаковка">Переупаковка</option>
-                </select>
+                <div class="select">
+                    <select id="newBoxArea">
+                        <option value="Сортировка">Сортировка</option>
+                        <option value="Переупаковка">Переупаковка</option>
+                    </select>
+                </div>
             </label>
-            <label>Ответственный<br><input id="newBoxResponsible" type="text" placeholder="Укажите, кто принес короб" style="width:100%;"></label>
+            <label>Ответственный<br><input id="newBoxResponsible" type="text" class="input" placeholder="Укажите, кто принес короб" style="width:95%;"></label>
         </div>
         <div class="file-row" style="margin-top:12px;">
             <button id="saveNewBoxBtn" class="btn btn-rect" type="button">Создать короб</button>
