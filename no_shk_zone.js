@@ -77,6 +77,22 @@
         setTimeout(finish, 260);
     }
 
+    // In-house confirm() replacement -- no native browser dialogs, matches
+    // the app's own modal styling. Promise-based so call sites read like
+    // `if (!(await zoneConfirm("..."))) return;`, same shape as confirm().
+    let confirmResolve = null;
+    function zoneConfirm(message) {
+        return new Promise((resolve) => {
+            confirmResolve = resolve;
+            $("noShkConfirmMessage").textContent = message;
+            setZoneModalOpen("noShkConfirmModal", true);
+        });
+    }
+    function resolveConfirm(value) {
+        setZoneModalOpen("noShkConfirmModal", false);
+        if (confirmResolve) { confirmResolve(value); confirmResolve = null; }
+    }
+
     let racks = [];
     let floorBoxes = [];
     // Boxes already rendered once get a calm fade on re-render; a box seen
@@ -134,11 +150,26 @@
         assign(data);
     }
 
+    function areaClass(area) {
+        return area === "Переупаковка" ? "area-repack" : "area-sort";
+    }
+
+    function boxTooltip(box) {
+        return "Короб без ШК " + box.box_number
+            + "\nДата: " + computeDateLabel(box) + " (" + box.shift_type + ")"
+            + "\nТип: " + box.box_type
+            + "\nУчасток: " + box.area
+            + "\nОтветственный: " + box.responsible_name;
+    }
+
     function boxTileHtml(box, index) {
         const isNew = !seenBoxIds.has(box.id);
-        const cls = "no-shk-box" + (isNew ? " is-new" : "");
+        const cls = "no-shk-box " + areaClass(box.area) + (isNew ? " is-new" : "");
         const delay = Math.min(index, 10) * 30;
-        return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "' title='Короб без ШК " + box.box_number + "'>№" + box.box_number + "</div>";
+        return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "' title='" + escapeHtmlLocal(boxTooltip(box)) + "'>"
+            + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
+            + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span>"
+            + "</div>";
     }
 
     function shelfSkeuoHtml(shelf) {
@@ -152,6 +183,15 @@
             + "</div>"
             + "<div class='no-shk-boxes-row'>" + (boxesHtml || "<span style='color:#94a3b8;font-size:12px;'>пусто</span>") + "</div>"
             + "</div>";
+    }
+
+    // Rack width scales with its widest shelf's capacity, so a rack that
+    // holds more boxes per shelf is visibly wider -- not just a fixed box.
+    const BOX_TILE_PX = 64 + 8; // .no-shk-box width + .no-shk-boxes-row gap
+    function rackFrameWidthPx(rack) {
+        const shelves = rack.wms_no_shk_shelves || [];
+        const maxCapacity = shelves.reduce((max, s) => Math.max(max, s.capacity || 0), 1);
+        return maxCapacity * BOX_TILE_PX + 28; // + shelf horizontal padding
     }
 
     function boxWord(count) {
@@ -179,16 +219,17 @@
             + "</div></div>";
 
         const racksHtml = racks.length
-            ? racks.map((rack) => {
+            ? "<div class='no-shk-racks-row'>" + racks.map((rack) => {
                 const shelves = rack.wms_no_shk_shelves || [];
+                const width = rackFrameWidthPx(rack);
                 const shelvesHtml = shelves.length
-                    ? "<div class='no-shk-rack-frame'>" + shelves.map(shelfSkeuoHtml).join("") + "</div>"
+                    ? "<div class='no-shk-rack-frame' style='width:" + width + "px;'>" + shelves.map(shelfSkeuoHtml).join("") + "</div>"
                     : "<p style='color:#64748b;font-size:13px;'>Полок пока нет.</p>";
                 return "<div class='no-shk-rack'>"
                     + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
                     + shelvesHtml
                     + "</div>";
-            }).join("")
+            }).join("") + "</div>"
             : "<p style='color:#64748b;'>Стеллажей пока нет. Нажми ✎, чтобы добавить.</p>";
 
         wrap.innerHTML = floorHtml + racksHtml;
@@ -229,7 +270,7 @@
                 + shelvesHtml
                 + "<div style='display:flex;gap:8px;align-items:flex-end;margin-top:8px;'>"
                 + "<label>Полка<br><input type='text' data-new-shelf-name='" + rack.id + "' placeholder='Полка " + (shelves.length + 1) + "' style='width:140px;'></label>"
-                + "<label>Вместимость<br><input type='number' data-new-shelf-capacity='" + rack.id + "' value='10' style='width:90px;'></label>"
+                + "<label>Вместимость<br><input type='number' data-new-shelf-capacity='" + rack.id + "' value='4' style='width:90px;'></label>"
                 + "<button class='btn btn-outline' type='button' data-add-shelf='" + rack.id + "'>+ Полка</button>"
                 + "</div>"
                 + "</div>";
@@ -261,18 +302,27 @@
         status.style.color = isError ? "#dc2626" : "";
     }
 
+    const DEFAULT_SHELVES_PER_RACK = 5;
+    const DEFAULT_SHELF_CAPACITY = 4;
+
     async function addRack(name) {
         const client = db();
         if (!client || !name) return;
-        const { error } = await client.from("wms_no_shk_racks").insert({ name });
+        const { data: rack, error } = await client.from("wms_no_shk_racks").insert({ name }).select("id").single();
         if (error) { setAdminStatus("Не удалось добавить стеллаж: " + error.message, true); return; }
+        const shelves = [];
+        for (let i = 1; i <= DEFAULT_SHELVES_PER_RACK; i++) {
+            shelves.push({ rack_id: rack.id, name: "Полка " + i, capacity: DEFAULT_SHELF_CAPACITY, shelf_number: i });
+        }
+        const { error: shelvesError } = await client.from("wms_no_shk_shelves").insert(shelves);
+        if (shelvesError) { setAdminStatus("Стеллаж создан, но не удалось добавить полки: " + shelvesError.message, true); await loadZone(); return; }
         setAdminStatus("");
         await loadZone();
     }
 
     async function deleteRack(id) {
         const client = db();
-        if (!client || !confirm("Удалить стеллаж вместе со всеми его полками? Короба с этих полок вернутся «на пол».")) return;
+        if (!client || !(await zoneConfirm("Удалить стеллаж вместе со всеми его полками? Короба с этих полок вернутся «на пол»."))) return;
         const { error } = await client.from("wms_no_shk_racks").delete().eq("id", id);
         if (error) { setAdminStatus("Не удалось удалить: " + error.message, true); return; }
         setAdminStatus("");
@@ -292,7 +342,7 @@
 
     async function deleteShelf(id) {
         const client = db();
-        if (!client || !confirm("Удалить полку? Короба с неё вернутся «на пол».")) return;
+        if (!client || !(await zoneConfirm("Удалить полку? Короба с неё вернутся «на пол»."))) return;
         const { error } = await client.from("wms_no_shk_shelves").delete().eq("id", id);
         if (error) { setAdminStatus("Не удалось удалить: " + error.message, true); return; }
         setAdminStatus("");
@@ -439,11 +489,11 @@
         const ctx = findBoxContext(activeBoxId);
         if (!ctx) return;
         if (ctx.shelf) {
-            if (!confirm("Убрать этот короб с полки? Он останется в системе, «на полу».")) return;
+            if (!(await zoneConfirm("Убрать этот короб с полки? Он останется в системе, «на полу»."))) return;
             const { error } = await client.from("wms_no_shk_boxes").update({ shelf_id: null }).eq("id", activeBoxId);
             if (error) { $("noShkBoxDetailStatus").textContent = "Не удалось убрать: " + error.message; $("noShkBoxDetailStatus").style.color = "#dc2626"; return; }
         } else {
-            if (!confirm("Удалить этот короб полностью? Это нельзя отменить.")) return;
+            if (!(await zoneConfirm("Удалить этот короб полностью? Это нельзя отменить."))) return;
             const { error } = await client.from("wms_no_shk_boxes").delete().eq("id", activeBoxId);
             if (error) { $("noShkBoxDetailStatus").textContent = "Не удалось удалить: " + error.message; $("noShkBoxDetailStatus").style.color = "#dc2626"; return; }
         }
@@ -502,62 +552,118 @@
     }
 
     // ---- Move boxes (scan flow) ----
+    // No visible form fields -- a schematic overview, a big status prompt,
+    // and animated feedback (checkmark / zoomed placement). The real input
+    // stays focused but visually hidden (.no-shk-move-hidden-input) to
+    // capture scanner keystrokes. Every single box placement re-requires a
+    // shelf scan (state resets to "shelf" after each successful box), per
+    // the described flow -- simplest to reason about, and matches "scan
+    // shelf, scan box, watch it land, scan shelf again."
 
-    function moveLog(message, kind) {
-        const log = $("noShkMoveLog");
-        if (!log) return;
-        const row = document.createElement("div");
-        row.className = "no-shk-move-log-row" + (kind ? " " + kind : "");
-        row.textContent = message;
-        log.appendChild(row);
+    let moveStage = "shelf"; // 'shelf' | 'box'
+
+    function setMovePrompt(text) {
+        const el = $("noShkMovePrompt");
+        if (el) el.textContent = text;
     }
 
-    function setActiveShelfLabel() {
-        const el = $("noShkMoveActiveShelf");
+    function flashMoveCheck() {
+        const el = $("noShkMoveCheck");
         if (!el) return;
-        el.textContent = moveActiveShelf
-            ? "Полка: " + moveActiveShelf.rack.name + " — " + moveActiveShelf.shelf.name
-            : "Полка не выбрана";
+        el.classList.add("is-visible");
+        setTimeout(() => el.classList.remove("is-visible"), 700);
+    }
+
+    function flashMoveError(message) {
+        const el = $("noShkMoveError");
+        if (!el) return;
+        el.textContent = message;
+        el.classList.add("is-visible");
+        clearTimeout(el._hideTimer);
+        el._hideTimer = setTimeout(() => el.classList.remove("is-visible"), 2200);
+    }
+
+    function moveShelfHtml(shelf, isTarget, justPlacedBoxId) {
+        const boxes = (shelf.wms_no_shk_boxes || []).slice().sort((a, b) => a.box_number - b.box_number);
+        const isFull = boxes.length >= shelf.capacity;
+        const boxesHtml = boxes.map((box) => {
+            const cls = "no-shk-box " + areaClass(box.area) + (box.id === justPlacedBoxId ? " is-new" : "");
+            return "<div class='" + cls + "' title='" + escapeHtmlLocal(boxTooltip(box)) + "'>"
+                + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
+                + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span></div>";
+        }).join("");
+        return "<div class='no-shk-shelf" + (isTarget ? " no-shk-move-shelf is-target" : "") + "'>"
+            + "<div class='no-shk-shelf-head'><span>" + escapeHtmlLocal(shelf.name) + "</span>"
+            + "<span class='no-shk-shelf-fill" + (isFull ? " is-full" : "") + "'>" + boxes.length + " / " + shelf.capacity + "</span></div>"
+            + "<div class='no-shk-boxes-row'>" + (boxesHtml || "<span style='color:#94a3b8;font-size:12px;'>пусто</span>") + "</div>"
+            + "</div>";
+    }
+
+    function renderMoveOverview(justPlacedBoxId) {
+        const el = $("noShkMoveOverview");
+        if (!el) return;
+        el.innerHTML = racks.map((rack) => {
+            const isTargetRack = moveActiveShelf && moveActiveShelf.rack.id === rack.id;
+            const isDimmed = moveActiveShelf && !isTargetRack;
+            const shelves = rack.wms_no_shk_shelves || [];
+            const shelvesHtml = shelves.map((shelf) => moveShelfHtml(shelf, Boolean(moveActiveShelf && moveActiveShelf.id === shelf.id), justPlacedBoxId)).join("");
+            return "<div class='no-shk-rack" + (isTargetRack ? " is-zoomed" : "") + (isDimmed ? " is-dimmed" : "") + "'>"
+                + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
+                + "<div class='no-shk-rack-frame' style='width:" + rackFrameWidthPx(rack) + "px;'>" + shelvesHtml + "</div>"
+                + "</div>";
+        }).join("");
     }
 
     async function handleScan(rawCode) {
         const code = rawCode.trim();
         if (!code) return;
         if (code.startsWith("WMSP.PLCE.WSHK.")) {
+            if (moveStage !== "shelf") { flashMoveError("Сейчас нужно отсканировать короб."); return; }
             const parts = code.slice("WMSP.PLCE.WSHK.".length).split(".");
             const rackNumber = parseInt(parts[0], 10);
             const shelfNumber = parseInt(parts[1], 10);
             const rack = racks.find((r) => r.rack_number === rackNumber);
-            if (!rack) { moveLog("Стеллаж " + parts[0] + " не существует.", "err"); return; }
+            if (!rack) { flashMoveError("Стеллаж " + parts[0] + " не существует."); return; }
             const shelf = (rack.wms_no_shk_shelves || []).find((s) => s.shelf_number === shelfNumber);
-            if (!shelf) { moveLog("Полка " + parts[1] + " не найдена на стеллаже " + rack.name + ".", "err"); return; }
+            if (!shelf) { flashMoveError("Полка " + parts[1] + " не найдена на стеллаже " + rack.name + "."); return; }
             moveActiveShelf = { id: shelf.id, rack, shelf };
-            setActiveShelfLabel();
-            moveLog("Выбрана полка: " + rack.name + " — " + shelf.name);
+            moveStage = "box";
+            flashMoveCheck();
+            renderMoveOverview();
+            setMovePrompt("Отсканируйте короб — " + rack.name + " · " + shelf.name);
             return;
         }
         if (code.startsWith("WMSP.BOX.")) {
-            if (!moveActiveShelf) { moveLog("Сначала отсканируй этикетку полки.", "err"); return; }
+            if (moveStage !== "box" || !moveActiveShelf) { flashMoveError("Сначала отсканируйте полку."); return; }
             const boxNumber = parseInt(code.slice("WMSP.BOX.".length), 10);
             const box = findBoxByNumber(boxNumber);
-            if (!box) { moveLog("Короб №" + boxNumber + " не найден.", "err"); return; }
+            if (!box) { flashMoveError("Короб №" + boxNumber + " не найден."); return; }
             const currentCount = (moveActiveShelf.shelf.wms_no_shk_boxes || []).length;
             if (currentCount >= moveActiveShelf.shelf.capacity && box.shelf_id !== moveActiveShelf.id) {
-                moveLog("Полка «" + moveActiveShelf.shelf.name + "» заполнена.", "err");
+                flashMoveError("Полка «" + moveActiveShelf.shelf.name + "» заполнена.");
                 return;
             }
             const client = db();
             const { error } = await client.from("wms_no_shk_boxes").update({ shelf_id: moveActiveShelf.id }).eq("id", box.id);
-            if (error) { moveLog("Ошибка: " + error.message, "err"); return; }
-            moveLog("Короб №" + boxNumber + " → " + moveActiveShelf.rack.name + " — " + moveActiveShelf.shelf.name + " ✓", "ok");
+            if (error) { flashMoveError("Ошибка: " + error.message); return; }
             await loadZone();
-            // loadZone() replaced the racks array -- keep moveActiveShelf pointing at fresh data.
+            // loadZone() replaced the racks array -- keep moveActiveShelf pointing at fresh data
+            // for the placement animation below.
             const freshRack = racks.find((r) => r.id === moveActiveShelf.rack.id);
             const freshShelf = freshRack && (freshRack.wms_no_shk_shelves || []).find((s) => s.id === moveActiveShelf.id);
             if (freshRack && freshShelf) moveActiveShelf = { id: freshShelf.id, rack: freshRack, shelf: freshShelf };
+            flashMoveCheck();
+            renderMoveOverview(box.id);
+            setMovePrompt("Короб №" + boxNumber + " на месте ✓");
+            setTimeout(() => {
+                moveActiveShelf = null;
+                moveStage = "shelf";
+                renderMoveOverview();
+                setMovePrompt("Отсканируйте полку");
+            }, 1300);
             return;
         }
-        moveLog("Неизвестный код: " + code, "err");
+        flashMoveError("Неизвестный код: " + code);
     }
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -610,19 +716,22 @@
         if (printBoxBtn) printBoxBtn.addEventListener("click", () => void printActiveBox());
 
         const openMoveBtn = $("openMoveBoxesBtn");
+        const moveInput = $("noShkMoveScanInput");
         if (openMoveBtn) {
             openMoveBtn.addEventListener("click", () => {
                 moveActiveShelf = null;
-                setActiveShelfLabel();
-                $("noShkMoveLog").innerHTML = "";
-                $("noShkMoveScanInput").value = "";
+                moveStage = "shelf";
+                $("noShkMoveError").classList.remove("is-visible");
+                $("noShkMoveCheck").classList.remove("is-visible");
+                setMovePrompt("Отсканируйте полку");
+                renderMoveOverview();
+                if (moveInput) moveInput.value = "";
                 setZoneModalOpen("noShkMoveModal", true);
-                setTimeout(() => $("noShkMoveScanInput").focus(), 50);
+                setTimeout(() => moveInput && moveInput.focus(), 50);
             });
         }
         const closeMoveBtn = $("closeNoShkMove");
         if (closeMoveBtn) closeMoveBtn.addEventListener("click", () => setZoneModalOpen("noShkMoveModal", false));
-        const moveInput = $("noShkMoveScanInput");
         if (moveInput) {
             let scanBuffer = "";
             moveInput.addEventListener("keydown", (event) => {
@@ -636,6 +745,18 @@
                 }
                 if (event.key.length === 1) scanBuffer += event.key;
             });
+            // Keep the (visually hidden) scan input focused while the move
+            // modal is open -- a stray click inside the modal shouldn't
+            // stop the scanner's keystrokes from being captured.
+            document.addEventListener("focusout", () => {
+                const modal = $("noShkMoveModal");
+                if (modal && modal.classList.contains("active")) setTimeout(() => moveInput.focus(), 0);
+            });
         }
+
+        const confirmYesBtn = $("noShkConfirmYes");
+        if (confirmYesBtn) confirmYesBtn.addEventListener("click", () => resolveConfirm(true));
+        const confirmNoBtn = $("noShkConfirmNo");
+        if (confirmNoBtn) confirmNoBtn.addEventListener("click", () => resolveConfirm(false));
     });
 })();

@@ -396,34 +396,41 @@
         #noShkNewBoxModal,
         #noShkBoxDetailModal,
         #noShkMoveModal { z-index: 4400; }
-        /* Зона «Без ШК» -- rack/shelf/box visualization: dark structural
-           lines (posts + shelf planks) with light rounded box tiles,
-           closer to a clean line drawing than a heavy skeuomorphic render. */
-        .no-shk-rack { margin-bottom: 28px; }
+        #noShkConfirmModal { z-index: 4420; }
+        /* Зона «Без ШК» -- flat schematic rack/shelf/box diagram: no
+           shadows, no gradients, thin structural lines in the app's own
+           accent, boxes color-coded by area via a center stripe. */
+        .no-shk-modal-xl { width: min(1400px, 96vw); }
+        .no-shk-racks-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 24px;
+            align-items: flex-start;
+        }
+        .no-shk-rack { margin-bottom: 0; }
         .no-shk-rack-title {
             font-weight: 700;
-            font-size: 15px;
-            color: #0f172a;
+            font-size: 14px;
+            color: #4c1d95;
             margin: 0 0 8px;
             letter-spacing: .01em;
         }
         .no-shk-rack-frame {
-            background: #fff;
-            border-left: 6px solid #1e293b;
-            border-right: 6px solid #1e293b;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(15,23,42,.1);
+            background: #faf9fd;
+            border: 3px solid #7c5cf0;
+            border-radius: 10px;
+            overflow: hidden;
         }
         .no-shk-shelf {
-            border-bottom: 6px solid #1e293b;
-            padding: 12px 14px 16px;
+            border-bottom: 2px solid #ded6f7;
+            padding: 10px 12px 12px;
         }
-        .no-shk-rack-frame .no-shk-shelf:first-child { border-top: 6px solid #1e293b; }
+        .no-shk-rack-frame .no-shk-shelf:last-child { border-bottom: none; }
         .no-shk-shelf-head {
             display: flex;
             justify-content: space-between;
             align-items: baseline;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             font-size: 12px;
             color: #64748b;
             font-weight: 600;
@@ -432,7 +439,7 @@
         .no-shk-boxes-row {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
         }
         @keyframes no-shk-box-in {
             from { opacity: 0; transform: scale(.85) translateY(4px); }
@@ -449,29 +456,40 @@
             to { opacity: 1; transform: translateX(0); }
         }
         .no-shk-box {
-            width: 52px;
-            height: 52px;
-            background: #d6dbe3;
+            position: relative;
+            width: 64px;
+            height: 60px;
+            background: #eceef3;
+            border: 1.5px solid #c7ccd9;
             border-radius: 8px;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            font-size: 11px;
-            font-weight: 700;
-            color: #475569;
+            gap: 2px;
+            overflow: hidden;
             cursor: pointer;
-            transition: background .12s ease, transform .12s ease, box-shadow .12s ease;
+            transition: background .12s ease, transform .12s ease, border-color .12s ease;
             animation: no-shk-box-in .3s ease-out both;
         }
-        .no-shk-box.is-new { animation: no-shk-box-pop .55s cubic-bezier(.34,1.56,.64,1) both; }
-        .no-shk-box:hover {
-            background: #c3cad6;
-            transform: translateY(-3px);
-            box-shadow: 0 6px 10px rgba(15,23,42,.15);
+        .no-shk-box-number { position: relative; z-index: 1; font-size: 12px; font-weight: 700; color: #334155; }
+        .no-shk-box-date { position: relative; z-index: 1; font-size: 9px; color: #64748b; }
+        .no-shk-box::before {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            margin-left: -2px;
         }
+        .no-shk-box.area-sort::before { background: #facc15; }
+        .no-shk-box.area-repack::before { background: #a78bfa; }
+        .no-shk-box.is-new { animation: no-shk-box-pop .55s cubic-bezier(.34,1.56,.64,1) both; }
+        .no-shk-box:hover { background: #e2e5ec; border-color: #94a3b8; transform: translateY(-2px); }
         .no-shk-floor {
             border: 2px dashed #cbd5e1;
-            border-radius: 6px;
+            border-radius: 8px;
             padding: 12px 14px;
             margin-bottom: 24px;
         }
@@ -488,9 +506,77 @@
         }
         .no-shk-move-log-row.ok { color: #15803d; }
         .no-shk-move-log-row.err { color: #b91c1c; }
+
+        /* Перемещение коробов: no visible form fields, just a schematic
+           overview, a big status prompt, and animated feedback. The real
+           input is visually hidden but stays focused to capture scanner
+           keystrokes. */
+        .no-shk-move-hidden-input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .no-shk-move-stage {
+            position: relative;
+            min-height: 320px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 18px;
+            padding: 12px 0 24px;
+        }
+        .no-shk-move-overview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 24px;
+            justify-content: center;
+            width: 100%;
+        }
+        .no-shk-move-overview .no-shk-rack-frame { transition: transform .4s cubic-bezier(.2,.8,.2,1), opacity .4s ease; }
+        .no-shk-move-overview .no-shk-rack.is-dimmed { opacity: .3; filter: grayscale(.6); transition: opacity .4s ease, filter .4s ease; }
+        .no-shk-move-overview .no-shk-rack.is-zoomed .no-shk-rack-frame { transform: scale(1.18); border-color: #16a34a; }
+        .no-shk-move-shelf.is-target { border-bottom-color: #16a34a; background: #f0fdf4; transition: background .3s ease, border-color .3s ease; }
+        .no-shk-move-hud { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .no-shk-move-prompt {
+            font-size: 22px;
+            font-weight: 700;
+            color: #0f172a;
+            text-align: center;
+        }
+        .no-shk-move-check {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: #16a34a;
+            color: #fff;
+            font-size: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transform: scale(.4);
+            transition: opacity .25s ease, transform .25s cubic-bezier(.34,1.56,.64,1);
+        }
+        .no-shk-move-check.is-visible { opacity: 1; transform: scale(1); }
+        .no-shk-move-error {
+            font-size: 15px;
+            font-weight: 600;
+            color: #b91c1c;
+            text-align: center;
+            min-height: 20px;
+            opacity: 0;
+            transition: opacity .2s ease;
+        }
+        .no-shk-move-error.is-visible { opacity: 1; }
         @media (prefers-reduced-motion: reduce) {
             .no-shk-box, .no-shk-box.is-new, .no-shk-move-log-row { animation: none; }
             .no-shk-box:hover { transform: none; }
+            .no-shk-move-overview .no-shk-rack-frame,
+            .no-shk-move-overview .no-shk-rack.is-dimmed,
+            .no-shk-move-check { transition: none; }
         }
         .tasks-flow-card {
             width: min(920px, 100%);
@@ -1807,7 +1893,7 @@
 </section>
 
 <section id="noShkZoneModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card tasks-flow-card-wide">
+    <div class="tasks-flow-card no-shk-modal-xl">
         <div class="work-head">
             <div>
                 <h3 class="work-title">Зона «Без ШК»</h3>
@@ -1900,18 +1986,36 @@
     </div>
 </section>
 
-<section id="noShkMoveModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+<section id="noShkConfirmModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div><h3 class="work-title">Подтверди</h3></div>
+        </div>
+        <p id="noShkConfirmMessage" style="margin:0 0 16px;"></p>
+        <div class="file-row" style="margin-top:0;">
+            <button id="noShkConfirmYes" class="btn btn-rect" type="button">Да</button>
+            <button id="noShkConfirmNo" class="btn btn-outline" type="button">Отмена</button>
+        </div>
+    </div>
+</section>
+
+<section id="noShkMoveModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card no-shk-modal-xl">
         <div class="work-head">
             <div>
                 <h3 class="work-title">Перемещение коробов</h3>
-                <p class="work-subtitle">Сначала отсканируй этикетку полки, потом — коробов один за другим.</p>
             </div>
             <button id="closeNoShkMove" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <label>Скан<br><input id="noShkMoveScanInput" type="text" placeholder="Наведи сканер и пикай" autocomplete="off" style="width:100%;font-size:16px;"></label>
-        <div id="noShkMoveActiveShelf" style="margin-top:10px;font-weight:600;">Полка не выбрана</div>
-        <div id="noShkMoveLog" style="margin-top:10px;display:flex;flex-direction:column-reverse;gap:4px;max-height:240px;overflow:auto;font-size:13px;"></div>
+        <div class="no-shk-move-stage">
+            <div id="noShkMoveOverview" class="no-shk-move-overview"></div>
+            <div class="no-shk-move-hud">
+                <div id="noShkMovePrompt" class="no-shk-move-prompt">Отсканируйте полку</div>
+                <div id="noShkMoveCheck" class="no-shk-move-check">✓</div>
+                <div id="noShkMoveError" class="no-shk-move-error"></div>
+            </div>
+        </div>
+        <input id="noShkMoveScanInput" type="text" autocomplete="off" class="no-shk-move-hidden-input" aria-hidden="true" tabindex="-1">
     </div>
 </section>
 
