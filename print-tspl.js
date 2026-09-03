@@ -28,6 +28,8 @@ function resolveElementValue(element, data) {
     return (data && data[element.field] != null) ? data[element.field] : "";
 }
 
+const VALID_ROTATIONS = [0, 90, 180, 270];
+
 function textCommand(element, data) {
     const x = mmToDots(element.x_mm);
     const y = mmToDots(element.y_mm);
@@ -37,7 +39,8 @@ function textCommand(element, data) {
     // point size) -- font_size 10 -> multiplier 1, roughly doubling per
     // +10, clamped to TSPL's 1-10 multiplier range.
     const mult = Math.min(10, Math.max(1, Math.round((Number(element.font_size) || 10) / 10)));
-    return `TEXT ${x},${y},"3",0,${mult},${mult},"${value}"`;
+    const rotation = VALID_ROTATIONS.indexOf(Number(element.rotation)) !== -1 ? Number(element.rotation) : 0;
+    return `TEXT ${x},${y},"3",${rotation},${mult},${mult},"${value}"`;
 }
 
 function barcodeCommand(element, data) {
@@ -64,10 +67,25 @@ function qrCommand(element, data) {
     return `QRCODE ${x},${y},M,${cellSize},A,0,"${value}"`;
 }
 
+// Purely decorative plus/cross, drawn as two overlapping filled rectangles
+// (TSPL's BAR command) rather than a bitmap -- no image data to encode,
+// just two more plain-text TSPL lines. x_mm/y_mm is the top-left of the
+// cross's square bounding box.
+function crossCommand(element) {
+    const size = mmToDots(element.size_mm || 12);
+    const thickness = mmToDots(element.thickness_mm || 4);
+    const x = mmToDots(element.x_mm);
+    const y = mmToDots(element.y_mm);
+    const vBarX = x + Math.round((size - thickness) / 2);
+    const hBarY = y + Math.round((size - thickness) / 2);
+    return `BAR ${vBarX},${y},${thickness},${size}\r\nBAR ${x},${hBarY},${size},${thickness}`;
+}
+
 function elementCommand(element, data) {
     if (element.type === "text") return textCommand(element, data);
     if (element.type === "barcode") return barcodeCommand(element, data);
     if (element.type === "qr") return qrCommand(element, data);
+    if (element.type === "cross") return crossCommand(element);
     throw new Error("print-tspl: unknown element type '" + element.type + "'");
 }
 

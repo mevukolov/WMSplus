@@ -56,6 +56,27 @@ test("buildTsplFromTemplate emits a QRCODE command for type=qr", () => {
     assert.ok(tspl.includes('QRCODE 40,40,M,4,A,0,"https://example.com"'));
 });
 
+test("buildTsplFromTemplate emits a rotated TEXT command when rotation is set", () => {
+    const template = { width_mm: 50, height_mm: 50, elements: [{ type: "text", literal: "Ночь", x_mm: 5, y_mm: 5, font_size: 10, rotation: 90 }] };
+    const tspl = buildTsplFromTemplate(template, {});
+    assert.ok(tspl.includes('TEXT 40,40,"3",90,1,1,"Ночь"'));
+});
+
+test("buildTsplFromTemplate falls back to rotation 0 for an invalid value", () => {
+    const template = { width_mm: 50, height_mm: 50, elements: [{ type: "text", literal: "x", x_mm: 0, y_mm: 0, rotation: 45 }] };
+    const tspl = buildTsplFromTemplate(template, {});
+    assert.ok(tspl.includes('TEXT 0,0,"3",0,1,1,"x"'));
+});
+
+test("buildTsplFromTemplate emits two BAR commands for a cross element", () => {
+    const template = { width_mm: 50, height_mm: 50, elements: [{ type: "cross", x_mm: 5, y_mm: 5, size_mm: 10, thickness_mm: 2 }] };
+    const tspl = buildTsplFromTemplate(template, {});
+    // size_mm=10 -> 80dots, thickness_mm=2 -> 16dots, x_mm/y_mm=5 -> 40dots.
+    // Bars centered within the 80x80 box: offset (80-16)/2=32 -> 40+32=72.
+    assert.ok(tspl.includes("BAR 72,40,16,80"));
+    assert.ok(tspl.includes("BAR 40,72,80,16"));
+});
+
 test("buildTsplFromTemplate throws on an unknown element type", () => {
     const template = { width_mm: 50, height_mm: 50, elements: [{ type: "bogus", x_mm: 0, y_mm: 0 }] };
     assert.throws(() => buildTsplFromTemplate(template, {}), /unknown element type/);
