@@ -533,53 +533,27 @@
             opacity: 0;
             pointer-events: none;
         }
-        .no-shk-move-stage {
-            position: relative;
-            min-height: 420px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 12px 0 96px;
-            overflow: hidden;
-        }
-        .no-shk-move-overview {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 24px;
-            justify-content: center;
-            align-items: flex-start;
-            width: 100%;
-        }
-        .no-shk-move-overview .no-shk-rack { position: relative; transition: transform .4s cubic-bezier(.2,.8,.2,1); }
-        .no-shk-move-overview .no-shk-rack-frame { transition: transform .4s cubic-bezier(.2,.8,.2,1), opacity .4s ease; }
-        .no-shk-move-overview .no-shk-rack.is-dimmed { opacity: .25; filter: grayscale(.7); transform: scale(.85); transition: opacity .4s ease, filter .4s ease, transform .4s ease; }
-        .no-shk-move-overview .no-shk-rack.is-zoomed { z-index: 5; }
-        .no-shk-move-overview .no-shk-rack.is-zoomed .no-shk-rack-frame { transform: scale(1.8); border-color: #16a34a; }
-        .no-shk-move-shelf.is-target { border-bottom-color: #16a34a; background: #f0fdf4; transition: background .3s ease, border-color .3s ease; }
-        /* Text sits ON TOP of the (now much bigger) zoomed rack as a fixed
-           overlay plate, anchored to the bottom of the stage, so the scaled
-           rack's own paint never covers it. */
+        /* Перемещение коробов is a dedicated full-screen modal, same
+           pattern as #quickNoShkModal.quick-no-shk-modal: the overlay gets
+           no padding/centering, the card itself becomes the full viewport. */
+        .no-shk-move-modal { padding: 0; align-items: stretch; justify-content: stretch; }
+        .no-shk-move-topbar { display: flex; justify-content: flex-end; }
+        /* No card/backdrop behind the prompt -- it's a plain header above
+           the schematic now, so it never overlaps or needs a plate under
+           it to stay readable. */
         .no-shk-move-hud {
-            position: absolute;
-            left: 50%;
-            bottom: 16px;
-            transform: translateX(-50%);
-            z-index: 20;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 8px;
-            background: #fff;
-            border: 1px solid #e2e8f0;
-            border-radius: 14px;
-            padding: 14px 28px;
-            max-width: min(90%, 520px);
+            gap: 10px;
+            padding: 4px 0 28px;
+            text-align: center;
         }
         .no-shk-move-prompt {
-            font-size: 20px;
-            font-weight: 700;
+            font-size: clamp(22px, 3vw, 30px);
+            font-weight: 800;
+            letter-spacing: -.01em;
             color: #0f172a;
-            text-align: center;
         }
         .no-shk-move-check {
             width: 48px;
@@ -597,20 +571,43 @@
         }
         .no-shk-move-check.is-visible { opacity: 1; transform: scale(1); }
         .no-shk-move-error {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 600;
             color: #b91c1c;
-            text-align: center;
             min-height: 20px;
             opacity: 0;
             transition: opacity .2s ease;
         }
         .no-shk-move-error.is-visible { opacity: 1; }
 
+        .no-shk-move-stage {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
+        }
+        .no-shk-move-overview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 24px;
+            justify-content: center;
+            align-items: flex-start;
+            width: 100%;
+        }
+        .no-shk-move-overview .no-shk-rack { position: relative; transition: transform .4s cubic-bezier(.2,.8,.2,1); }
+        .no-shk-move-overview .no-shk-rack-frame { transition: transform .4s cubic-bezier(.2,.8,.2,1), opacity .4s ease; }
+        .no-shk-move-overview .no-shk-rack.is-dimmed { opacity: .25; filter: grayscale(.7); transform: scale(.85); transition: opacity .4s ease, filter .4s ease, transform .4s ease; }
+        .no-shk-move-overview .no-shk-rack.is-zoomed { z-index: 5; }
+        .no-shk-move-overview .no-shk-rack.is-zoomed .no-shk-rack-frame { transform: scale(1.8); border-color: #16a34a; }
+        .no-shk-move-shelf.is-target { border-bottom-color: #16a34a; background: #f0fdf4; transition: background .3s ease, border-color .3s ease; }
+
         /* Arcade-ish success feedback: a green wash filling out from the
-           prompt card to the stage edges, a white wave sweeping over it,
-           and a small particle burst -- all layered above the overview,
-           below the HUD card. */
+           prompt (top of the stage, right where the header sits) to the
+           stage edges, a white wave sweeping over it, and a small particle
+           burst. */
         .no-shk-move-burst, .no-shk-move-wave {
             position: absolute;
             inset: 0;
@@ -620,9 +617,9 @@
         }
         .no-shk-move-burst.is-active { animation: no-shk-burst-fill 950ms ease-out both; }
         @keyframes no-shk-burst-fill {
-            0% { opacity: 0; background: radial-gradient(circle at 50% 88%, rgba(22,163,74,.5) 0%, rgba(22,163,74,0) 1%); }
-            30% { opacity: 1; background: radial-gradient(circle at 50% 88%, rgba(22,163,74,.4) 0%, rgba(22,163,74,0) 65%); }
-            100% { opacity: 0; background: radial-gradient(circle at 50% 88%, rgba(22,163,74,.4) 0%, rgba(22,163,74,0) 150%); }
+            0% { opacity: 0; background: radial-gradient(circle at 50% 2%, rgba(22,163,74,.5) 0%, rgba(22,163,74,0) 1%); }
+            30% { opacity: 1; background: radial-gradient(circle at 50% 2%, rgba(22,163,74,.4) 0%, rgba(22,163,74,0) 65%); }
+            100% { opacity: 0; background: radial-gradient(circle at 50% 2%, rgba(22,163,74,.4) 0%, rgba(22,163,74,0) 150%); }
         }
         .no-shk-move-wave {
             z-index: 16;
@@ -638,7 +635,7 @@
         .no-shk-particle {
             position: absolute;
             left: 50%;
-            bottom: 92px;
+            top: 4px;
             width: 7px;
             height: 7px;
             border-radius: 50%;
@@ -653,11 +650,11 @@
             100% { opacity: 0; transform: translate(calc(-50% + var(--tx)), var(--ty)) scale(.3); }
         }
         @keyframes no-shk-hud-shake {
-            0%, 100% { transform: translateX(-50%); }
-            20% { transform: translateX(calc(-50% - 8px)); }
-            40% { transform: translateX(calc(-50% + 8px)); }
-            60% { transform: translateX(calc(-50% - 5px)); }
-            80% { transform: translateX(calc(-50% + 5px)); }
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-8px); }
+            40% { transform: translateX(8px); }
+            60% { transform: translateX(-5px); }
+            80% { transform: translateX(5px); }
         }
         .no-shk-move-hud.is-shaking { animation: no-shk-hud-shake 400ms ease-in-out; }
 
@@ -702,6 +699,18 @@
         }
         .tasks-flow-card-wide { width: min(1160px, 100%); }
         .no-shk-modal-xl { width: min(1900px, 98vw); }
+        .no-shk-move-card {
+            width: 100vw;
+            height: 100dvh;
+            max-height: none;
+            border: 0;
+            border-radius: 0;
+            padding: clamp(16px, 3vw, 32px);
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            overflow: auto;
+        }
         .tasks-flow-card .module-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .tasks-flow-card .preview-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
         .backfill-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
@@ -2117,23 +2126,20 @@
     </div>
 </section>
 
-<section id="noShkMoveModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card no-shk-modal-xl">
-        <div class="work-head">
-            <div>
-                <h3 class="work-title">Перемещение коробов</h3>
-            </div>
+<section id="noShkMoveModal" class="tasks-flow-modal upload-work no-shk-move-modal" aria-hidden="true">
+    <div class="tasks-flow-card no-shk-move-card">
+        <div class="no-shk-move-topbar">
             <button id="closeNoShkMove" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="noShkMoveHud" class="no-shk-move-hud">
+            <div id="noShkMovePrompt" class="no-shk-move-prompt">Отсканируйте полку</div>
+            <div id="noShkMoveCheck" class="no-shk-move-check">✓</div>
+            <div id="noShkMoveError" class="no-shk-move-error"></div>
         </div>
         <div id="noShkMoveStage" class="no-shk-move-stage">
             <div id="noShkMoveOverview" class="no-shk-move-overview"></div>
             <div id="noShkMoveBurst" class="no-shk-move-burst"></div>
             <div id="noShkMoveWave" class="no-shk-move-wave"></div>
-            <div id="noShkMoveHud" class="no-shk-move-hud">
-                <div id="noShkMovePrompt" class="no-shk-move-prompt">Отсканируйте полку</div>
-                <div id="noShkMoveCheck" class="no-shk-move-check">✓</div>
-                <div id="noShkMoveError" class="no-shk-move-error"></div>
-            </div>
         </div>
         <input id="noShkMoveScanInput" type="text" autocomplete="off" class="no-shk-move-hidden-input" aria-hidden="true" tabindex="-1">
     </div>
