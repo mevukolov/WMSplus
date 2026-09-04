@@ -28,16 +28,6 @@ const DEFAULT_ALLOW_EMPTY_SYNC = false;
 const DEFAULT_SOURCE_MODULE = "incoming_boxes";
 const DEFAULT_SOURCE_TABLE = "google_sheets:incoming_boxes";
 const DEFAULT_TASK_TYPE = "Коробки на входе";
-const DEFAULT_BOARD_KEY = "incoming_boxes";
-const DEFAULT_COLUMN_KEY = "incoming_boxes";
-const DEFAULT_TARGET_WORKSPACE_ID = "1021782";
-const DEFAULT_TARGET_PROJECT_ID = "2";
-const DEFAULT_TARGET_BOARD_ID = "";
-const DEFAULT_TARGET_BOARD_NAME = "❗️ Активные задачи";
-const DEFAULT_TARGET_COLUMN_NAME = "Коробки на входе";
-const DEFAULT_TASK_TYPE_FIELD_ID = "a25e22e9-f7fb-4640-963b-5ba1ad75cfe9";
-const DEFAULT_TASK_TYPE_OPTION_ID = "a25e2312-ba2e-4a54-a144-7955cb835fc0";
-const DEFAULT_LAST_MOVEMENT_FIELD_ID = "a25e1c97-2c70-4771-9cb8-3637dc2f48d9";
 const DEFAULT_DEADLINE_DAYS = 29;
 const RPC_BATCH_SIZE = 300;
 
@@ -254,34 +244,12 @@ function buildDescription(row: IncomingBoxRow): string {
   ].join("\n");
 }
 
-function isoDateAsDateTime(isoDate: string | null): string | null {
-  return isoDate ? `${isoDate}T00:00:00.000Z` : null;
-}
-
-function buildTargetCustomFields(row: IncomingBoxRow, body: JsonObject): JsonObject {
-  const customFields = { ...(asObject(body.target_custom_fields) ?? {}) };
-  const taskTypeFieldId = normalizeText(body.task_type_field_id) || DEFAULT_TASK_TYPE_FIELD_ID;
-  const taskTypeOptionId = normalizeText(body.task_type_option_id) || DEFAULT_TASK_TYPE_OPTION_ID;
-  const lastMovementFieldId = normalizeText(body.last_movement_field_id) || DEFAULT_LAST_MOVEMENT_FIELD_ID;
-
-  if (taskTypeFieldId && taskTypeOptionId && !Object.prototype.hasOwnProperty.call(customFields, taskTypeFieldId)) {
-    customFields[taskTypeFieldId] = taskTypeOptionId;
-  }
-
-  if (lastMovementFieldId && row.date && !Object.prototype.hasOwnProperty.call(customFields, lastMovementFieldId)) {
-    customFields[lastMovementFieldId] = isoDateAsDateTime(row.date);
-  }
-
-  return customFields;
-}
-
 function buildTaskPayload(row: IncomingBoxRow, body: JsonObject, sourceGeneratedAt: string | null): JsonObject {
   const sourceModule = normalizeText(body.source_module) || DEFAULT_SOURCE_MODULE;
   const taskType = normalizeText(body.task_type) || DEFAULT_TASK_TYPE;
-  const boardKey = normalizeText(body.board_key) || DEFAULT_BOARD_KEY;
-  const columnKey = normalizeText(body.column_key) || DEFAULT_COLUMN_KEY;
   const deadlineDays = normalizeNumber(body.deadline_days, DEFAULT_DEADLINE_DAYS);
   const dueDate = addDaysToIsoDate(row.date, deadlineDays);
+  const title = `Коробка ${row.box}${row.date ? ` | ${formatRuDateFromIso(row.date)}` : ""}`;
 
   return {
     source_module: sourceModule,
@@ -291,22 +259,15 @@ function buildTaskPayload(row: IncomingBoxRow, body: JsonObject, sourceGenerated
     source_payload: row,
     source_generated_at: sourceGeneratedAt,
     task_type: taskType,
-    board_key: boardKey,
-    column_key: columnKey,
-    title: `Коробка ${row.box}${row.date ? ` | ${formatRuDateFromIso(row.date)}` : ""}`,
+    title,
     description: buildDescription(row),
     priority: normalizePriority(body.priority),
+    priority_label: null,
     due_date: dueDate,
-    target_workspace_id: normalizeText(body.workspace_id) || normalizeText(body.target_workspace_id) || DEFAULT_TARGET_WORKSPACE_ID,
-    target_project_id: normalizeText(body.project_id) || normalizeText(body.target_project_id) || DEFAULT_TARGET_PROJECT_ID,
-    target_board_id: normalizeText(body.board_id) || normalizeText(body.target_board_id) || DEFAULT_TARGET_BOARD_ID,
-    target_board_name: normalizeText(body.board_name) || normalizeText(body.target_board_name) || DEFAULT_TARGET_BOARD_NAME,
-    target_column_id: normalizeText(body.board_column_id) || normalizeText(body.target_column_id) || null,
-    target_column_name: normalizeText(body.board_column_name) || normalizeText(body.target_column_name) || DEFAULT_TARGET_COLUMN_NAME,
-    target_custom_fields: buildTargetCustomFields(row, body),
-    target_tags: Array.isArray(body.target_tags) ? body.target_tags : [],
-    enabled: true,
-    master_action: "upsert",
+    upload_type: sourceModule,
+    upload_effective_date: row.date,
+    search_text: [title, taskType, row.box, row.analysis, row.guilty_id].filter(Boolean).join(" "),
+    tags: [],
   };
 }
 
@@ -314,8 +275,8 @@ async function upsertTasks(tasks: JsonObject[]): Promise<number> {
   let upserted = 0;
   for (let offset = 0; offset < tasks.length; offset += RPC_BATCH_SIZE) {
     const batch = tasks.slice(offset, offset + RPC_BATCH_SIZE);
-    const { data, error } = await supabase.rpc("upsert_weeek_tasks_from_json", { p_tasks: batch });
-    if (error) throw new Error(`Failed to upsert rows into weeek_tasks: ${error.message}`);
+    const { data, error } = await supabase.rpc("upsert_wms_external_requests_from_json", { p_tasks: batch });
+    if (error) throw new Error(`Failed to upsert rows into wms_tasks: ${error.message}`);
     upserted += Number(data ?? batch.length);
   }
   return upserted;
@@ -367,7 +328,7 @@ Deno.serve(async (req) => {
     return json(200, {
       ok: true,
       dry_run: dryRun,
-      target_table: "weeek_tasks",
+      target_table: "wms_tasks",
       source_module: normalizeText(body.source_module) || DEFAULT_SOURCE_MODULE,
       request_timeout_ms: requestTimeoutMs,
       started_at: startedAt,

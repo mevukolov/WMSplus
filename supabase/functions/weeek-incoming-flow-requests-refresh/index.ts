@@ -29,20 +29,8 @@ const DEFAULT_SOURCE_MODULE = "incoming_flow_requests";
 const DEFAULT_SOURCE_TABLE = "google_sheets:incoming_flow_requests";
 const DEFAULT_TASK_TYPE = "Запросы входящего потока";
 const DEFAULT_DESCRIPTION_TASK_TYPE = "Запросы входящего потока";
-const DEFAULT_BOARD_KEY = "incoming_flow_requests";
-const DEFAULT_COLUMN_KEY = "to_review";
-const DEFAULT_TARGET_WORKSPACE_ID = "1021782";
-const DEFAULT_TARGET_PROJECT_ID = "";
-const DEFAULT_TARGET_BOARD_ID = "";
-const DEFAULT_TARGET_BOARD_NAME = "Запросы входящего потока";
-const DEFAULT_TARGET_COLUMN_NAME = "К разбору";
-const DEFAULT_TASK_TYPE_FIELD_ID = "a25e22e9-f7fb-4640-963b-5ba1ad75cfe9";
-const DEFAULT_TASK_TYPE_OPTION_ID = "";
-const DEFAULT_REQUEST_TIME_FIELD_ID = "";
 const DEFAULT_DEADLINE_HOURS = 2;
 const DEFAULT_PRIORITY = 2;
-const DEFAULT_TAG_ID = "";
-const DEFAULT_TAG_NAME = "Запрос входящего потока";
 const DEFAULT_TITLE_MAX_LENGTH = 100;
 const RPC_BATCH_SIZE = 300;
 
@@ -298,42 +286,17 @@ function buildDescription(row: IncomingFlowRequestRow): string {
   ].join("\n");
 }
 
-function buildTargetCustomFields(row: IncomingFlowRequestRow, body: JsonObject): JsonObject {
-  const customFields = { ...(asObject(body.target_custom_fields) ?? {}) };
-  const taskTypeFieldId = normalizeText(body.task_type_field_id) || normalizeText(Deno.env.get("WEEEK_TASK_TYPE_FIELD_ID")) || DEFAULT_TASK_TYPE_FIELD_ID;
-  const taskTypeOptionId = normalizeText(body.task_type_option_id) || normalizeText(Deno.env.get("WEEEK_INCOMING_FLOW_TASK_TYPE_OPTION_ID")) || DEFAULT_TASK_TYPE_OPTION_ID;
-  const requestTimeFieldId = normalizeText(body.request_time_field_id) || normalizeText(Deno.env.get("WEEEK_INCOMING_FLOW_REQUEST_TIME_FIELD_ID")) || DEFAULT_REQUEST_TIME_FIELD_ID;
-
-  if (taskTypeFieldId && taskTypeOptionId && !Object.prototype.hasOwnProperty.call(customFields, taskTypeFieldId)) {
-    customFields[taskTypeFieldId] = taskTypeOptionId;
-  }
-
-  if (requestTimeFieldId && row.request_time && !Object.prototype.hasOwnProperty.call(customFields, requestTimeFieldId)) {
-    customFields[requestTimeFieldId] = row.request_time;
-  }
-
-  return customFields;
-}
-
-function buildTargetTags(body: JsonObject): unknown[] {
-  if (Array.isArray(body.target_tags)) return body.target_tags;
-  const tagId = normalizeText(body.tag_id) || normalizeText(Deno.env.get("WEEEK_INCOMING_FLOW_TAG_ID")) || DEFAULT_TAG_ID;
-  if (tagId) return [tagId];
-  const tagName = normalizeText(body.tag_name) || normalizeText(Deno.env.get("WEEEK_INCOMING_FLOW_TAG_NAME")) || DEFAULT_TAG_NAME;
-  return tagName ? [tagName] : [];
-}
-
 function buildTaskPayload(row: IncomingFlowRequestRow, body: JsonObject, sourceGeneratedAt: string | null): JsonObject {
   const sourceModule = normalizeText(body.source_module) || DEFAULT_SOURCE_MODULE;
   const taskType = normalizeText(body.task_type) || DEFAULT_TASK_TYPE;
-  const boardKey = normalizeText(body.board_key) || DEFAULT_BOARD_KEY;
-  const columnKey = normalizeText(body.column_key) || DEFAULT_COLUMN_KEY;
   const deadlineHours = normalizeNumber(body.deadline_hours, DEFAULT_DEADLINE_HOURS);
   const dueDateTime = addHoursToIsoDateTime(row.request_time, deadlineHours);
   const descriptionTaskType = normalizeText(body.description_task_type) || DEFAULT_DESCRIPTION_TASK_TYPE;
   const apiUrl = normalizeText(body.api_url) || normalizeText(Deno.env.get("INCOMING_FLOW_REQUESTS_APPS_SCRIPT_URL")) || DEFAULT_API_URL;
   const spreadsheetId = normalizeText(body.spreadsheet_id) || row.spreadsheet_id || DEFAULT_SPREADSHEET_ID;
   const sheetName = normalizeText(body.sheet_name) || row.source_sheet || DEFAULT_SHEET_NAME;
+  const title = truncateText(`Запрос входящего потока | ${row.requested_shk} | ${row.sender_lo || "ЛО не указано"}`);
+  const dueDate = dueDateTime ? dueDateTime.slice(0, 10) : null;
 
   return {
     source_module: sourceModule,
@@ -347,25 +310,19 @@ function buildTaskPayload(row: IncomingFlowRequestRow, body: JsonObject, sourceG
       api_url: apiUrl,
       spreadsheet_id: spreadsheetId,
       sheet_name: sheetName,
+      source_row_number: row.source_row_number,
     },
     source_generated_at: sourceGeneratedAt,
     task_type: taskType,
-    board_key: boardKey,
-    column_key: columnKey,
-    title: truncateText(`Запрос входящего потока | ${row.requested_shk} | ${row.sender_lo || "ЛО не указано"}`),
+    title,
     description: buildDescription(row),
     priority: normalizePriority(body.priority, DEFAULT_PRIORITY),
-    due_date: dueDateTime ? dueDateTime.slice(0, 10) : null,
-    target_workspace_id: normalizeText(body.workspace_id) || normalizeText(body.target_workspace_id) || DEFAULT_TARGET_WORKSPACE_ID,
-    target_project_id: normalizeText(body.project_id) || normalizeText(body.target_project_id) || normalizeText(Deno.env.get("WEEEK_INCOMING_FLOW_PROJECT_ID")) || DEFAULT_TARGET_PROJECT_ID,
-    target_board_id: normalizeText(body.board_id) || normalizeText(body.target_board_id) || DEFAULT_TARGET_BOARD_ID,
-    target_board_name: normalizeText(body.board_name) || normalizeText(body.target_board_name) || DEFAULT_TARGET_BOARD_NAME,
-    target_column_id: normalizeText(body.board_column_id) || normalizeText(body.target_column_id) || null,
-    target_column_name: normalizeText(body.board_column_name) || normalizeText(body.target_column_name) || DEFAULT_TARGET_COLUMN_NAME,
-    target_custom_fields: buildTargetCustomFields(row, body),
-    target_tags: buildTargetTags(body),
-    enabled: true,
-    master_action: "upsert",
+    priority_label: null,
+    due_date: dueDate,
+    upload_type: sourceModule,
+    upload_effective_date: dueDate,
+    search_text: [title, taskType, row.requested_shk, row.sample_shk, row.sender_lo].filter(Boolean).join(" "),
+    tags: [],
   };
 }
 
@@ -373,8 +330,8 @@ async function upsertTasks(tasks: JsonObject[]): Promise<number> {
   let upserted = 0;
   for (let offset = 0; offset < tasks.length; offset += RPC_BATCH_SIZE) {
     const batch = tasks.slice(offset, offset + RPC_BATCH_SIZE);
-    const { data, error } = await supabase.rpc("upsert_weeek_tasks_from_json", { p_tasks: batch });
-    if (error) throw new Error(`Failed to upsert rows into weeek_tasks: ${error.message}`);
+    const { data, error } = await supabase.rpc("upsert_wms_external_requests_from_json", { p_tasks: batch });
+    if (error) throw new Error(`Failed to upsert rows into wms_tasks: ${error.message}`);
     upserted += Number(data ?? batch.length);
   }
   return upserted;
@@ -426,7 +383,7 @@ Deno.serve(async (req) => {
     return json(200, {
       ok: true,
       dry_run: dryRun,
-      target_table: "weeek_tasks",
+      target_table: "wms_tasks",
       source_module: normalizeText(body.source_module) || DEFAULT_SOURCE_MODULE,
       request_timeout_ms: requestTimeoutMs,
       started_at: startedAt,

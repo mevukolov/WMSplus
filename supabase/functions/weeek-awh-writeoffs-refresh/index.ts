@@ -39,16 +39,6 @@ const DEFAULT_SOURCE_MODULE = "awh_writeoffs";
 const DEFAULT_SOURCE_TABLE = "google_sheets:awh_writeoffs";
 const DEFAULT_TASK_TYPE = "Списания AWH";
 const DEFAULT_DESCRIPTION_TASK_TYPE = "Списания на администрацию ЛО";
-const DEFAULT_BOARD_KEY = "awh_writeoffs";
-const DEFAULT_COLUMN_KEY = "awh_writeoffs";
-const DEFAULT_TARGET_WORKSPACE_ID = "1021782";
-const DEFAULT_TARGET_PROJECT_ID = "2";
-const DEFAULT_TARGET_BOARD_ID = "";
-const DEFAULT_TARGET_BOARD_NAME = "❗️ Активные задачи";
-const DEFAULT_TARGET_COLUMN_NAME = "Списания AWH";
-const DEFAULT_TASK_TYPE_FIELD_ID = "a25e22e9-f7fb-4640-963b-5ba1ad75cfe9";
-const DEFAULT_TASK_TYPE_OPTION_ID = "";
-const DEFAULT_COST_FIELD_ID = "";
 const DEFAULT_DEADLINE_DAYS = 7;
 const DEFAULT_PRICE_DEADLINE_REDUCE_5000_DAYS = 2;
 const DEFAULT_PRICE_DEADLINE_REDUCE_10000_DAYS = 4;
@@ -348,35 +338,22 @@ function buildDescription(row: AwhWriteoffRow): string {
   ].join("\n");
 }
 
-function buildTargetCustomFields(row: AwhWriteoffRow, body: JsonObject): JsonObject {
-  const customFields = { ...(asObject(body.target_custom_fields) ?? {}) };
-  const taskTypeFieldId = normalizeText(body.task_type_field_id) || normalizeText(Deno.env.get("WEEEK_TASK_TYPE_FIELD_ID")) || DEFAULT_TASK_TYPE_FIELD_ID;
-  const taskTypeOptionId = normalizeText(body.task_type_option_id) || normalizeText(Deno.env.get("WEEEK_AWH_TASK_TYPE_OPTION_ID")) || DEFAULT_TASK_TYPE_OPTION_ID;
-  const costFieldId = normalizeText(body.cost_field_id) || normalizeText(Deno.env.get("WEEEK_COST_FIELD_ID")) || DEFAULT_COST_FIELD_ID;
-
-  if (taskTypeFieldId && taskTypeOptionId && !Object.prototype.hasOwnProperty.call(customFields, taskTypeFieldId)) {
-    customFields[taskTypeFieldId] = taskTypeOptionId;
-  }
-
-  if (costFieldId && row.price !== null && !Object.prototype.hasOwnProperty.call(customFields, costFieldId)) {
-    customFields[costFieldId] = row.price;
-  }
-
-  return customFields;
-}
-
 function buildTaskPayload(row: AwhWriteoffRow, body: JsonObject, sourceGeneratedAt: string | null): JsonObject {
   const sourceModule = normalizeText(body.source_module) || DEFAULT_SOURCE_MODULE;
   const taskType = normalizeText(body.task_type) || DEFAULT_TASK_TYPE;
-  const boardKey = normalizeText(body.board_key) || DEFAULT_BOARD_KEY;
-  const columnKey = normalizeText(body.column_key) || DEFAULT_COLUMN_KEY;
   const deadlineDays = normalizeNumber(body.deadline_days, DEFAULT_DEADLINE_DAYS);
   const deadlineReductionDays = deadlineReductionDaysByPrice(row, body);
   const taskDate = currentMoscowIsoDate();
   const dueDate = addDaysToIsoDate(taskDate, Math.max(deadlineDays - deadlineReductionDays, 0));
   const unloadDate = normalizeIsoDate(row.unload_time_lo_label || row.unload_time_lo);
   const descriptionTaskType = normalizeText(body.description_task_type) || DEFAULT_DESCRIPTION_TASK_TYPE;
+  // Was routed through Weeek's own "task master" automation as
+  // master_action "system_finalize" -- that queue is gone, and actually
+  // auto-closing a task here (vs. just flagging it) is a separate decision
+  // from "make the sync work at all" (see chat), so this stays informational
+  // in source_payload only for now, same shape as before.
   const shouldSystemFinalize = isSystemFinalStatus(row.status);
+  const title = `Коробка ${row.box}${unloadDate ? ` | ${formatRuDateFromIso(unloadDate)}` : ""}`;
 
   return {
     source_module: sourceModule,
@@ -395,22 +372,15 @@ function buildTaskPayload(row: AwhWriteoffRow, body: JsonObject, sourceGenerated
     },
     source_generated_at: sourceGeneratedAt,
     task_type: taskType,
-    board_key: boardKey,
-    column_key: columnKey,
-    title: `Коробка ${row.box}${unloadDate ? ` | ${formatRuDateFromIso(unloadDate)}` : ""}`,
+    title,
     description: buildDescription(row),
     priority: normalizePriority(body.priority, DEFAULT_PRIORITY),
+    priority_label: null,
     due_date: dueDate,
-    target_workspace_id: normalizeText(body.workspace_id) || normalizeText(body.target_workspace_id) || DEFAULT_TARGET_WORKSPACE_ID,
-    target_project_id: normalizeText(body.project_id) || normalizeText(body.target_project_id) || DEFAULT_TARGET_PROJECT_ID,
-    target_board_id: normalizeText(body.board_id) || normalizeText(body.target_board_id) || DEFAULT_TARGET_BOARD_ID,
-    target_board_name: normalizeText(body.board_name) || normalizeText(body.target_board_name) || DEFAULT_TARGET_BOARD_NAME,
-    target_column_id: normalizeText(body.board_column_id) || normalizeText(body.target_column_id) || null,
-    target_column_name: normalizeText(body.board_column_name) || normalizeText(body.target_column_name) || DEFAULT_TARGET_COLUMN_NAME,
-    target_custom_fields: buildTargetCustomFields(row, body),
-    target_tags: Array.isArray(body.target_tags) ? body.target_tags : [],
-    enabled: true,
-    master_action: shouldSystemFinalize ? "system_finalize" : "upsert",
+    upload_type: sourceModule,
+    upload_effective_date: unloadDate,
+    search_text: [title, taskType, row.box, row.waybill, row.lo].filter(Boolean).join(" "),
+    tags: [],
   };
 }
 
@@ -418,8 +388,8 @@ async function upsertTasks(tasks: JsonObject[]): Promise<number> {
   let upserted = 0;
   for (let offset = 0; offset < tasks.length; offset += RPC_BATCH_SIZE) {
     const batch = tasks.slice(offset, offset + RPC_BATCH_SIZE);
-    const { data, error } = await supabase.rpc("upsert_weeek_tasks_from_json", { p_tasks: batch });
-    if (error) throw new Error(`Failed to upsert rows into weeek_tasks: ${error.message}`);
+    const { data, error } = await supabase.rpc("upsert_wms_external_requests_from_json", { p_tasks: batch });
+    if (error) throw new Error(`Failed to upsert rows into wms_tasks: ${error.message}`);
     upserted += Number(data ?? batch.length);
   }
   return upserted;
@@ -471,7 +441,7 @@ Deno.serve(async (req) => {
     return json(200, {
       ok: true,
       dry_run: dryRun,
-      target_table: "weeek_tasks",
+      target_table: "wms_tasks",
       source_module: normalizeText(body.source_module) || DEFAULT_SOURCE_MODULE,
       request_timeout_ms: requestTimeoutMs,
       started_at: startedAt,
