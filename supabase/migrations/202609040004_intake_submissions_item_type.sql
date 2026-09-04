@@ -6,8 +6,20 @@
 -- no category/item_text, and carry a scanned sticker_code instead of
 -- relying on the user typing anything. Photo goes back to required now
 -- that the skip-photo button is removed.
+
+-- Add item_type column with backfill for existing rows.
+-- This repo's migrations apply against live tables that may already have rows,
+-- so we add nullable, backfill, then set not null to safely handle pre-existing data.
 alter table public.intake_submissions
-    add column item_type text not null
+    add column item_type text;
+
+update public.intake_submissions set item_type = 'Мелкий товар' where item_type is null;
+
+alter table public.intake_submissions
+    alter column item_type set not null;
+
+alter table public.intake_submissions
+    add constraint intake_submissions_item_type_check
         check (item_type in ('Мелкий товар', 'КГТ', 'Шредер'));
 
 alter table public.intake_submissions
