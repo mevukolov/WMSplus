@@ -1051,6 +1051,13 @@
         .shift-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
         .shift-form-grid label { color: #334155; font-size: 13px; font-weight: 900; }
         .shift-form-grid select { box-sizing: border-box; width: 100%; margin-top: 6px; border: 1px solid #dbe3ec; border-radius: 14px; padding: 11px 12px; background: #fff; color: #242038; font: inherit; }
+        .shift-roster { margin-top: 14px; display: grid; gap: 10px; }
+        .shift-roster-row { border: 1px solid #dbe3ec; border-radius: 14px; padding: 12px; display: grid; gap: 8px; }
+        .shift-roster-row-head { display: flex; align-items: center; gap: 8px; }
+        .shift-roster-row-head select { flex: 1; box-sizing: border-box; border: 1px solid #dbe3ec; border-radius: 12px; padding: 9px 10px; background: #fff; color: #242038; font: inherit; }
+        .shift-roster-zones { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+        .shift-roster-zone { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #334155; }
+        .shift-roster-add { justify-self: start; }
         .shift-pure-stats { margin-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
         .shift-pure-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
         .shift-list-box { border: 1px solid #e2e8f0; border-radius: 16px; padding: 12px; background: #fff; }
@@ -1749,14 +1756,9 @@
             </div>
             <button id="closeShiftOpening" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="shift-form-grid">
-            <label>Входящий поток
-                <select id="shiftIncomingSelect"></select>
-            </label>
-            <label>Исходящий поток
-                <select id="shiftOutgoingSelect"></select>
-            </label>
-        </div>
+        <div id="shiftRosterEditor" class="shift-roster"></div>
+        <button id="addShiftRosterRow" class="btn btn-outline shift-roster-add" type="button">+ Добавить человека</button>
+        <div id="shiftRosterCoverageWarning" class="status-line" style="display:none;"></div>
         <div class="file-row">
             <label class="btn btn-rect" for="shiftPureLossesFile">Загрузить чистые списания</label>
             <input id="shiftPureLossesFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">

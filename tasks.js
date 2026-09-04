@@ -446,8 +446,7 @@
     const FLOW_SKIP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
     const FLOW_SCORE_VERSION = "flow-mvp-2026-08-24";
     const FLOW_ALLOWED_USER_IDS = new Set(["1034305"]);
-    const FLOW_STRICT_INCOMING_SECTIONS = new Set(["Запросы входящего потока", "Коробки на входе"]);
-    const FLOW_STRICT_OUTGOING_SECTIONS = new Set(["Списания AWH"]);
+    const FLOW_STRICT_SECTIONS = new Set(["Запросы входящего потока", "Коробки на входе", "Списания AWH"]);
     const DEFAULT_FLOW_SCORE_SETTINGS = {
         lockTtlMinutes: 15,
         weights: {
@@ -1679,6 +1678,111 @@
         return employee ? normalizeText(employee.full_name) : "";
     }
 
+    // The one place old two-named-role shifts (incoming_employee_id/
+    // outgoing_employee_id, no real `roster`) get read as an equivalent
+    // roster. Everything else in this file reads shift.roster only --
+    // never the two old fields directly -- so this is the single point
+    // that has to change if the old-shift compatibility mapping ever
+    // needs adjusting. The old model treated "Запросы входящего потока"
+    // and "Коробки на входе" as the incoming person's zones (see the old
+    // FLOW_STRICT_INCOMING_SECTIONS set) and everything else as the
+    // outgoing person's -- this reproduces that split exactly, so a shift
+    // opened before this change scores identically to before.
+    function normalizeShiftRoster(shift) {
+        if (!shift) return [];
+        if (Array.isArray(shift.roster) && shift.roster.length) {
+            return shift.roster.map((entry) => ({
+                employee_id: normalizeIdentifier(entry && entry.employee_id),
+                full_name: normalizeText(entry && entry.full_name),
+                zones: Array.isArray(entry && entry.zones) ? entry.zones.filter(Boolean) : [],
+            })).filter((entry) => entry.employee_id);
+        }
+        const roster = [];
+        const incomingId = normalizeIdentifier(shift.incoming_employee_id);
+        if (incomingId) {
+            roster.push({
+                employee_id: incomingId,
+                full_name: normalizeText(shift.incoming_name) || employeeNameById(incomingId),
+                zones: ["Запросы входящего потока", "Коробки на входе"],
+            });
+        }
+        const outgoingId = normalizeIdentifier(shift.outgoing_employee_id);
+        if (outgoingId) {
+            const outgoingZones = REVIEW_SECTIONS.concat(["Списания AWH"]);
+            const existing = roster.find((entry) => entry.employee_id === outgoingId);
+            if (existing) existing.zones = existing.zones.concat(outgoingZones);
+            else roster.push({
+                employee_id: outgoingId,
+                full_name: normalizeText(shift.outgoing_name) || employeeNameById(outgoingId),
+                zones: outgoingZones,
+            });
+        }
+        return roster;
+    }
+
+    const SHIFT_ROSTER_ZONES = REVIEW_SECTIONS.concat(REQUEST_SECTIONS);
+
+    function shiftRosterZoneCheckboxesHtml(selectedZones) {
+        const selected = new Set(selectedZones || []);
+        return SHIFT_ROSTER_ZONES.map((zone) => "<label class='shift-roster-zone'><input type='checkbox' value='" + escapeHtml(zone) + "'" + (selected.has(zone) ? " checked" : "") + ">" + escapeHtml(zone) + "</label>").join("");
+    }
+
+    function shiftRosterEmployeeOptionsHtml(selectedId) {
+        const options = "<option value=''>Выберите сотрудника</option>" + (state.shift.employees || [])
+            .map((employee) => "<option value='" + escapeHtml(employee.id || employee.employee_id) + "'" + ((employee.id || employee.employee_id) === selectedId ? " selected" : "") + ">" + escapeHtml(employee.full_name) + "</option>")
+            .join("");
+        return options;
+    }
+
+    function addShiftRosterRow(prefill) {
+        const container = $("shiftRosterEditor");
+        if (!container) return;
+        const row = document.createElement("div");
+        row.className = "shift-roster-row";
+        row.innerHTML = "<div class='shift-roster-row-head'>"
+            + "<select class='shift-roster-employee'>" + shiftRosterEmployeeOptionsHtml(prefill && prefill.employee_id) + "</select>"
+            + "<button class='btn btn-square shift-roster-remove' type='button' aria-label='Убрать'>×</button>"
+            + "</div>"
+            + "<div class='shift-roster-zones'>" + shiftRosterZoneCheckboxesHtml(prefill && prefill.zones) + "</div>";
+        container.appendChild(row);
+        row.querySelector(".shift-roster-remove").addEventListener("click", () => row.remove());
+    }
+
+    function renderShiftRosterEditor(rows) {
+        const container = $("shiftRosterEditor");
+        if (!container) return;
+        container.innerHTML = "";
+        const entries = Array.isArray(rows) && rows.length ? rows : [null];
+        entries.forEach((entry) => addShiftRosterRow(entry));
+    }
+
+    // Merges by employee_id so the same person picked across multiple rows
+    // (with different zones checked in each) ends up as a single roster
+    // entry with the union of their zones, rather than a second entry whose
+    // zones would later be shadowed and silently lost by roster.find() --
+    // mirrors the merge normalizeShiftRoster() does for the legacy
+    // incoming/outgoing compatibility case above.
+    function collectShiftRosterFromForm() {
+        const rows = Array.from(document.querySelectorAll("#shiftRosterEditor .shift-roster-row"));
+        const roster = [];
+        rows.forEach((row) => {
+            const select = row.querySelector(".shift-roster-employee");
+            const employeeId = select ? normalizeIdentifier(select.value) : "";
+            if (!employeeId) return;
+            const zones = Array.from(row.querySelectorAll(".shift-roster-zone input:checked")).map((input) => input.value);
+            if (!zones.length) return;
+            const existing = roster.find((entry) => entry.employee_id === employeeId);
+            if (existing) {
+                zones.forEach((zone) => { if (existing.zones.indexOf(zone) === -1) existing.zones.push(zone); });
+            } else {
+                const employee = employeeById(employeeId);
+                const uniqueZones = zones.filter((zone, index) => zones.indexOf(zone) === index);
+                roster.push({ employee_id: employeeId, full_name: employee ? employee.full_name : "", zones: uniqueZones });
+            }
+        });
+        return roster;
+    }
+
     function renderShiftGate() {
         const banner = $("shiftGateBanner");
         const title = $("shiftGateTitle");
@@ -1740,6 +1844,7 @@
                     ...shift,
                     incoming_name: employeeNameById(shift.incoming_employee_id),
                     outgoing_name: employeeNameById(shift.outgoing_employee_id),
+                    roster: normalizeShiftRoster(shift),
                 } : null;
             } catch (error) {
                 console.error("wms shift state failed:", error);
@@ -2090,18 +2195,10 @@
         el.className = "status-line" + (type ? " " + type : "");
     }
 
-    function fillShiftSelects() {
-        const options = "<option value=''>Выберите сотрудника</option>" + (state.shift.employees || [])
-            .map((employee) => "<option value='" + escapeHtml(employee.id) + "'>" + escapeHtml(employee.full_name + (employee.employee_id ? " · " + employee.employee_id : "")) + "</option>")
-            .join("");
-        if ($("shiftIncomingSelect")) $("shiftIncomingSelect").innerHTML = options;
-        if ($("shiftOutgoingSelect")) $("shiftOutgoingSelect").innerHTML = options;
-    }
-
     async function openShiftOpeningModal() {
         if (!state.shift.employees.length) await loadShiftState();
         closeFlowModals();
-        fillShiftSelects();
+        renderShiftRosterEditor(normalizeShiftRoster(state.shift.current));
         state.shift.pureRows = [];
         state.shift.pureStats = null;
         state.shift.purePrepared = null;
@@ -2123,13 +2220,36 @@
     }
 
     function updateShiftOpeningForm() {
-        const incoming = normalizeText($("shiftIncomingSelect") && $("shiftIncomingSelect").value);
-        const outgoing = normalizeText($("shiftOutgoingSelect") && $("shiftOutgoingSelect").value);
+        const roster = collectShiftRosterFromForm();
         const button = $("saveShiftOpening");
-        const ready = Boolean(incoming && outgoing && state.shift.purePrepared && !state.shift.saving);
+        const ready = Boolean(roster.length && state.shift.purePrepared && !state.shift.saving);
         if (button) {
             button.disabled = !ready;
-            button.title = ready ? "" : "Нужно выбрать ответственных и загрузить чистые списания.";
+            button.title = ready ? "" : "Нужно добавить хотя бы одного человека с хотя бы одним участком и загрузить чистые списания.";
+        }
+        updateShiftRosterCoverageWarning(roster);
+    }
+
+    // Informational only -- an uncovered участок might be intentional some
+    // days, so this never touches saveShiftOpening's disabled state (that
+    // stays governed solely by updateShiftOpeningForm's `ready` check
+    // above). Just surfaces, live as the operator edits the roster, which
+    // of the 14 SHIFT_ROSTER_ZONES nobody in the current (unsaved) roster
+    // covers -- including the three FLOW_STRICT_SECTIONS, which silently
+    // vanish from the Флоу queue for the whole shift when uncovered.
+    function updateShiftRosterCoverageWarning(roster) {
+        const el = $("shiftRosterCoverageWarning");
+        if (!el) return;
+        const rosterRows = roster || collectShiftRosterFromForm();
+        const covered = new Set();
+        rosterRows.forEach((entry) => (entry.zones || []).forEach((zone) => covered.add(zone)));
+        const uncovered = SHIFT_ROSTER_ZONES.filter((zone) => !covered.has(zone));
+        if (uncovered.length) {
+            el.textContent = "Не закрыты участки: " + uncovered.join(", ");
+            el.style.display = "";
+        } else {
+            el.textContent = "";
+            el.style.display = "none";
         }
     }
 
@@ -2191,14 +2311,11 @@
     async function saveShiftOpening() {
         const db = supabaseDb();
         if (!db) return;
-        const incomingId = normalizeText($("shiftIncomingSelect") && $("shiftIncomingSelect").value);
-        const outgoingId = normalizeText($("shiftOutgoingSelect") && $("shiftOutgoingSelect").value);
-        if (!incomingId || !outgoingId || !state.shift.purePrepared) {
-            setShiftOpeningStatus("Нужно выбрать ответственных и загрузить чистые списания.", "error");
+        const roster = collectShiftRosterFromForm();
+        if (!roster.length || !state.shift.purePrepared) {
+            setShiftOpeningStatus("Нужно добавить хотя бы одного человека с хотя бы одним участком и загрузить чистые списания.", "error");
             return;
         }
-        const incoming = employeeById(incomingId);
-        const outgoing = employeeById(outgoingId);
         const button = $("saveShiftOpening");
         state.shift.saving = true;
         if (button) button.disabled = true;
@@ -2212,10 +2329,7 @@
                 shift_key: WH_ID + ":" + state.today,
                 shift_label: formatRuDate(state.today),
                 status: "opened",
-                incoming_employee_id: incomingId,
-                outgoing_employee_id: outgoingId,
-                incoming_process: "Входящий поток",
-                outgoing_process: "Исходящий поток",
+                roster,
                 file_uploaded: true,
                 file_name: state.shift.pureFileName || "",
                 opened_by: [user.name, user.id].filter(Boolean).join(" / ") || null,
@@ -2236,13 +2350,12 @@
             if (result.error) throw result.error;
             state.shift.current = {
                 ...(result.data || payload),
-                incoming_name: incoming ? incoming.full_name : "",
-                outgoing_name: outgoing ? outgoing.full_name : "",
+                roster: normalizeShiftRoster(result.data || payload),
             };
             renderShiftGate();
             closeShiftOpeningModal();
             toast("Смена открыта. Чистые списания обработаны: +" + pureImport.inserted_new + ", движение: " + pureImport.auto_marked_found + ".", "success");
-            void evaluateShiftAchievements(incomingId, outgoingId);
+            void evaluateShiftAchievements();
         } catch (error) {
             console.error("shift opening save failed:", error);
             setShiftOpeningStatus("Не удалось открыть смену: " + (error && error.message ? error.message : String(error)), "error");
@@ -4937,57 +5050,39 @@
         return requestSectionName(row) || taskSectionName(row);
     }
 
+    // The task's own участок/section (one of the 14 SHIFT_ROSTER_ZONES
+    // values -- taskSectionName/requestSectionName always return one of
+    // those, there is no real "no section" case left to handle) IS the
+    // zone key now -- no more collapsing everything down to
+    // incoming/outgoing/neutral.
     function flowTaskZoneKey(row) {
-        const section = flowTaskSection(row);
-        if (FLOW_STRICT_INCOMING_SECTIONS.has(section)) return "incoming";
-        if (FLOW_STRICT_OUTGOING_SECTIONS.has(section)) return "outgoing";
-        const zone = normalizeForMatch(row && row.responsibility_zone);
-        if (zone.includes("вход")) return "incoming";
-        if (zone.includes("исход")) return "outgoing";
-        return "neutral";
-    }
-
-    function flowTaskZoneLabel(row) {
-        const key = flowTaskZoneKey(row);
-        if (key === "incoming") return "Входящий поток";
-        if (key === "outgoing") return "Исходящий поток";
-        return "Нет привязки";
+        return flowTaskSection(row);
     }
 
     function flowZonePolicy(row) {
-        const section = flowTaskSection(row);
-        if (FLOW_STRICT_INCOMING_SECTIONS.has(section) || FLOW_STRICT_OUTGOING_SECTIONS.has(section)) return "strict";
-        if (flowTaskZoneKey(row) === "neutral") return "neutral";
-        return "flexible";
+        return FLOW_STRICT_SECTIONS.has(flowTaskSection(row)) ? "strict" : "flexible";
     }
 
     function currentFlowEmployee() {
         const user = currentWmsUser();
         const shift = state.shift.current || {};
+        const roster = Array.isArray(shift.roster) ? shift.roster : normalizeShiftRoster(shift);
         let id = normalizeIdentifier(user.id);
         const nameKey = normalizeForMatch(user.name);
-        const incomingId = normalizeIdentifier(shift.incoming_employee_id);
-        const outgoingId = normalizeIdentifier(shift.outgoing_employee_id);
-        const incomingName = normalizeForMatch(shift.incoming_name);
-        const outgoingName = normalizeForMatch(shift.outgoing_name);
         const zones = new Set();
-        if (id && incomingId && id === incomingId) zones.add("incoming");
-        if (id && outgoingId && id === outgoingId) zones.add("outgoing");
-        if (nameKey && incomingName && nameKey === incomingName) {
-            zones.add("incoming");
-            if (!id) id = incomingId;
-        }
-        if (nameKey && outgoingName && nameKey === outgoingName) {
-            zones.add("outgoing");
-            if (!id) id = outgoingId;
+        // Same double fallback (id, then name) the old two-role model used
+        // -- covers the known wms_employees full_name rotation issue where
+        // an employee's real id doesn't line up with what got stored.
+        const match = roster.find((entry) => (id && entry.employee_id === id) || (nameKey && normalizeForMatch(entry.full_name) === nameKey));
+        if (match) {
+            match.zones.forEach((zone) => zones.add(zone));
+            if (!id) id = match.employee_id;
         }
         if (!id) id = nameKey;
         return {
             id,
             name: user.name,
             zones,
-            incomingId,
-            outgoingId,
             inShift: zones.size > 0,
         };
     }
@@ -4995,11 +5090,7 @@
     function flowActor() {
         const user = currentWmsUser();
         const context = currentFlowEmployee();
-        const actorId = (context.zones.has("incoming") ? context.incomingId : "")
-            || (context.zones.has("outgoing") ? context.outgoingId : "")
-            || normalizeIdentifier(user.id)
-            || normalizeIdentifier(context.id)
-            || "";
+        const actorId = normalizeIdentifier(user.id) || normalizeIdentifier(context.id) || "";
         return { id: actorId, name: user.name || context.name || "" };
     }
 
@@ -5076,7 +5167,8 @@
     }
 
     function flowZoneCounts(rows) {
-        const counts = { incoming: 0, outgoing: 0, neutral: 0 };
+        const counts = {};
+        SHIFT_ROSTER_ZONES.forEach((zone) => { counts[zone] = 0; });
         (rows || []).filter(isActiveReviewTask).forEach((row) => {
             const key = flowTaskZoneKey(row);
             counts[key] = (counts[key] || 0) + 1;
@@ -5088,7 +5180,6 @@
         const policy = flowZonePolicy(row);
         const zone = flowTaskZoneKey(row);
         const zoneSettings = flowSettings().zone || {};
-        if (policy === "neutral") return { value: 1, label: "Без жесткой зоны" };
         const own = context.zones.has(zone);
         let raw = own ? settingNumber(zoneSettings.own, 1.18) : settingNumber(zoneSettings.otherFlexible, 0.82);
         const currentCount = Number(counts[zone]) || 0;
@@ -5323,7 +5414,7 @@
         const canIssue = hasShift && !state.flow.loading && !state.flow.claiming && (currentActive || (state.flow.scored || []).length > 0);
         const note = $("flowCommandNote");
         if (note) {
-            const zones = Array.from(context.zones).map((zone) => zone === "incoming" ? "входящий поток" : "исходящий поток");
+            const zones = Array.from(context.zones);
             const skillNote = state.flow.employeeStats.loaded ? " Личный коэффициент включен." : " Личная статистика пока не загружена.";
             const debugPrefix = state.flow.debugMode ? "⚠ ОТЛАДКА — ничего не сохраняется. " : "";
             note.textContent = debugPrefix + (hasShift
@@ -5376,7 +5467,7 @@
         const route = taskRouteLabel(row);
         target.innerHTML = "<div class='flow-current-head'>"
             + "<div><h3 class='flow-current-title'>" + escapeHtml(displayTaskTitle(row)) + "</h3>"
-            + "<div class='flow-current-meta'>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route].filter(Boolean).join(" · ")) + "</div></div>"
+            + "<div class='flow-current-meta'>" + escapeHtml([flowTaskSection(row), route].filter(Boolean).join(" · ")) + "</div></div>"
             + "<span class='flow-score-pill'>Score " + escapeHtml(String(score.score)) + "</span>"
             + "</div>"
             + "<div class='flow-reasons'>" + score.reasons.slice(0, 8).map((reason) => "<div class='flow-reason'>" + escapeHtml(reason) + "</div>").join("") + "</div>"
@@ -5413,7 +5504,7 @@
             const group = item.group ? "Группа " + item.group.count : "";
             return "<div class='flow-queue-row'>"
                 + "<div><strong>" + escapeHtml(displayTaskTitle(row)) + "</strong>"
-                + "<span>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route, group, formatMoney(reviewPrice(row))].filter(Boolean).join(" · ")) + "</span></div>"
+                + "<span>" + escapeHtml([flowTaskSection(row), route, group, formatMoney(reviewPrice(row))].filter(Boolean).join(" · ")) + "</span></div>"
                 + "<span class='flow-level " + escapeHtml(item.level.key) + "'>" + escapeHtml(item.level.label + " · " + item.score) + "</span>"
                 + "</div>";
         }).join("");
@@ -5659,7 +5750,7 @@
             : "";
         target.innerHTML = "<div class='flow-task-hero'>"
             + "<div class='flow-task-head'><div><h3 class='flow-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</h3>"
-            + "<p class='flow-task-subtitle'>" + escapeHtml([flowTaskSection(row), flowTaskZoneLabel(row), route, lockText].filter(Boolean).join(" · ")) + "</p></div>"
+            + "<p class='flow-task-subtitle'>" + escapeHtml([flowTaskSection(row), route, lockText].filter(Boolean).join(" · ")) + "</p></div>"
             + "<button id='closeFlowTaskCard' class='btn btn-square' type='button'>×</button></div>"
             + "<div class='flow-task-score'>"
             + "<span>Score " + escapeHtml(String(score.score)) + "</span>"
@@ -12354,13 +12445,9 @@
     function shiftAssigneeForZone(zone) {
         const shift = state.shift.current;
         if (!shift) return null;
-        const normalized = normalizeForMatch(zone);
-        const id = normalized.includes("вход")
-            ? shift.incoming_employee_id
-            : normalized.includes("исход")
-                ? shift.outgoing_employee_id
-                : "";
-        return id ? employeeById(id) : null;
+        const roster = Array.isArray(shift.roster) ? shift.roster : normalizeShiftRoster(shift);
+        const match = roster.find((entry) => entry.zones.includes(zone));
+        return match ? employeeById(match.employee_id) : null;
     }
 
     function candidateIdsForSpecial(preview) {
@@ -12481,7 +12568,7 @@
 
     function taskRecord(options) {
         const priority = taskPriority(options.price, options.forceHighPriority);
-        const assignee = shiftAssigneeForZone(options.responsibilityZone);
+        const assignee = shiftAssigneeForZone(taskSectionName({ task_type: options.taskType, title: options.title, source_module: options.sourceModule, upload_type: options.uploadType }));
         const sourceIds = (options.productIds || []).map(normalizeIdentifier).filter(Boolean);
         const specialMap = options.specialMap || new Map();
         const specialInfos = specialInfosForIds(sourceIds, specialMap);
@@ -15675,8 +15762,16 @@
         });
         $("openShiftFromBanner").addEventListener("click", () => { void openShiftOpeningModal(); });
         $("closeShiftOpening").addEventListener("click", closeShiftOpeningModal);
-        $("shiftIncomingSelect").addEventListener("change", updateShiftOpeningForm);
-        $("shiftOutgoingSelect").addEventListener("change", updateShiftOpeningForm);
+        $("addShiftRosterRow").addEventListener("click", () => { addShiftRosterRow(null); updateShiftOpeningForm(); });
+        // Delegated on the editor's stable container (not the rows
+        // themselves, which get created/removed dynamically) -- covers
+        // every employee-select change, every zone checkbox, and doubles
+        // as the "row removed" signal since removing a row changes what
+        // collectShiftRosterFromForm() would return.
+        $("shiftRosterEditor").addEventListener("change", updateShiftOpeningForm);
+        $("shiftRosterEditor").addEventListener("click", (event) => {
+            if (event.target.closest && event.target.closest(".shift-roster-remove")) updateShiftOpeningForm();
+        });
         $("shiftPureLossesFile").addEventListener("change", () => {
             const file = $("shiftPureLossesFile").files && $("shiftPureLossesFile").files[0];
             if (file) void handleShiftPureLossesFile(file);
