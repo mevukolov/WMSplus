@@ -2,10 +2,13 @@
 -- Public, no-auth intake form (see
 -- docs/superpowers/specs/2026-09-04-public-intake-form-design.md).
 -- Anonymous clients may only insert -- no select/update/delete policy for
--- anon, so the submitted list and photos are not readable through the
--- public API, only via the Supabase dashboard or `supabase db query`
--- (both bypass RLS).
-create table public.intake_submissions (
+-- anon, so the submitted list is not readable through the public API, and
+-- neither is a listing of the photo bucket -- but an individual photo IS
+-- readable by direct link if you know its exact (unguessable, UUID-based)
+-- path, since the bucket is public. The submitted list and the bucket
+-- listing are reachable only via the Supabase dashboard or
+-- `supabase db query` (both bypass RLS).
+create table if not exists public.intake_submissions (
     id uuid primary key default gen_random_uuid(),
     created_at timestamptz not null default now(),
     item_text text not null,
@@ -20,8 +23,19 @@ create table public.intake_submissions (
 
 alter table public.intake_submissions enable row level security;
 
-create policy "intake_submissions_insert_anon" on public.intake_submissions
-    for insert to anon with check (true);
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_policies
+        where schemaname = 'public'
+          and tablename = 'intake_submissions'
+          and policyname = 'intake_submissions_insert_anon'
+    ) then
+        create policy "intake_submissions_insert_anon" on public.intake_submissions
+            for insert to anon with check (true);
+    end if;
+end $$;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
@@ -30,7 +44,19 @@ values (
     true,
     8388608,
     array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
-);
+)
+on conflict (id) do nothing;
 
-create policy "intake_photos_insert_anon" on storage.objects
-    for insert to anon with check (bucket_id = 'intake-photos');
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_policies
+        where schemaname = 'storage'
+          and tablename = 'objects'
+          and policyname = 'intake_photos_insert_anon'
+    ) then
+        create policy "intake_photos_insert_anon" on storage.objects
+            for insert to anon with check (bucket_id = 'intake-photos');
+    end if;
+end $$;
