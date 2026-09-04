@@ -286,6 +286,14 @@ function buildDescription(row: IncomingFlowRequestRow): string {
   ].join("\n");
 }
 
+// ШК-на-поиск набор -- taskItems()/Actualize (the client's movement-
+// detection flow) reads source_shk_ids to know which barcodes to check;
+// without it these tasks could never auto-close via "Движение".
+function extractShkIds(value: string): string[] {
+  const matches = normalizeText(value).match(/\d{5,}/g) || [];
+  return Array.from(new Set(matches));
+}
+
 function buildTaskPayload(row: IncomingFlowRequestRow, body: JsonObject, sourceGeneratedAt: string | null): JsonObject {
   const sourceModule = normalizeText(body.source_module) || DEFAULT_SOURCE_MODULE;
   const taskType = normalizeText(body.task_type) || DEFAULT_TASK_TYPE;
@@ -313,6 +321,8 @@ function buildTaskPayload(row: IncomingFlowRequestRow, body: JsonObject, sourceG
       source_row_number: row.source_row_number,
     },
     source_generated_at: sourceGeneratedAt,
+    source_shk_ids: extractShkIds(row.requested_shk),
+    source_last_movement_at: row.request_time,
     task_type: taskType,
     title,
     description: buildDescription(row),

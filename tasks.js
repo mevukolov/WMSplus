@@ -2173,6 +2173,81 @@
         $("requestsPage").classList.add("active");
         renderRequests();
         void ensureReviewTasksLoaded();
+        void scanIncomingFlowDuplicates();
+    }
+
+    // "Дубль" is a system-only autoverdict (see task-verdicts.js) -- an
+    // operator can never pick it, so something has to set it. Runs a full
+    // (not just active) scan every time the Requests tab opens: two
+    // requests are duplicates only when their whole ШК-на-поиск set
+    // matches exactly (scope decided in chat -- against all requests ever,
+    // not just still-open ones). The earliest-created request in a
+    // matching group is left alone; later ones auto-close, unless an
+    // operator already put a real verdict on one (never overwrite that).
+    async function scanIncomingFlowDuplicates() {
+        const db = supabaseDb();
+        if (!db) return;
+        const read = await readOptionalRows(db, WMS_TASKS_TABLE, (query) => query
+            .select("id,source_payload,task_status,opp_verdict,created_at")
+            .eq("source_module", "incoming_flow_requests")
+            .eq("is_deleted", false)
+            .order("created_at", { ascending: true }));
+        if (!read.ok) return;
+        const bySetKey = new Map();
+        (read.rows || []).forEach((row) => {
+            const key = incomingFlowShkSetKey(row);
+            if (!key) return;
+            if (!bySetKey.has(key)) bySetKey.set(key, []);
+            bySetKey.get(key).push(row);
+        });
+        const toClose = [];
+        bySetKey.forEach((group) => {
+            if (group.length < 2) return;
+            group.slice(1).forEach((row) => {
+                const verdict = normalizeText(row.opp_verdict);
+                if (verdict && verdict !== "Не выбран") return;
+                if (normalizeText(row.task_status) === "Завершено") return;
+                toClose.push(row);
+            });
+        });
+        if (!toClose.length) return;
+        const now = new Date().toISOString();
+        let closed = 0;
+        for (const row of toClose) {
+            const basePayload = row.source_payload && typeof row.source_payload === "object" && !Array.isArray(row.source_payload) ? row.source_payload : {};
+            const nextPayload = {
+                ...basePayload,
+                wms_review: {
+                    ...(basePayload.wms_review && typeof basePayload.wms_review === "object" ? basePayload.wms_review : {}),
+                    verdict: SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT,
+                    attachment: SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT,
+                    comment: "Совпадает набор ШК на поиск с более ранним запросом.",
+                    completed_by_id: null,
+                    completed_by_name: "Система",
+                    completed_at: now,
+                },
+            };
+            try {
+                // Optimistic guard: only apply while task_status still
+                // matches what we just read, so a request an operator
+                // finishes between the scan and this write is left as-is.
+                const { data, error } = await db
+                    .from(WMS_TASKS_TABLE)
+                    .update({ opp_verdict: SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT, task_status: "Завершено", completed_at: now, source_payload: nextPayload, updated_at: now })
+                    .eq("id", row.id)
+                    .eq("task_status", row.task_status)
+                    .select("id")
+                    .maybeSingle();
+                if (error) throw error;
+                if (data) closed += 1;
+            } catch (error) {
+                console.error("incoming flow duplicate auto-close failed:", row.id, error);
+            }
+        }
+        if (closed) {
+            await loadReviewTasks();
+            if (state.view === "requests") renderRequests();
+        }
     }
 
     function showInactivePage() {
@@ -7083,14 +7158,19 @@
         ]) || textAfterDescriptionLabel(row, ["ЛО-отправитель", "Наименование ЛО"]);
     }
 
-    function incomingFlowRequestDate(row) {
-        const raw = firstTextFromPayload(row, [
+    function incomingFlowRequestTimeRaw(row) {
+        return firstTextFromPayload(row, [
             "request_time", "requested_at", "timestamp", "created_at", "time", "request_at", "source_created_at",
             "Отметка времени", "Время запроса", "A",
         ]) || normalizeText(row && row.source_last_movement_at) || normalizeText(row && row.upload_effective_date);
-        const parsed = parseDateTime(raw);
-        if (!parsed.date) return "-";
-        return /:\d{2}/.test(normalizeText(raw)) ? formatRuDateTime(raw) : formatRuDate(parsed.date);
+    }
+
+    function incomingFlowSampleShk(row) {
+        return firstTextFromPayload(row, ["sample_shk", "sampleShk", "Пример разложенного ШК", "E"]);
+    }
+
+    function incomingFlowTare(row) {
+        return firstTextFromPayload(row, ["tare", "Тара", "F"]);
     }
 
     function incomingFlowShkList(row) {
@@ -7111,6 +7191,14 @@
             textAfterDescriptionLabel(row, ["Искомый ШК", "ШК в запросе", "ШК"]),
         ].forEach(add);
         return ids;
+    }
+
+    // Exact-set key for the "Дубль" auto-verdict: two requests only count
+    // as duplicates when their whole ШК-на-поиск набор matches exactly --
+    // a shared "Пример разложенного ШК" alone is not enough (see chat).
+    function incomingFlowShkSetKey(row) {
+        const ids = Array.from(new Set(incomingFlowShkList(row).map(normalizeIdentifier).filter(Boolean)));
+        return ids.length ? ids.sort().join(",") : "";
     }
 
     function isSingleShkTask(row) {
@@ -7530,16 +7618,16 @@
         const isIncomingFlow = isIncomingFlowRequestTask(row);
         const taskItemList = taskItems(row);
         const targetId = isIncomingFlow
-            ? incomingFlowShkList(row)[0] || normalizeIdentifier(row && row.source_id)
+            ? incomingFlowSampleShk(row) || incomingFlowShkList(row)[0] || normalizeIdentifier(row && row.source_id)
             : isTareTask(row)
             ? normalizeIdentifier(row.source_tare_id) || normalizeIdentifier(taskPayload(row).tare_id || taskPayload(row).transfer)
             : normalizeIdentifier(taskItemList[0] && taskItemList[0].shk) || normalizeIdentifier(row.source_shk_ids && row.source_shk_ids[0]);
         const items = [
-            taskInfoItem(isTareTask(row) ? "Искомая тара" : "Искомый ШК", targetId),
+            taskInfoItem(isTareTask(row) ? "Искомая тара" : (isIncomingFlow ? "Пример разложенного ШК" : "Искомый ШК"), targetId),
         ];
         if (isIncomingFlow) {
             items.push(taskInfoItem("ЛО-отправитель", incomingFlowSender(row)));
-            items.push(taskInfoItem("Дата запроса", incomingFlowRequestDate(row)));
+            items.push(taskInfoItem("Тара", incomingFlowTare(row)));
         }
         const itemName = taskItemName(row);
         if (isSingleShkTask(row) && itemName) items.splice(1, 0, taskInfoItem("Наименование", itemName));
@@ -7679,7 +7767,7 @@
             + "<span class='task-tare-meta'>ШК из запроса</span>"
             + "</button>").join("");
         return "<div class='task-tare-box'>"
-            + "<div class='task-tare-head'><strong>ШК в запросе</strong><button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(all) + "'>Скопировать все</button></div>"
+            + "<div class='task-tare-head'><strong>ШК на поиск</strong><button class='btn btn-outline' type='button' data-copy-shk='" + escapeHtml(all) + "'>Скопировать все</button></div>"
             + "<div class='task-tare-list'>" + (rows || "<div class='task-tare-meta'>ШК не найдены</div>") + "</div>"
             + "</div>";
     }
@@ -7719,6 +7807,7 @@
         task_system_closed: "Закрыто системой (актуализация)",
         task_prespisok_second_line: "Передано на вторую линию предсписка",
         task_prespisok_uploaded: "ШК в предсписке",
+        task_incoming_flow_request_received: "Получен входящий запрос",
     };
 
     function taskHistoryEventLabel(eventType) {
@@ -7878,6 +7967,25 @@
             });
         }
         return entries;
+    }
+
+    // "Получен входящий запрос" -- not a real wms_task_history row (these
+    // tasks are synced in, not created through the client), so it's
+    // synthesized from the same source_payload fields the header/list
+    // already read (request_time/sender_employee_id/sender_lo), the same
+    // way synthesizeForecastHistoryEntries() fakes "Создана задача".
+    function synthesizeIncomingFlowRequestHistoryEntries(row) {
+        if (!isIncomingFlowRequestTask(row)) return [];
+        const requestTimeRaw = incomingFlowRequestTimeRaw(row);
+        const parsed = parseDateTime(requestTimeRaw);
+        if (!parsed.iso) return [];
+        return [{
+            created_at: parsed.iso,
+            event_type: "task_incoming_flow_request_received",
+            actor_name: "",
+            actor_employee_id: normalizeText(taskPayload(row).sender_employee_id),
+            payload: { comment: incomingFlowSender(row) },
+        }];
     }
 
     const NO_SHK_RESULT_LABELS = {};
@@ -8043,6 +8151,7 @@
         const merged = (historyRows || [])
             .concat(synthesizeLegacyHistoryEntries(row, historyRows))
             .concat(synthesizeForecastHistoryEntries(row))
+            .concat(synthesizeIncomingFlowRequestHistoryEntries(row))
             .concat(synthesizeNoShkHistoryEntries(row))
             .concat(extraRows || [])
             .filter((item) => item && item.created_at)
@@ -8093,12 +8202,10 @@
             : normalizeText(savedReview.verdict || savedReview.attachment) || "Не выбран";
         const verdictOptions = incomingFlow ? INCOMING_FLOW_ATTACHMENT_OPTIONS : REVIEW_VERDICTS;
         const formVerdict = verdictOptions.includes(verdict) ? verdict : "Не выбран";
-        const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const readOnlyReviewLines = [
             "Комментарий: " + (savedReview.comment || "-"),
             (incomingFlow ? "Вложение: " : "Вердикт: ") + (verdict || "-"),
         ];
-        if (incomingFlow) readOnlyReviewLines.push("ID виновного: " + (savedReview.guilty_id || "-"));
         if (savedReview.extra_label || savedReview.extra_value) readOnlyReviewLines.push((savedReview.extra_label || "Доп. поле") + ": " + (savedReview.extra_value || "-"));
         if (savedReview.completed_by_name || savedReview.completed_by_id) readOnlyReviewLines.push("Кто поставил вердикт: " + [savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / "));
         const verdictTriggerLabel = formVerdict === "Не выбран" ? (incomingFlow ? "Вложение" : "Вердикт") : formVerdict;
@@ -8110,26 +8217,21 @@
         // Regular (non-incoming-flow) read-only tasks show nothing here --
         // the verdict/comment/who-completed-it is already in the history
         // feed above, and duplicating it in a second box read the same
-        // information twice. Incoming-flow keeps its summary box since it
-        // has one field (ID виновного) the history feed doesn't render.
+        // information twice. Incoming-flow keeps its summary box since the
+        // history feed doesn't render who-completed-it for it.
         const reviewBlock = readOnly
             ? (incomingFlow
                 ? "<div class='task-description-box copyable' data-copy-value='" + escapeHtml(readOnlyReviewLines.join("\n")) + "' title='Нажми, чтобы скопировать'><strong>Комментарий:</strong><br>" + escapeHtml(savedReview.comment || "-")
                     + "<br><br><strong>Вложение:</strong><br>" + escapeHtml(verdict || "-")
-                    + "<br><br><strong>ID виновного:</strong><br>" + escapeHtml(savedReview.guilty_id || "-")
                     + (savedReview.extra_label || savedReview.extra_value ? "<br><br><strong>" + escapeHtml(savedReview.extra_label || "Доп. поле") + ":</strong><br>" + escapeHtml(savedReview.extra_value || "-") : "")
                     + (savedReview.completed_by_name || savedReview.completed_by_id ? "<br><br><strong>Кто поставил вердикт:</strong><br>" + escapeHtml([savedReview.completed_by_name, savedReview.completed_by_id].filter(Boolean).join(" / ")) : "")
                     + "</div>"
                 : "")
             : incomingFlow
             ? "<div class='task-form task-compose'>"
-                + "<div class='task-compose-extra'>"
-                + "<div class='task-compose-field'><label for='taskGuiltyIdInput'>ID виновного</label><input id='taskGuiltyIdInput' type='text' inputmode='numeric' pattern='\\d{5,8}' maxlength='8' value='" + escapeHtml(savedReview.guilty_id || "") + "' placeholder='5-8 цифр'></div>"
-                + "<div id='taskExtraFieldWrap' class='task-compose-field" + (extraLabel ? "" : " hidden") + "'><label id='taskExtraLabel' for='taskExtraInput'>" + escapeHtml(extraLabel) + "</label><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
-                + "</div>"
                 + "<div class='task-compose-bar' id='taskComposeBar'>"
                 + verdictPickerHtml
-                + "<textarea id='taskCommentInput' class='task-compose-input' rows='1' aria-label='Комментарий ОПП' placeholder='Комментарий ОПП'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
+                + "<textarea id='taskCommentInput' class='task-compose-input" + (formVerdict === "Не выбран" ? " hidden" : "") + "' rows='1' aria-label='Комментарий ОПП' placeholder='" + escapeHtml(INCOMING_FLOW_COMMENT_PROMPTS[formVerdict] || "") + "'>" + escapeHtml(savedReview.comment || "") + "</textarea>"
                 + "<button id='completeTaskBtn' class='task-compose-send' type='button' disabled title='Завершить задачу' aria-label='Завершить задачу'>✓</button>"
                 + "</div>"
                 + "<div id='taskDetailStatus' class='review-status'></div>"
@@ -8228,11 +8330,10 @@
         if (editBtn) editBtn.addEventListener("click", () => openEditTareTaskModal(row.id));
         const deferBtn = $("openDeferTaskBtn");
         if (deferBtn) deferBtn.addEventListener("click", () => openDeferTaskModal(row.id));
-        ["taskCommentInput", "taskVerdictInput", "taskExtraInput", "taskGuiltyIdInput"].forEach((id) => {
+        ["taskCommentInput", "taskVerdictInput", "taskExtraInput"].forEach((id) => {
             const el = $(id);
             if (el) {
                 el.addEventListener(id === "taskVerdictInput" ? "change" : "input", () => {
-                    if (id === "taskGuiltyIdInput") el.value = normalizeGuiltyId(el.value);
                     if (id === "taskCommentInput") autoGrowTextarea(el);
                     updateTaskDetailForm();
                 });
@@ -8678,16 +8779,20 @@
         const extra = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
         const missing = [];
         if (incomingFlow) {
-            const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
-            const extraWrap = $("taskExtraFieldWrap");
-            const extraLabelEl = $("taskExtraLabel");
-            if (extraWrap) extraWrap.classList.toggle("hidden", !extraLabel);
-            if (extraLabelEl) extraLabelEl.textContent = extraLabel;
-            const guiltyIdError = incomingFlowGuiltyIdError($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value);
+            const chosen = verdict && verdict !== "Не выбран";
+            const commentField = $("taskCommentInput");
+            if (commentField) {
+                commentField.classList.toggle("hidden", !chosen);
+                commentField.placeholder = INCOMING_FLOW_COMMENT_PROMPTS[verdict] || "Комментарий ОПП";
+            }
+            const bar = $("taskComposeBar");
+            if (bar) {
+                bar.classList.remove("tone-green", "tone-yellow", "tone-red");
+                const tone = VERDICT_TONE[verdict] || "";
+                if (tone) bar.classList.add("tone-" + tone);
+            }
+            if (!chosen) missing.push("Вложение");
             if (!comment) missing.push("Комментарий ОПП");
-            if (!verdict || verdict === "Не выбран") missing.push("Вложение");
-            if (guiltyIdError) missing.push(guiltyIdError);
-            if (extraLabel && !extra) missing.push(extraLabel);
         } else {
             const tone = VERDICT_TONE[verdict] || "";
             updateComposeRows(verdict, tone, extra);
@@ -8695,7 +8800,7 @@
             if (tone === "yellow" && !extra) missing.push(DEFERRED_VERDICT_FIELDS[verdict] || "Ссылка");
             if (tone === "red" && !comment) missing.push("Комментарий");
         }
-        if (verdict === SYSTEM_MOVEMENT_VERDICT) missing.push("доступный пользователю вердикт");
+        if (verdict === SYSTEM_MOVEMENT_VERDICT || verdict === SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT) missing.push("доступный пользователю вердикт");
         const ready = missing.length === 0;
         const button = $("completeTaskBtn");
         if (button) {
@@ -9113,17 +9218,6 @@
         return isIncomingFlowRequestTask(row);
     }
 
-    function normalizeGuiltyId(value) {
-        return normalizeText(value).replace(/\D+/g, "").slice(0, 8);
-    }
-
-    function incomingFlowGuiltyIdError(value) {
-        const normalized = normalizeGuiltyId(value);
-        if (!normalized) return "ID виновного";
-        if (!/^\d{5,8}$/.test(normalized)) return "ID виновного: 5-8 цифр";
-        return "";
-    }
-
     function sourceRowNumberForTask(row) {
         const payload = taskPayload(row);
         const direct = normalizeIdentifier(payload.source_row_number || payload.sourceRowNumber || payload.row_number || payload.row);
@@ -9220,20 +9314,17 @@
         const comment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const extraValue = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
-        const guiltyId = incomingFlow ? normalizeGuiltyId($("taskGuiltyIdInput") && $("taskGuiltyIdInput").value) : "";
-        const guiltyIdError = incomingFlow ? incomingFlowGuiltyIdError(guiltyId) : "";
-        if (verdict === SYSTEM_MOVEMENT_VERDICT) {
+        if (verdict === SYSTEM_MOVEMENT_VERDICT || verdict === SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT) {
             const status = $("taskDetailStatus");
-            if (status) status.textContent = "Вердикт “" + SYSTEM_MOVEMENT_VERDICT + "” ставится только системой при актуализации движения.";
+            if (status) status.textContent = "Вердикт “" + verdict + "” ставится только системой.";
             return;
         }
-        if (incomingFlow && guiltyId === "1034305" && !state.flow.debugMode) void unlockAchievement("guilty_1034305", { task_id: id, source_id: row.source_id });
         const tone = incomingFlow ? "" : (VERDICT_TONE[verdict] || "");
         const commentRequired = incomingFlow || tone === "red";
-        if ((commentRequired && !comment) || verdict === "Не выбран" || (extraLabel && !extraValue) || guiltyIdError) {
+        if ((commentRequired && !comment) || verdict === "Не выбран" || (extraLabel && !extraValue)) {
             const status = $("taskDetailStatus");
             if (status) status.textContent = incomingFlow
-                ? "Заполни Комментарий ОПП, Вложение и ID виновного: только цифры, 5-8 символов."
+                ? "Заполни Комментарий ОПП и Вложение."
                 : "Заполни вердикт и обязательное поле по выбранному вердикту.";
             return;
         }
@@ -9243,7 +9334,6 @@
             comment,
             verdict,
             attachment: incomingFlow ? verdict : "",
-            guilty_id: guiltyId || "",
             extra_label: extraLabel,
             extra_value: extraValue,
             completed_by_id: user.id || null,

@@ -10,14 +10,15 @@ const REVIEW_VERDICTS = [
     "Нет на МХ/Не найден",
 ];
 
+// "Дубль" и "Движение" -- не в этом списке: оба теперь только системные
+// автовердикты (см. SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT /
+// SYSTEM_MOVEMENT_VERDICT ниже), их нельзя выбрать руками.
 const INCOMING_FLOW_ATTACHMENT_OPTIONS = [
     "Не выбран",
     "Вложено верно",
     "Вложено неверно",
     "Отправлен под пустым стикером",
-    "Дубль",
     "Некорректный запрос",
-    "Движение",
 ];
 
 const DEFERRED_VERDICT_FIELDS = {
@@ -26,9 +27,16 @@ const DEFERRED_VERDICT_FIELDS = {
     "Отправлен на списание ревизией": "Вставьте ссылку",
 };
 
-// Drives the compose bar's radial color + field layout in tasks.js. Only
-// covers REVIEW_VERDICTS -- incoming-flow attachment options keep the
-// plain (untinted) compose layout.
+// Комментарий ОПП для "Запросов входящего потока" меняет подсказку в
+// зависимости от выбранного вложения -- поле общее, текст разный.
+const INCOMING_FLOW_COMMENT_PROMPTS = {
+    "Вложено верно": "Комментарий ОПП",
+    "Вложено неверно": "Комментарий ОПП",
+    "Отправлен под пустым стикером": "Введите под каким стикером отправлен товар",
+    "Некорректный запрос": "В чем ошибка запроса?",
+};
+
+// Drives the compose bar's radial color + field layout in tasks.js.
 const VERDICT_TONE = {
     "Найден/Релиз/Списан": "green",
     "Отправлен запрос": "yellow",
@@ -37,6 +45,10 @@ const VERDICT_TONE = {
     "Нет на МХ/Не найден": "red",
     "Обнаружено без ШК": "green",
     "Не найдено без ШК": "red",
+    "Вложено верно": "green",
+    "Вложено неверно": "red",
+    "Отправлен под пустым стикером": "yellow",
+    // "Некорректный запрос" -- намеренно без тона, остаётся серым.
 };
 
 // Системные вердикты — выставляются только кодом (актуализация, авто-проверка Без ШК),
@@ -44,3 +56,4 @@ const VERDICT_TONE = {
 const SYSTEM_MOVEMENT_VERDICT = "Система - Движение";
 const SYSTEM_NO_SHK_NOT_FOUND_VERDICT = "Система - Не найден Без ШК";
 const SYSTEM_NO_SHK_FOUND_VERDICT = "Система - Обнаружен Без ШК";
+const SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT = "Система - Дубль";
