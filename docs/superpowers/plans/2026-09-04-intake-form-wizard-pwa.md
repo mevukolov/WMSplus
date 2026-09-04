@@ -215,58 +215,41 @@ the rebase, `git stash push -- .DS_Store` first and `git stash pop` after.
 - [ ] **Step 2: Generate the three icon PNGs**
 
 No icon files exist yet (per the spec, a generated icon, not a supplied
-logo). Generate them with canvas in the browser — a simple purple square
-with a white box pictogram (a filled white rounded rectangle for the box
-body, a horizontal purple line for the fold seam, a vertical purple line
-for the tape) — then save each size to disk.
+logo). Generate them directly with Python (Pillow is already installed
+in this environment — `pip3 install --user Pillow` was run and confirmed
+working before this plan was finalized; if `import PIL` fails, re-run
+that install first) — a simple purple square with a white box pictogram
+(a filled white rounded rectangle for the box body, a horizontal purple
+line for the fold seam, a vertical purple line for the tape).
 
-Open any page in the Claude_Browser preview tab (a blank `about:blank`
-tab is fine — this doesn't touch the actual site), then run via
-`javascript_tool`:
-
-```js
-(function () {
-    function roundRect(ctx, x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.arcTo(x + w, y, x + w, y + h, r);
-        ctx.arcTo(x + w, y + h, x, y + h, r);
-        ctx.arcTo(x, y + h, x, y, r);
-        ctx.arcTo(x, y, x + w, y, r);
-        ctx.closePath();
-    }
-    function drawIcon(size) {
-        const c = document.createElement('canvas');
-        c.width = size; c.height = size;
-        const ctx = c.getContext('2d');
-        const s = size / 512;
-        ctx.fillStyle = '#623CEA';
-        roundRect(ctx, 0, 0, size, size, 96 * s);
-        ctx.fill();
-        ctx.fillStyle = '#FFFFFF';
-        roundRect(ctx, 106 * s, 176 * s, 300 * s, 220 * s, 16 * s);
-        ctx.fill();
-        ctx.strokeStyle = '#623CEA';
-        ctx.lineWidth = 10 * s;
-        ctx.beginPath(); ctx.moveTo(106 * s, 226 * s); ctx.lineTo(406 * s, 226 * s); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(256 * s, 176 * s); ctx.lineTo(256 * s, 396 * s); ctx.stroke();
-        return c.toDataURL('image/png').split(',')[1];
-    }
-    return JSON.stringify({
-        icon512: drawIcon(512),
-        icon192: drawIcon(192),
-        appleTouch180: drawIcon(180),
-    });
-})();
-```
-
-The result is a JSON string with three base64 PNG payloads. For each of
-the three fields, save it to disk:
+**Do not** generate this via a browser canvas + `toDataURL()` + hand-typed
+`base64 -d` — a 512px PNG's base64 payload is large enough that an agent
+retyping it as literal text into a subsequent tool call can blow past
+output-token limits (this failed exactly that way in an earlier attempt
+at this task). Pillow writes the PNG straight to disk — no giant string
+ever needs to pass through anyone's output.
 
 ```bash
-echo '<icon512 base64 value>' | base64 -d > /Users/WBwork/Downloads/wmsplus-intake-form/icon-512.png
-echo '<icon192 base64 value>' | base64 -d > /Users/WBwork/Downloads/wmsplus-intake-form/icon-192.png
-echo '<appleTouch180 base64 value>' | base64 -d > /Users/WBwork/Downloads/wmsplus-intake-form/apple-touch-icon.png
+cd /Users/WBwork/Downloads/wmsplus-intake-form
+python3 <<'EOF'
+from PIL import Image, ImageDraw
+
+def draw_icon(size):
+    img = Image.new('RGB', (size, size), '#623CEA')
+    draw = ImageDraw.Draw(img)
+    s = size / 512
+    box = [106 * s, 176 * s, 106 * s + 300 * s, 176 * s + 220 * s]
+    draw.rounded_rectangle(box, radius=16 * s, fill='#FFFFFF')
+    line_w = max(1, round(10 * s))
+    draw.line([(106 * s, 226 * s), (406 * s, 226 * s)], fill='#623CEA', width=line_w)
+    draw.line([(256 * s, 176 * s), (256 * s, 396 * s)], fill='#623CEA', width=line_w)
+    return img
+
+draw_icon(512).save('icon-512.png')
+draw_icon(192).save('icon-192.png')
+draw_icon(180).save('apple-touch-icon.png')
+print('done')
+EOF
 ```
 
 - [ ] **Step 3: Verify the files**
@@ -284,10 +267,11 @@ Expected: each `file` line says `PNG image data`; `icon-192.png` reports
 192×192, `icon-512.png` reports 512×512, `apple-touch-icon.png` reports
 180×180; manifest confirms valid.
 
-Take a screenshot of the 512px canvas (before closing the tab used in
-Step 2, or by re-rendering — e.g. set an `<img>`'s `src` to the same
-data URL and screenshot it) to visually confirm it reads as a simple
-purple box icon, not a rendering glitch.
+Visually confirm the icon looks right: serve the directory locally
+(`python3 -m http.server` on a free port) and open `icon-512.png`
+directly in the Claude_Browser preview tab, then screenshot it — confirm
+it reads as a simple purple square with a white box pictogram, not a
+blank or garbled image. Stop the local server afterward.
 
 - [ ] **Step 4: Commit**
 
