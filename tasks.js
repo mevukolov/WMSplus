@@ -817,24 +817,47 @@
         return Number.isFinite(date.getTime()) ? date : null;
     }
 
+    // Sheet/upload/manual timestamps arrive as naive wall-clock values (no
+    // timezone marker) and always mean Europe/Moscow local time. Postgres
+    // timestamptz values come back with an explicit Z/offset and are already
+    // true UTC. Without this distinction, a naive "14:08" gets treated as
+    // 14:08 UTC and then re-rendered as 17:08 Moscow -- a phantom +3h.
+    const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
+    function hasExplicitTimezone(raw) {
+        return /(?:[zZ]|[+-]\d{2}:?\d{2})\s*$/.test(raw);
+    }
+    function formatIsoDate(year, monthIndex, day) {
+        return new Date(Date.UTC(year, monthIndex, day)).toISOString().slice(0, 10);
+    }
+
     function parseDateTime(value) {
         if (typeof value === "number" && Number.isFinite(value)) {
             const date = excelSerialToDate(value);
-            if (date) return { date: date.toISOString().slice(0, 10), ts: date.getTime(), iso: date.toISOString(), label: formatRuDate(date.toISOString().slice(0, 10)) };
+            if (date) {
+                const hasTime = Math.abs(value % 1) > 1e-6;
+                const ts = date.getTime() - (hasTime ? MOSCOW_OFFSET_MS : 0);
+                const shifted = new Date(ts);
+                return { date: shifted.toISOString().slice(0, 10), ts, iso: shifted.toISOString(), label: formatRuDate(shifted.toISOString().slice(0, 10)) };
+            }
         }
         const raw = normalizeText(value);
         if (!raw) return { date: "", ts: 0, iso: "", label: "" };
+        const naive = !hasExplicitTimezone(raw);
         let match = raw.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/);
         if (match) {
-            const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)));
-            return { date: date.toISOString().slice(0, 10), ts: date.getTime(), iso: date.toISOString(), label: formatRuDate(date.toISOString().slice(0, 10)) };
+            const calendarDate = formatIsoDate(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+            const hasTime = match[4] !== undefined;
+            const ts = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)) - (hasTime && naive ? MOSCOW_OFFSET_MS : 0);
+            return { date: calendarDate, ts, iso: new Date(ts).toISOString(), label: formatRuDate(calendarDate) };
         }
         match = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
         if (match) {
             let year = Number(match[3]);
             if (year < 100) year += 2000;
-            const date = new Date(Date.UTC(year, Number(match[2]) - 1, Number(match[1]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)));
-            return { date: date.toISOString().slice(0, 10), ts: date.getTime(), iso: date.toISOString(), label: formatRuDate(date.toISOString().slice(0, 10)) };
+            const calendarDate = formatIsoDate(year, Number(match[2]) - 1, Number(match[1]));
+            const hasTime = match[4] !== undefined;
+            const ts = Date.UTC(year, Number(match[2]) - 1, Number(match[1]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)) - (hasTime && naive ? MOSCOW_OFFSET_MS : 0);
+            return { date: calendarDate, ts, iso: new Date(ts).toISOString(), label: formatRuDate(calendarDate) };
         }
         const parsed = new Date(raw.replace(" ", "T"));
         return Number.isFinite(parsed.getTime())
