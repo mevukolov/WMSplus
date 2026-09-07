@@ -132,12 +132,6 @@ function addDaysToIsoDate(isoDate: string | null, days: number): string | null {
   return date.toISOString().slice(0, 10);
 }
 
-function formatRuDateFromIso(isoDate: string | null): string {
-  if (!isoDate) return "дата не указана";
-  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return match ? `${match[3]}.${match[2]}.${match[1]}` : isoDate;
-}
-
 function normalizeIncomingBoxRow(raw: unknown): IncomingBoxRow | null {
   const row = asObject(raw);
   if (!row) return null;
@@ -249,7 +243,9 @@ function buildTaskPayload(row: IncomingBoxRow, body: JsonObject, sourceGenerated
   const taskType = normalizeText(body.task_type) || DEFAULT_TASK_TYPE;
   const deadlineDays = normalizeNumber(body.deadline_days, DEFAULT_DEADLINE_DAYS);
   const dueDate = addDaysToIsoDate(row.date, deadlineDays);
-  const title = `Коробка ${row.box}${row.date ? ` | ${formatRuDateFromIso(row.date)}` : ""}`;
+  // No date suffix -- it's now the "Последнее движение" history line
+  // (see tasks.js synthesizeIncomingBoxHistoryEntries), not the title.
+  const title = `Коробка ${row.box}`;
 
   return {
     source_module: sourceModule,

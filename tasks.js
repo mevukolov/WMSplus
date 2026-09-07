@@ -7114,6 +7114,10 @@
         return requestSectionName(row) === "Запросы входящего потока";
     }
 
+    function isIncomingBoxTask(row) {
+        return requestSectionName(row) === "Коробки на входе";
+    }
+
     function extractIdsFromLooseText(value) {
         const text = normalizeText(value);
         if (!text) return [];
@@ -7616,14 +7620,20 @@
 
     function taskDetailInfo(row) {
         const isIncomingFlow = isIncomingFlowRequestTask(row);
+        const isIncomingBox = isIncomingBoxTask(row);
         const taskItemList = taskItems(row);
         const targetId = isIncomingFlow
             ? incomingFlowSampleShk(row) || incomingFlowShkList(row)[0] || normalizeIdentifier(row && row.source_id)
+            : isIncomingBox
+            ? normalizeIdentifier(row && row.source_id)
             : isTareTask(row)
             ? normalizeIdentifier(row.source_tare_id) || normalizeIdentifier(taskPayload(row).tare_id || taskPayload(row).transfer)
             : normalizeIdentifier(taskItemList[0] && taskItemList[0].shk) || normalizeIdentifier(row.source_shk_ids && row.source_shk_ids[0]);
         const items = [
-            taskInfoItem(isTareTask(row) ? "Искомая тара" : (isIncomingFlow ? "Пример разложенного ШК" : "Искомый ШК"), targetId),
+            taskInfoItem(
+                isTareTask(row) ? "Искомая тара" : isIncomingBox ? "Номер тары" : (isIncomingFlow ? "Пример разложенного ШК" : "Искомый ШК"),
+                targetId
+            ),
         ];
         if (isIncomingFlow) {
             items.push(taskInfoItem("ЛО-отправитель", incomingFlowSender(row)));
@@ -7808,6 +7818,8 @@
         task_prespisok_second_line: "Передано на вторую линию предсписка",
         task_prespisok_uploaded: "ШК в предсписке",
         task_incoming_flow_request_received: "Получен входящий запрос",
+        task_incoming_box_last_movement: "Последнее движение",
+        task_incoming_box_analysis: "Разбор",
     };
 
     function taskHistoryEventLabel(eventType) {
@@ -7988,6 +8000,44 @@
         }];
     }
 
+    // "Коробки на входе" -- two synthesized lines, same reasoning as
+    // synthesizeIncomingFlowRequestHistoryEntries (these tasks are synced
+    // in, no real wms_task_history rows exist for them): "Последнее
+    // движение" (дата, столбец B, Система) then "Разбор" (сотрудник =
+    // столбец G, событие = столбец H как есть, комментарий = столбец F +
+    // ", " + столбец I, время = создание задачи минус 5 минут -- разбор в
+    // источнике происходит раньше, чем эта задача попадает в WMS+).
+    function synthesizeIncomingBoxHistoryEntries(row) {
+        if (!isIncomingBoxTask(row)) return [];
+        const payload = taskPayload(row);
+        const entries = [];
+        const movementParsed = parseDateTime(payload.date);
+        if (movementParsed.iso) {
+            entries.push({
+                created_at: movementParsed.iso,
+                event_type: "task_incoming_box_last_movement",
+                actor_name: "Система",
+                actor_employee_id: "",
+                payload: {},
+            });
+        }
+        const analysisName = normalizeText(payload.analysis);
+        const analysisStatus = normalizeText(payload.analysis_status);
+        const combinedComment = [normalizeText(payload.comment), normalizeText(payload.error)].filter(Boolean).join(", ");
+        if (analysisName || analysisStatus || combinedComment) {
+            const createdTs = Date.parse(row && row.created_at);
+            const analysisIso = Number.isFinite(createdTs) ? new Date(createdTs - 5 * 60000).toISOString() : normalizeText(row && row.created_at);
+            entries.push({
+                created_at: analysisIso,
+                event_type: "task_incoming_box_analysis",
+                actor_name: analysisName,
+                actor_employee_id: "",
+                payload: { verdict: analysisStatus, comment: combinedComment },
+            });
+        }
+        return entries;
+    }
+
     const NO_SHK_RESULT_LABELS = {};
     NO_SHK_RESULT_LABELS[SYSTEM_NO_SHK_FOUND_VERDICT] = "Обнаружено без ШК";
     NO_SHK_RESULT_LABELS[SYSTEM_NO_SHK_NOT_FOUND_VERDICT] = "Не найдено без ШК";
@@ -8152,6 +8202,7 @@
             .concat(synthesizeLegacyHistoryEntries(row, historyRows))
             .concat(synthesizeForecastHistoryEntries(row))
             .concat(synthesizeIncomingFlowRequestHistoryEntries(row))
+            .concat(synthesizeIncomingBoxHistoryEntries(row))
             .concat(synthesizeNoShkHistoryEntries(row))
             .concat(extraRows || [])
             .filter((item) => item && item.created_at)
