@@ -1555,32 +1555,36 @@ with:
 
 - [ ] **Step 3: `findBoxContext` must also find outside boxes**
 
-Check the existing `findBoxContext` function (used by
-`openBoxDetailModal`/`showBoxTooltip`) — it already falls back to
-`floorBoxes.find(...)` when a box isn't on any shelf. Since
-`outsideBoxes` are also never on a shelf, extend that same fallback.
-Find:
+Replace:
 ```js
     function findBoxContext(boxId) {
-```
-and locate its `floorBoxes.find(...)` line (look a few lines below the
-declaration); add an equivalent check against `outsideBoxes` alongside
-it, e.g. change:
-```js
+        for (const rack of racks) {
+            for (const shelf of rack.wms_no_shk_shelves || []) {
+                const box = (shelf.wms_no_shk_boxes || []).find((b) => b.id === boxId);
+                if (box) return { box, shelf, rack };
+            }
+        }
         const floorBox = floorBoxes.find((b) => b.id === boxId);
+        if (floorBox) return { box: floorBox, shelf: null, rack: null };
+        return null;
+    }
 ```
-to also check outside boxes right after:
+with:
 ```js
+    function findBoxContext(boxId) {
+        for (const rack of racks) {
+            for (const shelf of rack.wms_no_shk_shelves || []) {
+                const box = (shelf.wms_no_shk_boxes || []).find((b) => b.id === boxId);
+                if (box) return { box, shelf, rack };
+            }
+        }
         const floorBox = floorBoxes.find((b) => b.id === boxId);
         if (floorBox) return { box: floorBox, shelf: null, rack: null };
         const outsideBox = outsideBoxes.find((b) => b.id === boxId);
         if (outsideBox) return { box: outsideBox, shelf: null, rack: null };
+        return null;
+    }
 ```
-(Read the surrounding ~10 lines of `findBoxContext` first to match its
-actual existing control flow — e.g. if it already does `if (floorBox)
-return ...` immediately, insert the `outsideBox` check as the next
-statement in the same shape; if it stores into a variable and returns
-once at the end, adapt accordingly so both paths are reachable.)
 
 - [ ] **Step 4: Show box status + a "Принесено" button in the detail modal**
 
