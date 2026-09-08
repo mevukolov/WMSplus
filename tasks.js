@@ -7351,9 +7351,11 @@
             // render, animate the jump) instead of snapping straight from the
             // one-line loading placeholder to the full card.
             animateTaskDetailCardResize(() => renderTaskDetail(row));
+            void refreshTaskSpecialTags(row);
             return;
         }
         renderTaskDetail(row);
+        void refreshTaskSpecialTags(row);
     }
 
     function closeTaskDetail() {
@@ -7776,6 +7778,46 @@
                 : "<button class='task-tag-pill' type='button' data-copy-value='" + escapeHtml(tag) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(tag) + "</button>";
         }).join("");
         return "<div class='task-tags-box'><div class='task-info-label'>Теги</div><div class='task-tags-row'>" + buttons + "</div></div>";
+    }
+
+    // "Два ШК"/"Пустая упаковка" pills are computed once, at task-creation
+    // time, from whatever was already in 2shk_rep back then (loadSpecialMap,
+    // called only from the upload/preview flow). A fixation submitted after
+    // the task already exists never reaches it retroactively -- this live
+    // check closes that gap for whichever task is actually being opened,
+    // persisting the match so the pill sticks without a bulk backfill.
+    async function refreshTaskSpecialTags(row) {
+        if (!row || !row.id || state.flow.debugMode) return;
+        const ids = Array.from(new Set((Array.isArray(row.source_shk_ids) ? row.source_shk_ids : []).map(normalizeIdentifier).filter(Boolean)));
+        if (!ids.length) return;
+        const db = supabaseDb();
+        if (!db) return;
+        let specialMap;
+        try {
+            specialMap = await loadSpecialMap(ids);
+        } catch (_error) {
+            return;
+        }
+        if (!specialMap.size) return;
+        const freshInfos = specialInfosForIds(ids, specialMap);
+        if (!freshInfos.length) return;
+        const existingInfos = taskSpecialInfos(row);
+        const existingKeys = new Set(existingInfos.map((info) => info.tag_name + "|" + info.matched_shk + "|" + info.second_shk));
+        const newInfos = freshInfos.filter((info) => !existingKeys.has(info.tag_name + "|" + info.matched_shk + "|" + info.second_shk));
+        if (!newInfos.length) return;
+        const mergedTags = mergeTags(reviewTags(row), freshInfos);
+        const nextPayload = { ...taskPayload(row), special_infos: existingInfos.concat(newInfos) };
+        try {
+            const { error } = await db.from(WMS_TASKS_TABLE).update({ tags: mergedTags, source_payload: nextPayload }).eq("id", row.id);
+            if (error) throw error;
+        } catch (error) {
+            console.warn("2ШК live tag refresh failed:", error);
+            return;
+        }
+        row.tags = mergedTags;
+        row.source_payload = nextPayload;
+        if (state.taskDetail && state.taskDetail.rowId === row.id) renderTaskDetail(row);
+        renderReview();
     }
 
     function isTareTask(row) {
