@@ -548,6 +548,7 @@
             loading: false,
             loaded: false,
             loadPromise: null,
+            writebackFailures: [],
             // ensureFullActiveTasksLoaded() upgrades rows (above) to carry
             // real task_items in place (merged into the SAME row objects by
             // id) instead of keeping a second parallel array -- two arrays
@@ -2486,6 +2487,7 @@
                     state.review.activeSection = REVIEW_SECTIONS.find((section) => (grouped.get(section) || []).length) || REVIEW_SECTIONS[0];
                 }
                 setReviewStatus("Загружено активных задач: " + state.review.rows.length + ".");
+                void refreshWritebackFailuresBanner();
             } catch (error) {
                 console.error("wms review load failed:", error);
                 state.review.rows = [];
@@ -3264,10 +3266,10 @@
             // dropdown option is a courtesy mirror, not a precondition for
             // the WMS task itself being done. A batch of 50 closes must not
             // stall because one sheet row is already filled or unreachable.
-            writeBackTaskToSource({ ...row, ...data }, {
+            runSourceWritebackInBackground({ ...row, ...data }, nextPayload, {
                 attachment: "Движение",
                 comment: note || "Подтверждено движение по Superset",
-            }).catch((error) => console.warn("system movement writeback skipped for", row.id, error));
+            }, {});
         }
         return data;
     }
@@ -9349,29 +9351,6 @@
         return /строка\s+\d+.*уже\s+заполн/i.test(message) || /уже\s+заполнен[аы]?.*столбц[еа]\s+h/i.test(message);
     }
 
-    function showIncomingFlowWritebackConflict(row, error) {
-        const status = $("taskDetailStatus");
-        const actions = $("taskWritebackConflictActions");
-        const rowNumber = sourceRowNumberForTask(row);
-        const url = incomingFlowSourceSheetUrl(row);
-        if (status) {
-            status.textContent = "В исходной таблице строка " + (rowNumber || "") + " уже заполнена. Проверь H/I: если данные корректные, можно закрыть задачу без повторной записи. Если в таблице ошибка, перезапиши только H/I.";
-        }
-        if (!actions) return;
-        actions.classList.remove("hidden");
-        actions.innerHTML = "<div class='task-writeback-note'>"
-            + escapeHtml(error && error.message ? error.message : String(error))
-            + "</div><div class='file-row'>"
-            + (url ? "<a class='btn btn-outline' href='" + escapeHtml(url) + "' target='_blank' rel='noopener'>Проверить таблицу</a>" : "<button class='btn btn-outline' type='button' disabled>Проверить таблицу</button>")
-            + "<button id='completeTaskSkipWriteback' class='btn btn-outline' type='button'>Закрыть задачу</button>"
-            + "<button id='completeTaskOverwriteWriteback' class='btn btn-rect' type='button'>Перезаписать данные в таблице</button>"
-            + "</div>";
-        const skip = $("completeTaskSkipWriteback");
-        const overwrite = $("completeTaskOverwriteWriteback");
-        if (skip) skip.addEventListener("click", () => { void completeTaskFromDetail(row.id, { skipSourceWriteback: true }); });
-        if (overwrite) overwrite.addEventListener("click", () => { void completeTaskFromDetail(row.id, { overwriteSourceWriteback: true }); });
-    }
-
     function wmsWritebackSecret() {
         return normalizeText(localStorage.getItem("wms_task_writeback_secret") || localStorage.getItem("WMS_TASK_WRITEBACK_SECRET"));
     }
@@ -9405,6 +9384,91 @@
             throw new Error("Не удалось записать результат в источник: " + message);
         }
         return payload;
+    }
+
+    // Task completion no longer waits on this -- Apps Script round trips can
+    // take anywhere from one to tens of seconds, and blocking the operator on
+    // it just to keep the sheet in sync isn't worth the wait. This merges the
+    // outcome into the already-completed row's source_payload afterward, and
+    // refreshWritebackFailuresBanner() is how a failure stays visible instead
+    // of silently vanishing once the operator has moved to the next task.
+    async function updateTaskWritebackField(taskId, nextPayloadBase, writebackValue) {
+        const db = supabaseDb();
+        if (!db) return;
+        const { error } = await db
+            .from(WMS_TASKS_TABLE)
+            .update({ source_payload: { ...nextPayloadBase, wms_writeback: writebackValue } })
+            .eq("id", taskId);
+        if (error) console.error("wms writeback status update failed:", error);
+    }
+
+    function runSourceWritebackInBackground(row, nextPayload, reviewPayload, options) {
+        void writeBackTaskToSource(row, reviewPayload, options)
+            .then((response) => updateTaskWritebackField(row.id, nextPayload, response))
+            .catch((error) => {
+                console.error("wms source writeback failed (background):", error);
+                void updateTaskWritebackField(row.id, nextPayload, {
+                    ok: false,
+                    error: error && error.message ? error.message : String(error),
+                    conflict: isIncomingFlowWritebackConflict(error),
+                    failed_at: new Date().toISOString(),
+                }).then(() => refreshWritebackFailuresBanner());
+            });
+    }
+
+    async function refreshWritebackFailuresBanner() {
+        const el = $("writebackFailuresBanner");
+        if (!el) return;
+        const db = supabaseDb();
+        if (!db) return;
+        const { data, error } = await db
+            .from(WMS_TASKS_TABLE)
+            .select("id,source_id,source_module,task_type,upload_type,title,source_payload")
+            .eq("source_module", "incoming_flow_requests")
+            .eq("source_payload->wms_writeback->>ok", "false")
+            .limit(50);
+        if (error) {
+            console.warn("writeback failures check skipped:", error);
+            return;
+        }
+        state.review.writebackFailures = data || [];
+        if (!state.review.writebackFailures.length) {
+            el.style.display = "none";
+            el.innerHTML = "";
+            return;
+        }
+        const shkList = state.review.writebackFailures.map((row) => normalizeText(row.source_id)).slice(0, 5).join(", ");
+        const firstUrl = incomingFlowSourceSheetUrl(state.review.writebackFailures[0]);
+        el.style.display = "";
+        el.innerHTML = "Не записалось в таблицу (" + state.review.writebackFailures.length + "): " + escapeHtml(shkList)
+            + (state.review.writebackFailures.length > 5 ? "…" : "")
+            + " <button id='retryWritebackFailures' class='btn btn-outline' type='button' style='margin-left:8px'>Повторить</button>"
+            + (firstUrl ? " <a class='btn btn-outline' href='" + escapeHtml(firstUrl) + "' target='_blank' rel='noopener'>Открыть таблицу</a>" : "");
+        const retryBtn = $("retryWritebackFailures");
+        if (retryBtn) retryBtn.addEventListener("click", () => { void retryWritebackFailures(retryBtn); });
+    }
+
+    async function retryWritebackFailures(button) {
+        const pending = state.review.writebackFailures || [];
+        if (!pending.length) return;
+        if (button) { button.disabled = true; button.textContent = "Повторяю..."; }
+        for (const row of pending) {
+            const review = taskReviewPayload(row);
+            const wasConflict = Boolean(taskPayload(row).wms_writeback && taskPayload(row).wms_writeback.conflict);
+            try {
+                const response = await writeBackTaskToSource(row, review, { overwrite: wasConflict });
+                await updateTaskWritebackField(row.id, taskPayload(row), response);
+            } catch (error) {
+                console.error("wms writeback retry failed:", error);
+                await updateTaskWritebackField(row.id, taskPayload(row), {
+                    ok: false,
+                    error: error && error.message ? error.message : String(error),
+                    conflict: isIncomingFlowWritebackConflict(error),
+                    failed_at: new Date().toISOString(),
+                });
+            }
+        }
+        await refreshWritebackFailuresBanner();
     }
 
     async function completeTaskFromDetail(id, options) {
@@ -9450,25 +9514,17 @@
         const button = $("completeTaskBtn");
         const status = $("taskDetailStatus");
         if (button) button.disabled = true;
-        let writebackResponse = null;
-        try {
-            if (!isDeferred && needsSourceWriteback(row) && !opts.skipSourceWriteback && !state.flow.debugMode) {
-                if (status) status.textContent = "Записываю результат в исходную таблицу...";
-                writebackResponse = await writeBackTaskToSource(row, reviewPayload, { overwrite: opts.overwriteSourceWriteback });
-            } else if (opts.skipSourceWriteback) {
-                writebackResponse = { ok: true, skipped: true, reason: "source_checked_manually" };
-            }
-        } catch (error) {
-            console.error("wms source writeback failed:", error);
-            if (incomingFlow && isIncomingFlowWritebackConflict(error)) {
-                showIncomingFlowWritebackConflict(row, error);
-                if (button) button.disabled = false;
-                return;
-            }
-            if (status) status.textContent = error && error.message ? error.message : String(error);
-            if (button) button.disabled = false;
-            return;
-        }
+        // Apps Script round trips are slow and unpredictable (cold starts can
+        // run past a minute) -- the task completes right away and the sheet
+        // write happens after, in the background. A failure doesn't get lost:
+        // it lands in wms_writeback below and refreshWritebackFailuresBanner()
+        // surfaces it for retry instead of blocking this operator's screen.
+        const needsWriteback = !isDeferred && needsSourceWriteback(row) && !opts.skipSourceWriteback && !state.flow.debugMode;
+        const writebackResponse = opts.skipSourceWriteback
+            ? { ok: true, skipped: true, reason: "source_checked_manually" }
+            : needsWriteback
+                ? { ok: null, pending: true }
+                : null;
         const nextPayload = {
             ...taskPayload(row),
             wms_review: {
@@ -9499,6 +9555,9 @@
                 data = result.data;
             }
             const completedForAchievements = { ...row, ...payload, ...(data || {}) };
+            if (needsWriteback && !state.flow.debugMode) {
+                runSourceWritebackInBackground(completedForAchievements, nextPayload, reviewPayload, { overwrite: opts.overwriteSourceWriteback });
+            }
             const stateRow = (state.review.rows || []).find((item) => item.id === id);
             if (stateRow) Object.assign(stateRow, data || payload);
             state.review.rows = (state.review.rows || []).filter((item) => item.id !== id || isActiveReviewTask(item));
