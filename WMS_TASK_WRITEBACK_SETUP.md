@@ -73,6 +73,6 @@ localStorage.setItem("wms_task_writeback_secret", "...");
 
 - `H` = Вложение
 - `I` = Комментарий ОПП
-- `J` = сотрудник ОПП
-- `K` = ID виновного
+
+`J` (сотрудник ОПП) и `K` (ID виновного) — legacy-столбцы, этот контур их не трогает (см. `google_apps_script_incoming_flow_requests_api.gs`).
 

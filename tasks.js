@@ -2574,6 +2574,26 @@
         el.className = "status-line" + (type ? " " + type : "");
     }
 
+    const SUPERSET_CACHE_STALE_HOURS = 12;
+
+    async function warnIfSupersetCacheStale() {
+        try {
+            const { data, error } = await supabaseDb()
+                .from(SUPERSET_CACHE_TABLE)
+                .select("updated_at")
+                .eq("wh_id", WH_ID)
+                .order("updated_at", { ascending: false })
+                .limit(1);
+            if (error || !data || !data.length) return;
+            const ageHours = (Date.now() - new Date(data[0].updated_at).getTime()) / 3600000;
+            if (!(ageHours >= SUPERSET_CACHE_STALE_HOURS)) return;
+            const ageLabel = ageHours >= 24 ? Math.round(ageHours / 24) + " дн." : Math.round(ageHours) + " ч.";
+            setActualizeStatus("Сначала скопируйте список активных ШК. Кэш Superset в базе не обновлялся " + ageLabel + " — актуализация по нему может пропустить свежие движения, загрузите новый файл.", "warn");
+        } catch (error) {
+            console.warn("superset cache freshness check skipped:", error);
+        }
+    }
+
     async function openActualizeTasksModal() {
         closeFlowModals();
         state.actualize = { copied: false, rows: [], candidates: [], removedShks: new Set(), tareActions: {}, stats: null, supersetDebug: null, processing: false };
@@ -2584,6 +2604,7 @@
         setFlowModalOpen("actualizeTasksModal", true);
         if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
         await ensureFullActiveTasksLoaded();
+        await warnIfSupersetCacheStale();
     }
 
     function closeActualizeTasksModal() {
