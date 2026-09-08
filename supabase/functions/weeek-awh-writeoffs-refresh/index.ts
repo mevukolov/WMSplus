@@ -281,7 +281,7 @@ function parseRowsFromPayload(payload: unknown): { rows: AwhWriteoffRow[]; dupli
 }
 
 function buildApiUrl(body: JsonObject): string {
-  const apiUrl = normalizeText(body.api_url) || DEFAULT_API_URL;
+  const apiUrl = normalizeText(body.api_url) || normalizeText(Deno.env.get("AWH_WRITEOFFS_APPS_SCRIPT_URL")) || DEFAULT_API_URL;
   if (!apiUrl) throw new Error("api_url is required in request body");
 
   const url = new URL(apiUrl);
