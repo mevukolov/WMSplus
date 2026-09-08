@@ -593,6 +593,33 @@
         return "https://bgphllmzmlwurfnbagho.supabase.co/storage/v1/object/public/intake-photos/" + path;
     }
 
+    // Reverse of shk_generator.js's encode_shk_light/common_encode: a
+    // sticker's scanned QR value is "*" + a base64-like-encoded BigInt
+    // packing [checksum(4b)][checksum2(4b)][SHK value(42b)]. Decodes back
+    // to the plain numeric value for display; falls back to the raw code
+    // on any malformed input rather than hiding it. Checksum validity is
+    // NOT re-checked here (matches shk_generator.js's own
+    // try_parse(barcode, true) -- it displays the value even when the
+    // checksum doesn't validate).
+    const SHK_CHAR_LIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const SHK_CHECK_SUM_BITS = 4n + 4n;
+    const SHK_VALUE_BITS = 42n;
+    function decodeStickerCode(barcode) {
+        if (!barcode || barcode.charAt(0) !== "*") return null;
+        const body = barcode.slice(1);
+        const base = BigInt(SHK_CHAR_LIST.length);
+        let result = 0n;
+        for (let i = 0; i < body.length; i++) {
+            const idx = SHK_CHAR_LIST.indexOf(body.charAt(body.length - 1 - i));
+            if (idx < 0) return null;
+            result += BigInt(idx) * (base ** BigInt(i));
+        }
+        const shkVal = (result >> SHK_CHECK_SUM_BITS) & ((1n << SHK_VALUE_BITS) - 1n);
+        const remaining = result >> (SHK_CHECK_SUM_BITS + SHK_VALUE_BITS);
+        if (remaining !== 0n || shkVal === 0n) return null;
+        return shkVal.toString();
+    }
+
     function contentCardHtml(item) {
         const photo = item.photo_path
             ? "<img src='" + escapeHtmlLocal(buildIntakePhotoUrl(item.photo_path)) + "' style='width:100%;border-radius:8px;object-fit:cover;max-height:220px;display:block;' loading='lazy'>"
@@ -601,7 +628,7 @@
         const categoryLine = item.category ? " · " + escapeHtmlLocal(item.category) : "";
         const when = new Date(item.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
         const stickerLine = item.sticker_code
-            ? "<div style='font-size:12px;color:#64748b;margin-top:2px;'>Присвоенный ШК: " + escapeHtmlLocal(item.sticker_code) + "</div>"
+            ? "<div style='font-size:12px;color:#64748b;margin-top:2px;'>Присвоенный ШК: " + escapeHtmlLocal(decodeStickerCode(item.sticker_code) || item.sticker_code) + "</div>"
             : "";
         return "<div style='border:1px solid rgba(15,23,42,.08);border-radius:10px;padding:10px;margin-bottom:10px;'>"
             + photo
