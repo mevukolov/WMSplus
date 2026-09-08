@@ -126,7 +126,7 @@
                 .from("wms_no_shk_boxes")
                 .select(BOX_FIELDS)
                 .eq("outside_opp", true)
-                .order("created_at", { ascending: true }),
+                .order("created_at", { ascending: false }),
         ]);
         if (racksRes.error) {
             racks = [];
@@ -576,7 +576,8 @@
             + "<div>Товаров зафиксировано: " + box.total_items + "</div>"
             + "<div>Местоположение: " + location + "</div>"
             + "</div>";
-        $("bringOutsideBoxBtn").style.display = box.outside_opp ? "" : "none";
+        const bringOutsideBoxBtn = $("bringOutsideBoxBtn");
+        if (bringOutsideBoxBtn) bringOutsideBoxBtn.style.display = box.outside_opp ? "" : "none";
         $("printNoShkBoxBtn").style.display = box.outside_opp ? "none" : "";
         $("removeNoShkBoxBtn").style.display = box.outside_opp ? "none" : "";
         $("removeNoShkBoxBtn").textContent = shelf ? "Убрать с полки (на пол)" : "Удалить короб";
