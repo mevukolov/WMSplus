@@ -396,7 +396,8 @@
         #noShkZoneAdminModal,
         #noShkNewBoxModal,
         #noShkBoxDetailModal,
-        #noShkMoveModal { z-index: 4400; }
+        #noShkMoveModal,
+        #intakeSearchModal { z-index: 4400; }
         #noShkConfirmModal,
         #noShkBoxContentsModal { z-index: 4420; }
         /* Зона «Без ШК» -- flat schematic rack/shelf/box diagram: no
@@ -1629,6 +1630,11 @@
                     <h2 class="tasks-action-title">Зона «Без ШК»</h2>
                     <p class="tasks-action-text">Стеллажи и полки физической зоны хранения товаров «Без ШК», их вместимость.</p>
                 </button>
+                <button id="openIntakeSearch" class="tasks-action-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">🔎</span>
+                    <h2 class="tasks-action-title">Поиск товара без ШК</h2>
+                    <p class="tasks-action-text">Лента всего зафиксированного через форму приёма: любой участок, категория, сотрудник или дата.</p>
+                </button>
             </div>
         </div>
     </section>
@@ -2126,6 +2132,70 @@
     </div>
 </section>
 
+<section id="intakeSearchModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card no-shk-modal-xl">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Поиск товара без ШК</h3>
+                <p class="work-subtitle">Всё, что зафиксировано через форму приёма, на любом участке.</p>
+            </div>
+            <button id="closeIntakeSearch" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:14px;">
+            <label>Наименование<br><input id="intakeSearchQuery" type="text" class="input" placeholder="Что искать" style="width:180px;"></label>
+            <label>Участок<br>
+                <div class="select">
+                    <select id="intakeSearchArea">
+                        <option value="">Все</option>
+                        <option value="ХАБ">ХАБ</option>
+                        <option value="Упаковка">Упаковка</option>
+                        <option value="Маркетплейс">Маркетплейс</option>
+                    </select>
+                </div>
+            </label>
+            <label>Тип<br>
+                <div class="select">
+                    <select id="intakeSearchItemType">
+                        <option value="">Все</option>
+                        <option value="Мелкий товар">Мелкий товар</option>
+                        <option value="КГТ">КГТ</option>
+                        <option value="Шредер">Шредер</option>
+                    </select>
+                </div>
+            </label>
+            <label>Категория<br>
+                <div class="select">
+                    <select id="intakeSearchCategory">
+                        <option value="">Все</option>
+                        <option value="Одежда">Одежда</option>
+                        <option value="Обувь">Обувь</option>
+                        <option value="Косметика">Косметика</option>
+                        <option value="Бытовая химия">Бытовая химия</option>
+                        <option value="Мебель">Мебель</option>
+                        <option value="Электроника">Электроника</option>
+                        <option value="Ювелирка">Ювелирка</option>
+                        <option value="Для авто">Для авто</option>
+                        <option value="Для животных">Для животных</option>
+                        <option value="Посуда">Посуда</option>
+                        <option value="Еда">Еда</option>
+                        <option value="Посылка">Посылка</option>
+                    </select>
+                </div>
+            </label>
+            <label>Сотрудник<br><input id="intakeSearchFullName" type="text" class="input" placeholder="ФИО" style="width:160px;"></label>
+            <label>Дата с<br><input id="intakeSearchDateFrom" type="date" class="input"></label>
+            <label>по<br><input id="intakeSearchDateTo" type="date" class="input"></label>
+            <button id="intakeSearchGoBtn" class="btn btn-rect" type="button">Найти</button>
+            <button id="intakeSearchResetBtn" class="btn btn-outline" type="button">Сбросить</button>
+        </div>
+        <div id="intakeSearchStatus" class="review-status"></div>
+        <div id="intakeSearchResultsWrap" style="max-height:60vh;overflow-y:auto;"></div>
+        <div class="file-row" style="margin-top:12px;">
+            <button id="intakeSearchMoreBtn" class="btn btn-outline" type="button" style="display:none;">Показать ещё</button>
+        </div>
+    </div>
+</section>
+
 <section id="noShkBoxContentsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card task-small-card">
         <div class="work-head">
@@ -2338,5 +2408,6 @@
 <script src="tasks.js"></script>
 <script src="print-tspl.js"></script>
 <script src="no_shk_zone.js"></script>
+<script src="intake_search.js"></script>
 </body>
 </html>
