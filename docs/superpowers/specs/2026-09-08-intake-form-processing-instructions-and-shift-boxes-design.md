@@ -105,7 +105,8 @@ CSS animation architecture needed, reuse what Task 1 already built.
 8. Далее необходимо отсканировать приклеенный ранее на вещь стикер.
 9. Отсканируйте тару ПЕРЕУПАКОВКИ. *(renders QR for the area's WCT code,
    same value as step 5)*
-10. Отнесите товар на Идентификацию.
+10. Отнесите товар на Идентификацию *(ХАБ)* / Отнесите товар на
+    переупаковку *(Упаковка)*.
 
 **Короткая инструкция (4 слайда, `data-instr-choice="skip"`):**
 
@@ -113,7 +114,13 @@ CSS animation architecture needed, reuse what Task 1 already built.
 2. Отсканируйте тару ПЕРЕУПАКОВКИ, если нужно. *(QR, area's WCT code)*
 3. Отсканируйте приклеенный ранее на вещь стикер.
 4. Отсканируйте тару ПЕРЕУПАКОВКИ *(QR, area's WCT code)* и передайте
-   товар на переупаковку.
+   товар на Идентификацию *(ХАБ)* / и передайте товар на переупаковку
+   *(Упаковка)*.
+
+The final-step destination line is area-dependent (step 10 of the full
+sequence and step 4 of the short sequence both switch on
+`state.area`): **ХАБ** → "...на Идентификацию", **Упаковка** → "...на
+переупаковку".
 
 The final slide of **either** sequence replaces Далее with **Завершить**,
 which returns to `screenEntryType` (same behavior as the existing
@@ -284,12 +291,3 @@ the existing "На полу" rendering — no other code path changes).
   click (per user decision).
 - No changes to `2ШК`/`Пустая упаковка` branches or `2shk_rep`.
 
-## Open assumption flagged for review
-
-The final step of the short ("Пропустить") instruction sequence reads
-"...и передайте товар на переупаковку" per the user's final message in
-this conversation (differs from an earlier draft of the same message,
-which ended the *short* sequence with "...на Идентификацию" instead —
-the full 10-step sequence unambiguously ends with "Отнесите товар на
-Идентификацию" in both drafts). This spec uses the final wording as
-authoritative. Flag if that's a typo.
