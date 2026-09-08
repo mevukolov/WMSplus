@@ -1,6 +1,8 @@
 // task-verdicts.js — единый словарь вердиктов wms_tasks.opp_verdict.
 // Загружается до tasks.js обычным <script> тегом (без модулей, как ui.js).
 
+const CANCELLATION_AFTER_WRITEOFF_VERDICT = "Аннулирование после списания";
+
 const REVIEW_VERDICTS = [
     "Не выбран",
     "Найден/Релиз/Списан",
@@ -8,6 +10,7 @@ const REVIEW_VERDICTS = [
     "Отправлен на списание ревизией",
     "Отправлен запрос",
     "Нет на МХ/Не найден",
+    CANCELLATION_AFTER_WRITEOFF_VERDICT,
 ];
 
 // "Дубль" и "Движение" -- не в этом списке: оба теперь только системные
@@ -21,10 +24,14 @@ const INCOMING_FLOW_ATTACHMENT_OPTIONS = [
     "Некорректный запрос",
 ];
 
+// Value is the extra field's label -- "" means the verdict is still deferred
+// (see completeTaskFromDetail's isDeferred, which checks key presence, not
+// truthiness) but needs no extra input beyond the verdict itself.
 const DEFERRED_VERDICT_FIELDS = {
     "Отправлен запрос": "Направление запроса",
     "Отправлен на релиз": "Вставьте ссылку на запрос релиза",
     "Отправлен на списание ревизией": "Вставьте ссылку",
+    [CANCELLATION_AFTER_WRITEOFF_VERDICT]: "",
 };
 
 // Комментарий ОПП для "Запросов входящего потока" меняет подсказку в
@@ -48,6 +55,7 @@ const VERDICT_TONE = {
     "Вложено верно": "green",
     "Вложено неверно": "red",
     "Отправлен под пустым стикером": "yellow",
+    [CANCELLATION_AFTER_WRITEOFF_VERDICT]: "yellow",
     // "Некорректный запрос" -- намеренно без тона, остаётся серым.
 };
 

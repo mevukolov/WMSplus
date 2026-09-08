@@ -8904,7 +8904,7 @@
             const tone = VERDICT_TONE[verdict] || "";
             updateComposeRows(verdict, tone, extra);
             if (!verdict || verdict === "Не выбран") missing.push("Вердикт");
-            if (tone === "yellow" && !extra) missing.push(DEFERRED_VERDICT_FIELDS[verdict] || "Ссылка");
+            if (tone === "yellow" && DEFERRED_VERDICT_FIELDS[verdict] && !extra) missing.push(DEFERRED_VERDICT_FIELDS[verdict]);
             if (tone === "red" && !comment) missing.push("Комментарий");
         }
         if (verdict === SYSTEM_MOVEMENT_VERDICT || verdict === SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT) missing.push("доступный пользователю вердикт");
@@ -8949,24 +8949,42 @@
             bar.classList.toggle("is-centered", !tone);
             if (tone) bar.classList.add("tone-" + tone);
         }
-        const picker = $("taskVerdictPicker");
-        if (picker) picker.classList.toggle("is-full", tone === "green");
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
+        const showExtra = tone === "yellow" && Boolean(extraLabel);
+        const picker = $("taskVerdictPicker");
+        // Deferred verdicts with no extra field (e.g. "Аннулирование после
+        // списания") lay out like green -- nothing to reserve room for.
+        if (picker) picker.classList.toggle("is-full", tone === "green" || (tone === "yellow" && !showExtra));
         const extraWrap = $("taskExtraFieldWrap");
         const extraInput = $("taskExtraInput");
         if (extraInput) extraInput.placeholder = extraLabel;
-        if (extraWrap) extraWrap.classList.toggle("hidden", tone !== "yellow");
+        if (extraWrap) extraWrap.classList.toggle("hidden", !showExtra);
         positionCommentField(tone);
         const inlineSlot = $("taskComposeInlineSlot");
-        if (inlineSlot) inlineSlot.classList.toggle("is-filled", tone === "yellow" || tone === "red");
+        if (inlineSlot) inlineSlot.classList.toggle("is-filled", showExtra || tone === "red");
         const belowRow = $("taskComposeBelowRow");
-        if (belowRow) belowRow.classList.toggle("is-expanded", tone === "yellow" && Boolean(extraValue));
+        if (belowRow) belowRow.classList.toggle("is-expanded", showExtra && Boolean(extraValue));
     }
 
     function addDaysIso(days) {
         const date = new Date();
         date.setDate(date.getDate() + days);
         return date.toISOString();
+    }
+
+    // Every other deferred verdict reopens a fixed N days from now --
+    // "Аннулирование после списания" is the odd one out, anchored to the
+    // task's own due_date (the marketplace's projected write-off date, per
+    // this module's SLA field) rather than to the moment the operator acted.
+    function reopenAfterForVerdict(verdict, row) {
+        if (verdict === CANCELLATION_AFTER_WRITEOFF_VERDICT) {
+            const match = normalizeText(row && row.due_date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (match) {
+                const moscowMidnightUtcMs = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) - MOSCOW_OFFSET_MS;
+                return new Date(moscowMidnightUtcMs + 3 * 60 * 60 * 1000).toISOString();
+            }
+        }
+        return addDaysIso(2);
     }
 
     function currentWmsUser() {
@@ -9498,7 +9516,11 @@
             return;
         }
         const now = new Date().toISOString();
-        const isDeferred = Boolean(DEFERRED_VERDICT_FIELDS[verdict]);
+        // hasOwnProperty, not truthiness -- CANCELLATION_AFTER_WRITEOFF_VERDICT
+        // is deferred with an empty-string field label (no extra input
+        // required), which `Boolean(...)` would wrongly read as "not deferred".
+        const isDeferred = Object.prototype.hasOwnProperty.call(DEFERRED_VERDICT_FIELDS, verdict);
+        const reopenAfter = isDeferred ? reopenAfterForVerdict(verdict, row) : null;
         const reviewPayload = {
             comment,
             verdict,
@@ -9508,9 +9530,8 @@
             completed_by_id: user.id || null,
             completed_by_name: user.name || null,
             completed_at: now,
-            reopen_after: isDeferred ? addDaysIso(2) : null,
+            reopen_after: reopenAfter,
         };
-        const reopenAfter = isDeferred ? addDaysIso(2) : null;
         const button = $("completeTaskBtn");
         const status = $("taskDetailStatus");
         if (button) button.disabled = true;
@@ -10570,7 +10591,13 @@
             const actor = staffStatsHistoryActor(row);
             const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
             const payload = row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : {};
+            // "Задачи" measures how many tasks an employee actually worked on
+            // that day, not just ones that reached a terminal status --
+            // deferring (yellow verdicts: Отправлен запрос/на релиз/на
+            // списание ревизией) is real work too, so it counts here in
+            // addition to `deferred` below, not instead of it.
             employee.deferred += 1;
+            employee.tasksCompleted += 1;
             if (payload.verdict) incrementCounter(employee.verdicts, payload.verdict, 1);
             historyDeferredTaskIds.add(normalizeText(row.task_id));
             employee.details.deferred.push({
@@ -10620,6 +10647,7 @@
             if (deferredAt && moscowDateFromValue(deferredAt) === date && !historyDeferredTaskIds.has(normalizeText(row.id))) {
                 const employee = ensureStaffStatsRow(byEmployee, review.deferred_by_id, review.deferred_by_name);
                 employee.deferred += 1;
+                employee.tasksCompleted += 1;
                 employee.details.deferred.push({
                     id: row.id,
                     title: displayTaskTitle(row),
@@ -11897,10 +11925,17 @@
         };
     }
 
+    // "Контур" (old carrier-check export) truncated to 1000 rows, so any
+    // transfer past that cap silently never matched "отгрузка сторонним
+    // перевозчиком" and kept generating tasks for tares already shipped
+    // (confirmed against a real case, тара 5429124836). Its replacement is
+    // scoped per-transfer by the operator before export, so simple presence
+    // in this file -- regardless of the action in column E -- now means
+    // shipped; see buildPmPreview's excludedTransfers.
     function normalizePmCarrierRow(row, rowNumber) {
         const transfer = normalizeIdentifier(row[1]);
         if (!transfer) return null;
-        return { row_number: rowNumber, transfer, office: normalizeText(row[2]), time: normalizeText(row[3]), mx: normalizeText(row[4]), employee: normalizeText(row[5]), carrier: normalizeText(row[6]) };
+        return { row_number: rowNumber, transfer, office: normalizeText(row[2]), time: normalizeText(row[3]), action: normalizeText(row[4]), employee: normalizeText(row[5]), carrier: normalizeText(row[6]) };
     }
 
     function normalizeAfterSaleMovementRow(row, rowNumber) {
@@ -12417,7 +12452,6 @@
     function isNoOrderTmmStatus(row) { return sourceRowStatus(row) === "tmm"; }
     function isMultiShipmentBufferMx(value) { return normalizeForMatch(value).includes("буфер мультиотгрузки"); }
     function mxHasBoxes(row) { return normalizeForMatch(row && row.mx).includes("коробк"); }
-    function isGateMx(value) { return normalizeForMatch(value).includes("ворота"); }
 
     function routeNumberFromMx(mx) {
         const matches = normalizeText(mx).match(/\d{1,3}/g);
@@ -13092,12 +13126,11 @@
         const eligibleDateRows = dateRows.filter((row) => !mxHasBoxes(row));
         const smsRows = eligibleDateRows.filter((row) => isPmBufferStatus(row.product_status));
         const transferIds = Array.from(new Set(smsRows.map((row) => row.transfer).filter(isGroupableIdentifier))).sort((a, b) => a.localeCompare(b, "ru"));
-        const excludedTransfers = new Set((carrierRows || []).filter((row) => normalizeForMatch(row.mx).includes("отгрузка сторонним перевозчиком")).map((row) => row.transfer));
-        const carrierGateMxByTransfer = new Map();
-        (carrierRows || []).forEach((row) => {
-            if (!row.transfer || excludedTransfers.has(row.transfer) || !isGateMx(row.mx)) return;
-            if (!carrierGateMxByTransfer.has(row.transfer)) carrierGateMxByTransfer.set(row.transfer, row.mx);
-        });
+        // Presence alone means shipped now -- the operator scopes this file to
+        // just the copied transfer numbers before exporting it, so any row
+        // for a transfer here is that transfer's shipment confirmation,
+        // whatever the action in column E says.
+        const excludedTransfers = new Set((carrierRows || []).map((row) => row.transfer).filter(Boolean));
         const byTransfer = new Map();
         eligibleDateRows.forEach((row) => {
             const group = byTransfer.get(row.transfer) || [];
@@ -13116,8 +13149,7 @@
             const specialSplit = splitSpecialRows(allRows, specialMap, "product");
             specialSplit.special.forEach((row) => {
                 specialTaskCount += 1;
-                const routeMx = isMultiShipmentBufferMx(row.mx) ? (carrierGateMxByTransfer.get(transfer) || row.mx) : row.mx;
-                const routeNumber = routeNumberFromMx(routeMx);
+                const routeNumber = routeNumberFromMx(row.mx);
                 const routeLabel = routeLabelFromMx(row.mx, isMultiShipmentBufferMx(row.mx) ? routeNumberFromMx(row.mx) : routeNumber);
                 const mail = isMailRoute(routeNumber);
                 const taskType = mail ? "Разбор ОПП // Почта" : "Разбор ОПП // ПМ";
@@ -13148,8 +13180,7 @@
             const priceSum = rowsPrice(groupRows, "price");
             if (priceSum < 2000) { cheapTransfers += 1; return; }
             const primary = groupRows.find((row) => isPmBufferStatus(row.product_status)) || groupRows[0];
-            const routeMx = isMultiShipmentBufferMx(primary.mx) ? (carrierGateMxByTransfer.get(transfer) || primary.mx) : primary.mx;
-            const routeNumber = routeNumberFromMx(routeMx);
+            const routeNumber = routeNumberFromMx(primary.mx);
             const routeLabel = routeLabelFromMx(primary.mx, isMultiShipmentBufferMx(primary.mx) ? routeNumberFromMx(primary.mx) : routeNumber);
             const mail = isMailRoute(routeNumber);
             const taskType = mail ? "Разбор ОПП // Почта" : "Разбор ОПП // ПМ";
