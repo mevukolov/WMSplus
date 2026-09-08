@@ -609,6 +609,7 @@
             loaded: false,
             activeGroup: "deferred",
             sort: { key: "updated", dir: "desc" },
+            counts: { deferred: 0, completed: 0 },
         },
         taskDetail: {
             rowId: "",
@@ -5057,6 +5058,22 @@
             if (batch.length < pageSize) break;
         }
         return rows;
+    }
+
+    // rows returned by fetchWmsTaskRows("inactive") are capped at
+    // INACTIVE_TASK_ROW_LIMIT, so rows.length is a page size, not a real
+    // total -- once completed tasks pile up past the cap that number
+    // freezes forever. head:true count queries give the real totals cheaply
+    // (no row data transferred) for the two inactive-page tiles.
+    async function fetchInactiveTaskCounts(db) {
+        const nowIso = new Date().toISOString();
+        const [completedResult, deferredResult] = await Promise.all([
+            db.from(WMS_TASKS_TABLE).select("id", { count: "exact", head: true }).eq("is_deleted", false).eq("task_status", "Завершено"),
+            db.from(WMS_TASKS_TABLE).select("id", { count: "exact", head: true }).eq("is_deleted", false).eq("task_status", "Отложено").gt("reopen_after", nowIso),
+        ]);
+        if (completedResult.error) throw completedResult.error;
+        if (deferredResult.error) throw deferredResult.error;
+        return { completed: completedResult.count || 0, deferred: deferredResult.count || 0 };
     }
 
     function taskStatus(row) {
@@ -9856,8 +9873,9 @@
         state.inactive.loading = true;
         renderInactive();
         try {
-            const rows = await fetchWmsTaskRows(db, "inactive");
+            const [rows, counts] = await Promise.all([fetchWmsTaskRows(db, "inactive"), fetchInactiveTaskCounts(db)]);
             state.inactive.rows = rows.filter((row) => isCompletedTask(row) || isWaitingReopenTask(row));
+            state.inactive.counts = counts;
             state.inactive.loaded = true;
             setInactiveStatus("Загружено неактивных задач: " + state.inactive.rows.length + ".");
         } catch (error) {
@@ -9891,11 +9909,10 @@
             target.innerHTML = "<div class='empty-state'>Загружаю неактивные задачи...</div>";
             return;
         }
-        const deferred = inactiveRowsByGroup("deferred");
-        const completed = inactiveRowsByGroup("completed");
+        const counts = state.inactive.counts || { deferred: 0, completed: 0 };
         target.innerHTML = [
-            { key: "deferred", title: "Ожидают переоткрытия", count: deferred.length, note: "Отложенные задачи. В карточке показывается дата, когда они снова появятся в активном разборе." },
-            { key: "completed", title: "Разбор завершен", count: completed.length, note: "Задачи, которые закрыты окончательно и больше не должны возвращаться в активный разбор." },
+            { key: "deferred", title: "Ожидают переоткрытия", count: counts.deferred, note: "Отложенные задачи. В карточке показывается дата, когда они снова появятся в активном разборе." },
+            { key: "completed", title: "Разбор завершен", count: counts.completed, note: "Задачи, которые закрыты окончательно и больше не должны возвращаться в активный разбор." },
         ].map((item) => "<button class='inactive-card' type='button' data-inactive-group='" + escapeHtml(item.key) + "'>"
             + "<div class='inactive-card-title'><span>" + escapeHtml(item.title) + "</span><strong>" + item.count + "</strong></div>"
             + "<div class='inactive-card-note'>" + escapeHtml(item.note) + "</div>"
@@ -9931,7 +9948,11 @@
                 + "<td><span class='review-pill'>" + escapeHtml(taskStatus(row)) + "</span><div class='review-task-sub'>" + escapeHtml(statusLine) + "</div></td>"
                 + "</tr>";
         }).join("");
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(title) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + ".</div></div><div class='file-row' style='margin-top:0'><button id='refreshInactiveTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeInactiveTasksModal' class='btn btn-square' type='button'>×</button></div></div>"
+        const totalCount = (state.inactive.counts || {})[group] || 0;
+        const countLabel = totalCount > rows.length
+            ? "Задач: " + totalCount + " (показаны последние " + rows.length + ")."
+            : "Задач: " + rows.length + ".";
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(title) + "</h3><div class='review-table-subtitle'>" + escapeHtml(countLabel) + "</div></div><div class='file-row' style='margin-top:0'><button id='refreshInactiveTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeInactiveTasksModal' class='btn btn-square' type='button'>×</button></div></div>"
             + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>Задача</th><th>Тип задачи</th><th>Наименование</th><th>Стоимость</th><th>Статус</th></tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>Пока пусто.</div>");
         const refresh = $("refreshInactiveTasks");
         if (refresh) refresh.addEventListener("click", () => { void loadInactiveTasks(); });
