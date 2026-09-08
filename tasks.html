@@ -397,7 +397,8 @@
         #noShkNewBoxModal,
         #noShkBoxDetailModal,
         #noShkMoveModal { z-index: 4400; }
-        #noShkConfirmModal { z-index: 4420; }
+        #noShkConfirmModal,
+        #noShkBoxContentsModal { z-index: 4420; }
         /* Зона «Без ШК» -- flat schematic rack/shelf/box diagram: no
            shadows, no gradients, thin structural lines in the app's own
            accent, boxes color-coded by area via a center stripe. */
@@ -2117,10 +2118,23 @@
         <div id="noShkBoxDetailWrap"></div>
         <div class="file-row" style="margin-top:12px;">
             <button id="bringOutsideBoxBtn" class="btn btn-rect" type="button" style="display:none;">Принесено</button>
+            <button id="openNoShkBoxContentsBtn" class="btn btn-rect" type="button">Открыть содержимое</button>
             <button id="printNoShkBoxBtn" class="btn btn-rect" type="button">Распечатать стикер</button>
             <button id="removeNoShkBoxBtn" class="btn btn-outline" type="button">Убрать с полки</button>
         </div>
         <div id="noShkBoxDetailStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="noShkBoxContentsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Содержимое короба</h3>
+            </div>
+            <button id="closeNoShkBoxContents" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="noShkBoxContentsWrap" style="max-height:70vh;overflow-y:auto;"></div>
     </div>
 </section>
 

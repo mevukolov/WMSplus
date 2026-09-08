@@ -585,6 +585,47 @@
         setZoneModalOpen("noShkBoxDetailModal", true);
     }
 
+    // ---- Box contents (photo feed) ----
+    // intake-photos is a public storage bucket -- the path alone is
+    // enough to build a viewable URL, same construction the intake form
+    // itself uses (buildPublicPhotoUrl in intake.js).
+    function buildIntakePhotoUrl(path) {
+        return "https://bgphllmzmlwurfnbagho.supabase.co/storage/v1/object/public/intake-photos/" + path;
+    }
+
+    function contentCardHtml(item) {
+        const photo = item.photo_path
+            ? "<img src='" + escapeHtmlLocal(buildIntakePhotoUrl(item.photo_path)) + "' style='width:100%;border-radius:8px;object-fit:cover;max-height:220px;display:block;' loading='lazy'>"
+            : "";
+        const nameLine = escapeHtmlLocal(item.item_text || item.item_type || "Без наименования");
+        const categoryLine = item.category ? " · " + escapeHtmlLocal(item.category) : "";
+        const when = new Date(item.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+        return "<div style='border:1px solid rgba(15,23,42,.08);border-radius:10px;padding:10px;margin-bottom:10px;'>"
+            + photo
+            + "<div style='margin-top:8px;font-weight:700;font-size:14px;'>" + nameLine + categoryLine + "</div>"
+            + "<div style='font-size:12px;color:#64748b;margin-top:2px;'>" + escapeHtmlLocal(item.full_name) + " · " + when + "</div>"
+            + "</div>";
+    }
+
+    async function openBoxContentsModal(boxId) {
+        const wrap = $("noShkBoxContentsWrap");
+        if (!wrap) return;
+        wrap.innerHTML = "<p style='color:#64748b;'>Загрузка…</p>";
+        setZoneModalOpen("noShkBoxContentsModal", true);
+        const client = db();
+        if (!client) return;
+        const { data, error } = await client.rpc("wms_no_shk_box_contents", { p_box_id: boxId });
+        if (error) {
+            wrap.innerHTML = "<p style='color:#dc2626;'>Не удалось загрузить: " + escapeHtmlLocal(error.message) + "</p>";
+            return;
+        }
+        if (!data || !data.length) {
+            wrap.innerHTML = "<p style='color:#94a3b8;'>Пока ничего не зафиксировано в этом коробе.</p>";
+            return;
+        }
+        wrap.innerHTML = data.map(contentCardHtml).join("");
+    }
+
     async function removeActiveBox() {
         const client = db();
         if (!client || !activeBoxId) return;
@@ -935,6 +976,10 @@
         if (printBoxBtn) printBoxBtn.addEventListener("click", () => void printActiveBox());
         const bringOutsideBtn = $("bringOutsideBoxBtn");
         if (bringOutsideBtn) bringOutsideBtn.addEventListener("click", () => void bringOutsideBox());
+        const openContentsBtn = $("openNoShkBoxContentsBtn");
+        if (openContentsBtn) openContentsBtn.addEventListener("click", () => { if (activeBoxId) void openBoxContentsModal(activeBoxId); });
+        const closeContentsBtn = $("closeNoShkBoxContents");
+        if (closeContentsBtn) closeContentsBtn.addEventListener("click", () => setZoneModalOpen("noShkBoxContentsModal", false));
 
         const openMoveBtn = $("openMoveBoxesBtn");
         const moveInput = $("noShkMoveScanInput");
