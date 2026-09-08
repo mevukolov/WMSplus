@@ -95,6 +95,7 @@
 
     let racks = [];
     let floorBoxes = [];
+    let outsideBoxes = [];
     // Boxes already rendered once get a calm fade on re-render; a box seen
     // for the first time (just created, or freshly moved into view) gets
     // the bouncier pop-in -- see .no-shk-box.is-new in tasks.html.
@@ -104,12 +105,12 @@
     let activeBoxId = "";
     let moveActiveShelf = null; // { id, rack, shelf }
 
-    const BOX_FIELDS = "id,box_number,shift_date,shift_type,box_type,area,responsible_name,shelf_id,created_at";
+    const BOX_FIELDS = "id,box_number,shift_date,shift_type,box_type,area,responsible_name,shelf_id,outside_opp,total_items,created_at";
 
     async function loadZone() {
         const client = db();
         if (!client) return;
-        const [racksRes, floorRes] = await Promise.all([
+        const [racksRes, floorRes, outsideRes] = await Promise.all([
             client
                 .from("wms_no_shk_racks")
                 .select("id,name,rack_number,position,created_at,wms_no_shk_shelves(id,name,shelf_number,capacity,created_at,wms_no_shk_boxes(" + BOX_FIELDS + "))")
@@ -119,7 +120,13 @@
                 .from("wms_no_shk_boxes")
                 .select(BOX_FIELDS)
                 .is("shelf_id", null)
+                .eq("outside_opp", false)
                 .order("box_number", { ascending: true }),
+            client
+                .from("wms_no_shk_boxes")
+                .select(BOX_FIELDS)
+                .eq("outside_opp", true)
+                .order("created_at", { ascending: true }),
         ]);
         if (racksRes.error) {
             racks = [];
@@ -129,6 +136,7 @@
         }
         racks = racksRes.data || [];
         floorBoxes = floorRes.error ? [] : (floorRes.data || []);
+        outsideBoxes = outsideRes.error ? [] : (outsideRes.data || []);
         renderZoneView();
         renderAdminView();
         if (!boxLabelTemplate) void loadTemplate("Короб «Без ШК»", (tpl) => { boxLabelTemplate = tpl; });
@@ -169,6 +177,16 @@
         return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "'>"
             + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
             + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span>"
+            + "</div>";
+    }
+
+    function outsideBoxTileHtml(box, index) {
+        const isNew = !seenBoxIds.has(box.id);
+        const cls = "no-shk-box " + areaClass(box.area) + (isNew ? " is-new" : "");
+        const delay = Math.min(index, 10) * 30;
+        return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "'>"
+            + "<span class='no-shk-box-number'>" + escapeHtmlLocal(box.area) + "</span>"
+            + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + " · " + box.total_items + " шт.</span>"
             + "</div>";
     }
 
@@ -249,6 +267,14 @@
             wrap.innerHTML = "<p style='color:#dc2626;'>" + escapeHtmlLocal(errorMessage) + "</p>";
             return;
         }
+        const outsideHtml = "<div class='no-shk-floor'>"
+            + "<p class='no-shk-floor-title'>Вне ОПП" + (outsideBoxes.length ? " (" + outsideBoxes.length + ")" : "") + "</p>"
+            + "<div class='no-shk-boxes-row'>"
+            + (outsideBoxes.length
+                ? outsideBoxes.map(outsideBoxTileHtml).join("")
+                : "<span style='color:#94a3b8;font-size:12px;'>пусто</span>")
+            + "</div></div>";
+
         const floorHtml = "<div class='no-shk-floor'>"
             + "<p class='no-shk-floor-title'>На полу" + (floorBoxes.length ? " (" + floorBoxes.length + ")" : "") + "</p>"
             + "<div class='no-shk-boxes-row'>"
@@ -271,7 +297,7 @@
             }).join("") + "</div>"
             : "<p style='color:#64748b;'>Стеллажей пока нет. Нажми ✎, чтобы добавить.</p>";
 
-        wrap.innerHTML = floorHtml + racksHtml;
+        wrap.innerHTML = outsideHtml + floorHtml + racksHtml;
 
         wrap.querySelectorAll("[data-box-id]").forEach((box) => {
             box.addEventListener("click", () => openBoxDetailModal(box.dataset.boxId));
@@ -279,6 +305,7 @@
         attachBoxTooltips(wrap);
 
         const nextSeen = new Set();
+        outsideBoxes.forEach((box) => nextSeen.add(box.id));
         floorBoxes.forEach((box) => nextSeen.add(box.id));
         racks.forEach((rack) => (rack.wms_no_shk_shelves || []).forEach((shelf) => (shelf.wms_no_shk_boxes || []).forEach((box) => nextSeen.add(box.id))));
         seenBoxIds = nextSeen;
@@ -455,6 +482,8 @@
         }
         const floorBox = floorBoxes.find((b) => b.id === boxId);
         if (floorBox) return { box: floorBox, shelf: null, rack: null };
+        const outsideBox = outsideBoxes.find((b) => b.id === boxId);
+        if (outsideBox) return { box: outsideBox, shelf: null, rack: null };
         return null;
     }
 
@@ -537,15 +566,19 @@
         if (!ctx) return;
         activeBoxId = boxId;
         const { box, shelf, rack } = ctx;
-        const location = shelf ? escapeHtmlLocal(rack.name) + " — " + escapeHtmlLocal(shelf.name) : "На полу";
+        const location = box.outside_opp ? "Вне ОПП (Формируется)" : (shelf ? escapeHtmlLocal(rack.name) + " — " + escapeHtmlLocal(shelf.name) : "На полу");
         $("noShkBoxDetailWrap").innerHTML = "<div style='display:flex;flex-direction:column;gap:6px;font-size:14px;'>"
             + "<div><strong>Короб без ШК " + box.box_number + "</strong></div>"
             + "<div>Дата: " + escapeHtmlLocal(computeDateLabel(box)) + " (" + escapeHtmlLocal(box.shift_type) + ")</div>"
             + "<div>Тип: " + escapeHtmlLocal(box.box_type) + "</div>"
             + "<div>Участок: " + escapeHtmlLocal(box.area) + "</div>"
             + "<div>Ответственный: " + escapeHtmlLocal(box.responsible_name) + "</div>"
+            + "<div>Товаров зафиксировано: " + box.total_items + "</div>"
             + "<div>Местоположение: " + location + "</div>"
             + "</div>";
+        $("bringOutsideBoxBtn").style.display = box.outside_opp ? "" : "none";
+        $("printNoShkBoxBtn").style.display = box.outside_opp ? "none" : "";
+        $("removeNoShkBoxBtn").style.display = box.outside_opp ? "none" : "";
         $("removeNoShkBoxBtn").textContent = shelf ? "Убрать с полки (на пол)" : "Удалить короб";
         $("noShkBoxDetailStatus").textContent = "";
         setZoneModalOpen("noShkBoxDetailModal", true);
@@ -564,6 +597,19 @@
             if (!(await zoneConfirm("Удалить этот короб полностью? Это нельзя отменить."))) return;
             const { error } = await client.from("wms_no_shk_boxes").delete().eq("id", activeBoxId);
             if (error) { $("noShkBoxDetailStatus").textContent = "Не удалось удалить: " + error.message; $("noShkBoxDetailStatus").style.color = "#dc2626"; return; }
+        }
+        setZoneModalOpen("noShkBoxDetailModal", false);
+        await loadZone();
+    }
+
+    async function bringOutsideBox() {
+        const client = db();
+        if (!client || !activeBoxId) return;
+        const { error } = await client.from("wms_no_shk_boxes").update({ outside_opp: false }).eq("id", activeBoxId);
+        if (error) {
+            $("noShkBoxDetailStatus").textContent = "Не удалось перенести: " + error.message;
+            $("noShkBoxDetailStatus").style.color = "#dc2626";
+            return;
         }
         setZoneModalOpen("noShkBoxDetailModal", false);
         await loadZone();
@@ -886,6 +932,8 @@
         if (removeBoxBtn) removeBoxBtn.addEventListener("click", () => void removeActiveBox());
         const printBoxBtn = $("printNoShkBoxBtn");
         if (printBoxBtn) printBoxBtn.addEventListener("click", () => void printActiveBox());
+        const bringOutsideBtn = $("bringOutsideBoxBtn");
+        if (bringOutsideBtn) bringOutsideBtn.addEventListener("click", () => void bringOutsideBox());
 
         const openMoveBtn = $("openMoveBoxesBtn");
         const moveInput = $("noShkMoveScanInput");
