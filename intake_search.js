@@ -91,11 +91,15 @@
             ? " <span style='color:#dc2626;font-weight:700;'>· " + escapeHtmlLocal(item.no_shk_bucket) + "</span>"
             : "";
         const when = new Date(item.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+        const stickerLine = item.sticker_code
+            ? "<div style='font-size:12px;color:#64748b;'>Присвоенный ШК: " + escapeHtmlLocal(item.sticker_code) + "</div>"
+            : "";
         return "<div style='border:1px solid rgba(15,23,42,.08);border-radius:10px;padding:10px;'>"
             + photo
             + "<div style='margin-top:8px;font-weight:700;font-size:14px;'>" + nameLine + categoryLine + bucketLine + "</div>"
             + "<div style='font-size:12px;color:#64748b;margin-top:2px;'>" + escapeHtmlLocal(item.area) + " · " + escapeHtmlLocal(item.item_type || "") + "</div>"
             + "<div style='font-size:12px;color:#64748b;'>" + escapeHtmlLocal(item.full_name) + " · " + when + "</div>"
+            + stickerLine
             + "</div>";
     }
 

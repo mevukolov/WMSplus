@@ -600,10 +600,14 @@
         const nameLine = escapeHtmlLocal(item.item_text || item.item_type || "Без наименования");
         const categoryLine = item.category ? " · " + escapeHtmlLocal(item.category) : "";
         const when = new Date(item.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+        const stickerLine = item.sticker_code
+            ? "<div style='font-size:12px;color:#64748b;margin-top:2px;'>Присвоенный ШК: " + escapeHtmlLocal(item.sticker_code) + "</div>"
+            : "";
         return "<div style='border:1px solid rgba(15,23,42,.08);border-radius:10px;padding:10px;margin-bottom:10px;'>"
             + photo
             + "<div style='margin-top:8px;font-weight:700;font-size:14px;'>" + nameLine + categoryLine + "</div>"
             + "<div style='font-size:12px;color:#64748b;margin-top:2px;'>" + escapeHtmlLocal(item.full_name) + " · " + when + "</div>"
+            + stickerLine
             + "</div>";
     }
 
