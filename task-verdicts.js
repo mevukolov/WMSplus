@@ -24,14 +24,15 @@ const INCOMING_FLOW_ATTACHMENT_OPTIONS = [
     "Некорректный запрос",
 ];
 
-// Value is the extra field's label -- "" means the verdict is still deferred
-// (see completeTaskFromDetail's isDeferred, which checks key presence, not
-// truthiness) but needs no extra input beyond the verdict itself.
+// Value is the extra field's label -- "" would mean the verdict is still
+// deferred (see completeTaskFromDetail's isDeferred, which checks key
+// presence, not truthiness) but needs no extra input beyond the verdict
+// itself. Every current entry requires input, same as "Отправлен на релиз".
 const DEFERRED_VERDICT_FIELDS = {
     "Отправлен запрос": "Направление запроса",
     "Отправлен на релиз": "Вставьте ссылку на запрос релиза",
     "Отправлен на списание ревизией": "Вставьте ссылку",
-    [CANCELLATION_AFTER_WRITEOFF_VERDICT]: "",
+    [CANCELLATION_AFTER_WRITEOFF_VERDICT]: "Комментарий",
 };
 
 // Комментарий ОПП для "Запросов входящего потока" меняет подсказку в

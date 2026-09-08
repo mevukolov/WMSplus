@@ -9516,9 +9516,9 @@
             return;
         }
         const now = new Date().toISOString();
-        // hasOwnProperty, not truthiness -- CANCELLATION_AFTER_WRITEOFF_VERDICT
-        // is deferred with an empty-string field label (no extra input
-        // required), which `Boolean(...)` would wrongly read as "not deferred".
+        // hasOwnProperty, not truthiness -- future verdicts may need to be
+        // deferred with an empty-string field label (no extra input beyond
+        // the verdict itself), which `Boolean(...)` would misread as "not deferred".
         const isDeferred = Object.prototype.hasOwnProperty.call(DEFERRED_VERDICT_FIELDS, verdict);
         const reopenAfter = isDeferred ? reopenAfterForVerdict(verdict, row) : null;
         const reviewPayload = {
