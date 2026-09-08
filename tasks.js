@@ -3259,6 +3259,16 @@
             verdict: SYSTEM_MOVEMENT_VERDICT,
             comment: note || "Подтверждено движение по Superset",
         });
+        if (needsSourceWriteback(row)) {
+            // Auto-close never blocks on this -- the sheet's own "Движение"
+            // dropdown option is a courtesy mirror, not a precondition for
+            // the WMS task itself being done. A batch of 50 closes must not
+            // stall because one sheet row is already filled or unreachable.
+            writeBackTaskToSource({ ...row, ...data }, {
+                attachment: "Движение",
+                comment: note || "Подтверждено движение по Superset",
+            }).catch((error) => console.warn("system movement writeback skipped for", row.id, error));
+        }
         return data;
     }
 
