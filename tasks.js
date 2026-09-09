@@ -5103,6 +5103,12 @@
 
     function displayTaskStatus(row) {
         if (isReopenedTask(row)) return "Переоткрыто";
+        // auto_reopen_wms_tasks() (202608260003_task_status_check_and_auto_reopen.sql)
+        // flips task_status back to "Не начато" once reopen_after passes, so a
+        // task that already went through a defer+reopen cycle looks identical
+        // to one nobody ever touched. reopened_at survives that reset and is
+        // the only trace left -- surface it so the two cases stay distinguishable.
+        if (taskStatus(row) === "Не начато" && row && row.reopened_at) return "Переоткрыто";
         return taskStatus(row);
     }
 
