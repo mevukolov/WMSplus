@@ -389,8 +389,9 @@
     let currentLightboxId = null;
 
     function openPhotoLightbox(item, id) {
-        const wrap = $("intakeSearchPhotoWrap");
-        if (!wrap || !item.photo_path) return;
+        const img = $("intakeSearchPhotoImg");
+        const infoContent = $("intakeSearchPhotoInfoContent");
+        if (!img || !infoContent || !item.photo_path) return;
         currentLightboxId = id || null;
         const when = new Date(item.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
         const isShredder = item.item_type === "Шредер";
@@ -403,17 +404,15 @@
             : "";
         const employeeLine = "<div class='row'><b>Сотрудник:</b> " + escapeHtmlLocal(item.full_name || "-")
             + (item.employee_id ? " (№" + escapeHtmlLocal(String(item.employee_id)) + ")" : "") + "</div>";
-        wrap.innerHTML = "<img src='" + escapeHtmlLocal(buildIntakePhotoUrl(item.photo_path)) + "' alt='Фото товара'>"
-            + "<div class='intake-photo-lightbox-info'>"
-            + areaPillHtml(item.area)
+        img.src = buildIntakePhotoUrl(item.photo_path);
+        infoContent.innerHTML = areaPillHtml(item.area)
             + "<div class='name'>" + nameLine + "</div>"
             + (item.category ? "<div class='category'>" + escapeHtmlLocal(item.category) + "</div>" : "")
             + bucketLine
             + employeeLine
             + "<div class='row'><b>Тип:</b> " + escapeHtmlLocal(item.item_type || "-") + "</div>"
             + "<div class='row'><b>Когда:</b> " + when + "</div>"
-            + stickerLine
-            + "</div>";
+            + stickerLine;
         renderAssignRow(item);
         setModalOpen("intakeSearchPhotoModal", true);
     }
@@ -436,6 +435,7 @@
         const preview = $("intakeAssignShkPreview");
         const msg = $("intakeAssignShkMsg");
         if (!btn || !form) return;
+        btn.style.display = "";
         form.style.display = "none";
         if (input) input.value = "";
         if (preview) { preview.textContent = ""; preview.className = "intake-assign-preview"; }
@@ -654,6 +654,7 @@
                 const form = $("intakeAssignShkForm");
                 const input = $("intakeAssignShkInput");
                 if (!form) return;
+                assignBtn.style.display = "none";
                 form.style.display = "grid";
                 if (input) input.focus();
             });
@@ -672,6 +673,7 @@
             assignCancel.addEventListener("click", () => {
                 const form = $("intakeAssignShkForm");
                 if (form) form.style.display = "none";
+                if (assignBtn) assignBtn.style.display = "";
             });
         }
     });
