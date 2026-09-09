@@ -129,6 +129,7 @@
         rangeTo: "",
         calendarMonth: startOfMonth(new Date()),
         openKey: "",
+        unassignedOnly: false,
     };
 
     function filterSummaryText(key) {
@@ -220,6 +221,12 @@
         });
     }
 
+    function renderUnassignedBlock() {
+        return "<div class='intake-search-unassigned-block'>"
+            + "<label class='intake-search-unassigned-check'><input type='checkbox' id='intakeSearchUnassignedOnly' " + (filters.unassignedOnly ? "checked" : "") + "> Без оприхода</label>"
+            + "</div>";
+    }
+
     function renderFilterPanel() {
         const panel = $("intakeSearchFilterPanel");
         if (!panel) return;
@@ -229,7 +236,8 @@
             + renderDropdownBlock("itemTypes", "Тип")
             + renderDropdownBlock("categories", "Категория")
             + renderEmployeeBlock()
-            + renderCalendarBlock();
+            + renderCalendarBlock()
+            + renderUnassignedBlock();
     }
 
     function wireFilterPanelEvents() {
@@ -271,6 +279,10 @@
         });
 
         panel.addEventListener("change", (e) => {
+            if (e.target && e.target.id === "intakeSearchUnassignedOnly") {
+                filters.unassignedOnly = e.target.checked;
+                return;
+            }
             const allBox = e.target.closest("[data-intake-filter-all]");
             if (allBox) {
                 e.stopPropagation();
@@ -337,6 +349,7 @@
             p_employee_query: filters.employeeQuery.trim() || null,
             p_date_from: filters.rangeFrom || null,
             p_date_to: filters.rangeTo || null,
+            p_unassigned_only: filters.unassignedOnly,
         };
     }
 
@@ -441,13 +454,16 @@
         if (preview) { preview.textContent = ""; preview.className = "intake-assign-preview"; }
         if (msg) { msg.textContent = ""; msg.className = "intake-assign-msg"; }
         if (item.sticker_code) {
-            btn.disabled = true;
+            const decoded = decodeStickerCode(item.sticker_code) || item.sticker_code;
+            btn.disabled = false;
             btn.classList.add("is-assigned");
-            btn.textContent = "ШК присвоен: " + (decodeStickerCode(item.sticker_code) || item.sticker_code);
+            btn.textContent = "ШК присвоен: " + decoded;
+            btn.setAttribute("data-copy-value", decoded);
         } else {
             btn.disabled = false;
             btn.classList.remove("is-assigned");
             btn.textContent = "Присвоить ШК";
+            btn.removeAttribute("data-copy-value");
         }
     }
 
@@ -570,6 +586,7 @@
         filters.categories = new Set();
         filters.employeeQuery = "";
         filters.openKey = "";
+        filters.unassignedOnly = false;
         const range = defaultDateRange();
         filters.rangeFrom = range.from;
         filters.rangeTo = range.to;
@@ -651,6 +668,20 @@
         const assignBtn = $("intakeAssignShkBtn");
         if (assignBtn) {
             assignBtn.addEventListener("click", () => {
+                const copyValue = assignBtn.getAttribute("data-copy-value");
+                if (copyValue) {
+                    const restore = assignBtn.textContent;
+                    const copyDone = () => {
+                        assignBtn.textContent = "Скопировано";
+                        setTimeout(() => { assignBtn.textContent = restore; }, 1200);
+                    };
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(copyValue).then(copyDone, copyDone);
+                    } else {
+                        copyDone();
+                    }
+                    return;
+                }
                 const form = $("intakeAssignShkForm");
                 const input = $("intakeAssignShkInput");
                 if (!form) return;
