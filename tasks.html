@@ -400,6 +400,26 @@
         #intakeSearchModal { z-index: 4400; }
         #noShkConfirmModal,
         #noShkBoxContentsModal { z-index: 4420; }
+        #intakeSearchPhotoModal { z-index: 4460; }
+        .intake-search-query-row { margin-bottom: 12px; }
+        .intake-search-query-row input { width: 100%; font-size: 17px; font-weight: 800; padding: 12px 14px; }
+        .intake-area-pill { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 900; white-space: nowrap; }
+        .intake-area-pill--hub { background: #fef3c7; color: #92400e; }
+        .intake-area-pill--pack { background: #ede9fe; color: #5b21b6; }
+        .intake-area-pill--market { background: #dbeafe; color: #1d4ed8; }
+        .intake-search-card { border: 1px solid rgba(15,23,42,.08); border-radius: 10px; padding: 10px; cursor: default; }
+        .intake-search-card.has-shk { border-color: #22c55e; background: #f0fdf4; }
+        .intake-search-photo { cursor: zoom-in; }
+        .review-filter-day.is-intake-range-start, .review-filter-day.is-intake-range-end { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .review-filter-day.is-intake-in-range { background: #ede9fe; border-color: #ddd6fe; color: #4c1d95; }
+        .intake-daterange-trigger { min-width: 190px; }
+        .intake-photo-lightbox { display: flex; gap: 20px; align-items: flex-start; max-width: min(1100px, 94vw); max-height: 88dvh; }
+        .intake-photo-lightbox img { max-width: min(640px, 58vw); max-height: 82dvh; object-fit: contain; border-radius: 12px; background: #0f0f14; display: block; }
+        .intake-photo-lightbox-info { width: min(300px, 32vw); flex: 0 0 auto; display: grid; gap: 8px; }
+        .intake-photo-lightbox-info .name { font-weight: 900; font-size: 16px; }
+        .intake-photo-lightbox-info .category { font-style: italic; color: #64748b; }
+        .intake-photo-lightbox-info .row { font-size: 13px; color: #334155; }
+        .intake-photo-lightbox-info .row b { color: #0f172a; }
         /* Зона «Без ШК» -- flat schematic rack/shelf/box diagram: no
            shadows, no gradients, thin structural lines in the app's own
            accent, boxes color-coded by area via a center stripe. */
@@ -2141,50 +2161,13 @@
             </div>
             <button id="closeIntakeSearch" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
+        <div class="intake-search-query-row">
+            <input id="intakeSearchQuery" type="text" class="input" placeholder="Наименование товара">
+        </div>
+        <div id="intakeSearchFilterPanel" class="review-filter-dropdown" style="padding:0 0 12px;border-bottom:0;">
+            <div class="review-filter-panel"></div>
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:14px;">
-            <label>Наименование<br><input id="intakeSearchQuery" type="text" class="input" placeholder="Что искать" style="width:180px;"></label>
-            <label>Участок<br>
-                <div class="select">
-                    <select id="intakeSearchArea">
-                        <option value="">Все</option>
-                        <option value="ХАБ">ХАБ</option>
-                        <option value="Упаковка">Упаковка</option>
-                        <option value="Маркетплейс">Маркетплейс</option>
-                    </select>
-                </div>
-            </label>
-            <label>Тип<br>
-                <div class="select">
-                    <select id="intakeSearchItemType">
-                        <option value="">Все</option>
-                        <option value="Мелкий товар">Мелкий товар</option>
-                        <option value="КГТ">КГТ</option>
-                        <option value="Шредер">Шредер</option>
-                    </select>
-                </div>
-            </label>
-            <label>Категория<br>
-                <div class="select">
-                    <select id="intakeSearchCategory">
-                        <option value="">Все</option>
-                        <option value="Одежда">Одежда</option>
-                        <option value="Обувь">Обувь</option>
-                        <option value="Косметика">Косметика</option>
-                        <option value="Бытовая химия">Бытовая химия</option>
-                        <option value="Мебель">Мебель</option>
-                        <option value="Электроника">Электроника</option>
-                        <option value="Ювелирка">Ювелирка</option>
-                        <option value="Для авто">Для авто</option>
-                        <option value="Для животных">Для животных</option>
-                        <option value="Посуда">Посуда</option>
-                        <option value="Еда">Еда</option>
-                        <option value="Посылка">Посылка</option>
-                    </select>
-                </div>
-            </label>
-            <label>Сотрудник<br><input id="intakeSearchFullName" type="text" class="input" placeholder="ФИО" style="width:160px;"></label>
-            <label>Дата с<br><input id="intakeSearchDateFrom" type="date" class="input"></label>
-            <label>по<br><input id="intakeSearchDateTo" type="date" class="input"></label>
             <button id="intakeSearchGoBtn" class="btn btn-rect" type="button">Найти</button>
             <button id="intakeSearchResetBtn" class="btn btn-outline" type="button">Сбросить</button>
         </div>
@@ -2205,6 +2188,16 @@
             <button id="closeNoShkBoxContents" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
         <div id="noShkBoxContentsWrap" style="max-height:70vh;overflow-y:auto;"></div>
+    </div>
+</section>
+
+<section id="intakeSearchPhotoModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card no-shk-modal-xl">
+        <div class="work-head">
+            <div><h3 class="work-title">Фото товара</h3></div>
+            <button id="closeIntakeSearchPhoto" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="intakeSearchPhotoWrap" class="intake-photo-lightbox"></div>
     </div>
 </section>
 
