@@ -666,8 +666,6 @@
                 if (e.key === "Enter") void confirmAssignSticker();
             });
         }
-        const assignConfirm = $("intakeAssignShkConfirm");
-        if (assignConfirm) assignConfirm.addEventListener("click", () => void confirmAssignSticker());
         const assignCancel = $("intakeAssignShkCancel");
         if (assignCancel) {
             assignCancel.addEventListener("click", () => {

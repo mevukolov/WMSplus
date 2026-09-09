@@ -428,13 +428,18 @@
         .intake-photo-lightbox-info .category { font-style: italic; color: #64748b; }
         .intake-photo-lightbox-info .row { font-size: 13px; color: #334155; }
         .intake-photo-lightbox-info .row b { color: #0f172a; }
-        .intake-assign-row { flex: 0 0 auto; margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(15,23,42,.08); display: flex; flex-direction: column; align-items: flex-end; }
+        .intake-assign-row { flex: 0 0 auto; margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(15,23,42,.08); }
+        .intake-assign-btn { width: 100%; box-sizing: border-box; }
         .intake-assign-btn.is-assigned { background: #e2e8f0; color: #94a3b8; opacity: 1; cursor: default; box-shadow: none; }
-        .intake-assign-form { margin-top: 10px; display: grid; gap: 10px; width: 100%; max-width: 100%; box-sizing: border-box; }
-        .intake-assign-form input { box-sizing: border-box; max-width: 100%; }
-        .intake-assign-preview { font-size: 12px; color: #64748b; min-height: 16px; }
+        .intake-assign-form { display: grid; gap: 8px; width: 100%; box-sizing: border-box; }
+        .intake-assign-input-row { display: flex; gap: 8px; align-items: stretch; }
+        .intake-assign-input-row input { flex: 1; min-width: 0; box-sizing: border-box; }
+        .intake-assign-cancel { flex: 0 0 auto; background: #e2e8f0; color: #64748b; box-shadow: none; }
+        .intake-assign-preview { font-size: 12px; color: #64748b; }
+        .intake-assign-preview:empty { display: none; }
         .intake-assign-preview.is-invalid { color: #dc2626; }
-        .intake-assign-msg { font-size: 12px; min-height: 16px; }
+        .intake-assign-msg { font-size: 12px; }
+        .intake-assign-msg:empty { display: none; }
         .intake-assign-msg.is-error { color: #dc2626; }
         .intake-assign-msg.is-ok { color: #16a34a; }
         /* Зона «Без ШК» -- flat schematic rack/shelf/box diagram: no
@@ -2222,14 +2227,11 @@
                 <div id="intakeAssignShkRow" class="intake-assign-row">
                     <button id="intakeAssignShkBtn" class="btn btn-rect intake-assign-btn" type="button">Присвоить ШК</button>
                     <div id="intakeAssignShkForm" class="intake-assign-form" style="display:none;">
-                        <label>Отсканируйте стикер<br>
-                            <input id="intakeAssignShkInput" class="input" type="text" placeholder="Введите значение стикера">
-                        </label>
-                        <div id="intakeAssignShkPreview" class="intake-assign-preview"></div>
-                        <div class="file-row" style="margin-top:0;">
-                            <button id="intakeAssignShkConfirm" class="btn btn-rect" type="button">Присвоить</button>
-                            <button id="intakeAssignShkCancel" class="btn btn-outline" type="button">Отмена</button>
+                        <div class="intake-assign-input-row">
+                            <input id="intakeAssignShkInput" class="input" type="text" placeholder="Отсканируйте стикер">
+                            <button id="intakeAssignShkCancel" class="btn btn-square intake-assign-cancel" type="button" aria-label="Отмена">×</button>
                         </div>
+                        <div id="intakeAssignShkPreview" class="intake-assign-preview"></div>
                         <div id="intakeAssignShkMsg" class="intake-assign-msg"></div>
                     </div>
                 </div>
