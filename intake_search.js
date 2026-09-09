@@ -16,6 +16,14 @@
         return window.supabaseClient || null;
     }
 
+    // window.MiniUI (ui.js) is a genuine shared global, unlike this file's
+    // own small helpers -- still wrapped so a missing MiniUI degrades to a
+    // console log instead of throwing, matching tasks.js's own toast().
+    function toast(message, type) {
+        if (window.MiniUI && typeof window.MiniUI.toast === "function") window.MiniUI.toast(message, { type: type || "info" });
+        else console.log(message);
+    }
+
     function escapeHtmlLocal(value) {
         const div = document.createElement("div");
         div.textContent = value == null ? "" : String(value);
@@ -221,9 +229,17 @@
         });
     }
 
+    // Mirrors pure_losses_constructor's posted-mode-toggle-btn: a small
+    // square icon button that cycles state on click instead of a checkbox.
+    const UNASSIGNED_TOGGLE_META = {
+        false: { icon: "○", title: "Оприход: все" },
+        true: { icon: "✕", title: "Оприход: без оприхода" },
+    };
     function renderUnassignedBlock() {
+        const meta = UNASSIGNED_TOGGLE_META[filters.unassignedOnly];
         return "<div class='intake-search-unassigned-block'>"
-            + "<label class='intake-search-unassigned-check'><input type='checkbox' id='intakeSearchUnassignedOnly' " + (filters.unassignedOnly ? "checked" : "") + "> Без оприхода</label>"
+            + "<span class='review-filter-title'>Оприход</span>"
+            + "<button id='intakeSearchUnassignedToggle' type='button' class='btn btn-square" + (filters.unassignedOnly ? " active" : "") + "' title='" + meta.title + "'>" + meta.icon + "</button>"
             + "</div>";
     }
 
@@ -269,26 +285,33 @@
                 if (!filters.rangeFrom || filters.rangeTo || iso < filters.rangeFrom) {
                     filters.rangeFrom = iso;
                     filters.rangeTo = "";
+                    renderFilterPanel();
                 } else {
                     filters.rangeTo = iso;
                     filters.openKey = "";
+                    renderFilterPanel();
+                    void runSearch(true);
                 }
+                return;
+            }
+            const unassignedToggle = e.target.closest("#intakeSearchUnassignedToggle");
+            if (unassignedToggle) {
+                e.stopPropagation();
+                filters.unassignedOnly = !filters.unassignedOnly;
                 renderFilterPanel();
+                void runSearch(true);
                 return;
             }
         });
 
         panel.addEventListener("change", (e) => {
-            if (e.target && e.target.id === "intakeSearchUnassignedOnly") {
-                filters.unassignedOnly = e.target.checked;
-                return;
-            }
             const allBox = e.target.closest("[data-intake-filter-all]");
             if (allBox) {
                 e.stopPropagation();
                 const key = allBox.getAttribute("data-intake-filter-all");
                 filters[key] = allBox.checked ? new Set() : new Set([FILTER_NONE]);
                 renderFilterPanel();
+                void runSearch(true);
                 return;
             }
             const oneBox = e.target.closest("[data-intake-filter]");
@@ -302,6 +325,7 @@
                 else if (checked.length >= options.length) filters[key] = new Set();
                 else filters[key] = new Set(checked);
                 renderFilterPanel();
+                void runSearch(true);
             }
         });
 
@@ -670,11 +694,9 @@
             assignBtn.addEventListener("click", () => {
                 const copyValue = assignBtn.getAttribute("data-copy-value");
                 if (copyValue) {
-                    const restore = assignBtn.textContent;
-                    const copyDone = () => {
-                        assignBtn.textContent = "Скопировано";
-                        setTimeout(() => { assignBtn.textContent = restore; }, 1200);
-                    };
+                    // Toast only -- swapping the button's own text caused a
+                    // reflow (button height/row jumping for a frame).
+                    const copyDone = () => toast("Скопировано: " + copyValue, "success");
                     if (navigator.clipboard && navigator.clipboard.writeText) {
                         navigator.clipboard.writeText(copyValue).then(copyDone, copyDone);
                     } else {

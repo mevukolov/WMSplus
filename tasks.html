@@ -401,7 +401,7 @@
         #noShkConfirmModal,
         #noShkBoxContentsModal { z-index: 4420; }
         #intakeSearchPhotoModal { z-index: 4460; }
-        .intake-search-query-row { margin-bottom: 12px; display: flex; gap: 10px; align-items: stretch; }
+        .intake-search-query-row { margin-top: 18px; margin-bottom: 12px; display: flex; gap: 10px; align-items: stretch; }
         .intake-search-query-row input { flex: 1; min-width: 0; box-sizing: border-box; font-size: 19px; font-weight: 800; padding: 14px 16px; }
         .intake-search-query-row #intakeSearchGoBtn { flex: 0 0 auto; font-size: 15px; padding-left: 22px; padding-right: 22px; }
         .intake-search-filter-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding-bottom: 14px; }
@@ -409,9 +409,9 @@
         .intake-search-filter-row .review-filter-trigger { min-height: 32px; padding: 6px 10px; font-size: 12px; border-radius: 10px; box-shadow: none; }
         .intake-search-filter-row .review-filter-title { font-size: 11px; margin-bottom: 3px; }
         .intake-search-filter-row #intakeSearchResetBtn { flex: 0 0 auto; margin-left: auto; }
-        .intake-search-unassigned-block { display: flex; align-items: flex-end; }
-        .intake-search-unassigned-check { display: flex; align-items: center; gap: 7px; min-height: 32px; font-size: 12px; font-weight: 800; color: #334155; cursor: pointer; white-space: nowrap; }
-        .intake-search-unassigned-check input { accent-color: var(--accent); width: 15px; height: 15px; }
+        .intake-search-unassigned-block { display: flex; flex-direction: column; }
+        .intake-search-unassigned-block .review-filter-title { font-size: 11px; margin-bottom: 3px; }
+        #intakeSearchUnassignedToggle { width: 32px; height: 32px; border-radius: 10px; font-size: 15px; }
         .intake-area-pill { display: inline-block; border-radius: 999px; padding: 5px 13px; font-size: 12px; line-height: 1.3; font-weight: 900; white-space: nowrap; }
         .intake-area-pill--hub { background: #fef3c7; color: #92400e; }
         .intake-area-pill--pack { background: #ede9fe; color: #5b21b6; }
@@ -426,7 +426,7 @@
         .intake-daterange-trigger { min-width: 190px; }
         .review-filter-block--align-right .review-filter-popover { left: auto; right: 0; }
         .intake-employee-input { box-sizing: border-box; width: 100%; min-height: 38px; }
-        .intake-search-modal-card { width: min(1440px, 96vw); height: 85vh; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+        .intake-search-modal-card { width: min(1440px, 96vw); max-width: min(1440px, 96vw); min-width: 0; height: 85vh; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
         .intake-search-modal-card #intakeSearchResultsWrap { flex: 1; min-height: 0; overflow-y: auto; }
         .intake-photo-modal-card { width: min(1200px, 92vw); height: 85vh; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
         .intake-photo-lightbox { flex: 1; min-height: 0; display: flex; gap: 20px; margin-top: 14px; }
@@ -759,7 +759,6 @@
         }
         .tasks-flow-card-wide { width: min(1160px, 100%); }
         .no-shk-modal-xl { width: fit-content; max-width: min(1300px, 98vw); }
-        .intake-search-modal-card { width: min(1440px, 96vw); }
         .no-shk-move-card {
             width: 100vw;
             height: 100dvh;
@@ -2201,10 +2200,8 @@
             <button id="intakeSearchResetBtn" class="btn btn-outline" type="button">Сбросить</button>
         </div>
         <div id="intakeSearchStatus" class="review-status"></div>
-        <div id="intakeSearchResultsWrap" style="max-height:60vh;overflow-y:auto;"></div>
-        <div class="file-row" style="margin-top:12px;">
-            <button id="intakeSearchMoreBtn" class="btn btn-outline" type="button" style="display:none;">Показать ещё</button>
-        </div>
+        <div id="intakeSearchResultsWrap"></div>
+        <button id="intakeSearchMoreBtn" class="btn btn-outline" type="button" style="display:none;margin-top:12px;">Показать ещё</button>
     </div>
 </section>
 
