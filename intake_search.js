@@ -162,7 +162,7 @@
     function renderEmployeeBlock() {
         return "<div class='review-filter-block'>"
             + "<span class='review-filter-title'>Сотрудник</span>"
-            + "<input id='intakeSearchEmployee' type='text' class='input' placeholder='ФИО или таб. номер' style='width:100%;min-height:38px;' value='" + escapeHtmlLocal(filters.employeeQuery) + "'>"
+            + "<input id='intakeSearchEmployee' type='text' class='input intake-employee-input' placeholder='ФИО или таб. номер' value='" + escapeHtmlLocal(filters.employeeQuery) + "'>"
             + "</div>";
     }
 
@@ -373,7 +373,7 @@
         const stickerLine = item.sticker_code
             ? "<div style='font-size:12px;color:#64748b;'>Присвоенный ШК: " + escapeHtmlLocal(decodeStickerCode(item.sticker_code) || item.sticker_code) + "</div>"
             : "";
-        return "<div class='intake-search-card" + (item.sticker_code ? " has-shk" : "") + "'>"
+        return "<div class='intake-search-card" + (item.sticker_code ? " has-shk" : "") + "' data-intake-card-id='" + id + "'>"
             + photo
             + "<div style='margin-top:8px;'>"
             + areaPillHtml(item.area)
@@ -386,9 +386,12 @@
             + "</div>";
     }
 
-    function openPhotoLightbox(item) {
+    let currentLightboxId = null;
+
+    function openPhotoLightbox(item, id) {
         const wrap = $("intakeSearchPhotoWrap");
         if (!wrap || !item.photo_path) return;
+        currentLightboxId = id || null;
         const when = new Date(item.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
         const isShredder = item.item_type === "Шредер";
         const nameLine = escapeHtmlLocal(isShredder ? "Шредер" : (item.item_text || item.item_type || "Без наименования"));
@@ -411,7 +414,106 @@
             + "<div class='row'><b>Когда:</b> " + when + "</div>"
             + stickerLine
             + "</div>";
+        renderAssignRow(item);
         setModalOpen("intakeSearchPhotoModal", true);
+    }
+
+    // ---- retroactive sticker assignment: equivalent to scanning a
+    // sticker in the intake form itself, just from the admin side. ----
+    function currentAdminActor() {
+        try {
+            const user = JSON.parse(localStorage.getItem("user") || "{}");
+            return { id: user.id != null ? String(user.id) : "", name: user.fio || user.name || "" };
+        } catch (e) {
+            return { id: "", name: "" };
+        }
+    }
+
+    function renderAssignRow(item) {
+        const btn = $("intakeAssignShkBtn");
+        const form = $("intakeAssignShkForm");
+        const input = $("intakeAssignShkInput");
+        const preview = $("intakeAssignShkPreview");
+        const msg = $("intakeAssignShkMsg");
+        if (!btn || !form) return;
+        form.style.display = "none";
+        if (input) input.value = "";
+        if (preview) { preview.textContent = ""; preview.className = "intake-assign-preview"; }
+        if (msg) { msg.textContent = ""; msg.className = "intake-assign-msg"; }
+        if (item.sticker_code) {
+            btn.disabled = true;
+            btn.classList.add("is-assigned");
+            btn.textContent = "ШК присвоен: " + (decodeStickerCode(item.sticker_code) || item.sticker_code);
+        } else {
+            btn.disabled = false;
+            btn.classList.remove("is-assigned");
+            btn.textContent = "Присвоить ШК";
+        }
+    }
+
+    function updatePreview() {
+        const input = $("intakeAssignShkInput");
+        const preview = $("intakeAssignShkPreview");
+        if (!input || !preview) return;
+        const value = input.value.trim();
+        if (!value) {
+            preview.textContent = "";
+            preview.className = "intake-assign-preview";
+            return;
+        }
+        if (value.charAt(0) !== "*") {
+            preview.textContent = "Стикер должен начинаться с «*»";
+            preview.className = "intake-assign-preview is-invalid";
+            return;
+        }
+        const decoded = decodeStickerCode(value);
+        if (!decoded) {
+            preview.textContent = "Не удалось расшифровать стикер";
+            preview.className = "intake-assign-preview is-invalid";
+            return;
+        }
+        preview.textContent = "Значение: " + decoded;
+        preview.className = "intake-assign-preview";
+    }
+
+    async function confirmAssignSticker() {
+        const id = currentLightboxId;
+        const item = id ? itemsById.get(id) : null;
+        const input = $("intakeAssignShkInput");
+        const msg = $("intakeAssignShkMsg");
+        if (!item || !input || !msg) return;
+        const value = input.value.trim();
+        if (value.charAt(0) !== "*" || !decodeStickerCode(value)) {
+            msg.textContent = "Проверьте значение стикера.";
+            msg.className = "intake-assign-msg is-error";
+            return;
+        }
+        const client = db();
+        if (!client) return;
+        msg.textContent = "Сохранение…";
+        msg.className = "intake-assign-msg";
+        const { data, error } = await client.rpc("wms_intake_assign_sticker", {
+            p_submission_id: item.id,
+            p_sticker_code: value,
+        });
+        if (error || !data || !data.length) {
+            msg.textContent = error ? "Не удалось присвоить: " + error.message : "ШК уже присвоен другим стикером.";
+            msg.className = "intake-assign-msg is-error";
+            return;
+        }
+        item.sticker_code = data[0].sticker_code;
+        const actor = currentAdminActor();
+        await client.from("wms_no_shk_sticker_events").insert({
+            intake_submission_id: item.id,
+            sticker_code: item.sticker_code,
+            source: "admin",
+            actor_employee_id: actor.id || null,
+            actor_name: actor.name || null,
+            payload: { note: "Присвоен стикер к товару «Без ШК»" },
+        });
+        const cardEl = document.querySelector("[data-intake-card-id='" + id + "']");
+        if (cardEl) cardEl.outerHTML = resultCardHtml(item);
+        openPhotoLightbox(item, id);
     }
 
     async function runSearch(reset) {
@@ -483,8 +585,9 @@
             resultsWrap.addEventListener("click", (e) => {
                 const photoEl = e.target.closest("[data-intake-photo-id]");
                 if (!photoEl) return;
-                const item = itemsById.get(photoEl.getAttribute("data-intake-photo-id"));
-                if (item) openPhotoLightbox(item);
+                const id = photoEl.getAttribute("data-intake-photo-id");
+                const item = itemsById.get(id);
+                if (item) openPhotoLightbox(item, id);
             });
         }
 
@@ -521,5 +624,55 @@
 
         const moreBtn = $("intakeSearchMoreBtn");
         if (moreBtn) moreBtn.addEventListener("click", () => void runSearch(false));
+
+        // Enter searches (from the name field or the employee field);
+        // Escape closes whichever of the two modals is topmost.
+        const searchModal = $("intakeSearchModal");
+        if (searchModal) {
+            searchModal.addEventListener("keydown", (e) => {
+                if (e.key !== "Enter") return;
+                if (e.target && (e.target.id === "intakeSearchQuery" || e.target.id === "intakeSearchEmployee")) {
+                    void runSearch(true);
+                }
+            });
+        }
+        document.addEventListener("keydown", (e) => {
+            if (e.key !== "Escape") return;
+            const photoModal = $("intakeSearchPhotoModal");
+            if (photoModal && photoModal.classList.contains("active")) {
+                setModalOpen("intakeSearchPhotoModal", false);
+                return;
+            }
+            if (searchModal && searchModal.classList.contains("active")) {
+                setModalOpen("intakeSearchModal", false);
+            }
+        });
+
+        const assignBtn = $("intakeAssignShkBtn");
+        if (assignBtn) {
+            assignBtn.addEventListener("click", () => {
+                const form = $("intakeAssignShkForm");
+                const input = $("intakeAssignShkInput");
+                if (!form) return;
+                form.style.display = "grid";
+                if (input) input.focus();
+            });
+        }
+        const assignInput = $("intakeAssignShkInput");
+        if (assignInput) {
+            assignInput.addEventListener("input", updatePreview);
+            assignInput.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") void confirmAssignSticker();
+            });
+        }
+        const assignConfirm = $("intakeAssignShkConfirm");
+        if (assignConfirm) assignConfirm.addEventListener("click", () => void confirmAssignSticker());
+        const assignCancel = $("intakeAssignShkCancel");
+        if (assignCancel) {
+            assignCancel.addEventListener("click", () => {
+                const form = $("intakeAssignShkForm");
+                if (form) form.style.display = "none";
+            });
+        }
     });
 })();
