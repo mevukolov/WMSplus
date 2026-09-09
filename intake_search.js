@@ -81,7 +81,7 @@
     // ---- fixed enums, matching the values used elsewhere for these same columns ----
     const AREA_OPTIONS = ["ХАБ", "Упаковка", "Маркетплейс"];
     const ITEM_TYPE_OPTIONS = ["Мелкий товар", "КГТ", "Шредер"];
-    const CATEGORY_OPTIONS = ["Одежда", "Обувь", "Косметика", "Бытовая химия", "Мебель", "Электроника", "Ювелирка", "Для авто", "Для животных", "Посуда", "Еда", "Посылка"];
+    const CATEGORY_OPTIONS = ["Одежда", "Обувь", "Косметика", "Бытовая химия", "Мебель", "Электроника", "Ювелирка", "Для авто", "Для животных", "Посуда", "Еда", "Посылка", "Другое"];
     const FILTER_OPTIONS = { areas: AREA_OPTIONS, itemTypes: ITEM_TYPE_OPTIONS, categories: CATEGORY_OPTIONS };
 
     const AREA_PILL_CLASS = {
@@ -185,7 +185,7 @@
         const summary = filters.rangeFrom && filters.rangeTo
             ? ruDate(filters.rangeFrom) + " – " + ruDate(filters.rangeTo)
             : (filters.rangeFrom ? "С " + ruDate(filters.rangeFrom) + "… выберите конец" : "Выберите период");
-        return "<div class='review-filter-block" + (filters.openKey === "date" ? " is-open" : "") + "'>"
+        return "<div class='review-filter-block review-filter-block--align-right" + (filters.openKey === "date" ? " is-open" : "") + "'>"
             + "<span class='review-filter-title'>Период</span>"
             + "<button class='review-filter-trigger intake-daterange-trigger' type='button' data-intake-filter-toggle='date'><span class='review-filter-summary'>" + escapeHtmlLocal(summary) + "</span><span class='review-filter-chevron'>⌄</span></button>"
             + "<div class='review-filter-popover'>"
@@ -197,6 +197,27 @@
             + "<div class='review-filter-calendar'>" + weekdays + cells.join("") + "</div>"
             + "</div>"
             + "</div>";
+    }
+
+    // Live preview of the range while picking the end date: highlights
+    // every day between the already-picked start and the hovered day, so
+    // it's clear what a click there would select. Toggled directly on the
+    // existing day buttons (not via renderFilterPanel) so hovering stays
+    // instant and never fights the click re-render.
+    function clearHoverPreview() {
+        document.querySelectorAll(".review-filter-day.is-intake-hover-range, .review-filter-day.is-intake-hover-endpoint")
+            .forEach((el) => el.classList.remove("is-intake-hover-range", "is-intake-hover-endpoint"));
+    }
+
+    function applyHoverPreview(hoverIso) {
+        clearHoverPreview();
+        const lo = filters.rangeFrom < hoverIso ? filters.rangeFrom : hoverIso;
+        const hi = filters.rangeFrom < hoverIso ? hoverIso : filters.rangeFrom;
+        document.querySelectorAll("#intakeSearchFilterPanel [data-intake-range-day]").forEach((el) => {
+            const iso = el.getAttribute("data-intake-range-day");
+            if (iso === hoverIso && iso !== filters.rangeFrom) el.classList.add("is-intake-hover-endpoint");
+            else if (iso > lo && iso < hi) el.classList.add("is-intake-hover-range");
+        });
     }
 
     function renderFilterPanel() {
@@ -276,6 +297,20 @@
             if (e.target && e.target.id === "intakeSearchEmployee") {
                 filters.employeeQuery = e.target.value;
             }
+        });
+
+        panel.addEventListener("mouseover", (e) => {
+            if (filters.openKey !== "date" || !filters.rangeFrom || filters.rangeTo) return;
+            const dayEl = e.target.closest("[data-intake-range-day]");
+            if (!dayEl) return;
+            applyHoverPreview(dayEl.getAttribute("data-intake-range-day"));
+        });
+
+        panel.addEventListener("mouseout", (e) => {
+            const dayEl = e.target.closest("[data-intake-range-day]");
+            if (!dayEl) return;
+            const toEl = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest("[data-intake-range-day]") : null;
+            if (!toEl) clearHoverPreview();
         });
 
         document.addEventListener("click", (e) => {
@@ -416,7 +451,7 @@
             if (!grid) {
                 grid = document.createElement("div");
                 grid.setAttribute("data-intake-search-grid", "");
-                grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;";
+                grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;";
                 wrap.appendChild(grid);
             }
             grid.insertAdjacentHTML("beforeend", rows.map(resultCardHtml).join(""));

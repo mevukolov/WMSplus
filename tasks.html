@@ -412,7 +412,10 @@
         .intake-search-photo { cursor: zoom-in; }
         .review-filter-day.is-intake-range-start, .review-filter-day.is-intake-range-end { background: var(--accent); border-color: var(--accent); color: #fff; }
         .review-filter-day.is-intake-in-range { background: #ede9fe; border-color: #ddd6fe; color: #4c1d95; }
+        .review-filter-day.is-intake-hover-range { background: #f3e8ff; border-color: #e9d5ff; }
+        .review-filter-day.is-intake-hover-endpoint { background: #a78bfa; border-color: #a78bfa; color: #fff; }
         .intake-daterange-trigger { min-width: 190px; }
+        .review-filter-block--align-right .review-filter-popover { left: auto; right: 0; }
         .intake-photo-lightbox { display: flex; gap: 20px; align-items: flex-start; max-width: min(1100px, 94vw); max-height: 88dvh; }
         .intake-photo-lightbox img { max-width: min(640px, 58vw); max-height: 82dvh; object-fit: contain; border-radius: 12px; background: #0f0f14; display: block; }
         .intake-photo-lightbox-info { width: min(300px, 32vw); flex: 0 0 auto; display: grid; gap: 8px; }
@@ -728,6 +731,7 @@
         }
         .tasks-flow-card-wide { width: min(1160px, 100%); }
         .no-shk-modal-xl { width: fit-content; max-width: min(1300px, 98vw); }
+        .intake-search-modal-card { width: min(1440px, 96vw); }
         .no-shk-move-card {
             width: 100vw;
             height: 100dvh;
@@ -2153,7 +2157,7 @@
 </section>
 
 <section id="intakeSearchModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card no-shk-modal-xl">
+    <div class="tasks-flow-card intake-search-modal-card">
         <div class="work-head">
             <div>
                 <h3 class="work-title">Поиск товара без ШК</h3>
