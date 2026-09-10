@@ -8537,6 +8537,7 @@
                 + "<div id='taskComposeInlineSlot' class='task-compose-inline-slot'>"
                 + "<div id='taskExtraFieldWrap' class='task-compose-inline-field hidden'><input id='taskExtraInput' type='text' value='" + escapeHtml(savedReview.extra_value || "") + "'></div>"
                 + "</div>"
+                + "<div id='taskExclusionHoursWrap' class='task-compose-narrow-field hidden'><input id='taskExclusionHoursInput' type='number' inputmode='numeric' min='1' step='1' placeholder='Срок, ч' title='Срок исключения, часы' value='" + escapeHtml(savedReview.exclusion_hours || "") + "'></div>"
                 + "<button id='completeTaskBtn' class='task-compose-send' type='button' disabled title='Завершить задачу' aria-label='Завершить задачу'>✓</button>"
                 + "</div>"
                 + "<div class='task-compose-row-collapse' id='taskComposeBelowRow'><div class='task-compose-row-inner' id='taskComposeBelowInner'>"
@@ -8622,7 +8623,7 @@
         if (editBtn) editBtn.addEventListener("click", () => openEditTareTaskModal(row.id));
         const deferBtn = $("openDeferTaskBtn");
         if (deferBtn) deferBtn.addEventListener("click", () => openDeferTaskModal(row.id));
-        ["taskCommentInput", "taskVerdictInput", "taskExtraInput"].forEach((id) => {
+        ["taskCommentInput", "taskVerdictInput", "taskExtraInput", "taskExclusionHoursInput"].forEach((id) => {
             const el = $(id);
             if (el) {
                 el.addEventListener(id === "taskVerdictInput" ? "change" : "input", () => {
@@ -9091,6 +9092,10 @@
             if (!verdict || verdict === "Не выбран") missing.push("Вердикт");
             if (tone === "yellow" && DEFERRED_VERDICT_FIELDS[verdict] && !extra) missing.push(DEFERRED_VERDICT_FIELDS[verdict]);
             if (tone === "red" && !comment) missing.push("Комментарий");
+            if (verdict === AUTO_WRITEOFF_EXCLUSION_VERDICT) {
+                const hours = Number($("taskExclusionHoursInput") && $("taskExclusionHoursInput").value);
+                if (!Number.isFinite(hours) || hours <= 0) missing.push("Срок исключения (часы)");
+            }
         }
         if (verdict === SYSTEM_MOVEMENT_VERDICT || verdict === SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT) missing.push("доступный пользователю вердикт");
         const ready = missing.length === 0;
@@ -9144,6 +9149,8 @@
         const extraInput = $("taskExtraInput");
         if (extraInput) extraInput.placeholder = extraLabel;
         if (extraWrap) extraWrap.classList.toggle("hidden", !showExtra);
+        const hoursWrap = $("taskExclusionHoursWrap");
+        if (hoursWrap) hoursWrap.classList.toggle("hidden", verdict !== AUTO_WRITEOFF_EXCLUSION_VERDICT);
         positionCommentField(tone);
         const inlineSlot = $("taskComposeInlineSlot");
         if (inlineSlot) inlineSlot.classList.toggle("is-filled", showExtra || tone === "red");
@@ -9157,17 +9164,30 @@
         return date.toISOString();
     }
 
+    // "Исключён из автосписания" reopens 24h before its own exclusion end
+    // (exclusion end = verdict time + the operator-entered hour count) --
+    // e.g. exclusion ends the 2nd at 10:00, so the task reopens the 1st at
+    // 10:00, giving someone a day's notice before the exclusion lapses.
+    function exclusionEndIsoFromHours(hours) {
+        const n = Number(hours);
+        return Number.isFinite(n) && n > 0 ? new Date(Date.now() + n * 3600000).toISOString() : "";
+    }
+
     // Every other deferred verdict reopens a fixed N days from now --
     // "Аннулирование после списания" is the odd one out, anchored to the
     // task's own due_date (the marketplace's projected write-off date, per
     // this module's SLA field) rather than to the moment the operator acted.
-    function reopenAfterForVerdict(verdict, row) {
+    function reopenAfterForVerdict(verdict, row, exclusionHours) {
         if (verdict === CANCELLATION_AFTER_WRITEOFF_VERDICT) {
             const match = normalizeText(row && row.due_date).match(/^(\d{4})-(\d{2})-(\d{2})/);
             if (match) {
                 const moscowMidnightUtcMs = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) - MOSCOW_OFFSET_MS;
                 return new Date(moscowMidnightUtcMs + 3 * 60 * 60 * 1000).toISOString();
             }
+        }
+        if (verdict === AUTO_WRITEOFF_EXCLUSION_VERDICT) {
+            const exclusionEndIso = exclusionEndIsoFromHours(exclusionHours);
+            if (exclusionEndIso) return new Date(Date.parse(exclusionEndIso) - 24 * 3600000).toISOString();
         }
         return addDaysIso(2);
     }
@@ -9683,9 +9703,11 @@
         const user = currentWmsUser();
         const incomingFlow = isIncomingFlowRequestTask(row);
         const verdict = normalizeText($("taskVerdictInput") && $("taskVerdictInput").value) || "Не выбран";
-        const comment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
+        const rawComment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
         const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
         const extraValue = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
+        const isExclusionVerdict = verdict === AUTO_WRITEOFF_EXCLUSION_VERDICT;
+        const exclusionHours = isExclusionVerdict ? Number($("taskExclusionHoursInput") && $("taskExclusionHoursInput").value) : null;
         if (verdict === SYSTEM_MOVEMENT_VERDICT || verdict === SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT) {
             const status = $("taskDetailStatus");
             if (status) status.textContent = "Вердикт “" + verdict + "” ставится только системой.";
@@ -9693,7 +9715,7 @@
         }
         const tone = incomingFlow ? "" : (VERDICT_TONE[verdict] || "");
         const commentRequired = incomingFlow || tone === "red";
-        if ((commentRequired && !comment) || verdict === "Не выбран" || (extraLabel && !extraValue)) {
+        if ((commentRequired && !rawComment) || verdict === "Не выбран" || (extraLabel && !extraValue) || (isExclusionVerdict && !(Number.isFinite(exclusionHours) && exclusionHours > 0))) {
             const status = $("taskDetailStatus");
             if (status) status.textContent = incomingFlow
                 ? "Заполни Комментарий ОПП и Вложение."
@@ -9701,17 +9723,25 @@
             return;
         }
         const now = new Date().toISOString();
+        // Exclusion end = verdict time + the entered hour count; the comment
+        // states it explicitly since reopen_after (see reopenAfterForVerdict)
+        // is 24h *before* that, not the exclusion end itself.
+        const exclusionEndIso = isExclusionVerdict ? exclusionEndIsoFromHours(exclusionHours) : "";
+        const comment = exclusionEndIso
+            ? (rawComment ? rawComment + " · " : "") + "Исключение действует до " + formatRuDateTime(exclusionEndIso)
+            : rawComment;
         // hasOwnProperty, not truthiness -- future verdicts may need to be
         // deferred with an empty-string field label (no extra input beyond
         // the verdict itself), which `Boolean(...)` would misread as "not deferred".
         const isDeferred = Object.prototype.hasOwnProperty.call(DEFERRED_VERDICT_FIELDS, verdict);
-        const reopenAfter = isDeferred ? reopenAfterForVerdict(verdict, row) : null;
+        const reopenAfter = isDeferred ? reopenAfterForVerdict(verdict, row, exclusionHours) : null;
         const reviewPayload = {
             comment,
             verdict,
             attachment: incomingFlow ? verdict : "",
             extra_label: extraLabel,
             extra_value: extraValue,
+            exclusion_hours: isExclusionVerdict ? exclusionHours : null,
             completed_by_id: user.id || null,
             completed_by_name: user.name || null,
             completed_at: now,

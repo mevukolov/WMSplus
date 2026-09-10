@@ -2,6 +2,7 @@
 // Загружается до tasks.js обычным <script> тегом (без модулей, как ui.js).
 
 const CANCELLATION_AFTER_WRITEOFF_VERDICT = "Аннулирование после списания";
+const AUTO_WRITEOFF_EXCLUSION_VERDICT = "Исключён из автосписания";
 
 const REVIEW_VERDICTS = [
     "Не выбран",
@@ -11,6 +12,7 @@ const REVIEW_VERDICTS = [
     "Отправлен запрос",
     "Нет на МХ/Не найден",
     CANCELLATION_AFTER_WRITEOFF_VERDICT,
+    AUTO_WRITEOFF_EXCLUSION_VERDICT,
 ];
 
 // "Дубль" и "Движение" -- не в этом списке: оба теперь только системные
@@ -33,6 +35,7 @@ const DEFERRED_VERDICT_FIELDS = {
     "Отправлен на релиз": "Вставьте ссылку на запрос релиза",
     "Отправлен на списание ревизией": "Вставьте ссылку",
     [CANCELLATION_AFTER_WRITEOFF_VERDICT]: "Комментарий",
+    [AUTO_WRITEOFF_EXCLUSION_VERDICT]: "Вставьте ссылку на исключение",
 };
 
 // Комментарий ОПП для "Запросов входящего потока" меняет подсказку в
@@ -57,6 +60,7 @@ const VERDICT_TONE = {
     "Вложено неверно": "red",
     "Отправлен под пустым стикером": "yellow",
     [CANCELLATION_AFTER_WRITEOFF_VERDICT]: "yellow",
+    [AUTO_WRITEOFF_EXCLUSION_VERDICT]: "yellow",
     // "Некорректный запрос" -- намеренно без тона, остаётся серым.
 };
 

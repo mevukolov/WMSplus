@@ -1082,6 +1082,13 @@
         .task-compose-inline-slot textarea { width: 100%; box-sizing: border-box; border: 0; background: transparent; padding: 9px 10px; font: inherit; color: #242038; resize: none; min-height: 0; line-height: 1.3; }
         .task-compose-inline-field input:focus,
         .task-compose-inline-slot textarea:focus { outline: none; }
+        /* "Исключён из автосписания" is the one verdict needing two extra
+           inputs (link + hours) -- the link reuses .task-compose-inline-field,
+           this is the narrow hours-count field pinned right before the send
+           button, at the tail of the row per the design. */
+        .task-compose-narrow-field { flex: 0 0 auto; width: 64px; }
+        .task-compose-narrow-field input { width: 100%; box-sizing: border-box; border: 1px solid #dbe3ec; border-radius: 12px; background: #fff; padding: 9px 8px; font: inherit; font-size: 13px; text-align: center; color: #242038; }
+        .task-compose-narrow-field input:focus { outline: none; border-color: var(--accent); }
         .task-compose-bar > * { position: relative; z-index: 1; }
         .task-compose-bar.tone-green::before { background: #dcfce7; clip-path: circle(150% at 36px 50%); }
         .task-compose-bar.tone-yellow::before { background: #fef3c7; clip-path: circle(150% at 36px 50%); }
