@@ -1674,6 +1674,9 @@
         setFlowModalOpen("noShkBoxDetailModal", false);
         setFlowModalOpen("noShkMoveModal", false);
         setFlowModalOpen("noShkConfirmModal", false);
+        setFlowModalOpen("notificationsModal", false);
+        setFlowModalOpen("profileModal", false);
+        setFlowModalOpen("logoutConfirmModal", false);
         setFlowModalOpen("prespisokModal", false);
         if (state.prespisok && state.prespisok.clockTimer) {
             clearInterval(state.prespisok.clockTimer);
@@ -1683,6 +1686,109 @@
             clearInterval(state.prespisok.syncTimer);
             state.prespisok.syncTimer = null;
         }
+    }
+
+    // Small ripple burst from the click point -- shared by the header menu
+    // trigger and its strip items, the only "liquid" click feedback in the
+    // app so it lives here rather than in styles.css.
+    function spawnLiquidRipple(el, evt) {
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height) * 1.6;
+        const ripple = document.createElement("span");
+        ripple.className = "liquid-ripple";
+        ripple.style.width = ripple.style.height = size + "px";
+        const x = evt && typeof evt.clientX === "number" ? evt.clientX - rect.left : rect.width / 2;
+        const y = evt && typeof evt.clientY === "number" ? evt.clientY - rect.top : rect.height / 2;
+        ripple.style.left = (x - size / 2) + "px";
+        ripple.style.top = (y - size / 2) + "px";
+        el.appendChild(ripple);
+        ripple.addEventListener("animationend", () => ripple.remove(), { once: true });
+        setTimeout(() => ripple.remove(), 700);
+    }
+
+    function closeTasksHeaderMenuStrip() {
+        const strip = $("tasksMenuStrip");
+        const trigger = $("tasksMenuBtn");
+        if (strip) strip.classList.remove("open");
+        if (trigger) trigger.setAttribute("aria-expanded", "false");
+    }
+
+    function renderProfileDrawer() {
+        const body = $("profileDrawerBody");
+        if (!body) return;
+        const user = parseJsonSafe(localStorage.getItem("user"), {}) || {};
+        const rows = [
+            ["ФИО", normalizeText(user.name) || "-"],
+            ["ID", normalizeText(user.id) || "-"],
+            ["Склад", normalizeText(user.wh_name) || "-"],
+            ["Доступы", Array.isArray(user.accesses) && user.accesses.length ? user.accesses.join(", ") : "-"],
+        ];
+        body.innerHTML = rows.map(([label, value]) => "<div class='profile-info-row'><span>" + escapeHtml(label) + "</span><span>" + escapeHtml(value) + "</span></div>").join("");
+    }
+
+    // The header menu trigger/strip and the 3 right-side drawers it opens
+    // are tasks.html-only (per the design: other pages keep the classic
+    // hamburger). "Лента без ШК" reuses intake_search.js's own
+    // #openIntakeSearch click handler (modal-open + first-search trigger)
+    // instead of duplicating it here.
+    function initTasksHeaderMenu() {
+        const trigger = $("tasksMenuBtn");
+        const strip = $("tasksMenuStrip");
+        if (!trigger || !strip) return;
+
+        trigger.addEventListener("click", (evt) => {
+            spawnLiquidRipple(trigger, evt);
+            evt.stopPropagation();
+            const willOpen = !strip.classList.contains("open");
+            if (willOpen) {
+                strip.classList.add("open");
+                trigger.setAttribute("aria-expanded", "true");
+            } else {
+                closeTasksHeaderMenuStrip();
+            }
+        });
+
+        document.addEventListener("click", (evt) => {
+            if (!strip.classList.contains("open")) return;
+            if (strip.contains(evt.target) || trigger.contains(evt.target)) return;
+            closeTasksHeaderMenuStrip();
+        });
+
+        strip.querySelectorAll(".tasks-menu-item").forEach((btn) => {
+            btn.addEventListener("click", (evt) => spawnLiquidRipple(btn, evt));
+        });
+
+        $("tasksMenuNotifications")?.addEventListener("click", () => {
+            closeTasksHeaderMenuStrip();
+            setFlowModalOpen("notificationsModal", true);
+        });
+        $("tasksMenuFeed")?.addEventListener("click", () => {
+            closeTasksHeaderMenuStrip();
+            const openBtn = $("openIntakeSearch");
+            if (openBtn) openBtn.click();
+        });
+        $("tasksMenuProfile")?.addEventListener("click", () => {
+            closeTasksHeaderMenuStrip();
+            renderProfileDrawer();
+            setFlowModalOpen("profileModal", true);
+        });
+        $("tasksMenuHome")?.addEventListener("click", () => {
+            closeTasksHeaderMenuStrip();
+            window.location.href = "index.html";
+        });
+        $("tasksMenuLogout")?.addEventListener("click", () => {
+            closeTasksHeaderMenuStrip();
+            setFlowModalOpen("logoutConfirmModal", true);
+        });
+
+        $("closeNotifications")?.addEventListener("click", () => setFlowModalOpen("notificationsModal", false));
+        $("closeProfile")?.addEventListener("click", () => setFlowModalOpen("profileModal", false));
+        $("cancelLogoutBtn")?.addEventListener("click", () => setFlowModalOpen("logoutConfirmModal", false));
+        $("confirmLogoutBtn")?.addEventListener("click", () => {
+            if (typeof clearAllCaches === "function") clearAllCaches();
+            window.location.href = "login.html";
+        });
     }
 
     function shiftLabel(isoDate) {
@@ -16283,12 +16389,17 @@
             else if ($("moduleChooser").classList.contains("active")) setFlowModalOpen("moduleChooser", false);
             else if ($("backfillCalendarModal").classList.contains("active")) setFlowModalOpen("backfillCalendarModal", false);
             else if ($("reviewSectionModal").classList.contains("active")) closeReviewSectionModal();
+            else if ($("logoutConfirmModal").classList.contains("active")) setFlowModalOpen("logoutConfirmModal", false);
+            else if ($("notificationsModal").classList.contains("active")) setFlowModalOpen("notificationsModal", false);
+            else if ($("profileModal").classList.contains("active")) setFlowModalOpen("profileModal", false);
+            else if ($("tasksMenuStrip") && $("tasksMenuStrip").classList.contains("open")) closeTasksHeaderMenuStrip();
         });
     }
 
     function init() {
         installAchievementDebugHelpers();
         initEvents();
+        initTasksHeaderMenu();
         startPrespisokHomeTimer();
         renderCalendar();
         renderShiftGate();
