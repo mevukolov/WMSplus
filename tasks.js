@@ -646,6 +646,12 @@
             saving: false,
             error: "",
         },
+        printAlert: {
+            loading: false,
+            failedCount: 0,
+            lastError: "",
+            lastCheckedAt: null,
+        },
         actualize: {
             copied: false,
             rows: [],
@@ -2003,6 +2009,51 @@
             }
         })();
         return state.shift.loadPromise;
+    }
+
+    function renderPrintAlertBanner() {
+        const banner = $("printAlertBanner");
+        const text = $("printAlertText");
+        if (!banner || !text) return;
+        if (!state.printAlert.failedCount) {
+            banner.classList.remove("visible");
+            return;
+        }
+        banner.classList.add("visible");
+        const count = state.printAlert.failedCount;
+        const label = count === 1 ? "этикетку" : "этикеток";
+        text.textContent = "Не удалось напечатать " + count + " " + label + " подряд. Последняя ошибка: "
+            + (state.printAlert.lastError || "неизвестная ошибка") + ". Проверьте принтер на складе.";
+    }
+
+    async function loadPrintAlertState() {
+        const db = supabaseDb();
+        if (!db) return;
+        state.printAlert.loading = true;
+        try {
+            const { data, error } = await db
+                .from("print_jobs")
+                .select("status,error_message,created_at")
+                .order("created_at", { ascending: false })
+                .limit(50);
+            if (error) throw error;
+            const rows = Array.isArray(data) ? data : [];
+            let failedCount = 0;
+            let lastError = "";
+            for (const row of rows) {
+                if (row.status !== "failed") break;
+                failedCount += 1;
+                if (!lastError) lastError = row.error_message || "";
+            }
+            state.printAlert.failedCount = failedCount;
+            state.printAlert.lastError = lastError;
+            state.printAlert.lastCheckedAt = new Date().toISOString();
+        } catch (error) {
+            console.warn("print alert check failed:", error);
+        } finally {
+            state.printAlert.loading = false;
+            renderPrintAlertBanner();
+        }
     }
 
     function showHome() {
@@ -16454,6 +16505,8 @@
         void loadShiftState();
         void loadAchievements();
         void loadWriteoffTerms();
+        void loadPrintAlertState();
+        setInterval(() => { void loadPrintAlertState(); }, 120000);
     }
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
