@@ -1707,11 +1707,21 @@
         setTimeout(() => ripple.remove(), 700);
     }
 
+    let tasksMenuStripCloseToken = 0;
     function closeTasksHeaderMenuStrip() {
         const strip = $("tasksMenuStrip");
         const trigger = $("tasksMenuBtn");
-        if (strip) strip.classList.remove("open");
         if (trigger) trigger.setAttribute("aria-expanded", "false");
+        if (!strip || !strip.classList.contains("open")) return;
+        strip.classList.remove("open");
+        strip.classList.add("closing");
+        const token = ++tasksMenuStripCloseToken;
+        const finish = () => {
+            if (tasksMenuStripCloseToken !== token) return;
+            strip.classList.remove("closing");
+        };
+        strip.addEventListener("animationend", finish, { once: true });
+        setTimeout(finish, 260);
     }
 
     function renderProfileDrawer() {
@@ -1742,6 +1752,8 @@
             evt.stopPropagation();
             const willOpen = !strip.classList.contains("open");
             if (willOpen) {
+                tasksMenuStripCloseToken++;
+                strip.classList.remove("closing");
                 strip.classList.add("open");
                 trigger.setAttribute("aria-expanded", "true");
             } else {
@@ -1765,6 +1777,8 @@
         });
         $("tasksMenuFeed")?.addEventListener("click", () => {
             closeTasksHeaderMenuStrip();
+            const feedModal = $("intakeSearchModal");
+            if (feedModal) feedModal.dataset.forceDrawer = "1";
             const openBtn = $("openIntakeSearch");
             if (openBtn) openBtn.click();
         });

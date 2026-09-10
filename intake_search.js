@@ -635,6 +635,19 @@
         const openBtn = $("openIntakeSearch");
         if (openBtn) {
             openBtn.addEventListener("click", () => {
+                // Two entry points share this one click handler: the
+                // home-screen card (classic centered modal) and tasks.js's
+                // header-menu item, which sets this one-shot flag on the
+                // element then synthesizes the same click so the
+                // resetFiltersToDefault/runSearch-on-first-open logic below
+                // still runs. Either way this is the single place that
+                // decides the modal's class, so it never gets stuck from a
+                // previous open.
+                const modalEl = $("intakeSearchModal");
+                if (modalEl) {
+                    modalEl.classList.toggle("side-drawer-modal", modalEl.dataset.forceDrawer === "1");
+                    delete modalEl.dataset.forceDrawer;
+                }
                 setModalOpen("intakeSearchModal", true);
                 if (!lastFilters) {
                     resetFiltersToDefault();
