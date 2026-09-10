@@ -9238,7 +9238,18 @@
         }
         if (verdict === AUTO_WRITEOFF_EXCLUSION_VERDICT) {
             const exclusionEndIso = exclusionEndIsoFromHours(exclusionHours);
-            if (exclusionEndIso) return new Date(Date.parse(exclusionEndIso) - 24 * 3600000).toISOString();
+            if (exclusionEndIso) {
+                // Subtracting a flat 24h landed reopen_after *before* the
+                // verdict itself whenever the exclusion was under 24h (e.g.
+                // 14h -> reopens 10h in the past), which auto_reopen_wms_tasks()
+                // then flips back to "Не начато" within minutes -- the task
+                // never looked deferred at all. Only give the 24h notice when
+                // there's a full 24h to spare; shorter exclusions just defer
+                // for their whole duration, reopening exactly at the end.
+                const hours = Number(exclusionHours) || 0;
+                const noticeMs = hours > 24 ? 24 * 3600000 : 0;
+                return new Date(Date.parse(exclusionEndIso) - noticeMs).toISOString();
+            }
         }
         return addDaysIso(2);
     }
