@@ -4,9 +4,13 @@
 -- one sticker per КГТ item recorded that shift, carrying the item's own
 -- name instead of a box number/QR (a КГТ item never goes into a box).
 --
--- name prints largest (font_size 24, up from an original 14) since the
+-- name prints largest (font_size 30, up from an original 14) since the
 -- item's name is the one thing this sticker exists to show -- it should
 -- outrank the date lines (font_size 20) in prominence, not trail them.
+-- print-tspl.js's TSPL multiplier is round(font_size/10), so 24 and 20
+-- both round to the same multiplier (2) and would have looked identical
+-- on the real printer -- 30 rounds to 3, a full step above the date
+-- lines' 2, so the size difference is actually visible on the label.
 -- y_mm nudged from 5 to 7 to keep it clear of the date lines starting at
 -- y_mm 28.
 --
@@ -22,7 +26,7 @@ select
     50,
     50,
     '[
-        {"type":"text","field":"name","x_mm":5,"y_mm":7,"font_size":24},
+        {"type":"text","field":"name","x_mm":5,"y_mm":7,"font_size":30},
         {"type":"text","field":"date_line1","x_mm":5,"y_mm":28,"font_size":20},
         {"type":"text","field":"date_line2","x_mm":5,"y_mm":36,"font_size":20},
         {"type":"text","field":"area","x_mm":5,"y_mm":44,"font_size":10}
