@@ -1795,6 +1795,11 @@
                     <h2 class="tasks-action-title">Лента «Без ШК»</h2>
                     <p class="tasks-action-text">Список всех товаров без ШК, зафиксированных администрацией.</p>
                 </button>
+                <button id="openStaffStats" class="tasks-action-card staff-stats-home-card" type="button">
+                    <span class="tasks-action-icon">▦</span>
+                    <h2 class="tasks-action-title">Пульс смены</h2>
+                    <p class="tasks-action-text">Кто сколько решил: задачи, запросы, предсписок, Без ШК, отложения и выбранные вердикты.</p>
+                </button>
             </div>
         </div>
         <div class="tasks-home-group tasks-home-group-dev">
@@ -1819,11 +1824,6 @@
                     <span class="tasks-action-icon">⌛</span>
                     <h2 class="tasks-action-title">Сроки списания</h2>
                     <p class="tasks-action-text">Статусы WMS, дни без движения до списания и отдельная настройка 26LR.</p>
-                </button>
-                <button id="openStaffStats" class="tasks-action-card staff-stats-home-card" type="button" data-dev-only>
-                    <span class="tasks-action-icon">▦</span>
-                    <h2 class="tasks-action-title">Пульс смены</h2>
-                    <p class="tasks-action-text">Кто сколько решил: задачи, запросы, предсписок, Без ШК, отложения и выбранные вердикты.</p>
                 </button>
                 <button id="openDebugSandbox" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">🛠</span>
@@ -1905,6 +1905,7 @@
                 <div>
                     <div class="review-view-wrap">
                         <button id="openActualizeTasks" class="review-tool-square" type="button" title="Актуализировать активные задачи">▤</button>
+                        <button id="openShkExclusion" class="review-tool-square" type="button" title="Добавить ШК в исключения">⛔</button>
                         <span class="review-tool-divider" aria-hidden="true"></span>
                         <div class="review-view-tabs" aria-label="Вид разбора">
                             <button id="reviewViewSections" class="review-view-tab active" type="button">Участки</button>
@@ -1999,6 +2000,31 @@
             </div>
             <div id="actualizeStatus" class="status-line">Сначала скопируйте список активных ШК.</div>
             <div id="actualizeResults"></div>
+        </div>
+    </div>
+</section>
+
+<section id="shkExclusionModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Добавить ШК в исключения</h3>
+                <p class="work-subtitle">Загрузите XLSX с одним столбцом ШК — все активные задачи по этим ШК отложатся на указанный срок, как при вердикте «Исключён из автосписания».</p>
+            </div>
+            <button id="closeShkExclusion" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="actualize-step">
+            <div class="file-row">
+                <label id="shkExclusionUploadLabel" class="btn btn-outline" for="shkExclusionFile">Загрузить XLSX со ШК</label>
+                <input id="shkExclusionFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+            </div>
+            <div class="file-row">
+                <label>Срок исключения, ч<br><input id="shkExclusionHours" type="number" inputmode="numeric" min="1" step="1" class="input" placeholder="12" value="12" style="width:120px;"></label>
+                <label style="flex:1;min-width:220px;">Комментарий / ссылка (необязательно)<br><input id="shkExclusionComment" type="text" class="input" placeholder="Ссылка на исключение или причина"></label>
+            </div>
+            <button id="applyShkExclusion" class="btn btn-rect" type="button" disabled>Применить</button>
+            <div id="shkExclusionStatus" class="status-line">Сначала загрузите XLSX со ШК.</div>
+            <div id="shkExclusionResults"></div>
         </div>
     </div>
 </section>

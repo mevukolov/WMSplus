@@ -662,6 +662,10 @@
             supersetDebug: null,
             processing: false,
         },
+        shkExclusion: {
+            shks: [],
+            processing: false,
+        },
         quickNoShk: {
             loading: false,
             items: [],
@@ -2783,6 +2787,179 @@
 
     function closeActualizeTasksModal() {
         setFlowModalOpen("actualizeTasksModal", false);
+    }
+
+    function setShkExclusionStatus(message, type) {
+        const el = $("shkExclusionStatus");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = "status-line" + (type ? " " + type : "");
+    }
+
+    function openShkExclusionModal() {
+        state.shkExclusion = { shks: [], processing: false };
+        if ($("shkExclusionFile")) $("shkExclusionFile").value = "";
+        if ($("shkExclusionComment")) $("shkExclusionComment").value = "";
+        if ($("shkExclusionHours")) $("shkExclusionHours").value = "12";
+        if ($("shkExclusionResults")) $("shkExclusionResults").innerHTML = "";
+        if ($("applyShkExclusion")) $("applyShkExclusion").disabled = true;
+        setShkExclusionStatus("Сначала загрузите XLSX со ШК.");
+        setFlowModalOpen("shkExclusionModal", true);
+    }
+
+    function closeShkExclusionModal() {
+        setFlowModalOpen("shkExclusionModal", false);
+    }
+
+    // Single column of ШК, header optional -- unlike readSupersetRows this
+    // file has no other columns to map, so we just take column A of every
+    // row and drop anything that reads as a "ШК"/"SHK" header label.
+    async function readShkExclusionShks(file) {
+        if (typeof window.XLSX === "undefined") throw new Error("Не загрузилась библиотека XLSX. Обновите страницу и попробуйте еще раз.");
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) throw new Error("В файле не найдено листов.");
+        const sheet = workbook.Sheets[firstSheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
+        const shks = new Set();
+        rows.forEach((row) => {
+            const cell = Array.isArray(row) ? row[0] : row;
+            const normalized = normalizeIdentifier(cell);
+            if (!normalized || normalized.toLowerCase() === "шк" || normalized.toLowerCase() === "shk") return;
+            shks.add(normalized);
+        });
+        return Array.from(shks);
+    }
+
+    async function handleShkExclusionFile(file) {
+        if (!file) return;
+        setShkExclusionStatus("Читаю файл...");
+        try {
+            const shks = await readShkExclusionShks(file);
+            state.shkExclusion.shks = shks;
+            if ($("applyShkExclusion")) $("applyShkExclusion").disabled = !shks.length;
+            setShkExclusionStatus(shks.length
+                ? "Загружено ШК: " + shks.length + ". Укажите срок и нажмите «Применить»."
+                : "В файле не найдено ни одного ШК.", shks.length ? "good" : "warn");
+        } catch (error) {
+            console.error("shk exclusion file failed:", error);
+            setShkExclusionStatus("Не удалось прочитать файл: " + (error && error.message ? error.message : String(error)), "error");
+        }
+    }
+
+    // Bulk analogue of the single-task "Исключён из автосписания" verdict
+    // (see completeTaskFromDetail / exclusionEndIsoFromHours / reopenAfterForVerdict):
+    // every currently active task whose source_shk_ids overlaps the uploaded
+    // list gets deferred the same way a single excluded task would be.
+    async function applyShkExclusion() {
+        const shks = state.shkExclusion.shks || [];
+        const hours = Number($("shkExclusionHours") && $("shkExclusionHours").value);
+        if (!shks.length) { setShkExclusionStatus("Сначала загрузите XLSX со ШК.", "error"); return; }
+        if (!Number.isFinite(hours) || hours <= 0) { setShkExclusionStatus("Укажите срок исключения в часах.", "error"); return; }
+        const db = supabaseDb();
+        if (!db) { setShkExclusionStatus("Нет подключения к базе.", "error"); return; }
+        const button = $("applyShkExclusion");
+        if (button) button.disabled = true;
+        state.shkExclusion.processing = true;
+        setShkExclusionStatus("Ищу активные задачи по " + shks.length + " ШК...");
+        try {
+            const matchedById = new Map();
+            for (const chunk of chunkArray(shks, 80)) {
+                const { data, error } = await db
+                    .from(WMS_TASKS_TABLE)
+                    .select(WMS_TASK_SELECT_COLUMNS)
+                    .eq("is_deleted", false)
+                    .overlaps("source_shk_ids", chunk)
+                    .limit(10000);
+                if (error) throw error;
+                (data || []).forEach((row) => matchedById.set(row.id, row));
+            }
+            const activeRows = Array.from(matchedById.values()).filter(isActiveReviewTask);
+            const uploadedSet = new Set(shks);
+            const matchedShks = new Set();
+            activeRows.forEach((row) => {
+                (Array.isArray(row.source_shk_ids) ? row.source_shk_ids : []).forEach((id) => {
+                    const normalized = normalizeIdentifier(id);
+                    if (uploadedSet.has(normalized)) matchedShks.add(normalized);
+                });
+            });
+            if (!activeRows.length) {
+                setShkExclusionStatus("Активных задач с такими ШК не найдено (проверено " + shks.length + " ШК).", "warn");
+                return;
+            }
+            const user = currentWmsUser();
+            const rawComment = normalizeText($("shkExclusionComment") && $("shkExclusionComment").value);
+            let ok = 0;
+            let failed = 0;
+            for (const row of activeRows) {
+                setShkExclusionStatus("Исключаю задачи: " + (ok + failed + 1) + " / " + activeRows.length + "...");
+                const now = new Date().toISOString();
+                const exclusionEndIso = exclusionEndIsoFromHours(hours);
+                const reopenAfter = reopenAfterForVerdict(AUTO_WRITEOFF_EXCLUSION_VERDICT, row, hours);
+                const comment = (rawComment ? rawComment + " · " : "")
+                    + "Массовое исключение по ШК. Исключение действует до " + formatRuDateTime(exclusionEndIso);
+                const reviewPayload = {
+                    comment,
+                    verdict: AUTO_WRITEOFF_EXCLUSION_VERDICT,
+                    attachment: "",
+                    extra_label: DEFERRED_VERDICT_FIELDS[AUTO_WRITEOFF_EXCLUSION_VERDICT] || "",
+                    extra_value: rawComment,
+                    exclusion_hours: hours,
+                    completed_by_id: user.id || null,
+                    completed_by_name: user.name || null,
+                    completed_at: now,
+                    reopen_after: reopenAfter,
+                };
+                const nextPayload = {
+                    ...taskPayload(row),
+                    wms_review: { ...taskReviewPayload(row), ...reviewPayload },
+                };
+                const payload = {
+                    opp_verdict: AUTO_WRITEOFF_EXCLUSION_VERDICT,
+                    task_status: "Отложено",
+                    completed_at: now,
+                    reopen_after: reopenAfter,
+                    source_payload: nextPayload,
+                    updated_at: now,
+                };
+                try {
+                    if (!state.flow.debugMode) {
+                        const { error } = await db.from(WMS_TASKS_TABLE).update(payload).eq("id", row.id);
+                        if (error) throw error;
+                    }
+                    void writeTaskHistory({ ...row, ...payload }, "task_deferred", {
+                        title: displayTaskTitle(row),
+                        verdict: AUTO_WRITEOFF_EXCLUSION_VERDICT,
+                        comment,
+                        reopen_after: reopenAfter,
+                        completed_by_id: user.id || null,
+                        completed_by_name: user.name || null,
+                        bulk_shk_exclusion: true,
+                    });
+                    ok += 1;
+                } catch (error) {
+                    console.error("shk exclusion update failed:", row.id, error);
+                    failed += 1;
+                }
+            }
+            await loadReviewTasks();
+            renderReview();
+            if (state.view === "flow") { refreshFlowQueue(); renderFlowPage(); }
+            const unmatchedCount = shks.length - matchedShks.size;
+            setShkExclusionStatus(
+                "Отложено задач: " + ok + (failed ? " (ошибок: " + failed + ")" : "")
+                + ". Совпало ШК: " + matchedShks.size + " из " + shks.length
+                + (unmatchedCount ? " (" + unmatchedCount + " не найдено в активных задачах)" : "") + ".",
+                failed ? "warn" : "good"
+            );
+        } catch (error) {
+            console.error("shk exclusion failed:", error);
+            setShkExclusionStatus("Не удалось выполнить исключение: " + (error && error.message ? error.message : String(error)), "error");
+        } finally {
+            state.shkExclusion.processing = false;
+            if (button) button.disabled = !(state.shkExclusion.shks || []).length;
+        }
     }
 
     function activeTaskShkList() {
@@ -11161,7 +11338,6 @@
     }
 
     function openStaffStatsModal() {
-        if (!ensureDevelopmentAccess("Пульс смены")) return;
         closeFlowModals();
         state.staffStats.date = state.staffStats.date || state.today || todayIsoInMoscow();
         setFlowModalOpen("staffStatsModal", true);
@@ -16390,6 +16566,13 @@
             const file = $("actualizeSupersetFile").files && $("actualizeSupersetFile").files[0];
             if (file) void handleActualizeSupersetFile(file);
         });
+        $("openShkExclusion").addEventListener("click", openShkExclusionModal);
+        $("closeShkExclusion").addEventListener("click", closeShkExclusionModal);
+        $("shkExclusionFile").addEventListener("change", () => {
+            const file = $("shkExclusionFile").files && $("shkExclusionFile").files[0];
+            if (file) void handleShkExclusionFile(file);
+        });
+        $("applyShkExclusion").addEventListener("click", () => { void applyShkExclusion(); });
         $("copyMasterTransfers").addEventListener("click", () => { void copyMasterTransfers(); });
         $("buildMasterPreview").addEventListener("click", () => { void buildMasterPreview(); });
         $("showRejects").addEventListener("click", showMasterRejects);
