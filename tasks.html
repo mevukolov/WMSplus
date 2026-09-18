@@ -906,7 +906,7 @@
         .backfill-day:disabled { opacity: .42; cursor: not-allowed; transform: none; box-shadow: none; }
         .backfill-day.is-selected { outline: 2px solid var(--accent); background: #ede9fe; }
         .review-shell { padding: 16px; }
-        .review-status-card { padding: 14px 16px; margin-bottom: 16px; }
+        .review-status-card { padding: 14px 16px; margin-bottom: 16px; overflow: hidden; }
         .review-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
         .review-tool-square { width: 42px; height: 42px; border: 0; border-radius: 12px; background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); font-size: 20px; font-weight: 900; cursor: pointer; }
         .review-tool-square:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); color: var(--accent); }
@@ -921,8 +921,8 @@
         .review-pager-viewport { overflow: hidden; }
         .review-pager-track { display: flex; transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 100%; min-width: 0; }
-        .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; transform-origin: center bottom; transition: opacity .4s ease, transform .5s cubic-bezier(.34,1.56,.64,1); }
-        .review-toolbar-presort-only.is-away { opacity: 0; transform: translateY(24px) scale(.7); pointer-events: none; }
+        .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; transform-origin: center bottom; transition: opacity .22s ease, transform .38s cubic-bezier(.34,1.9,.5,1); }
+        .review-toolbar-presort-only.is-away { opacity: 0; transition: opacity .18s ease, transform .3s cubic-bezier(.5,-.3,.7,.4); transform: translateY(30px) scale(.6); pointer-events: none; }
         .review-status { color: #64748b; font-size: 13px; min-height: 18px; }
         .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
         .review-section-card { min-height: 116px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 18px; text-align: left; cursor: pointer; }
