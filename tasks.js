@@ -5475,11 +5475,11 @@
         return taskStatus(row);
     }
 
+    // #reviewStatus was removed from the Разбор status bar (routine "N задач
+    // загружено" text is gone by design) -- errors still need to surface
+    // somewhere, so they go to a toast instead of silently vanishing.
     function setReviewStatus(message, type) {
-        const el = $("reviewStatus");
-        if (!el) return;
-        el.textContent = message || "";
-        el.style.color = type === "error" ? "#b91c1c" : type === "good" ? "#15803d" : "#64748b";
+        if (type === "error" && message) toast(message, "error");
     }
 
     function taskSectionName(row) {
@@ -7264,11 +7264,10 @@
         });
     }
 
+    // #requestsStatus was removed along with the routine status text --
+    // same toast fallback as setReviewStatus for whatever errors show up.
     function setRequestsStatus(message, type) {
-        const el = $("requestsStatus");
-        if (!el) return;
-        el.textContent = message || "";
-        el.style.color = type === "error" ? "#b91c1c" : type === "good" ? "#15803d" : "#64748b";
+        if (type === "error" && message) toast(message, "error");
     }
 
     function renderRequests() {
@@ -8680,8 +8679,9 @@
     }
 
     // Same measure-before/after height transition as animateTaskDetailCardResize
-    // below, applied to the Разбор card so its first data load (and any tab
-    // switch that changes content height) grows smoothly instead of snapping.
+    // below, applied to the Разбор pager viewport so its first data load
+    // (and any tab switch that changes content height) grows smoothly
+    // instead of snapping.
     function animateReviewShellHeightChange(mutate) {
         const el = document.querySelector("#reviewPage .review-shell");
         if (!el) { mutate(); return; }

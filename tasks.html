@@ -906,8 +906,8 @@
         .backfill-day:disabled { opacity: .42; cursor: not-allowed; transform: none; box-shadow: none; }
         .backfill-day.is-selected { outline: 2px solid var(--accent); background: #ede9fe; }
         .review-shell { padding: 16px; }
-        .review-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
-        .review-view-wrap { display: inline-flex; align-items: center; gap: 10px; }
+        .review-status-card { padding: 14px 16px; margin-bottom: 16px; }
+        .review-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
         .review-tool-square { width: 42px; height: 42px; border: 0; border-radius: 12px; background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); font-size: 20px; font-weight: 900; cursor: pointer; }
         .review-tool-square:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); color: var(--accent); }
         .review-view-tabs { display: inline-flex; gap: 8px; padding: 4px; border-radius: 14px; background: #f1f5f9; }
@@ -921,9 +921,8 @@
         .review-pager-viewport { overflow: hidden; }
         .review-pager-track { display: flex; transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 100%; min-width: 0; }
-        .review-page-layout { position: relative; }
-        .review-toolbar-presort-only { position: absolute; top: 0; left: -26px; z-index: 3; display: flex; flex-direction: column; gap: 10px; transform-origin: left center; transition: opacity .4s ease, transform .5s cubic-bezier(.34,1.56,.64,1); }
-        .review-toolbar-presort-only.is-away { opacity: 0; transform: translateX(-24px) scale(.7); pointer-events: none; }
+        .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; transform-origin: center bottom; transition: opacity .4s ease, transform .5s cubic-bezier(.34,1.56,.64,1); }
+        .review-toolbar-presort-only.is-away { opacity: 0; transform: translateY(24px) scale(.7); pointer-events: none; }
         .review-status { color: #64748b; font-size: 13px; min-height: 18px; }
         .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
         .review-section-card { min-height: 116px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 18px; text-align: left; cursor: pointer; }
@@ -1657,7 +1656,7 @@
         @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
-        @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } .review-toolbar-presort-only { left: -12px; } }
+        @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
     </style>
 </head>
 <body>
@@ -1926,50 +1925,43 @@
             <button id="homeFromReview" class="btn btn-outline" type="button" aria-label="Назад">←</button>
             <div>
                 <h2 class="tasks-page-title">Разбор</h2>
-                <p class="tasks-page-note">Вот актуальные задачи на сегодня</p>
             </div>
         </div>
-        <div class="review-page-layout">
-            <div id="reviewToolbarPresortOnly" class="review-toolbar-presort-only">
-                <button id="openActualizeTasks" class="review-tool-square" type="button" title="Актуализировать активные задачи">▤</button>
-                <button id="openShkExclusion" class="review-tool-square" type="button" title="Добавить ШК в исключения">⛔</button>
-            </div>
-            <section class="card review-shell">
-                <div class="review-toolbar">
-                    <div>
-                        <div class="review-view-wrap">
-                            <div class="review-view-tabs review-view-tabs-3" aria-label="Вид разбора">
-                                <span id="reviewViewThumb" class="review-view-thumb" aria-hidden="true"></span>
-                                <button id="reviewTabPresort" class="review-view-tab active" type="button" data-tab-index="0" aria-selected="true">Предразбор</button>
-                                <button id="reviewTabTasks" class="review-view-tab" type="button" data-tab-index="1" aria-selected="false">Задачи</button>
-                                <button id="reviewTabPureLosses" class="review-view-tab" type="button" data-tab-index="2" aria-selected="false">Чистые списания</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="reviewStatus" class="review-status">Задачи еще не загружены.</div>
+        <section class="card review-status-card">
+            <div class="review-status-bar">
+                <div class="review-view-tabs review-view-tabs-3" aria-label="Вид разбора">
+                    <span id="reviewViewThumb" class="review-view-thumb" aria-hidden="true"></span>
+                    <button id="reviewTabPresort" class="review-view-tab active" type="button" data-tab-index="0" aria-selected="true">Предразбор</button>
+                    <button id="reviewTabTasks" class="review-view-tab" type="button" data-tab-index="1" aria-selected="false">Задачи</button>
+                    <button id="reviewTabPureLosses" class="review-view-tab" type="button" data-tab-index="2" aria-selected="false">Чистые списания</button>
                 </div>
-                <div id="writebackFailuresBanner" class="status-line warn" style="display:none;"></div>
-                <div class="review-pager-viewport">
-                    <div id="reviewPagerTrack" class="review-pager-track">
-                        <div class="review-pager-panel">
-                            <div id="reviewSectionsGrid" class="review-sections-grid"></div>
-                            <div id="reviewTableWrap" class="review-table-card"></div>
-                        </div>
-                        <div class="review-pager-panel">
-                            <div id="requestsStatus" class="review-status" style="margin-bottom:10px;">Задачи еще не загружены.</div>
-                            <div id="requestsSectionsGrid" class="review-sections-grid"></div>
-                            <div id="requestsTableWrap" class="review-table-card"></div>
-                        </div>
-                        <div class="review-pager-panel">
-                            <div class="card" style="padding:32px;text-align:center;">
-                                <h3 style="margin:0 0 8px;">Чистые списания</h3>
-                                <p class="empty-state" style="margin:0;">Группировка по критериям — в разработке.</p>
-                            </div>
+                <div id="reviewToolbarPresortOnly" class="review-toolbar-presort-only">
+                    <button id="openActualizeTasks" class="review-tool-square" type="button" title="Актуализировать активные задачи">▤</button>
+                    <button id="openShkExclusion" class="review-tool-square" type="button" title="Добавить ШК в исключения">⛔</button>
+                </div>
+            </div>
+        </section>
+        <div id="writebackFailuresBanner" class="status-line warn" style="display:none;"></div>
+        <section class="card review-shell">
+            <div class="review-pager-viewport">
+                <div id="reviewPagerTrack" class="review-pager-track">
+                    <div class="review-pager-panel">
+                        <div id="reviewSectionsGrid" class="review-sections-grid"></div>
+                        <div id="reviewTableWrap" class="review-table-card"></div>
+                    </div>
+                    <div class="review-pager-panel">
+                        <div id="requestsSectionsGrid" class="review-sections-grid"></div>
+                        <div id="requestsTableWrap" class="review-table-card"></div>
+                    </div>
+                    <div class="review-pager-panel">
+                        <div class="card" style="padding:32px;text-align:center;">
+                            <h3 style="margin:0 0 8px;">Чистые списания</h3>
+                            <p class="empty-state" style="margin:0;">Группировка по критериям — в разработке.</p>
                         </div>
                     </div>
                 </div>
-            </section>
-        </div>
+            </div>
+        </section>
     </section>
 
     <section id="inactivePage" class="tasks-page">
