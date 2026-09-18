@@ -7277,6 +7277,8 @@
             return;
         }
         const grouped = requestsGroupedRows();
+        const incomingFlowCount = (grouped.get("Запросы входящего потока") || []).length;
+        $("reviewTabTasks").classList.toggle("has-alert", incomingFlowCount > 0);
         if (!state.requests.activeSection || !(grouped.get(state.requests.activeSection) || []).length) {
             state.requests.activeSection = REQUEST_SECTIONS.find((section) => (grouped.get(section) || []).length) || REQUEST_SECTIONS[0];
         }

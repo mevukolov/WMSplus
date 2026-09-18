@@ -910,19 +910,20 @@
         .review-view-wrap { display: inline-flex; align-items: center; gap: 10px; }
         .review-tool-square { width: 42px; height: 42px; border: 0; border-radius: 12px; background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); font-size: 20px; font-weight: 900; cursor: pointer; }
         .review-tool-square:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); color: var(--accent); }
-        .review-tool-divider { width: 1px; height: 34px; background: #dbe3ec; }
         .review-view-tabs { display: inline-flex; gap: 8px; padding: 4px; border-radius: 14px; background: #f1f5f9; }
         .review-view-tabs-3 { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
-        .review-view-thumb { position: absolute; top: 4px; left: 4px; width: calc((100% - 8px) / 3); height: calc(100% - 8px); border-radius: 11px; background: #fff; box-shadow: var(--shadow-sm); transition: transform .38s cubic-bezier(.34,1.56,.64,1); z-index: 0; }
+        .review-view-thumb { position: absolute; top: 4px; left: 4px; width: calc((100% - 8px) / 3); height: calc(100% - 8px); border-radius: 11px; background: rgba(255,255,255,.78); backdrop-filter: blur(8px) saturate(160%); -webkit-backdrop-filter: blur(8px) saturate(160%); box-shadow: var(--shadow-sm), 0 1px 0 rgba(255,255,255,.7) inset; transition: transform .48s cubic-bezier(.32,1.2,.4,1); z-index: 0; }
         .review-view-tabs-3 .review-view-tab { position: relative; z-index: 1; border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; text-align: center; transition: color .2s ease; }
         .review-view-tabs-3 .review-view-tab.active { color: var(--accent-dark); background: transparent; box-shadow: none; }
         .review-view-tab { border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }
         .review-view-tab.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
+        .review-view-tab.has-alert::after { content: ''; position: absolute; top: 3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 2; }
         .review-pager-viewport { overflow: hidden; }
-        .review-pager-track { display: flex; transition: transform .38s cubic-bezier(.34,1.56,.64,1); }
+        .review-pager-track { display: flex; transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 100%; min-width: 0; }
-        .review-toolbar-presort-only { display: inline-flex; align-items: center; gap: 10px; }
-        .review-toolbar-presort-only.hidden { display: none; }
+        .review-page-layout { display: flex; gap: 14px; align-items: flex-start; }
+        .review-toolbar-presort-only { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; transition: opacity .3s ease, transform .3s cubic-bezier(.32,1.2,.4,1); }
+        .review-toolbar-presort-only.hidden { opacity: 0; transform: translateX(-14px); pointer-events: none; }
         .review-status { color: #64748b; font-size: 13px; min-height: 18px; }
         .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
         .review-section-card { min-height: 116px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 18px; text-align: left; cursor: pointer; }
@@ -1928,46 +1929,47 @@
                 <p class="tasks-page-note">Вот актуальные задачи на сегодня</p>
             </div>
         </div>
-        <section class="card review-shell">
-            <div class="review-toolbar">
-                <div>
-                    <div class="review-view-wrap">
-                        <div id="reviewToolbarPresortOnly" class="review-toolbar-presort-only">
-                            <button id="openActualizeTasks" class="review-tool-square" type="button" title="Актуализировать активные задачи">▤</button>
-                            <button id="openShkExclusion" class="review-tool-square" type="button" title="Добавить ШК в исключения">⛔</button>
-                            <span class="review-tool-divider" aria-hidden="true"></span>
+        <div class="review-page-layout">
+            <div id="reviewToolbarPresortOnly" class="review-toolbar-presort-only">
+                <button id="openActualizeTasks" class="review-tool-square" type="button" title="Актуализировать активные задачи">▤</button>
+                <button id="openShkExclusion" class="review-tool-square" type="button" title="Добавить ШК в исключения">⛔</button>
+            </div>
+            <section class="card review-shell">
+                <div class="review-toolbar">
+                    <div>
+                        <div class="review-view-wrap">
+                            <div class="review-view-tabs review-view-tabs-3" aria-label="Вид разбора">
+                                <span id="reviewViewThumb" class="review-view-thumb" aria-hidden="true"></span>
+                                <button id="reviewTabPresort" class="review-view-tab active" type="button" data-tab-index="0" aria-selected="true">Предразбор</button>
+                                <button id="reviewTabTasks" class="review-view-tab" type="button" data-tab-index="1" aria-selected="false">Задачи</button>
+                                <button id="reviewTabPureLosses" class="review-view-tab" type="button" data-tab-index="2" aria-selected="false">Чистые списания</button>
+                            </div>
                         </div>
-                        <div class="review-view-tabs review-view-tabs-3" aria-label="Вид разбора">
-                            <span id="reviewViewThumb" class="review-view-thumb" aria-hidden="true"></span>
-                            <button id="reviewTabPresort" class="review-view-tab active" type="button" data-tab-index="0" aria-selected="true">Предразбор</button>
-                            <button id="reviewTabTasks" class="review-view-tab" type="button" data-tab-index="1" aria-selected="false">Задачи</button>
-                            <button id="reviewTabPureLosses" class="review-view-tab" type="button" data-tab-index="2" aria-selected="false">Чистые списания</button>
+                    </div>
+                    <div id="reviewStatus" class="review-status">Задачи еще не загружены.</div>
+                </div>
+                <div id="writebackFailuresBanner" class="status-line warn" style="display:none;"></div>
+                <div class="review-pager-viewport">
+                    <div id="reviewPagerTrack" class="review-pager-track">
+                        <div class="review-pager-panel">
+                            <div id="reviewSectionsGrid" class="review-sections-grid"></div>
+                            <div id="reviewTableWrap" class="review-table-card"></div>
+                        </div>
+                        <div class="review-pager-panel">
+                            <div id="requestsStatus" class="review-status" style="margin-bottom:10px;">Задачи еще не загружены.</div>
+                            <div id="requestsSectionsGrid" class="review-sections-grid"></div>
+                            <div id="requestsTableWrap" class="review-table-card"></div>
+                        </div>
+                        <div class="review-pager-panel">
+                            <div class="card" style="padding:32px;text-align:center;">
+                                <h3 style="margin:0 0 8px;">Чистые списания</h3>
+                                <p class="empty-state" style="margin:0;">Группировка по критериям — в разработке.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div id="reviewStatus" class="review-status">Задачи еще не загружены.</div>
-            </div>
-            <div id="writebackFailuresBanner" class="status-line warn" style="display:none;"></div>
-            <div class="review-pager-viewport">
-                <div id="reviewPagerTrack" class="review-pager-track">
-                    <div class="review-pager-panel">
-                        <div id="reviewSectionsGrid" class="review-sections-grid"></div>
-                        <div id="reviewTableWrap" class="review-table-card"></div>
-                    </div>
-                    <div class="review-pager-panel">
-                        <div id="requestsStatus" class="review-status" style="margin-bottom:10px;">Задачи еще не загружены.</div>
-                        <div id="requestsSectionsGrid" class="review-sections-grid"></div>
-                        <div id="requestsTableWrap" class="review-table-card"></div>
-                    </div>
-                    <div class="review-pager-panel">
-                        <div class="card" style="padding:32px;text-align:center;">
-                            <h3 style="margin:0 0 8px;">Чистые списания</h3>
-                            <p class="empty-state" style="margin:0;">Группировка по критериям — в разработке.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
+            </section>
+        </div>
     </section>
 
     <section id="inactivePage" class="tasks-page">
