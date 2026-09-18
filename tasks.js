@@ -7218,7 +7218,7 @@
         const route = taskRouteLabel(row);
         const taskSub = opts.withSection ? (row.task_type || "-") + " · " + taskSectionName(row) : (row.task_type || "-");
         return "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(taskSub) + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
-            + "<td class='review-wrap-cell review-name-cell'>" + escapeHtml(truncateReviewName(taskItemName(row), 150) || "-") + "</td>"
+            + "<td class='review-wrap-cell review-name-cell'><div class='review-name-clamp'>" + escapeHtml(truncateReviewName(taskItemName(row), 150) || "-") + "</div></td>"
             + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
             + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + manualVerdictPillHtml(row) + "</td>";
     }
@@ -7245,7 +7245,7 @@
         const body = rows.map((row) => "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>" + reviewRowCellsHtml(row) + "</tr>").join("");
         target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
             + renderSectionFilters("review", baseRows, rows)
-            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
+            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-4col'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("name", "Наименование")
             + reviewSortHead("price", "Стоимость")
@@ -7303,7 +7303,7 @@
         state.review.sort = state.reviewCanvas.sort || { key: "price", dir: "desc" };
         target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Полотно разбора</h3><div class='review-table-subtitle'>Все активные задачи разбора: " + rows.length + " из " + baseRows.length + ".</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
             + renderSectionFilters("canvas", baseRows, rows)
-            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
+            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-4col'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("name", "Наименование")
             + reviewSortHead("price", "Стоимость")
