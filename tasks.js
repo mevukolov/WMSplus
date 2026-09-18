@@ -7862,11 +7862,21 @@
         if (target) target.classList.toggle("visible", Boolean(visible));
     }
 
+    // SYSTEM_MOVEMENT_VERDICT is excluded from VERDICT_TONE (it's a system
+    // autoverdict, never manually picked -- see manualVerdictPillHtml), but
+    // an actualization-closed task still deserves the same green "handled,
+    // nothing to do" signal a manual green verdict gets, in search and in
+    // the closed-tasks list specifically.
+    function isAutoActualizedTask(row) {
+        return normalizeText(row && row.opp_verdict) === SYSTEM_MOVEMENT_VERDICT;
+    }
+
     // Colors a search hit by its verdict tone (same palette as the review
     // table's second pill); a plain defer with no verdict gets a neutral
     // "deferred" tint instead, distinct from "not started" (no color at all).
     function taskSearchRowToneClass(row) {
         if (!row || row.__kind) return "";
+        if (isAutoActualizedTask(row)) return " tone-green";
         const verdict = normalizeText(row.opp_verdict);
         const tone = verdict && verdict !== "Не выбран" ? VERDICT_TONE[verdict] : "";
         if (tone) return " tone-" + tone;
@@ -10467,7 +10477,7 @@
                 ? "Переоткрытие: " + formatRuDateTime(row.reopen_after)
                 : "Завершено: " + formatRuDateTime(row.completed_at || row.updated_at);
             const route = taskRouteLabel(row);
-            return "<tr class='review-click-row' data-inactive-task-detail='" + escapeHtml(row.id) + "'>"
+            return "<tr class='review-click-row" + (isAutoActualizedTask(row) ? " tone-green" : "") + "' data-inactive-task-detail='" + escapeHtml(row.id) + "'>"
                 + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
                 + "<td><span class='review-pill'>" + escapeHtml(taskEntityTypeLabel(row)) + "</span></td>"
                 + "<td class='review-wrap-cell'>" + escapeHtml(taskItemName(row) || "-") + "</td>"
