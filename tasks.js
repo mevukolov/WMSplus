@@ -2377,8 +2377,11 @@
         if (index === 1) void scanIncomingFlowDuplicates();
     }
 
+    // Panels have a real 96px gap between them (see .review-pager-track) so
+    // the tilt-hover buffer on .review-pager-viewport has empty space to
+    // extend into instead of exposing the neighboring panel's content.
     function slidePagerTo(index) {
-        $("reviewPagerTrack").style.transform = "translateX(-" + (index * 100) + "%)";
+        $("reviewPagerTrack").style.transform = "translateX(calc(" + (-index) + " * (100% + 96px)))";
     }
 
     // Grid containers stay in the DOM across renders even though their card
@@ -7345,7 +7348,8 @@
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
             const active = section === state.requests.activeSection ? " active" : "";
             const empty = rows.length ? "" : " is-empty";
-            return "<button type='button' class='review-section-card" + active + empty + "' data-request-section='" + escapeHtml(section) + "'>"
+            const incomingAlert = section === "Запросы входящего потока" && rows.length ? " is-incoming-alert" : "";
+            return "<button type='button' class='review-section-card" + active + empty + incomingAlert + "' data-request-section='" + escapeHtml(section) + "'>"
                 + "<div class='review-section-name'><span>" + escapeHtml(section) + "</span><strong>" + rows.length + "</strong></div>"
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";

@@ -919,7 +919,7 @@
         .review-view-tab.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
         .review-view-tab.has-alert::after { content: ''; position: absolute; top: 3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 2; }
         .review-pager-viewport { clip-path: inset(-64px); }
-        .review-pager-track { display: flex; transition: transform .5s cubic-bezier(.22,1,.36,1); }
+        .review-pager-track { display: flex; gap: 96px; transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 100%; min-width: 0; }
         .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; transform-origin: center bottom; transition: opacity .22s ease, transform .38s cubic-bezier(.34,1.9,.5,1); }
         .review-toolbar-presort-only.is-away { opacity: 0; transition: opacity .18s ease, transform .3s cubic-bezier(.5,-.3,.7,.4); transform: translateY(30px) scale(.6); pointer-events: none; }
@@ -931,6 +931,12 @@
         .review-section-card.is-tilting { z-index: 41; transition: box-shadow .25s ease, border-color .2s ease, background-color .2s ease; background: rgba(255,255,255,.72); backdrop-filter: blur(10px) saturate(160%); -webkit-backdrop-filter: blur(10px) saturate(160%); border-color: rgba(98,60,234,.4); box-shadow: 0 22px 44px rgba(98,60,234,.2), var(--shadow-md); }
         .review-section-card.is-tilting::before { opacity: 1; }
         .review-section-card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(98,60,234,.18), var(--shadow-sm); }
+        .review-section-card.is-incoming-alert { animation: reviewIncomingPulse 1.8s ease-in-out infinite; }
+        .review-section-card.is-incoming-alert.is-tilting { animation-play-state: paused; }
+        @keyframes reviewIncomingPulse {
+            0%, 100% { border-color: rgba(239,68,68,.55); box-shadow: 0 0 0 0 rgba(239,68,68,.4), var(--shadow-sm); }
+            50% { border-color: rgba(239,68,68,.95); box-shadow: 0 0 0 9px rgba(239,68,68,0), var(--shadow-sm); }
+        }
         .review-section-name { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 12px; color: #242038; font-size: 18px; line-height: 1.15; font-weight: 900; }
         .review-section-name strong { font-size: 24px; line-height: 1; }
         .review-section-meta { position: relative; z-index: 1; margin-top: 14px; color: #64748b; font-size: 13px; line-height: 1.35; }
