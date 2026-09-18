@@ -567,7 +567,7 @@
             fullLoaded: false,
             fullLoadPromise: null,
             activeSection: "",
-            modalMode: "",
+            activeTab: 0,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
         },
@@ -596,10 +596,6 @@
         },
         requests: {
             activeSection: "",
-            sort: { key: "price", dir: "desc" },
-            filters: createReviewFilterState(),
-        },
-        reviewCanvas: {
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
         },
@@ -2070,7 +2066,6 @@
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
-        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         renderPrespisokHomeCard();
         renderFlowAccessGate();
@@ -2304,7 +2299,6 @@
         $("tasksHome").style.display = "none";
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
-        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         $("flowPage").classList.add("active");
         state.flow.loading = true;
@@ -2344,7 +2338,6 @@
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
-        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         $("uploadsPage").classList.add("active");
         $("uploadsStatus").textContent = "Загружаю журнал и настройки...";
@@ -2358,25 +2351,32 @@
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
-        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         $("reviewPage").classList.add("active");
         renderReview();
+        renderRequests();
         void ensureReviewTasksLoaded();
     }
 
-    function showRequestsPage() {
-        state.view = "requests";
-        closeFlowModals();
-        $("tasksHome").style.display = "none";
-        $("flowPage").classList.remove("active");
-        $("uploadsPage").classList.remove("active");
-        $("reviewPage").classList.remove("active");
-        $("inactivePage").classList.remove("active");
-        $("requestsPage").classList.add("active");
-        renderRequests();
-        void ensureReviewTasksLoaded();
-        void scanIncomingFlowDuplicates();
+    function setReviewTab(index) {
+        state.review.activeTab = index;
+        $("reviewViewThumb").style.transform = "translateX(" + (index * 100) + "%)";
+        [
+            [$("reviewTabPresort"), 0],
+            [$("reviewTabTasks"), 1],
+            [$("reviewTabPureLosses"), 2],
+        ].forEach(([button, tabIndex]) => {
+            const active = tabIndex === index;
+            button.classList.toggle("active", active);
+            button.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        $("reviewToolbarPresortOnly").classList.toggle("hidden", index !== 0);
+        slidePagerTo(index);
+        if (index === 1) void scanIncomingFlowDuplicates();
+    }
+
+    function slidePagerTo(index) {
+        $("reviewPagerTrack").style.transform = "translateX(-" + (index * 100) + "%)";
     }
 
     // "Дубль" is a system-only autoverdict (see task-verdicts.js) -- an
@@ -2460,7 +2460,6 @@
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
-        $("requestsPage").classList.remove("active");
         $("inactivePage").classList.add("active");
         renderInactive();
         void loadInactiveTasks();
@@ -2754,8 +2753,7 @@
 
     function refreshOpenSectionModal() {
         if (!$("reviewSectionModal") || !$("reviewSectionModal").classList.contains("active")) return;
-        if (state.view === "requests") renderRequestsTable(requestsGroupedRows());
-        else if (state.review.modalMode === "canvas") renderReviewCanvasTable();
+        if (state.review.activeTab === 1) renderRequestsTable(requestsGroupedRows());
         else renderReviewTable(reviewGroupedRows());
     }
 
@@ -6738,10 +6736,6 @@
         return grouped;
     }
 
-    function reviewCanvasRows() {
-        return (state.review.rows || []).filter((row) => isActiveReviewTask(row) && !isPrespisokTask(row) && !requestSectionName(row));
-    }
-
     function requestsGroupedRows() {
         const grouped = new Map(REQUEST_SECTIONS.map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
@@ -6867,13 +6861,13 @@
     }
 
     function sectionFilterState(mode) {
-        const holder = mode === "requests" ? state.requests : mode === "canvas" ? state.reviewCanvas : state.review;
+        const holder = mode === "requests" ? state.requests : state.review;
         if (!holder.filters) holder.filters = createReviewFilterState();
         return holder.filters;
     }
 
     function resetSectionFilters(mode) {
-        const holder = mode === "requests" ? state.requests : mode === "canvas" ? state.reviewCanvas : state.review;
+        const holder = mode === "requests" ? state.requests : state.review;
         holder.filters = createReviewFilterState();
     }
 
@@ -6962,7 +6956,6 @@
             if (filters.movementStatuses.size && !movementOptions.some((value) => filters.movementStatuses.has(value))) return false;
             if (!filterMatchesSet(taskEntityFilterValue(row), filters.entityTypes)) return false;
             if (!filterMatchesSet(taskStatusFilterValue(row), filters.taskStatuses)) return false;
-            if (mode === "canvas" && !filterMatchesSet(taskSectionName(row), filters.sectionNames)) return false;
             return true;
         });
     }
@@ -7035,7 +7028,6 @@
             + "</div>";
         return "<div class='review-filter-dropdown'><div class='review-filter-panel'>"
             + control("date", "Дата", dateSummary, "<div class='review-filter-options'><label class='review-filter-check'><input type='checkbox' data-review-filter-date-all='1' " + (!filters.date ? "checked" : "") + "> Выбрать всё</label></div>" + renderFilterCalendar(mode, baseRows))
-            + (mode === "canvas" ? control("sectionNames", "Участок", filterSummaryText(mode, "sectionNames", options.sectionNames), renderFilterCheckboxes(mode, "sectionNames", options.sectionNames)) : "")
             + control("movementStatuses", "Статус последнего движения", filterSummaryText(mode, "movementStatuses", options.movementStatuses), renderFilterCheckboxes(mode, "movementStatuses", options.movementStatuses))
             + control("entityTypes", "Тип задачи", filterSummaryText(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel), renderFilterCheckboxes(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel))
             + control("taskStatuses", "Статус", filterSummaryText(mode, "taskStatuses", options.taskStatuses), renderFilterCheckboxes(mode, "taskStatuses", options.taskStatuses) + "<div class='review-filter-empty-note' style='margin-top:8px'>Показано: " + escapeHtml(filteredRows.length) + " из " + escapeHtml(baseRows.length) + "</div>")
@@ -7179,13 +7171,11 @@
     }
 
     function openReviewSectionModal() {
-        state.review.modalMode = "section";
         renderReviewTable(reviewGroupedRows());
         setFlowModalOpen("reviewSectionModal", true);
     }
 
     function closeReviewSectionModal() {
-        state.review.modalMode = "";
         setFlowModalOpen("reviewSectionModal", false);
     }
 
@@ -7264,65 +7254,6 @@
                     ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
                     : { key, dir: key === "price" ? "desc" : "asc" };
                 renderReviewTable(reviewGroupedRows());
-            });
-        });
-        target.querySelectorAll("[data-task-detail]").forEach((row) => {
-            row.addEventListener("click", () => openTaskDetail(row.dataset.taskDetail, "review"));
-        });
-    }
-
-    function sortedCanvasRows(rows) {
-        const previous = state.review.sort;
-        state.review.sort = state.reviewCanvas.sort || { key: "price", dir: "desc" };
-        const sorted = sortedReviewRows(rows);
-        state.review.sort = previous;
-        return sorted;
-    }
-
-    function openReviewCanvasModal() {
-        state.review.modalMode = "canvas";
-        resetSectionFilters("canvas");
-        renderReviewCanvasTable();
-        setFlowModalOpen("reviewSectionModal", true);
-    }
-
-    function renderReviewCanvasTable() {
-        const baseRows = reviewCanvasRows();
-        const filteredRows = applySectionFilters("canvas", baseRows);
-        const rows = sortedCanvasRows(filteredRows);
-        const target = $("reviewSectionTableWrap");
-        if (!target) return;
-        if (!state.review.loaded) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Полотно разбора</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
-            const closeBtn = $("closeReviewSectionModal");
-            if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
-            return;
-        }
-        const body = rows.map((row) => "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>" + reviewRowCellsHtml(row, { withSection: true }) + "</tr>").join("");
-        const previousSort = state.review.sort;
-        state.review.sort = state.reviewCanvas.sort || { key: "price", dir: "desc" };
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Полотно разбора</h3><div class='review-table-subtitle'>Все активные задачи разбора: " + rows.length + " из " + baseRows.length + ".</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
-            + renderSectionFilters("canvas", baseRows, rows)
-            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-4col'><thead><tr>"
-            + reviewSortHead("title", "Задача")
-            + reviewSortHead("name", "Наименование")
-            + reviewSortHead("price", "Стоимость")
-            + reviewSortHead("status", "Статус")
-            + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
-        state.review.sort = previousSort;
-        const refresh = $("refreshReviewTasks");
-        if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
-        const closeBtn = $("closeReviewSectionModal");
-        if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
-        bindSectionFilterEvents(target, "canvas", renderReviewCanvasTable);
-        target.querySelectorAll("[data-review-sort]").forEach((button) => {
-            button.addEventListener("click", () => {
-                const key = button.dataset.reviewSort || "price";
-                const current = state.reviewCanvas.sort || { key: "price", dir: "desc" };
-                state.reviewCanvas.sort = current.key === key
-                    ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
-                    : { key, dir: key === "price" ? "desc" : "asc" };
-                renderReviewCanvasTable();
             });
         });
         target.querySelectorAll("[data-task-detail]").forEach((row) => {
@@ -16576,7 +16507,6 @@
         $("startFlowBanner").addEventListener("click", () => { void showFlowPage(); });
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
-        $("openRequests").addEventListener("click", showRequestsPage);
         $("openInactive").addEventListener("click", showInactivePage);
         $("openQuickNoShkReview").addEventListener("click", () => { void openQuickNoShkModal(); });
         $("openPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
@@ -16645,7 +16575,6 @@
         $("confirmFlowSkip").addEventListener("click", () => { void skipFlowTaskFromModal(); });
         $("homeFromUploads").addEventListener("click", showHome);
         $("homeFromReview").addEventListener("click", showHome);
-        $("homeFromRequests").addEventListener("click", showHome);
         $("homeFromInactive").addEventListener("click", showHome);
         $("makeUpload").addEventListener("click", () => openChooser(""));
         $("backfillUpload").addEventListener("click", openBackfillChooser);
@@ -16656,9 +16585,9 @@
         $("repeatUpload").addEventListener("click", resetCurrentUpload);
         $("closeMaster").addEventListener("click", () => setFlowModalOpen("masterWork", false));
         $("closeBackfillCalendar").addEventListener("click", () => setFlowModalOpen("backfillCalendarModal", false));
-        $("reviewViewSections").addEventListener("click", renderReview);
-        $("reviewViewCanvas").addEventListener("click", openReviewCanvasModal);
-        $("requestsViewSections").addEventListener("click", renderRequests);
+        $("reviewTabPresort").addEventListener("click", () => setReviewTab(0));
+        $("reviewTabTasks").addEventListener("click", () => setReviewTab(1));
+        $("reviewTabPureLosses").addEventListener("click", () => setReviewTab(2));
         $("openActualizeTasks").addEventListener("click", () => { void openActualizeTasksModal(); });
         $("closeActualizeTasks").addEventListener("click", closeActualizeTasksModal);
         $("copyActiveShk").addEventListener("click", () => { void copyActiveShkForActualize(); });

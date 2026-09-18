@@ -277,7 +277,13 @@ Replace with:
 
 (`requestsViewSections` no longer exists once Step 3 empties `requestsPage`'s body — its listener line is deleted here, one task ahead of the rest of `requestsPage`'s removal, which is fine since the element it targeted is already gone.)
 
-`tasks.js:16579` (`$("openRequests").addEventListener("click", showRequestsPage);`) and `tasks.js:16648` (`$("homeFromRequests").addEventListener("click", showHome);`) both target elements that step 3 has not yet removed from the DOM (the home tile and the back button are still present — only `requestsPage`'s inner body was emptied). Leave both listeners in place for this task; Task 2 removes them together with the elements they target.
+**Correction found during execution:** `$("openRequests").addEventListener("click", showRequestsPage);` (`tasks.js:16579`) references `showRequestsPage`, which this step's edit above just deleted — leaving that line in place throws an uncaught `ReferenceError` during `init()`, which silently aborts every listener registration *after* it in the same function, including the three new tab listeners from this same step. Delete this line now, in Task 1, not Task 2:
+
+```js
+        $("openRequests").addEventListener("click", showRequestsPage);
+```
+
+The `openRequests` home tile itself stays in the DOM until Task 2 (clicking it is inert with no listener — harmless for one task). `tasks.js:16648` (`$("homeFromRequests").addEventListener("click", showHome);`) has no such problem — `showHome` still exists — so that one line only *does* wait for Task 2 as originally planned.
 
 ### Step 6: Verify
 
@@ -514,12 +520,9 @@ Delete this entire block.
 
 ### Step 7: Delete the remaining `requestsPage` JS references
 
-Delete this listener line (`grep -n 'openRequests\b' tasks.js` to confirm
-its current position):
-
-```js
-        $("openRequests").addEventListener("click", showRequestsPage);
-```
+(`$("openRequests").addEventListener("click", showRequestsPage);` was
+already deleted in Task 1 Step 5 — see that step's correction — nothing
+left to do for it here.)
 
 Delete this listener line (`grep -n 'homeFromRequests' tasks.js`):
 
