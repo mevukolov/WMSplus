@@ -1783,6 +1783,7 @@
 
         $("tasksMenuNotifications")?.addEventListener("click", () => {
             closeTasksHeaderMenuStrip();
+            renderNotifications();
             setFlowModalOpen("notificationsModal", true);
         });
         $("tasksMenuFeed")?.addEventListener("click", () => {
@@ -2015,19 +2016,21 @@
         return state.shift.loadPromise;
     }
 
-    function renderPrintAlertBanner() {
-        const banner = $("printAlertBanner");
-        const text = $("printAlertText");
-        if (!banner || !text) return;
-        if (!state.printAlert.failedCount) {
-            banner.classList.remove("visible");
+    function renderNotifications() {
+        const menuButton = $("tasksMenuNotifications");
+        const list = $("notificationsList");
+        const hasPrintAlert = Boolean(state.printAlert.failedCount);
+        if (menuButton) menuButton.classList.toggle("has-alert", hasPrintAlert);
+        if (!list) return;
+        if (!hasPrintAlert) {
+            list.innerHTML = "<div class='empty-state'>Пока пусто. Скоро подключим уведомления.</div>";
             return;
         }
-        banner.classList.add("visible");
         const count = state.printAlert.failedCount;
         const label = count === 1 ? "этикетку" : "этикеток";
-        text.textContent = "Не удалось напечатать " + count + " " + label + " подряд. Последняя ошибка: "
+        const text = "Не удалось напечатать " + count + " " + label + " подряд. Последняя ошибка: "
             + (state.printAlert.lastError || "неизвестная ошибка") + ". Проверьте принтер на складе.";
+        list.innerHTML = "<div class='status-line warn'><strong>Принтер не отвечает</strong><br>" + escapeHtml(text) + "</div>";
     }
 
     async function loadPrintAlertState() {
@@ -2056,7 +2059,7 @@
             console.warn("print alert check failed:", error);
         } finally {
             state.printAlert.loading = false;
-            renderPrintAlertBanner();
+            renderNotifications();
         }
     }
 
@@ -2704,6 +2707,17 @@
                 const existingById = new Map((state.review.rows || []).map((row) => [row.id, row]));
                 const merged = [];
                 fullRows.forEach((full) => {
+                    // "active-full" fetches everything not completed, which
+                    // includes deferred-but-not-yet-reopened tasks -- unlike
+                    // fetchReviewTaskRows' light list, this one isn't
+                    // filtered by isActiveReviewTask. Without this check a
+                    // still-waiting deferral could leak into the active pool
+                    // (or, if it was deferred between the light and full
+                    // fetch, stay in it as a stale copy).
+                    if (!isActiveReviewTask(full)) {
+                        existingById.delete(full.id);
+                        return;
+                    }
                     const existing = existingById.get(full.id);
                     if (existing) {
                         // Same object reference as before -- any other code
@@ -7175,6 +7189,40 @@
         setFlowModalOpen("reviewSectionModal", false);
     }
 
+    const SYSTEM_VERDICT_SET = new Set([
+        SYSTEM_MOVEMENT_VERDICT,
+        SYSTEM_NO_SHK_NOT_FOUND_VERDICT,
+        SYSTEM_NO_SHK_FOUND_VERDICT,
+        SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT,
+    ]);
+
+    function truncateReviewName(text, maxLen) {
+        const value = normalizeText(text);
+        if (value.length <= maxLen) return value;
+        return value.slice(0, maxLen).trimEnd() + "…";
+    }
+
+    // Second status pill: only for a verdict the employee actually picked --
+    // system autoverdicts (Движение/Дубль/итд) never show here, and a plain
+    // defer with no verdict is already fully conveyed by the status pill.
+    function manualVerdictPillHtml(row) {
+        const verdict = normalizeText(row && row.opp_verdict);
+        if (!verdict || verdict === "Не выбран" || SYSTEM_VERDICT_SET.has(verdict)) return "";
+        const tone = VERDICT_TONE[verdict] || "";
+        return " <span class='review-pill" + (tone ? " tone-" + tone : "") + "'>" + escapeHtml(verdict) + "</span>";
+    }
+
+    function reviewRowCellsHtml(row, options) {
+        const opts = options || {};
+        const status = displayTaskStatus(row);
+        const route = taskRouteLabel(row);
+        const taskSub = opts.withSection ? (row.task_type || "-") + " · " + taskSectionName(row) : (row.task_type || "-");
+        return "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(taskSub) + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
+            + "<td class='review-wrap-cell review-name-cell'>" + escapeHtml(truncateReviewName(taskItemName(row), 150) || "-") + "</td>"
+            + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
+            + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + manualVerdictPillHtml(row) + "</td>";
+    }
+
     function renderReviewTable(grouped) {
         const section = state.review.activeSection || REVIEW_SECTIONS[0];
         const baseRows = grouped.get(section) || [];
@@ -7194,23 +7242,11 @@
             if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
             return;
         }
-        const body = rows.map((row) => {
-            const status = displayTaskStatus(row);
-            const verdict = normalizeText(row.opp_verdict);
-            const route = taskRouteLabel(row);
-            return "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>"
-                + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
-                + "<td><span class='review-pill'>" + escapeHtml(taskEntityTypeLabel(row)) + "</span></td>"
-                + "<td class='review-wrap-cell'>" + escapeHtml(taskItemName(row) || "-") + "</td>"
-                + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
-                + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + (verdict && verdict !== "Не выбран" ? "<div class='review-task-sub'>Вердикт: " + escapeHtml(verdict) + "</div>" : "") + "</td>"
-                + "</tr>";
-        }).join("");
+        const body = rows.map((row) => "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>" + reviewRowCellsHtml(row) + "</tr>").join("");
         target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
             + renderSectionFilters("review", baseRows, rows)
             + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
             + reviewSortHead("title", "Задача")
-            + reviewSortHead("entityType", "Тип задачи")
             + reviewSortHead("name", "Наименование")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
@@ -7262,25 +7298,13 @@
             if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
             return;
         }
-        const body = rows.map((row) => {
-            const status = displayTaskStatus(row);
-            const verdict = normalizeText(row.opp_verdict);
-            const route = taskRouteLabel(row);
-            return "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>"
-                + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + " · " + escapeHtml(taskSectionName(row)) + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
-                + "<td><span class='review-pill'>" + escapeHtml(taskEntityTypeLabel(row)) + "</span></td>"
-                + "<td class='review-wrap-cell'>" + escapeHtml(taskItemName(row) || "-") + "</td>"
-                + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
-                + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + (verdict && verdict !== "Не выбран" ? "<div class='review-task-sub'>Вердикт: " + escapeHtml(verdict) + "</div>" : "") + "</td>"
-                + "</tr>";
-        }).join("");
+        const body = rows.map((row) => "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>" + reviewRowCellsHtml(row, { withSection: true }) + "</tr>").join("");
         const previousSort = state.review.sort;
         state.review.sort = state.reviewCanvas.sort || { key: "price", dir: "desc" };
         target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Полотно разбора</h3><div class='review-table-subtitle'>Все активные задачи разбора: " + rows.length + " из " + baseRows.length + ".</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
             + renderSectionFilters("canvas", baseRows, rows)
             + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
             + reviewSortHead("title", "Задача")
-            + reviewSortHead("entityType", "Тип задачи")
             + reviewSortHead("name", "Наименование")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
@@ -7750,14 +7774,10 @@
         setFlowModalOpen("specialInfoModal", false);
     }
 
-    function openSpecialInfoModal(taskId, tag) {
-        const row = findTaskRow(taskId);
+    function renderSpecialInfoModal(title, infos, subtitle) {
         const target = $("specialInfoWrap");
-        if (!row || !target) return;
-        const normalizedTag = normalizeForMatch(tag);
-        const infos = taskSpecialInfos(row).filter((info) => !normalizedTag || normalizeForMatch(info.tag_name) === normalizedTag);
-        const title = normalizeText(tag) || "Особый ШК";
-        const cards = infos.length ? infos.map((info) => {
+        if (!target) return;
+        const cards = (infos || []).length ? infos.map((info) => {
             const lines = [
                 ["Тип", info.tag_name],
                 ["ШК в задаче", info.matched_shk || "-"],
@@ -7770,7 +7790,7 @@
                 + (info.media ? "<a class='special-info-link' href='" + escapeHtml(info.media) + "' target='_blank' rel='noopener'>Открыть ссылку/материал</a>" : "<div class='special-info-muted'>Ссылка не указана</div>")
                 + "</article>";
         }).join("") : "<div class='empty-state'>Детали по этому тегу не найдены. Для старых задач может понадобиться повторная выгрузка, чтобы WMS+ записал детали в payload.</div>";
-        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>" + escapeHtml(title) + "</h3><p class='work-subtitle'>Детали из базы 2ШК/ПУ по этой задаче.</p></div><button id='closeSpecialInfo' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
+        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>" + escapeHtml(title) + "</h3><p class='work-subtitle'>" + escapeHtml(subtitle || "Детали из базы 2ШК/ПУ.") + "</p></div><button id='closeSpecialInfo' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
             + "<div class='special-info-list'>" + cards + "</div>";
         $("closeSpecialInfo").addEventListener("click", closeSpecialInfoModal);
         target.querySelectorAll("[data-copy-value]").forEach((field) => {
@@ -7782,6 +7802,21 @@
             });
         });
         setFlowModalOpen("specialInfoModal", true);
+    }
+
+    function openSpecialInfoModal(taskId, tag) {
+        const row = findTaskRow(taskId);
+        if (!row) return;
+        const normalizedTag = normalizeForMatch(tag);
+        const infos = taskSpecialInfos(row).filter((info) => !normalizedTag || normalizeForMatch(info.tag_name) === normalizedTag);
+        renderSpecialInfoModal(normalizeText(tag) || "Особый ШК", infos, "Детали из базы 2ШК/ПУ по этой задаче.");
+    }
+
+    function openTwoShkSearchDetail(row) {
+        const infos = (row && row.__infos) || [];
+        const tagNames = Array.from(new Set(infos.map((info) => info.tag_name)));
+        const title = tagNames.length === 1 ? tagNames[0] : "Особый ШК";
+        renderSpecialInfoModal(title, infos, "Найдено напрямую в базе 2ШК/ПУ — задачи ОПП с этим ШК нет.");
     }
 
     function taskSearchPattern(value) {
@@ -7798,6 +7833,14 @@
                 row.opp_verdict || "",
                 payload.actor_label ? "Кто: " + payload.actor_label : "",
                 formatMoney(row.source_price_sum),
+            ].filter(Boolean).join(" · ");
+        }
+        if (row && row.__kind === "two_shk_rep") {
+            const infos = row.__infos || [];
+            return [
+                "База 2ШК/ПУ",
+                infos.length > 1 ? "Записей: " + infos.length : "",
+                infos[0] && infos[0].created_at ? formatRuDateTime(infos[0].created_at) : "",
             ].filter(Boolean).join(" · ");
         }
         const ids = taskItems(row).map((item) => item.shk).filter(Boolean);
@@ -7819,6 +7862,19 @@
         if (target) target.classList.toggle("visible", Boolean(visible));
     }
 
+    // Colors a search hit by its verdict tone (same palette as the review
+    // table's second pill); a plain defer with no verdict gets a neutral
+    // "deferred" tint instead, distinct from "not started" (no color at all).
+    function taskSearchRowToneClass(row) {
+        if (!row || row.__kind) return "";
+        const verdict = normalizeText(row.opp_verdict);
+        const tone = verdict && verdict !== "Не выбран" ? VERDICT_TONE[verdict] : "";
+        if (tone) return " tone-" + tone;
+        const status = displayTaskStatus(row);
+        if (status === "Отложено" || status === "Переоткрыто") return " tone-deferred";
+        return "";
+    }
+
     function renderTaskSearchResults(message) {
         const target = $("taskSearchResults");
         if (!target) return;
@@ -7833,7 +7889,7 @@
             setTaskSearchResultsVisible(true);
             return;
         }
-        target.innerHTML = rows.map((row) => "<button class='task-search-row' type='button' data-search-task-id='" + escapeHtml(row.id) + "'>"
+        target.innerHTML = rows.map((row) => "<button class='task-search-row" + taskSearchRowToneClass(row) + "' type='button' data-search-task-id='" + escapeHtml(row.id) + "'>"
             + "<span class='task-search-title'>" + escapeHtml(displayTaskTitle(row)) + "</span>"
             + "<span class='task-search-meta'>" + escapeHtml(taskSearchMeta(row)) + "</span>"
             + "</button>").join("");
@@ -7844,6 +7900,10 @@
                 const row = findTaskRow(id);
                 if (row && row.__kind === "prespisok_action") {
                     openPrespisokActionSearchDetail(row);
+                    return;
+                }
+                if (row && row.__kind === "two_shk_rep") {
+                    openTwoShkSearchDetail(row);
                     return;
                 }
                 openTaskDetail(id, row && isActiveReviewTask(row) ? "review" : "inactive");
@@ -7959,6 +8019,32 @@
         setFlowModalOpen("specialInfoModal", true);
     }
 
+    // Synthetic search hit for a ШК that only exists in 2shk_rep (no WMS
+    // task) -- reuses the same loadSpecialMap/specialInfosForIds lookup
+    // that computes the "Два ШК"/"Пустая упаковка" pills, so a hit here
+    // opens the exact same details (see openTwoShkSearchDetail).
+    function normalizeTwoShkSearchRow(id, infos) {
+        const tagNames = Array.from(new Set(infos.map((info) => info.tag_name)));
+        return {
+            __kind: "two_shk_rep",
+            __infos: infos,
+            id: "two-shk-rep:" + id,
+            title: (tagNames.join(" / ") || "Особый ШК") + " — ШК " + id,
+            source_shk_ids: [id],
+            source_price_sum: 0,
+            task_status: "Завершено",
+            updated_at: infos[0] && infos[0].created_at || "",
+        };
+    }
+
+    async function queryTwoShkSearch(id) {
+        if (!id) return [];
+        const specialMap = await loadSpecialMap([id]);
+        const infos = specialInfosForIds([id], specialMap);
+        if (!infos.length) return [];
+        return [normalizeTwoShkSearchRow(id, infos)];
+    }
+
     async function queryTaskSearch(value) {
         const db = supabaseDb();
         if (!db) return [];
@@ -7997,6 +8083,10 @@
         });
         const prespisokRows = id ? await queryPrespisokActionSearch(db, id).catch(() => []) : [];
         prespisokRows.forEach((row) => {
+            if (row && row.id && !byId.has(row.id)) byId.set(row.id, row);
+        });
+        const twoShkRows = id ? await queryTwoShkSearch(id).catch(() => []) : [];
+        twoShkRows.forEach((row) => {
             if (row && row.id && !byId.has(row.id)) byId.set(row.id, row);
         });
         if (!byId.size && errors.length === settled.length && errors[0]) throw errors[0];

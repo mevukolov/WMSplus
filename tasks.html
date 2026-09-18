@@ -41,6 +41,14 @@
         .task-search-results.visible { display: grid; gap: 6px; animation: tasksRiseIn .18s ease-out both; }
         .task-search-row { width: 100%; border: 0; border-radius: 14px; background: #fff; padding: 10px 12px; text-align: left; cursor: pointer; color: #242038; }
         .task-search-row:hover { background: #f5f3ff; }
+        .task-search-row.tone-green { background: #dcfce7; }
+        .task-search-row.tone-yellow { background: #fef3c7; }
+        .task-search-row.tone-red { background: #fee2e2; }
+        .task-search-row.tone-deferred { background: #f1f5f9; }
+        .task-search-row.tone-green:hover { background: #bbf7d0; }
+        .task-search-row.tone-yellow:hover { background: #fde68a; }
+        .task-search-row.tone-red:hover { background: #fecaca; }
+        .task-search-row.tone-deferred:hover { background: #e2e8f0; }
         .task-search-title { display: block; font-size: 14px; font-weight: 900; overflow-wrap: anywhere; }
         .task-search-meta { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
         .task-search-empty { padding: 12px; color: #64748b; font-size: 13px; line-height: 1.35; }
@@ -469,6 +477,10 @@
             z-index: 2;
         }
         .tasks-menu-item:hover::before { opacity: 1; transform: translateY(-50%) translateX(0) scale(1); }
+        .tasks-menu-item.has-alert::after {
+            content: ''; position: absolute; top: 1px; right: 1px; width: 10px; height: 10px;
+            border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 2;
+        }
         @media (max-width: 480px) { .tasks-menu-strip { right: -2px; } .tasks-menu-item::before { font-size: 11.5px; padding: 6px 11px; } }
 
         /* === Right-side drawers (Уведомления / Профиль / Лента без ШК when
@@ -931,8 +943,12 @@
         .review-task-title { font-weight: 800; color: #242038; }
         .review-task-sub { margin-top: 4px; color: #64748b; font-size: 12px; }
         .review-task-route { display: inline-flex; margin-top: 5px; border-radius: 999px; background: #fef3c7; color: #854d0e; padding: 3px 8px; font-size: 12px; font-weight: 900; }
-        .review-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 800; background: #f1f5f9; color: #334155; }
-        .review-price-cell { font-weight: 900; color: #0f172a; }
+        .review-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 800; background: #f1f5f9; color: #334155; margin: 2px 0; }
+        .review-pill.tone-green { background: #86efac; color: #14532d; }
+        .review-pill.tone-yellow { background: #fde047; color: #713f12; }
+        .review-pill.tone-red { background: #fca5a5; color: #7f1d1d; }
+        .review-price-cell { font-weight: 900; color: #0f172a; text-align: center; }
+        .review-name-cell { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
         .review-tags { display: flex; flex-wrap: wrap; gap: 4px; max-width: 240px; }
         .review-sort-btn { border: 0; background: transparent; padding: 0; color: inherit; font: inherit; font-weight: 900; cursor: pointer; }
         .review-sort-btn:hover { color: var(--accent); }
@@ -1677,13 +1693,6 @@
         <button id="openShiftFromBanner" class="btn btn-rect" type="button">Открыть смену</button>
     </section>
 
-    <section id="printAlertBanner" class="shift-gate-banner" aria-live="polite">
-        <div>
-            <p class="shift-gate-title">Принтер не отвечает</p>
-            <p id="printAlertText" class="shift-gate-text"></p>
-        </div>
-    </section>
-
     <section id="tasksHome" class="tasks-home-groups">
         <div class="flow-home-banner" data-dev-only>
             <span class="flow-home-banner-kicker">Флоу</span>
@@ -1770,6 +1779,11 @@
                     <h2 class="tasks-action-title">Открыть чистые списания</h2>
                     <p class="tasks-action-text">Переход на текущий экран pure_losses.html со статистикой, детализацией и таблицами.</p>
                 </button>
+                <button id="openNoShkReview" class="tasks-action-card" type="button">
+                    <span class="tasks-action-icon">∅</span>
+                    <h2 class="tasks-action-title">Разбор “Без ШК”</h2>
+                    <p class="tasks-action-text">Поиск товара в чистых списаниях по НМ, бренду или наименованию и ручное опознание.</p>
+                </button>
             </div>
         </div>
         <div class="tasks-home-group">
@@ -1780,11 +1794,6 @@
                 </div>
             </div>
             <div class="tasks-actions">
-                <button id="openNoShkReview" class="tasks-action-card" type="button">
-                    <span class="tasks-action-icon">∅</span>
-                    <h2 class="tasks-action-title">Разбор “Без ШК”</h2>
-                    <p class="tasks-action-text">Поиск товара в чистых списаниях по НМ, бренду или наименованию и ручное опознание.</p>
-                </button>
                 <button id="openAchievements" class="tasks-action-card" type="button">
                     <span class="tasks-action-icon">🏆</span>
                     <h2 class="tasks-action-title">Достижения</h2>
@@ -2365,7 +2374,7 @@
             <button id="closeNotifications" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
         <div class="drawer-body-scroll">
-            <div class="empty-state">Пока пусто. Скоро подключим уведомления.</div>
+            <div id="notificationsList"><div class="empty-state">Пока пусто. Скоро подключим уведомления.</div></div>
         </div>
     </div>
 </section>
