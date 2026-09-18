@@ -2353,8 +2353,10 @@
         $("uploadsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         $("reviewPage").classList.add("active");
-        renderReview();
-        renderRequests();
+        animateReviewShellHeightChange(() => {
+            renderReview();
+            renderRequests();
+        });
         void ensureReviewTasksLoaded();
     }
 
@@ -2370,7 +2372,7 @@
             button.classList.toggle("active", active);
             button.setAttribute("aria-selected", active ? "true" : "false");
         });
-        $("reviewToolbarPresortOnly").classList.toggle("hidden", index !== 0);
+        $("reviewToolbarPresortOnly").classList.toggle("is-away", index !== 0);
         slidePagerTo(index);
         if (index === 1) void scanIncomingFlowDuplicates();
     }
@@ -2449,7 +2451,6 @@
         }
         if (closed) {
             await loadReviewTasks();
-            if (state.view === "requests") renderRequests();
         }
     }
 
@@ -2673,8 +2674,10 @@
             } finally {
                 state.review.loading = false;
                 state.review.loadPromise = null;
-                renderReview();
-                renderRequests();
+                animateReviewShellHeightChange(() => {
+                    renderReview();
+                    renderRequests();
+                });
                 if (state.view === "flow") {
                     refreshFlowQueue();
                     renderFlowPage();
@@ -7282,7 +7285,7 @@
         if (!state.requests.activeSection || !(grouped.get(state.requests.activeSection) || []).length) {
             state.requests.activeSection = REQUEST_SECTIONS.find((section) => (grouped.get(section) || []).length) || REQUEST_SECTIONS[0];
         }
-        setRequestsStatus(state.review.loaded ? "Запросы загружены." : "Задачи еще не загружены.", state.review.loaded ? "good" : "");
+        setRequestsStatus(state.review.loaded ? "" : "Задачи еще не загружены.");
         renderRequestsSections(grouped);
         const section = state.requests.activeSection || REQUEST_SECTIONS[0];
         const rows = sortedRequestRows(grouped.get(section) || []);
@@ -8674,6 +8677,33 @@
             });
         }
         return entries;
+    }
+
+    // Same measure-before/after height transition as animateTaskDetailCardResize
+    // below, applied to the Разбор card so its first data load (and any tab
+    // switch that changes content height) grows smoothly instead of snapping.
+    function animateReviewShellHeightChange(mutate) {
+        const el = document.querySelector("#reviewPage .review-shell");
+        if (!el) { mutate(); return; }
+        const startHeight = el.getBoundingClientRect().height;
+        mutate();
+        const endHeight = el.scrollHeight;
+        if (Math.abs(endHeight - startHeight) < 2) return;
+        const startOverflow = el.style.overflow;
+        el.style.overflow = "hidden";
+        el.style.height = startHeight + "px";
+        el.style.transition = "none";
+        void el.offsetHeight;
+        el.style.transition = "height .42s cubic-bezier(.22,.9,.28,1.05)";
+        requestAnimationFrame(() => { el.style.height = endHeight + "px"; });
+        const cleanup = () => {
+            el.style.height = "";
+            el.style.transition = "";
+            el.style.overflow = startOverflow;
+            el.removeEventListener("transitionend", cleanup);
+        };
+        el.addEventListener("transitionend", cleanup);
+        setTimeout(cleanup, 550);
     }
 
     function animateTaskDetailCardResize(mutate) {
