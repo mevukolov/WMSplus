@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Склад</title>
+<style>
+  :root {
+    --ground: #d9c9a3;
+    --ground-line: #c2ae7c;
+    --plot: #8b6f4e;
+    --plot-top: #a9855c;
+    --bg: #eef2f7;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow-x: hidden;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100%;
+    padding: 16px;
+  }
+  h1 {
+    font-size: 20px;
+    color: #1f2937;
+    margin: 0 0 24px;
+  }
+  .iso-stage {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    perspective: 1400px;
+    padding: 40px 0;
+  }
+  .iso-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 48px);
+    grid-template-rows: repeat(5, 48px);
+    gap: 3px;
+    transform: rotateX(55deg) rotateZ(45deg);
+    transform-style: preserve-3d;
+  }
+  .iso-tile {
+    background: var(--ground);
+    border: 1px solid var(--ground-line);
+    border-radius: 4px;
+  }
+  .iso-tile.plot {
+    background: var(--plot-top);
+    border: 1px solid var(--plot);
+    border-radius: 4px;
+    transform: translateZ(22px);
+    box-shadow: 0 -22px 0 0 var(--plot);
+  }
+</style>
+</head>
+<body>
+  <h1>Склад</h1>
+  <div class="iso-stage">
+    <div class="iso-grid" id="isoGrid"></div>
+  </div>
+
+  <script>
+    (function () {
+      var raw = localStorage.getItem("user");
+      var user = null;
+      try { user = raw ? JSON.parse(raw) : null; } catch (e) { user = null; }
+      if (!user) {
+        window.location.href = "login.html";
+        return;
+      }
+
+      var GRID_SIZE = 5;
+      var GRID_TILES = [];
+      for (var row = 0; row < GRID_SIZE; row++) {
+        for (var col = 0; col < GRID_SIZE; col++) {
+          GRID_TILES.push({
+            row: row,
+            col: col,
+            type: (row === 2 && col === 2) ? "plot" : "ground",
+          });
+        }
+      }
+
+      function renderGrid(tiles) {
+        var container = document.getElementById("isoGrid");
+        tiles.forEach(function (tile) {
+          var el = document.createElement("div");
+          el.className = "iso-tile" + (tile.type === "plot" ? " plot" : "");
+          el.style.gridRow = String(tile.row + 1);
+          el.style.gridColumn = String(tile.col + 1);
+          container.appendChild(el);
+        });
+      }
+
+      renderGrid(GRID_TILES);
+    })();
+  </script>
+</body>
+</html>
