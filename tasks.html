@@ -918,7 +918,7 @@
         .review-view-tab { border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }
         .review-view-tab.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
         .review-view-tab.has-alert::after { content: ''; position: absolute; top: 3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 2; }
-        .review-pager-viewport { overflow: hidden; padding: 56px 0; margin: -56px 0; }
+        .review-pager-viewport { clip-path: inset(-64px); }
         .review-pager-track { display: flex; transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 100%; min-width: 0; }
         .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; transform-origin: center bottom; transition: opacity .22s ease, transform .38s cubic-bezier(.34,1.9,.5,1); }
