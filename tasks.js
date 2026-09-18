@@ -2381,6 +2381,53 @@
         $("reviewPagerTrack").style.transform = "translateX(-" + (index * 100) + "%)";
     }
 
+    // Grid containers stay in the DOM across renders even though their card
+    // buttons get replaced on every renderReview()/renderRequests() call, so
+    // listeners live on the grid (delegation) rather than on the cards.
+    function initReviewCardTilt() {
+        const grids = [$("reviewSectionsGrid"), $("requestsSectionsGrid")].filter(Boolean);
+        if (!grids.length) return;
+        const scrim = $("reviewCardScrim");
+        let activeCard = null;
+
+        function applyTilt(card, event) {
+            const rect = card.getBoundingClientRect();
+            const px = (event.clientX - rect.left) / rect.width;
+            const py = (event.clientY - rect.top) / rect.height;
+            const rotateY = (px - 0.5) * 16;
+            const rotateX = (0.5 - py) * 16;
+            card.style.transform = "translateY(-8px) scale(1.035) rotateX(" + rotateX.toFixed(2) + "deg) rotateY(" + rotateY.toFixed(2) + "deg)";
+            card.style.setProperty("--tilt-mx", (px * 100).toFixed(1) + "%");
+            card.style.setProperty("--tilt-my", (py * 100).toFixed(1) + "%");
+        }
+
+        function leaveCard(card) {
+            card.classList.remove("is-tilting");
+            card.style.transform = "";
+            card.style.removeProperty("--tilt-mx");
+            card.style.removeProperty("--tilt-my");
+            if (activeCard === card) activeCard = null;
+            if (scrim && !activeCard) scrim.classList.remove("is-active");
+        }
+
+        grids.forEach((grid) => {
+            grid.addEventListener("mousemove", (event) => {
+                const card = event.target.closest(".review-section-card");
+                if (!card || !grid.contains(card)) return;
+                if (activeCard && activeCard !== card) leaveCard(activeCard);
+                if (activeCard !== card) {
+                    card.classList.add("is-tilting");
+                    if (scrim) scrim.classList.add("is-active");
+                    activeCard = card;
+                }
+                applyTilt(card, event);
+            });
+            grid.addEventListener("mouseleave", () => {
+                if (activeCard) leaveCard(activeCard);
+            });
+        });
+    }
+
     // "Дубль" is a system-only autoverdict (see task-verdicts.js) -- an
     // operator can never pick it, so something has to set it. Runs a full
     // (not just active) scan every time the Requests tab opens: two
@@ -16750,6 +16797,7 @@
         installAchievementDebugHelpers();
         initEvents();
         initTasksHeaderMenu();
+        initReviewCardTilt();
         startPrespisokHomeTimer();
         renderCalendar();
         renderShiftGate();
