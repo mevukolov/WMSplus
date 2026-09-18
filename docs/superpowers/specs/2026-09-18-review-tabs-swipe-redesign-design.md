@@ -158,8 +158,21 @@ existing functions (`renderRequests`, `renderRequestsSections`,
 `sortedRequestRows`) untouched. `loadReviewTasks()`'s `finally` block
 already calls both `renderReview()` and `renderRequests()` unconditionally
 (`tasks.js:2678` area) — both panels' content is always current regardless
-of which tab is showing, so `setReviewTab` itself doesn't need to trigger
-any fetch or render, only the visual switch. The one call site gated on
+of which tab is showing, so `setReviewTab` doesn't need to trigger any
+fetch or render for either grid, only the visual switch.
+
+One side effect does need to move: `showRequestsPage()` (`tasks.js:2368-2380`,
+deleted per §6) also calls `void scanIncomingFlowDuplicates();` on every
+entry — a full scan that auto-closes duplicate incoming-flow requests
+(system "Дубль" verdict), documented at `tasks.js:2382-2389`. This has no
+other caller today. `setReviewTab(index)` must call
+`void scanIncomingFlowDuplicates();` whenever `index === 1`, every time
+(not just the first time — matches today's per-visit behavior exactly).
+`showReviewPage()` keeps calling `ensureReviewTasksLoaded()` unconditionally
+as it does today (both grids need `state.review.rows`, regardless of
+starting tab).
+
+The one call site gated on
 the old page model, `if (state.view === "requests") renderRequests();`
 (`tasks.js:2452`, inside the incoming-flow duplicate auto-close routine),
 is already redundant today — the `loadReviewTasks()` call two lines above
@@ -239,8 +252,13 @@ the existing `.empty-state`-style treatment:
   confirm no leftover references to `requestsPage`/`openRequests`/
   `reviewViewCanvas`/`openReviewCanvasModal` (grep sweep), confirm the
   home screen no longer shows a "Запросы" tile.
-- No new Supabase calls introduced — QA stays read-only exactly as in prior
-  rounds this session.
+- No *new* Supabase calls are introduced by this redesign, but switching to
+  the "Задачи" tab does fire the pre-existing `scanIncomingFlowDuplicates()`
+  (§3) — this can write (auto-closes real duplicate incoming-flow requests)
+  exactly as it already does today on the standalone "Запросы" page. That
+  behavior isn't new, but QA should still avoid clicking into "Задачи"
+  repeatedly for no reason, same caution as any other already-live write
+  path this session has worked around.
 
 ## Out of scope
 
