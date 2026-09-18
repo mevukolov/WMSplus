@@ -918,7 +918,7 @@
         .review-view-tab { border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }
         .review-view-tab.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
         .review-view-tab.has-alert::after { content: ''; position: absolute; top: 3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 2; }
-        .review-pager-viewport { overflow: hidden; }
+        .review-pager-viewport { overflow: hidden; padding: 56px; margin: -56px 0; }
         .review-pager-track { display: flex; transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 100%; min-width: 0; }
         .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; transform-origin: center bottom; transition: opacity .22s ease, transform .38s cubic-bezier(.34,1.9,.5,1); }
@@ -934,14 +934,13 @@
         .review-section-name { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 12px; color: #242038; font-size: 18px; line-height: 1.15; font-weight: 900; }
         .review-section-name strong { font-size: 24px; line-height: 1; }
         .review-section-meta { position: relative; z-index: 1; margin-top: 14px; color: #64748b; font-size: 13px; line-height: 1.35; }
-        .review-card-scrim { position: fixed; inset: 0; background: #0f172a; opacity: 0; pointer-events: none; transition: opacity .35s ease; z-index: 40; }
-        .review-card-scrim.is-active { opacity: .3; }
         .inactive-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .inactive-card { min-height: 150px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 16px; text-align: left; cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
         .inactive-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: rgba(98,60,234,.26); }
         .inactive-card-title { display: flex; justify-content: space-between; gap: 12px; color: #242038; font-size: 18px; font-weight: 900; }
         .inactive-card-note { margin-top: 10px; color: #64748b; font-size: 13px; line-height: 1.4; }
         .review-table-card { border: 1px solid #dbe3ec; border-radius: 16px; overflow: hidden; background: #fff; }
+        .review-table-card:empty { display: none; border: 0; }
         .review-table-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
         .review-table-title { margin: 0; color: #242038; font-size: 18px; }
         .review-table-subtitle { color: #64748b; font-size: 12px; }
@@ -1926,7 +1925,6 @@
     </section>
 
     <section id="reviewPage" class="tasks-page">
-        <div id="reviewCardScrim" class="review-card-scrim" aria-hidden="true"></div>
         <div class="tasks-page-head">
             <button id="homeFromReview" class="btn btn-outline" type="button" aria-label="Назад">←</button>
             <div>

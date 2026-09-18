@@ -2387,7 +2387,6 @@
     function initReviewCardTilt() {
         const grids = [$("reviewSectionsGrid"), $("requestsSectionsGrid")].filter(Boolean);
         if (!grids.length) return;
-        const scrim = $("reviewCardScrim");
         let activeCard = null;
 
         function applyTilt(card, event) {
@@ -2407,7 +2406,6 @@
             card.style.removeProperty("--tilt-mx");
             card.style.removeProperty("--tilt-my");
             if (activeCard === card) activeCard = null;
-            if (scrim && !activeCard) scrim.classList.remove("is-active");
         }
 
         grids.forEach((grid) => {
@@ -2415,9 +2413,9 @@
                 const card = event.target.closest(".review-section-card");
                 if (!card || !grid.contains(card)) return;
                 if (activeCard && activeCard !== card) leaveCard(activeCard);
+                if (card.classList.contains("is-empty")) return;
                 if (activeCard !== card) {
                     card.classList.add("is-tilting");
-                    if (scrim) scrim.classList.add("is-active");
                     activeCard = card;
                 }
                 applyTilt(card, event);
@@ -7191,7 +7189,8 @@
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
             const active = section === state.review.activeSection ? " active" : "";
-            return "<button type='button' class='review-section-card" + active + "' data-review-section='" + escapeHtml(section) + "'>"
+            const empty = rows.length ? "" : " is-empty";
+            return "<button type='button' class='review-section-card" + active + empty + "' data-review-section='" + escapeHtml(section) + "'>"
                 + "<div class='review-section-name'><span>" + escapeHtml(section) + "</span><strong>" + rows.length + "</strong></div>"
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";
@@ -7210,7 +7209,7 @@
         const section = state.review.activeSection || REVIEW_SECTIONS[0];
         const rows = sortedReviewRows(grouped.get(section) || []);
         if (!state.review.loaded) {
-            $("reviewTableWrap").innerHTML = "<div class='empty-state'>Нажмите \"Разбор\", и WMS+ загрузит активные задачи из Supabase.</div>";
+            $("reviewTableWrap").innerHTML = "<div class='empty-state'>Загружаю задачи...</div>";
             return;
         }
         if (!rows.length) {
@@ -7337,7 +7336,7 @@
         const rows = sortedRequestRows(grouped.get(section) || []);
         $("requestsTableWrap").innerHTML = state.review.loaded
             ? (rows.length ? "" : "<div class='empty-state'>Выберите участок. На выбранном участке \"" + escapeHtml(section) + "\" активных запросов пока нет.</div>")
-            : "<div class='empty-state'>Нажмите \"Запросы\", и WMS+ загрузит задачи из Supabase.</div>";
+            : "<div class='empty-state'>Загружаю задачи...</div>";
     }
 
     function renderRequestsSections(grouped) {
@@ -7345,7 +7344,8 @@
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
             const active = section === state.requests.activeSection ? " active" : "";
-            return "<button type='button' class='review-section-card" + active + "' data-request-section='" + escapeHtml(section) + "'>"
+            const empty = rows.length ? "" : " is-empty";
+            return "<button type='button' class='review-section-card" + active + empty + "' data-request-section='" + escapeHtml(section) + "'>"
                 + "<div class='review-section-name'><span>" + escapeHtml(section) + "</span><strong>" + rows.length + "</strong></div>"
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";
