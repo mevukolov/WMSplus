@@ -567,6 +567,7 @@
             fullLoaded: false,
             fullLoadPromise: null,
             activeSection: "",
+            sectionExpanded: false,
             activeTab: 0,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
@@ -596,6 +597,7 @@
         },
         requests: {
             activeSection: "",
+            sectionExpanded: false,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
         },
@@ -1651,7 +1653,6 @@
         setFlowModalOpen("uploadWork", false);
         setFlowModalOpen("masterWork", false);
         setFlowModalOpen("backfillCalendarModal", false);
-        setFlowModalOpen("reviewSectionModal", false);
         setFlowModalOpen("taskDetailModal", false);
         if (state.flow.embedded) setFlowEmbeddedMode(false);
         setFlowModalOpen("flowTaskModal", false);
@@ -2059,9 +2060,34 @@
         }
     }
 
+    // Crossfades .tasks-title's text via a slide-out/slide-in pair driven by
+    // the .is-swapping-out/.is-swapping-in CSS classes, and collapses
+    // .tasks-subtitle's height instead of hard-hiding it -- same enter/exit
+    // toggle pattern as the review pager's fly-in buttons.
+    function setHeroTitle(text, options) {
+        const opts = options || {};
+        const title = $("heroTitle");
+        const subtitle = $("heroSubtitle");
+        if (subtitle) subtitle.classList.toggle("is-collapsed", !!opts.hideSubtitle);
+        if (!title || title.textContent === text) return;
+        if (!opts.animate) {
+            title.textContent = text;
+            return;
+        }
+        title.classList.add("is-swapping-out");
+        setTimeout(() => {
+            title.textContent = text;
+            title.classList.remove("is-swapping-out");
+            title.classList.add("is-swapping-in");
+            void title.offsetHeight;
+            requestAnimationFrame(() => title.classList.remove("is-swapping-in"));
+        }, 220);
+    }
+
     function showHome() {
         state.view = "home";
         closeFlowModals();
+        setHeroTitle("Задачи и выгрузки", { animate: true, hideSubtitle: false });
         $("tasksHome").style.display = "grid";
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
@@ -2348,6 +2374,7 @@
     function showReviewPage() {
         state.view = "review";
         closeFlowModals();
+        setHeroTitle("Разбор", { animate: true, hideSubtitle: true });
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
@@ -2730,7 +2757,7 @@
                     refreshFlowQueue();
                     renderFlowPage();
                 }
-                refreshOpenSectionModal();
+                refreshExpandedSections();
             }
         })();
         return state.review.loadPromise;
@@ -2802,10 +2829,9 @@
         return rows.filter(isActiveReviewTask);
     }
 
-    function refreshOpenSectionModal() {
-        if (!$("reviewSectionModal") || !$("reviewSectionModal").classList.contains("active")) return;
-        if (state.review.activeTab === 1) renderRequestsTable(requestsGroupedRows());
-        else renderReviewTable(reviewGroupedRows());
+    function refreshExpandedSections() {
+        if (state.review.sectionExpanded) renderReviewTable(reviewGroupedRows());
+        if (state.requests.sectionExpanded) renderRequestsTable(requestsGroupedRows());
     }
 
     function setActualizeStatus(message, type) {
@@ -3810,7 +3836,7 @@
                 $("actualizeResults").innerHTML = "<div class='status-line good'>Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote() + "</div>";
             }
             setActualizeStatus("Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote(), lightSkipped.length ? "error" : "good");
-            refreshOpenSectionModal();
+            refreshExpandedSections();
         } catch (error) {
             console.error("actualize close movement failed:", error);
             setActualizeStatus("Не удалось закрыть задачи: " + (error && error.message ? error.message : String(error)), "error");
@@ -4874,7 +4900,7 @@
             state.quickNoShk.index += 1;
             state.quickNoShk.itemTimerStartedAt = Date.now();
             renderQuickNoShkPlay();
-            refreshOpenSectionModal();
+            refreshExpandedSections();
         } catch (error) {
             console.error("quick no shk action failed:", error);
             if (status) {
@@ -7086,8 +7112,7 @@
     }
 
     function filterRenderTarget(mode) {
-        if (mode === "review") return $("reviewTableWrap");
-        return $("reviewSectionTableWrap");
+        return mode === "review" ? $("reviewTableWrap") : $("requestsTableWrap");
     }
 
     function rerenderSectionKeepingPosition(target, mode, renderAgain) {
@@ -7188,47 +7213,57 @@
     }
 
     function renderReviewSections(grouped) {
-        $("reviewSectionsGrid").innerHTML = REVIEW_SECTIONS.map((section) => {
+        const grid = $("reviewSectionsGrid");
+        const expanded = state.review.sectionExpanded;
+        grid.classList.toggle("is-collapsed", expanded);
+        grid.innerHTML = REVIEW_SECTIONS.map((section) => {
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
             const active = section === state.review.activeSection ? " active" : "";
             const empty = rows.length ? "" : " is-empty";
+            if (expanded) {
+                return "<button type='button' class='review-section-pill" + active + empty + "' data-review-section='" + escapeHtml(section) + "'>"
+                    + escapeHtml(section) + "<span class='review-section-pill-count'>" + rows.length + "</span></button>";
+            }
             return "<button type='button' class='review-section-card" + active + empty + "' data-review-section='" + escapeHtml(section) + "'>"
                 + "<div class='review-section-name'><span>" + escapeHtml(section) + "</span><strong>" + rows.length + "</strong></div>"
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";
         }).join("");
-        $("reviewSectionsGrid").querySelectorAll("[data-review-section]").forEach((button) => {
+        grid.querySelectorAll("[data-review-section]").forEach((button) => {
             button.addEventListener("click", () => {
-                state.review.activeSection = button.dataset.reviewSection || REVIEW_SECTIONS[0];
+                const clicked = button.dataset.reviewSection || REVIEW_SECTIONS[0];
+                if (state.review.sectionExpanded && state.review.activeSection === clicked) {
+                    collapseReviewSection();
+                    return;
+                }
+                state.review.activeSection = clicked;
                 resetSectionFilters("review");
-                renderReview();
-                openReviewSectionModal();
+                expandReviewSection();
             });
         });
     }
 
+    function expandReviewSection() {
+        state.review.sectionExpanded = true;
+        animateReviewShellHeightChange(() => renderReview());
+    }
+
+    function collapseReviewSection() {
+        state.review.sectionExpanded = false;
+        animateReviewShellHeightChange(() => renderReview());
+    }
+
     function renderReviewLanding(grouped) {
-        const section = state.review.activeSection || REVIEW_SECTIONS[0];
-        const rows = sortedReviewRows(grouped.get(section) || []);
         if (!state.review.loaded) {
             $("reviewTableWrap").innerHTML = "<div class='empty-state'>Загружаю задачи...</div>";
             return;
         }
-        if (!rows.length) {
-            $("reviewTableWrap").innerHTML = "<div class='empty-state'>Выберите участок. На выбранном участке \"" + escapeHtml(section) + "\" активных задач пока нет.</div>";
+        if (!state.review.sectionExpanded) {
+            $("reviewTableWrap").innerHTML = "";
             return;
         }
-        $("reviewTableWrap").innerHTML = "";
-    }
-
-    function openReviewSectionModal() {
-        renderReviewTable(reviewGroupedRows());
-        setFlowModalOpen("reviewSectionModal", true);
-    }
-
-    function closeReviewSectionModal() {
-        setFlowModalOpen("reviewSectionModal", false);
+        renderReviewTable(grouped);
     }
 
     const SYSTEM_VERDICT_SET = new Set([
@@ -7270,22 +7305,18 @@
         const baseRows = grouped.get(section) || [];
         const filteredRows = applySectionFilters("review", baseRows);
         const rows = sortedReviewRows(filteredRows);
-        const target = $("reviewSectionTableWrap");
+        const target = $("reviewTableWrap");
         if (!target) return;
         if (!state.review.loaded) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Разбор</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
-            const closeBtn = $("closeReviewSectionModal");
-            if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Разбор</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
             return;
         }
         if (!baseRows.length) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач на участке нет.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Пусто. Красиво, если это правда.</div>";
-            const closeBtn = $("closeReviewSectionModal");
-            if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач на участке нет.</div></div></div><div class='empty-state'>Пусто. Красиво, если это правда.</div>";
             return;
         }
         const body = rows.map((row) => "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>" + reviewRowCellsHtml(row) + "</tr>").join("");
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
             + renderSectionFilters("review", baseRows, rows)
             + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-4col'><thead><tr>"
             + reviewSortHead("title", "Задача")
@@ -7295,8 +7326,6 @@
             + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
         const refresh = $("refreshReviewTasks");
         if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
-        const closeBtn = $("closeReviewSectionModal");
-        if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
         bindSectionFilterEvents(target, "review", () => renderReviewTable(reviewGroupedRows()));
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
@@ -7335,33 +7364,56 @@
         }
         setRequestsStatus(state.review.loaded ? "" : "Задачи еще не загружены.");
         renderRequestsSections(grouped);
-        const section = state.requests.activeSection || REQUEST_SECTIONS[0];
-        const rows = sortedRequestRows(grouped.get(section) || []);
-        $("requestsTableWrap").innerHTML = state.review.loaded
-            ? (rows.length ? "" : "<div class='empty-state'>Выберите участок. На выбранном участке \"" + escapeHtml(section) + "\" активных запросов пока нет.</div>")
-            : "<div class='empty-state'>Загружаю задачи...</div>";
+        if (!state.review.loaded) {
+            $("requestsTableWrap").innerHTML = "<div class='empty-state'>Загружаю задачи...</div>";
+        } else if (!state.requests.sectionExpanded) {
+            $("requestsTableWrap").innerHTML = "";
+        } else {
+            renderRequestsTable(grouped);
+        }
     }
 
     function renderRequestsSections(grouped) {
-        $("requestsSectionsGrid").innerHTML = REQUEST_SECTIONS.map((section) => {
+        const grid = $("requestsSectionsGrid");
+        const expanded = state.requests.sectionExpanded;
+        grid.classList.toggle("is-collapsed", expanded);
+        grid.innerHTML = REQUEST_SECTIONS.map((section) => {
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
             const active = section === state.requests.activeSection ? " active" : "";
             const empty = rows.length ? "" : " is-empty";
             const incomingAlert = section === "Запросы входящего потока" && rows.length ? " is-incoming-alert" : "";
+            if (expanded) {
+                return "<button type='button' class='review-section-pill" + active + empty + incomingAlert + "' data-request-section='" + escapeHtml(section) + "'>"
+                    + escapeHtml(section) + "<span class='review-section-pill-count'>" + rows.length + "</span></button>";
+            }
             return "<button type='button' class='review-section-card" + active + empty + incomingAlert + "' data-request-section='" + escapeHtml(section) + "'>"
                 + "<div class='review-section-name'><span>" + escapeHtml(section) + "</span><strong>" + rows.length + "</strong></div>"
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";
         }).join("");
-        $("requestsSectionsGrid").querySelectorAll("[data-request-section]").forEach((button) => {
+        grid.querySelectorAll("[data-request-section]").forEach((button) => {
             button.addEventListener("click", () => {
-                state.requests.activeSection = button.dataset.requestSection || REQUEST_SECTIONS[0];
+                const clicked = button.dataset.requestSection || REQUEST_SECTIONS[0];
+                if (state.requests.sectionExpanded && state.requests.activeSection === clicked) {
+                    collapseRequestsSection();
+                    return;
+                }
+                state.requests.activeSection = clicked;
                 resetSectionFilters("requests");
-                renderRequests();
-                openRequestsSectionModal();
+                expandRequestsSection();
             });
         });
+    }
+
+    function expandRequestsSection() {
+        state.requests.sectionExpanded = true;
+        animateReviewShellHeightChange(() => renderRequests());
+    }
+
+    function collapseRequestsSection() {
+        state.requests.sectionExpanded = false;
+        animateReviewShellHeightChange(() => renderRequests());
     }
 
     function sortedRequestRows(rows) {
@@ -7372,28 +7424,19 @@
         return sorted;
     }
 
-    function openRequestsSectionModal() {
-        renderRequestsTable(requestsGroupedRows());
-        setFlowModalOpen("reviewSectionModal", true);
-    }
-
     function renderRequestsTable(grouped) {
         const section = state.requests.activeSection || REQUEST_SECTIONS[0];
         const baseRows = grouped.get(section) || [];
         const filteredRows = applySectionFilters("requests", baseRows);
         const rows = sortedRequestRows(filteredRows);
-        const target = $("reviewSectionTableWrap");
+        const target = $("requestsTableWrap");
         if (!target) return;
         if (!state.review.loaded) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Запросы</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
-            const closeBtn = $("closeReviewSectionModal");
-            if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Запросы</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
             return;
         }
         if (!baseRows.length) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач нет.</div></div><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div><div class='empty-state'>Пусто. Непривычно, но приятно.</div>";
-            const closeBtn = $("closeReviewSectionModal");
-            if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
+            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач нет.</div></div></div><div class='empty-state'>Пусто. Непривычно, но приятно.</div>";
             return;
         }
         const body = rows.map((row) => {
@@ -7407,7 +7450,7 @@
         }).join("");
         const previousSort = state.review.sort;
         state.review.sort = state.requests.sort || { key: "price", dir: "desc" };
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeReviewSectionModal' class='btn btn-square' type='button'>×</button></div></div>"
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
             + renderSectionFilters("requests", baseRows, rows)
             + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
             + reviewSortHead("title", "Задача")
@@ -7417,8 +7460,6 @@
         state.review.sort = previousSort;
         const refresh = $("refreshReviewTasks");
         if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
-        const closeBtn = $("closeReviewSectionModal");
-        if (closeBtn) closeBtn.addEventListener("click", closeReviewSectionModal);
         bindSectionFilterEvents(target, "requests", () => renderRequestsTable(requestsGroupedRows()));
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
@@ -9363,7 +9404,7 @@
                 renderEditTareTaskModal(updated);
             }
             renderReview();
-            refreshOpenSectionModal();
+            refreshExpandedSections();
             return true;
         } catch (error) {
             console.error("detach shk failed:", error);
@@ -9399,7 +9440,7 @@
                 renderEditTareTaskModal(updated);
             }
             renderReview();
-            refreshOpenSectionModal();
+            refreshExpandedSections();
         } catch (error) {
             console.error("add shk failed:", error);
             if (status) status.textContent = "Не удалось добавить ШК: " + (error && error.message ? error.message : String(error));
@@ -10171,7 +10212,7 @@
             }
             setReviewStatus(isDeferred ? "Задача отложена до " + formatRuDateTime(reopenAfter) + "." : "Задача завершена.", "good");
             renderReview();
-            refreshOpenSectionModal();
+            refreshExpandedSections();
             if (state.view === "flow") {
                 refreshFlowQueue();
                 renderFlowPage();
@@ -10293,7 +10334,7 @@
             closeDeferTaskModal();
             setReviewStatus("Задача отложена до " + formatRuDateTime(reopenAfter) + ".", "good");
             renderReview();
-            refreshOpenSectionModal();
+            refreshExpandedSections();
             const afterCelebration = state.flow.embedded ? advanceFlowAfterResolution : closeTaskDetail;
             void playTaskCompletionCelebration("yellow").then(afterCelebration);
         } catch (error) {
@@ -16741,7 +16782,6 @@
         $("uploadWork").addEventListener("click", (event) => { if (event.target === $("uploadWork")) openChooser(state.manualDate); });
         $("masterWork").addEventListener("click", (event) => { if (event.target === $("masterWork")) setFlowModalOpen("masterWork", false); });
         $("backfillCalendarModal").addEventListener("click", (event) => { if (event.target === $("backfillCalendarModal")) setFlowModalOpen("backfillCalendarModal", false); });
-        $("reviewSectionModal").addEventListener("click", (event) => { if (event.target === $("reviewSectionModal")) closeReviewSectionModal(); });
         $("inactiveTasksModal").addEventListener("click", (event) => { if (event.target === $("inactiveTasksModal")) setFlowModalOpen("inactiveTasksModal", false); });
         $("prespisokSecondLineModal").addEventListener("click", (event) => { if (event.target === $("prespisokSecondLineModal")) setFlowModalOpen("prespisokSecondLineModal", false); });
         $("prespisokJournalModal").addEventListener("click", (event) => { if (event.target === $("prespisokJournalModal")) closePrespisokJournalModal(); });
@@ -16789,7 +16829,6 @@
             else if ($("uploadWork").classList.contains("active")) openChooser(state.manualDate);
             else if ($("moduleChooser").classList.contains("active")) setFlowModalOpen("moduleChooser", false);
             else if ($("backfillCalendarModal").classList.contains("active")) setFlowModalOpen("backfillCalendarModal", false);
-            else if ($("reviewSectionModal").classList.contains("active")) closeReviewSectionModal();
             else if ($("logoutConfirmModal").classList.contains("active")) setFlowModalOpen("logoutConfirmModal", false);
             else if ($("notificationsModal").classList.contains("active")) setFlowModalOpen("notificationsModal", false);
             else if ($("profileModal").classList.contains("active")) setFlowModalOpen("profileModal", false);
