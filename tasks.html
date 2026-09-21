@@ -32,7 +32,11 @@
         .tasks-hero-head { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; flex-wrap: wrap; }
         .tasks-hero-copy { min-width: 280px; flex: 1 1 540px; }
         .tasks-kicker { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+        .tasks-title-row { display: flex; align-items: center; gap: 14px; }
         .tasks-title { margin: 0; color: var(--accent-dark); font-size: clamp(28px, 4vw, 42px); line-height: 1; letter-spacing: -.04em; transition: transform .24s cubic-bezier(.22,1,.36,1), opacity .2s ease; }
+        .hero-back-btn { flex: none; width: 40px; height: 40px; border: 0; border-radius: 12px; background: #fff; box-shadow: var(--shadow-sm); color: var(--accent-dark); font-weight: 900; font-size: 18px; cursor: pointer; opacity: 0; transform: translateX(-18px) scale(.85); pointer-events: none; transition: opacity .24s ease, transform .34s cubic-bezier(.34,1.56,.64,1); }
+        .hero-back-btn.is-visible { opacity: 1; transform: translateX(0) scale(1); pointer-events: auto; }
+        .hero-back-btn:hover { box-shadow: var(--shadow-md); }
         .tasks-title.is-swapping-out { transform: translateY(-18px); opacity: 0; }
         .tasks-title.is-swapping-in { transform: translateY(18px); opacity: 0; }
         .tasks-subtitle { margin: 10px 0 0; max-width: 760px; max-height: 60px; overflow: hidden; color: #475569; font-size: 15px; line-height: 1.45; opacity: 1; transition: max-height .3s ease, opacity .2s ease, margin .3s ease; }
@@ -915,7 +919,7 @@
         .review-tool-square:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); color: var(--accent); }
         .review-view-tabs { display: inline-flex; gap: 8px; padding: 4px; border-radius: 14px; background: #f1f5f9; }
         .review-view-tabs-3 { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
-        .review-view-thumb { position: absolute; top: 4px; left: 4px; width: calc((100% - 8px) / 3); height: calc(100% - 8px); border-radius: 11px; background: rgba(255,255,255,.78); backdrop-filter: blur(8px) saturate(160%); -webkit-backdrop-filter: blur(8px) saturate(160%); box-shadow: var(--shadow-sm), 0 1px 0 rgba(255,255,255,.7) inset; transition: transform .48s cubic-bezier(.32,1.2,.4,1); z-index: 0; }
+        .review-view-thumb { position: absolute; inset: 4px; width: calc((100% - 8px) / 3); border-radius: 11px; background: rgba(255,255,255,.78); backdrop-filter: blur(8px) saturate(160%); -webkit-backdrop-filter: blur(8px) saturate(160%); box-shadow: var(--shadow-sm), 0 1px 0 rgba(255,255,255,.7) inset; transition: transform .48s cubic-bezier(.32,1.2,.4,1); z-index: 0; }
         .review-view-tabs-3 .review-view-tab { position: relative; z-index: 1; border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; text-align: center; transition: color .2s ease; }
         .review-view-tabs-3 .review-view-tab.active { color: var(--accent-dark); background: transparent; box-shadow: none; }
         .review-view-tab { border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }
@@ -946,7 +950,7 @@
         .review-section-name { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 12px; color: #242038; font-size: 18px; line-height: 1.15; font-weight: 900; }
         .review-section-name strong { font-size: 24px; line-height: 1; }
         .review-section-meta { position: relative; z-index: 1; margin-top: 14px; color: #64748b; font-size: 13px; line-height: 1.35; }
-        .review-sections-grid.is-collapsed { display: flex; flex-wrap: nowrap; gap: 4px; position: relative; width: max-content; }
+        .review-sections-grid.is-collapsed { display: flex; flex-wrap: nowrap; gap: 4px; position: relative; width: max-content; margin-bottom: 0; }
         .review-section-pill { position: relative; z-index: 1; border: 0; border-radius: 11px; padding: 9px 14px; background: transparent; color: #64748b; font-weight: 800; font-size: 14px; white-space: nowrap; cursor: pointer; transition: color .2s ease; animation: tasksRiseIn .22s ease-out both; }
         .review-section-pill:hover { color: var(--accent-dark); }
         .review-section-pill.active { color: var(--accent-dark); }
@@ -958,23 +962,20 @@
         .review-picker-row { position: relative; }
         .review-picker-arrow { display: none; }
         .review-picker-thumb { display: none; }
-        .review-picker-filters { display: none; }
+        .review-picker-filters-toggle { display: none; }
         .review-picker-row.is-collapsed { display: flex; align-items: center; gap: 8px; padding: 4px; margin-bottom: 14px; border-radius: 14px; background: #f1f5f9; overflow: hidden; transition: background-color .3s ease; }
         .review-picker-row.is-collapsed .review-picker-arrow { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border: 0; border-radius: 9px; background: #fff; color: var(--accent-dark); font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: var(--shadow-sm); transition: transform .18s ease, box-shadow .18s ease, opacity .2s ease; }
         .review-picker-row.is-collapsed .review-picker-arrow:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
         .review-picker-row.is-collapsed .review-picker-scroll { position: relative; flex: 1 1 0; min-width: 0; contain: inline-size; overflow-x: auto; overflow-y: hidden; scroll-behavior: smooth; scrollbar-width: none; }
         .review-picker-row.is-collapsed .review-picker-scroll::-webkit-scrollbar { display: none; }
-        .review-picker-row.is-collapsed .review-picker-thumb { display: block; position: absolute; top: 0; left: 0; height: 100%; width: 0; border-radius: 11px; background: #fff; box-shadow: var(--shadow-sm); transition: transform .48s cubic-bezier(.32,1.2,.4,1), width .48s cubic-bezier(.32,1.2,.4,1), opacity .2s ease; opacity: 0; z-index: 0; pointer-events: none; }
-        .review-picker-row.is-collapsed .review-picker-filters { display: flex; align-items: center; gap: 4px; flex: 0 1 clamp(150px, 30vw, 260px); overflow-x: auto; scrollbar-width: none; }
-        .review-picker-row.is-collapsed .review-picker-filters::-webkit-scrollbar { display: none; }
-        .review-picker-filters .review-filter-dropdown { padding: 0; border: 0; background: transparent; }
-        .review-picker-filters .review-filter-panel { display: flex; gap: 4px; }
-        .review-picker-filters .review-filter-block { flex: none; }
-        .review-picker-filters .review-filter-title { display: none; }
-        .review-picker-filters .review-filter-trigger { min-height: 30px; width: auto; max-width: 128px; padding: 6px 10px; font-size: 12px; border-radius: 9px; box-shadow: none; }
-        .review-picker-filters .review-filter-trigger:hover { transform: none; box-shadow: none; filter: saturate(1.1); }
-        .review-picker-filters .review-filter-summary { max-width: 84px; }
-        .review-picker-filters .review-filter-popover { left: auto; right: 0; }
+        .review-picker-row.is-collapsed .review-picker-thumb { display: block; position: absolute; top: 0; left: 0; width: 0; height: 0; border-radius: 11px; background: #fff; box-shadow: var(--shadow-sm); transition: transform .48s cubic-bezier(.32,1.2,.4,1), width .48s cubic-bezier(.32,1.2,.4,1), height .48s cubic-bezier(.32,1.2,.4,1), opacity .2s ease; opacity: 0; z-index: 0; pointer-events: none; }
+        .review-picker-row.is-collapsed .review-picker-filters-toggle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border: 0; border-radius: 9px; background: #fff; color: var(--accent-dark); cursor: pointer; box-shadow: var(--shadow-sm); transition: transform .18s ease, box-shadow .18s ease, background-color .2s ease, color .2s ease; }
+        .review-picker-row.is-collapsed .review-picker-filters-toggle:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+        .review-picker-row.is-collapsed .review-picker-filters-toggle svg { width: 15px; height: 15px; }
+        .review-picker-row.is-collapsed .review-picker-filters-toggle.active { background: var(--accent); color: #fff; }
+        .review-picker-filters-row:empty { display: none; }
+        .review-picker-filters-row .review-filter-dropdown { margin-bottom: 14px; }
+        .review-picker-filters-row .review-filter-popover { z-index: 32; }
         .inactive-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .inactive-card { min-height: 150px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 16px; text-align: left; cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
         .inactive-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: rgba(98,60,234,.26); }
@@ -1744,7 +1745,10 @@
         <div class="tasks-hero-head">
             <div class="tasks-hero-copy">
                 <p class="tasks-kicker">ОПП // WMS+</p>
-                <h1 id="heroTitle" class="tasks-title">Задачи и выгрузки</h1>
+                <div class="tasks-title-row">
+                    <button id="homeFromReview" class="hero-back-btn" type="button" aria-label="Назад">←</button>
+                    <h1 id="heroTitle" class="tasks-title">Задачи и выгрузки</h1>
+                </div>
                 <p id="heroSubtitle" class="tasks-subtitle">Новый контур WMS+: XLSX читается прямо в браузере, задачи и журнал выгрузок сохраняются в Supabase.</p>
             </div>
             <div class="task-search">
@@ -1966,9 +1970,6 @@
     </section>
 
     <section id="reviewPage" class="tasks-page">
-        <div class="tasks-page-head">
-            <button id="homeFromReview" class="btn btn-outline" type="button" aria-label="Назад">←</button>
-        </div>
         <section class="card review-status-card">
             <div class="review-status-bar">
                 <div class="review-view-tabs review-view-tabs-3" aria-label="Вид разбора">
@@ -1995,8 +1996,11 @@
                                 <div id="reviewSectionsGrid" class="review-sections-grid"></div>
                             </div>
                             <button id="reviewPickerNext" class="review-picker-arrow" type="button" aria-label="Следующие участки">›</button>
-                            <div id="reviewPickerFilters" class="review-picker-filters"></div>
+                            <button id="reviewFiltersToggle" class="review-picker-filters-toggle" type="button" aria-label="Фильтры">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4 4 20 4 14 12 14 19 10 21 10 12 4 4"/></svg>
+                            </button>
                         </div>
+                        <div id="reviewPickerFilters" class="review-picker-filters-row"></div>
                         <div id="reviewTableWrap" class="review-table-card"></div>
                     </div>
                     <div class="review-pager-panel">
@@ -2007,8 +2011,11 @@
                                 <div id="requestsSectionsGrid" class="review-sections-grid"></div>
                             </div>
                             <button id="requestsPickerNext" class="review-picker-arrow" type="button" aria-label="Следующие участки">›</button>
-                            <div id="requestsPickerFilters" class="review-picker-filters"></div>
+                            <button id="requestsFiltersToggle" class="review-picker-filters-toggle" type="button" aria-label="Фильтры">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4 4 20 4 14 12 14 19 10 21 10 12 4 4"/></svg>
+                            </button>
                         </div>
+                        <div id="requestsPickerFilters" class="review-picker-filters-row"></div>
                         <div id="requestsTableWrap" class="review-table-card"></div>
                     </div>
                     <div class="review-pager-panel">

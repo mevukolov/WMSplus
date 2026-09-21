@@ -568,6 +568,7 @@
             fullLoadPromise: null,
             activeSection: "",
             sectionExpanded: false,
+            filtersOpen: false,
             activeTab: 0,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
@@ -598,6 +599,7 @@
         requests: {
             activeSection: "",
             sectionExpanded: false,
+            filtersOpen: false,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
         },
@@ -2068,7 +2070,9 @@
         const opts = options || {};
         const title = $("heroTitle");
         const subtitle = $("heroSubtitle");
+        const backBtn = $("homeFromReview");
         if (subtitle) subtitle.classList.toggle("is-collapsed", !!opts.hideSubtitle);
+        if (backBtn) backBtn.classList.toggle("is-visible", !!opts.showBack);
         if (!title || title.textContent === text) return;
         if (!opts.animate) {
             title.textContent = text;
@@ -2087,7 +2091,7 @@
     function showHome() {
         state.view = "home";
         closeFlowModals();
-        setHeroTitle("Задачи и выгрузки", { animate: true, hideSubtitle: false });
+        setHeroTitle("Задачи и выгрузки", { animate: true, hideSubtitle: false, showBack: false });
         $("tasksHome").style.display = "grid";
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
@@ -2374,7 +2378,7 @@
     function showReviewPage() {
         state.view = "review";
         closeFlowModals();
-        setHeroTitle("Разбор", { animate: true, hideSubtitle: true });
+        setHeroTitle("Разбор", { animate: true, hideSubtitle: true, showBack: true });
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
@@ -2425,12 +2429,14 @@
     // definite pixel value instead of an ambiguous percentage.
     function updatePagerPanelWidth() {
         const track = $("reviewPagerTrack");
-        const shell = document.querySelector(".review-shell");
-        const wrap = document.querySelector(".tasks-wrap");
-        if (!track || !shell || !wrap) return;
-        const shellStyle = getComputedStyle(shell);
-        const shellPaddingX = (parseFloat(shellStyle.paddingLeft) || 0) + (parseFloat(shellStyle.paddingRight) || 0);
-        const available = wrap.clientWidth - shellPaddingX;
+        // .review-status-bar is the CONTENT area of the top switcher card
+        // (inside its own padding) and is never touched by the picker-row's
+        // sizing -- a pixel-exact stand-in for "how wide this page's content
+        // column really is" so the picker row's width matches it exactly,
+        // rather than matching the switcher card's outer (padded) box.
+        const statusBar = document.querySelector(".review-status-bar");
+        if (!track || !statusBar) return;
+        const available = statusBar.getBoundingClientRect().width;
         if (available > 0) track.style.setProperty("--pager-panel-w", available + "px");
     }
 
@@ -7264,6 +7270,8 @@
         thumb.style.opacity = "1";
         thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
         thumb.style.width = active.offsetWidth + "px";
+        thumb.style.top = active.offsetTop + "px";
+        thumb.style.height = active.offsetHeight + "px";
         if (firstShow) {
             void thumb.offsetHeight;
             thumb.style.transition = "";
@@ -7322,7 +7330,13 @@
 
     function collapseReviewSection() {
         state.review.sectionExpanded = false;
+        state.review.filtersOpen = false;
         animateReviewShellHeightChange(() => renderReview());
+    }
+
+    function toggleReviewFilters() {
+        state.review.filtersOpen = !state.review.filtersOpen;
+        animateReviewShellHeightChange(() => renderReviewTable(reviewGroupedRows()));
     }
 
     function renderReviewLanding(grouped) {
@@ -7391,19 +7405,22 @@
             return;
         }
         const body = rows.map((row) => "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>" + reviewRowCellsHtml(row) + "</tr>").join("");
-        target.innerHTML = "<div class='review-table-head'><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
-            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-4col'><thead><tr>"
+        target.innerHTML = rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-4col'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("name", "Наименование")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
-            + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
+            + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>";
         if (filtersTarget) {
-            filtersTarget.innerHTML = renderSectionFilters("review", baseRows, rows);
-            bindSectionFilterEvents(filtersTarget, "review", () => renderReviewTable(reviewGroupedRows()));
+            if (state.review.filtersOpen) {
+                filtersTarget.innerHTML = renderSectionFilters("review", baseRows, rows);
+                bindSectionFilterEvents(filtersTarget, "review", () => renderReviewTable(reviewGroupedRows()));
+            } else {
+                filtersTarget.innerHTML = "";
+            }
         }
-        const refresh = $("refreshReviewTasks");
-        if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
+        const filtersToggle = $("reviewFiltersToggle");
+        if (filtersToggle) filtersToggle.classList.toggle("active", state.review.filtersOpen);
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
                 const key = button.dataset.reviewSort || "price";
@@ -7494,7 +7511,13 @@
 
     function collapseRequestsSection() {
         state.requests.sectionExpanded = false;
+        state.requests.filtersOpen = false;
         animateReviewShellHeightChange(() => renderRequests());
+    }
+
+    function toggleRequestsFilters() {
+        state.requests.filtersOpen = !state.requests.filtersOpen;
+        animateReviewShellHeightChange(() => renderRequestsTable(requestsGroupedRows()));
     }
 
     function sortedRequestRows(rows) {
@@ -7534,19 +7557,22 @@
         }).join("");
         const previousSort = state.review.sort;
         state.review.sort = state.requests.sort || { key: "price", dir: "desc" };
-        target.innerHTML = "<div class='review-table-head'><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
-            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
+        target.innerHTML = rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
-            + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
+            + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>";
         state.review.sort = previousSort;
         if (filtersTarget) {
-            filtersTarget.innerHTML = renderSectionFilters("requests", baseRows, rows);
-            bindSectionFilterEvents(filtersTarget, "requests", () => renderRequestsTable(requestsGroupedRows()));
+            if (state.requests.filtersOpen) {
+                filtersTarget.innerHTML = renderSectionFilters("requests", baseRows, rows);
+                bindSectionFilterEvents(filtersTarget, "requests", () => renderRequestsTable(requestsGroupedRows()));
+            } else {
+                filtersTarget.innerHTML = "";
+            }
         }
-        const refresh = $("refreshReviewTasks");
-        if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
+        const filtersToggle = $("requestsFiltersToggle");
+        if (filtersToggle) filtersToggle.classList.toggle("active", state.requests.filtersOpen);
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
                 const key = button.dataset.reviewSort || "price";
@@ -16802,6 +16828,8 @@
         $("reviewPickerNext").addEventListener("click", () => scrollPicker("review", 1));
         $("requestsPickerPrev").addEventListener("click", () => scrollPicker("requests", -1));
         $("requestsPickerNext").addEventListener("click", () => scrollPicker("requests", 1));
+        $("reviewFiltersToggle").addEventListener("click", toggleReviewFilters);
+        $("requestsFiltersToggle").addEventListener("click", toggleRequestsFilters);
         window.addEventListener("resize", () => {
             if (state.view === "review") updatePagerPanelWidth();
         });
