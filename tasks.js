@@ -7365,6 +7365,21 @@
                 grid.classList.add("is-mode-in");
                 void grid.offsetHeight;
                 requestAnimationFrame(() => grid.classList.remove("is-mode-in"));
+                // Stagger each freshly-built card/pill's own pop-in on top of
+                // the grid's own fade+scale -- only here, on an actual mode
+                // swap, never on a plain selection switch (that path stays
+                // instant per the earlier no-blink fix).
+                const items = Array.from(grid.children);
+                items.forEach((item, index) => {
+                    item.classList.add("is-entering-item");
+                    item.style.animationDelay = (index * 32) + "ms";
+                });
+                setTimeout(() => {
+                    items.forEach((item) => {
+                        item.classList.remove("is-entering-item");
+                        item.style.animationDelay = "";
+                    });
+                }, items.length * 32 + 460);
             });
         }, 170);
     }
