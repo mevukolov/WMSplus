@@ -2380,6 +2380,7 @@
         $("uploadsPage").classList.remove("active");
         $("inactivePage").classList.remove("active");
         $("reviewPage").classList.add("active");
+        updatePagerPanelWidth();
         animateReviewShellHeightChange(() => {
             renderReview();
             renderRequests();
@@ -2408,7 +2409,29 @@
     // the tilt-hover buffer on .review-pager-viewport has empty space to
     // extend into instead of exposing the neighboring panel's content.
     function slidePagerTo(index) {
-        $("reviewPagerTrack").style.transform = "translateX(calc(" + (-index) + " * (100% + 96px)))";
+        $("reviewPagerTrack").style.transform = "translateX(calc(" + (-index) + " * (var(--pager-panel-w, 33.3333%) + 96px)))";
+    }
+
+    // A percentage flex-basis on the panels (the original, simpler design)
+    // resolves against the TRACK's own width -- but once a panel holds a
+    // nowrap horizontally-scrolling row (the participant-picker strip), that
+    // row's intrinsic content width leaks into the track's own auto-sizing
+    // in this browser, which then leaks further up through the viewport and
+    // shell into the page's outer CSS Grid column, ballooning the whole
+    // page. Measuring a real available width from .tasks-wrap (a block box
+    // with an explicit width/max-width, immune to that leak) and pinning it
+    // as a plain px custom property sidesteps the intrinsic-sizing pass
+    // entirely -- panels and the track's own width both key off this same
+    // definite pixel value instead of an ambiguous percentage.
+    function updatePagerPanelWidth() {
+        const track = $("reviewPagerTrack");
+        const shell = document.querySelector(".review-shell");
+        const wrap = document.querySelector(".tasks-wrap");
+        if (!track || !shell || !wrap) return;
+        const shellStyle = getComputedStyle(shell);
+        const shellPaddingX = (parseFloat(shellStyle.paddingLeft) || 0) + (parseFloat(shellStyle.paddingRight) || 0);
+        const available = wrap.clientWidth - shellPaddingX;
+        if (available > 0) track.style.setProperty("--pager-panel-w", available + "px");
     }
 
     // Grid containers stay in the DOM across renders even though their card
@@ -7112,13 +7135,22 @@
     }
 
     function filterRenderTarget(mode) {
+        return mode === "review" ? $("reviewPickerFilters") : $("requestsPickerFilters");
+    }
+
+    // Filters and their table live in two separate DOM subtrees now (filters
+    // sit in the compact picker row, the table in its own wrap below), so
+    // table-scroll and popover-scroll are tracked independently rather than
+    // both being queried out of one shared "target".
+    function tableRenderTarget(mode) {
         return mode === "review" ? $("reviewTableWrap") : $("requestsTableWrap");
     }
 
     function rerenderSectionKeepingPosition(target, mode, renderAgain) {
         const modalCard = target.closest(".tasks-modal-card");
         const modalScroll = modalCard ? modalCard.scrollTop : 0;
-        const tableScroll = target.querySelector(".review-table-scroll");
+        const tableEl = tableRenderTarget(mode);
+        const tableScroll = tableEl ? tableEl.querySelector(".review-table-scroll") : null;
         const tableScrollTop = tableScroll ? tableScroll.scrollTop : 0;
         const popover = target.querySelector(".review-filter-block.is-open .review-filter-popover");
         const popoverScrollTop = popover ? popover.scrollTop : 0;
@@ -7126,7 +7158,8 @@
         requestAnimationFrame(() => {
             const nextTarget = filterRenderTarget(mode) || target;
             const nextModalCard = nextTarget.closest(".tasks-modal-card");
-            const nextTableScroll = nextTarget.querySelector(".review-table-scroll");
+            const nextTableEl = tableRenderTarget(mode);
+            const nextTableScroll = nextTableEl ? nextTableEl.querySelector(".review-table-scroll") : null;
             const nextPopover = nextTarget.querySelector(".review-filter-block.is-open .review-filter-popover");
             if (nextModalCard) nextModalCard.scrollTop = modalScroll;
             if (nextTableScroll) nextTableScroll.scrollTop = tableScrollTop;
@@ -7212,10 +7245,47 @@
         renderReviewLanding(grouped);
     }
 
+    // Pill widths vary (unlike the equal-width top-level view tabs), so the
+    // active-section thumb is positioned in JS from measured offsets rather
+    // than a CSS percentage transform. First reveal after expanding snaps
+    // instantly (no stale fly-in from 0,0); switching between pills after
+    // that animates with the same spring easing as .review-view-thumb.
+    function updatePickerThumb(mode) {
+        const grid = $(mode === "review" ? "reviewSectionsGrid" : "requestsSectionsGrid");
+        const thumb = $(mode === "review" ? "reviewPickerThumb" : "requestsPickerThumb");
+        if (!grid || !thumb) return;
+        const active = grid.querySelector(".review-section-pill.active");
+        if (!active) {
+            thumb.style.opacity = "0";
+            return;
+        }
+        const firstShow = thumb.style.opacity !== "1";
+        if (firstShow) thumb.style.transition = "none";
+        thumb.style.opacity = "1";
+        thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
+        thumb.style.width = active.offsetWidth + "px";
+        if (firstShow) {
+            void thumb.offsetHeight;
+            thumb.style.transition = "";
+        }
+    }
+
+    function scrollPicker(mode, dir) {
+        const grid = $(mode === "review" ? "reviewSectionsGrid" : "requestsSectionsGrid");
+        const pills = grid ? Array.from(grid.querySelectorAll(".review-section-pill")) : [];
+        if (!grid || !pills.length) return;
+        const scrollEl = grid.parentElement;
+        const last = pills[pills.length - 1];
+        const avgWidth = (last.offsetLeft + last.offsetWidth - pills[0].offsetLeft) / pills.length;
+        scrollEl.scrollBy({ left: dir * avgWidth * 3, behavior: "smooth" });
+    }
+
     function renderReviewSections(grouped) {
         const grid = $("reviewSectionsGrid");
+        const wrap = $("reviewPickerRow");
         const expanded = state.review.sectionExpanded;
         grid.classList.toggle("is-collapsed", expanded);
+        if (wrap) wrap.classList.toggle("is-collapsed", expanded);
         grid.innerHTML = REVIEW_SECTIONS.map((section) => {
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
@@ -7242,6 +7312,7 @@
                 expandReviewSection();
             });
         });
+        if (expanded) updatePickerThumb("review");
     }
 
     function expandReviewSection() {
@@ -7261,6 +7332,7 @@
         }
         if (!state.review.sectionExpanded) {
             $("reviewTableWrap").innerHTML = "";
+            if ($("reviewPickerFilters")) $("reviewPickerFilters").innerHTML = "";
             return;
         }
         renderReviewTable(grouped);
@@ -7306,27 +7378,32 @@
         const filteredRows = applySectionFilters("review", baseRows);
         const rows = sortedReviewRows(filteredRows);
         const target = $("reviewTableWrap");
+        const filtersTarget = $("reviewPickerFilters");
         if (!target) return;
         if (!state.review.loaded) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Разбор</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
+            target.innerHTML = "<div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
+            if (filtersTarget) filtersTarget.innerHTML = "";
             return;
         }
         if (!baseRows.length) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач на участке нет.</div></div></div><div class='empty-state'>Пусто. Красиво, если это правда.</div>";
+            target.innerHTML = "<div class='empty-state'>Пусто. Красиво, если это правда.</div>";
+            if (filtersTarget) filtersTarget.innerHTML = "";
             return;
         }
         const body = rows.map((row) => "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>" + reviewRowCellsHtml(row) + "</tr>").join("");
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
-            + renderSectionFilters("review", baseRows, rows)
+        target.innerHTML = "<div class='review-table-head'><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
             + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-4col'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("name", "Наименование")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
             + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
+        if (filtersTarget) {
+            filtersTarget.innerHTML = renderSectionFilters("review", baseRows, rows);
+            bindSectionFilterEvents(filtersTarget, "review", () => renderReviewTable(reviewGroupedRows()));
+        }
         const refresh = $("refreshReviewTasks");
         if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
-        bindSectionFilterEvents(target, "review", () => renderReviewTable(reviewGroupedRows()));
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
                 const key = button.dataset.reviewSort || "price";
@@ -7368,6 +7445,7 @@
             $("requestsTableWrap").innerHTML = "<div class='empty-state'>Загружаю задачи...</div>";
         } else if (!state.requests.sectionExpanded) {
             $("requestsTableWrap").innerHTML = "";
+            if ($("requestsPickerFilters")) $("requestsPickerFilters").innerHTML = "";
         } else {
             renderRequestsTable(grouped);
         }
@@ -7375,8 +7453,10 @@
 
     function renderRequestsSections(grouped) {
         const grid = $("requestsSectionsGrid");
+        const wrap = $("requestsPickerRow");
         const expanded = state.requests.sectionExpanded;
         grid.classList.toggle("is-collapsed", expanded);
+        if (wrap) wrap.classList.toggle("is-collapsed", expanded);
         grid.innerHTML = REQUEST_SECTIONS.map((section) => {
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
@@ -7404,6 +7484,7 @@
                 expandRequestsSection();
             });
         });
+        if (expanded) updatePickerThumb("requests");
     }
 
     function expandRequestsSection() {
@@ -7430,13 +7511,16 @@
         const filteredRows = applySectionFilters("requests", baseRows);
         const rows = sortedRequestRows(filteredRows);
         const target = $("requestsTableWrap");
+        const filtersTarget = $("requestsPickerFilters");
         if (!target) return;
         if (!state.review.loaded) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Запросы</h3><div class='review-table-subtitle'>Задачи еще не загружены.</div></div></div><div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
+            target.innerHTML = "<div class='empty-state'>Подождите загрузку задач из Supabase.</div>";
+            if (filtersTarget) filtersTarget.innerHTML = "";
             return;
         }
         if (!baseRows.length) {
-            target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Активных задач нет.</div></div></div><div class='empty-state'>Пусто. Непривычно, но приятно.</div>";
+            target.innerHTML = "<div class='empty-state'>Пусто. Непривычно, но приятно.</div>";
+            if (filtersTarget) filtersTarget.innerHTML = "";
             return;
         }
         const body = rows.map((row) => {
@@ -7450,17 +7534,19 @@
         }).join("");
         const previousSort = state.review.sort;
         state.review.sort = state.requests.sort || { key: "price", dir: "desc" };
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(section) + "</h3><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div></div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
-            + renderSectionFilters("requests", baseRows, rows)
+        target.innerHTML = "<div class='review-table-head'><div class='review-table-subtitle'>Задач: " + rows.length + " из " + baseRows.length + ". Нажми на заголовок столбца для сортировки.</div><div class='file-row' style='margin-top:0'><button id='refreshReviewTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
             + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
             + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>");
         state.review.sort = previousSort;
+        if (filtersTarget) {
+            filtersTarget.innerHTML = renderSectionFilters("requests", baseRows, rows);
+            bindSectionFilterEvents(filtersTarget, "requests", () => renderRequestsTable(requestsGroupedRows()));
+        }
         const refresh = $("refreshReviewTasks");
         if (refresh) refresh.addEventListener("click", () => { void loadReviewTasks(); });
-        bindSectionFilterEvents(target, "requests", () => renderRequestsTable(requestsGroupedRows()));
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
                 const key = button.dataset.reviewSort || "price";
@@ -16712,6 +16798,13 @@
         $("reviewTabPresort").addEventListener("click", () => setReviewTab(0));
         $("reviewTabTasks").addEventListener("click", () => setReviewTab(1));
         $("reviewTabPureLosses").addEventListener("click", () => setReviewTab(2));
+        $("reviewPickerPrev").addEventListener("click", () => scrollPicker("review", -1));
+        $("reviewPickerNext").addEventListener("click", () => scrollPicker("review", 1));
+        $("requestsPickerPrev").addEventListener("click", () => scrollPicker("requests", -1));
+        $("requestsPickerNext").addEventListener("click", () => scrollPicker("requests", 1));
+        window.addEventListener("resize", () => {
+            if (state.view === "review") updatePagerPanelWidth();
+        });
         $("openActualizeTasks").addEventListener("click", () => { void openActualizeTasksModal(); });
         $("closeActualizeTasks").addEventListener("click", closeActualizeTasksModal);
         $("copyActiveShk").addEventListener("click", () => { void copyActiveShkForActualize(); });

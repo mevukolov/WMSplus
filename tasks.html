@@ -921,9 +921,9 @@
         .review-view-tab { border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }
         .review-view-tab.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
         .review-view-tab.has-alert::after { content: ''; position: absolute; top: 3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 2; }
-        .review-pager-viewport { clip-path: inset(-64px); }
-        .review-pager-track { display: flex; gap: 96px; transition: transform .5s cubic-bezier(.22,1,.36,1); }
-        .review-pager-panel { flex: 0 0 100%; min-width: 0; }
+        .review-pager-viewport { contain: inline-size; clip-path: inset(-64px); }
+        .review-pager-track { display: flex; gap: 96px; width: calc(3 * var(--pager-panel-w, 33.3333%) + 192px); transition: transform .5s cubic-bezier(.22,1,.36,1); }
+        .review-pager-panel { flex: 0 0 var(--pager-panel-w, 100%); min-width: 0; }
         .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; transform-origin: center bottom; transition: opacity .22s ease, transform .38s cubic-bezier(.34,1.9,.5,1); }
         .review-toolbar-presort-only.is-away { opacity: 0; transition: opacity .18s ease, transform .3s cubic-bezier(.5,-.3,.7,.4); transform: translateY(30px) scale(.6); pointer-events: none; }
         .review-status { color: #64748b; font-size: 13px; min-height: 18px; }
@@ -946,15 +946,35 @@
         .review-section-name { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 12px; color: #242038; font-size: 18px; line-height: 1.15; font-weight: 900; }
         .review-section-name strong { font-size: 24px; line-height: 1; }
         .review-section-meta { position: relative; z-index: 1; margin-top: 14px; color: #64748b; font-size: 13px; line-height: 1.35; }
-        .review-sections-grid.is-collapsed { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px; margin-bottom: 14px; border-radius: 14px; background: #f1f5f9; perspective: none; }
-        .review-section-pill { border: 0; border-radius: 11px; padding: 9px 14px; background: transparent; color: #64748b; font-weight: 800; font-size: 14px; cursor: pointer; transition: background-color .2s ease, color .2s ease, box-shadow .2s ease; animation: tasksRiseIn .22s ease-out both; }
+        .review-sections-grid.is-collapsed { display: flex; flex-wrap: nowrap; gap: 4px; position: relative; width: max-content; }
+        .review-section-pill { position: relative; z-index: 1; border: 0; border-radius: 11px; padding: 9px 14px; background: transparent; color: #64748b; font-weight: 800; font-size: 14px; white-space: nowrap; cursor: pointer; transition: color .2s ease; animation: tasksRiseIn .22s ease-out both; }
         .review-section-pill:hover { color: var(--accent-dark); }
-        .review-section-pill.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
+        .review-section-pill.active { color: var(--accent-dark); }
         .review-section-pill.is-empty { color: #cbd5e1; cursor: default; }
         .review-section-pill.is-empty:hover { color: #cbd5e1; }
         .review-section-pill.is-incoming-alert { animation: reviewIncomingPulse 1.8s ease-in-out infinite, tasksRiseIn .22s ease-out both; }
         .review-section-pill-count { margin-left: 7px; font-weight: 1000; opacity: .65; }
         .review-table-head { animation: tasksRiseIn .22s ease-out both; }
+        .review-picker-row { position: relative; }
+        .review-picker-arrow { display: none; }
+        .review-picker-thumb { display: none; }
+        .review-picker-filters { display: none; }
+        .review-picker-row.is-collapsed { display: flex; align-items: center; gap: 8px; padding: 4px; margin-bottom: 14px; border-radius: 14px; background: #f1f5f9; overflow: hidden; transition: background-color .3s ease; }
+        .review-picker-row.is-collapsed .review-picker-arrow { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border: 0; border-radius: 9px; background: #fff; color: var(--accent-dark); font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: var(--shadow-sm); transition: transform .18s ease, box-shadow .18s ease, opacity .2s ease; }
+        .review-picker-row.is-collapsed .review-picker-arrow:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+        .review-picker-row.is-collapsed .review-picker-scroll { position: relative; flex: 1 1 0; min-width: 0; contain: inline-size; overflow-x: auto; overflow-y: hidden; scroll-behavior: smooth; scrollbar-width: none; }
+        .review-picker-row.is-collapsed .review-picker-scroll::-webkit-scrollbar { display: none; }
+        .review-picker-row.is-collapsed .review-picker-thumb { display: block; position: absolute; top: 0; left: 0; height: 100%; width: 0; border-radius: 11px; background: #fff; box-shadow: var(--shadow-sm); transition: transform .48s cubic-bezier(.32,1.2,.4,1), width .48s cubic-bezier(.32,1.2,.4,1), opacity .2s ease; opacity: 0; z-index: 0; pointer-events: none; }
+        .review-picker-row.is-collapsed .review-picker-filters { display: flex; align-items: center; gap: 4px; flex: 0 1 clamp(150px, 30vw, 260px); overflow-x: auto; scrollbar-width: none; }
+        .review-picker-row.is-collapsed .review-picker-filters::-webkit-scrollbar { display: none; }
+        .review-picker-filters .review-filter-dropdown { padding: 0; border: 0; background: transparent; }
+        .review-picker-filters .review-filter-panel { display: flex; gap: 4px; }
+        .review-picker-filters .review-filter-block { flex: none; }
+        .review-picker-filters .review-filter-title { display: none; }
+        .review-picker-filters .review-filter-trigger { min-height: 30px; width: auto; max-width: 128px; padding: 6px 10px; font-size: 12px; border-radius: 9px; box-shadow: none; }
+        .review-picker-filters .review-filter-trigger:hover { transform: none; box-shadow: none; filter: saturate(1.1); }
+        .review-picker-filters .review-filter-summary { max-width: 84px; }
+        .review-picker-filters .review-filter-popover { left: auto; right: 0; }
         .inactive-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .inactive-card { min-height: 150px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 16px; text-align: left; cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
         .inactive-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: rgba(98,60,234,.26); }
@@ -1948,9 +1968,6 @@
     <section id="reviewPage" class="tasks-page">
         <div class="tasks-page-head">
             <button id="homeFromReview" class="btn btn-outline" type="button" aria-label="Назад">←</button>
-            <div>
-                <h2 class="tasks-page-title">Разбор</h2>
-            </div>
         </div>
         <section class="card review-status-card">
             <div class="review-status-bar">
@@ -1971,11 +1988,27 @@
             <div class="review-pager-viewport">
                 <div id="reviewPagerTrack" class="review-pager-track">
                     <div class="review-pager-panel">
-                        <div id="reviewSectionsGrid" class="review-sections-grid"></div>
+                        <div id="reviewPickerRow" class="review-picker-row">
+                            <button id="reviewPickerPrev" class="review-picker-arrow" type="button" aria-label="Прошлые участки">‹</button>
+                            <div class="review-picker-scroll">
+                                <span id="reviewPickerThumb" class="review-picker-thumb" aria-hidden="true"></span>
+                                <div id="reviewSectionsGrid" class="review-sections-grid"></div>
+                            </div>
+                            <button id="reviewPickerNext" class="review-picker-arrow" type="button" aria-label="Следующие участки">›</button>
+                            <div id="reviewPickerFilters" class="review-picker-filters"></div>
+                        </div>
                         <div id="reviewTableWrap" class="review-table-card"></div>
                     </div>
                     <div class="review-pager-panel">
-                        <div id="requestsSectionsGrid" class="review-sections-grid"></div>
+                        <div id="requestsPickerRow" class="review-picker-row">
+                            <button id="requestsPickerPrev" class="review-picker-arrow" type="button" aria-label="Прошлые участки">‹</button>
+                            <div class="review-picker-scroll">
+                                <span id="requestsPickerThumb" class="review-picker-thumb" aria-hidden="true"></span>
+                                <div id="requestsSectionsGrid" class="review-sections-grid"></div>
+                            </div>
+                            <button id="requestsPickerNext" class="review-picker-arrow" type="button" aria-label="Следующие участки">›</button>
+                            <div id="requestsPickerFilters" class="review-picker-filters"></div>
+                        </div>
                         <div id="requestsTableWrap" class="review-table-card"></div>
                     </div>
                     <div class="review-pager-panel">
