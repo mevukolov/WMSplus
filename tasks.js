@@ -569,6 +569,7 @@
             activeSection: "",
             sectionExpanded: false,
             filtersOpen: false,
+            filtersJustOpened: false,
             activeTab: 0,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
@@ -600,6 +601,7 @@
             activeSection: "",
             sectionExpanded: false,
             filtersOpen: false,
+            filtersJustOpened: false,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
         },
@@ -6977,6 +6979,17 @@
         holder.filters = createReviewFilterState();
     }
 
+    // Loose on purpose: a Set the user filled with every option (net effect
+    // "all selected") still counts as "active" here. This only drives a
+    // subtle badge on the closed filter toggle, not the actual filtering,
+    // so treating "touched" as "active" is fine and far simpler than
+    // re-deriving each field's full option count to detect that edge case.
+    function hasActiveFilters(mode) {
+        const filters = sectionFilterState(mode);
+        if (filters.date) return true;
+        return ["movementStatuses", "entityTypes", "taskStatuses"].some((key) => filters[key] && filters[key].size > 0);
+    }
+
     function taskFilterDate(row) {
         return parseDateTime(row && row.due_date).date
             || parseDateTime(row && row.upload_effective_date).date
@@ -7123,7 +7136,7 @@
         return "<div class='review-filter-calendar'>" + weekdays + cells.join("") + "</div>";
     }
 
-    function renderSectionFilters(mode, baseRows, filteredRows) {
+    function renderSectionFilters(mode, baseRows, filteredRows, entering) {
         const options = filterOptionsForRows(baseRows);
         const filters = sectionFilterState(mode);
         const dateSummary = filters.date === FILTER_NONE ? "Ничего не выбрано" : filters.date ? formatRuDate(filters.date) : "Выбраны все";
@@ -7132,7 +7145,7 @@
             + "<button class='review-filter-trigger' type='button' data-review-filter-toggle='" + escapeHtml(key) + "'><span class='review-filter-summary'>" + escapeHtml(summary) + "</span><span class='review-filter-chevron'>⌄</span></button>"
             + "<div class='review-filter-popover'><p class='review-filter-menu-title'>" + escapeHtml(title) + "</p>" + body + "</div>"
             + "</div>";
-        return "<div class='review-filter-dropdown'><div class='review-filter-panel'>"
+        return "<div class='review-filter-dropdown" + (entering ? " is-entering" : "") + "'><div class='review-filter-panel'>"
             + control("date", "Дата", dateSummary, "<div class='review-filter-options'><label class='review-filter-check'><input type='checkbox' data-review-filter-date-all='1' " + (!filters.date ? "checked" : "") + "> Выбрать всё</label></div>" + renderFilterCalendar(mode, baseRows))
             + control("movementStatuses", "Статус последнего движения", filterSummaryText(mode, "movementStatuses", options.movementStatuses), renderFilterCheckboxes(mode, "movementStatuses", options.movementStatuses))
             + control("entityTypes", "Тип задачи", filterSummaryText(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel), renderFilterCheckboxes(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel))
@@ -7294,7 +7307,17 @@
         const expanded = state.review.sectionExpanded;
         grid.classList.toggle("is-collapsed", expanded);
         if (wrap) wrap.classList.toggle("is-collapsed", expanded);
-        grid.innerHTML = REVIEW_SECTIONS.map((section) => {
+        // In the compact strip, empty sections are demoted to the tail so
+        // the scrollable row leads with sections actually worth picking;
+        // the big-card grid keeps REVIEW_SECTIONS' own order untouched.
+        const orderedSections = expanded
+            ? REVIEW_SECTIONS.slice().sort((a, b) => {
+                const aEmpty = !(grouped.get(a) || []).length;
+                const bEmpty = !(grouped.get(b) || []).length;
+                return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+            })
+            : REVIEW_SECTIONS;
+        grid.innerHTML = orderedSections.map((section) => {
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
             const active = section === state.review.activeSection ? " active" : "";
@@ -7315,27 +7338,63 @@
                     collapseReviewSection();
                     return;
                 }
+                const wasExpanded = state.review.sectionExpanded;
                 state.review.activeSection = clicked;
                 resetSectionFilters("review");
-                expandReviewSection();
+                if (wasExpanded) switchReviewSection();
+                else expandReviewSection();
             });
         });
         if (expanded) updatePickerThumb("review");
     }
 
+    // Big-card grid and compact pill strip are the same element
+    // (#reviewSectionsGrid/#requestsSectionsGrid) with its innerHTML
+    // swapped, not two elements crossfading -- so the mode change itself
+    // gets a fade+scale out, then (once .review-shell's own height has
+    // room to move) a fade+scale back in, layered on top of the height
+    // animation that already runs around it.
+    function animateSectionModeSwap(gridId, mutate) {
+        const grid = $(gridId);
+        if (!grid) { mutate(); return; }
+        grid.classList.add("is-mode-out");
+        setTimeout(() => {
+            animateReviewShellHeightChange(() => {
+                mutate();
+                grid.classList.remove("is-mode-out");
+                grid.classList.add("is-mode-in");
+                void grid.offsetHeight;
+                requestAnimationFrame(() => grid.classList.remove("is-mode-in"));
+            });
+        }, 170);
+    }
+
     function expandReviewSection() {
-        state.review.sectionExpanded = true;
+        animateSectionModeSwap("reviewSectionsGrid", () => {
+            state.review.sectionExpanded = true;
+            renderReview();
+        });
+    }
+
+    // Picking a different pill while already expanded is a selection
+    // change, not a mode change -- no grid-level fade, just the height
+    // easing (the new section's table can be a different length) and the
+    // thumb's own slide to the newly active pill.
+    function switchReviewSection() {
         animateReviewShellHeightChange(() => renderReview());
     }
 
     function collapseReviewSection() {
-        state.review.sectionExpanded = false;
-        state.review.filtersOpen = false;
-        animateReviewShellHeightChange(() => renderReview());
+        animateSectionModeSwap("reviewSectionsGrid", () => {
+            state.review.sectionExpanded = false;
+            state.review.filtersOpen = false;
+            renderReview();
+        });
     }
 
     function toggleReviewFilters() {
         state.review.filtersOpen = !state.review.filtersOpen;
+        if (state.review.filtersOpen) state.review.filtersJustOpened = true;
         animateReviewShellHeightChange(() => renderReviewTable(reviewGroupedRows()));
     }
 
@@ -7413,14 +7472,18 @@
             + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>";
         if (filtersTarget) {
             if (state.review.filtersOpen) {
-                filtersTarget.innerHTML = renderSectionFilters("review", baseRows, rows);
+                filtersTarget.innerHTML = renderSectionFilters("review", baseRows, rows, state.review.filtersJustOpened);
+                state.review.filtersJustOpened = false;
                 bindSectionFilterEvents(filtersTarget, "review", () => renderReviewTable(reviewGroupedRows()));
             } else {
                 filtersTarget.innerHTML = "";
             }
         }
         const filtersToggle = $("reviewFiltersToggle");
-        if (filtersToggle) filtersToggle.classList.toggle("active", state.review.filtersOpen);
+        if (filtersToggle) {
+            filtersToggle.classList.toggle("active", state.review.filtersOpen);
+            filtersToggle.classList.toggle("has-active-filters", !state.review.filtersOpen && hasActiveFilters("review"));
+        }
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
                 const key = button.dataset.reviewSort || "price";
@@ -7474,7 +7537,14 @@
         const expanded = state.requests.sectionExpanded;
         grid.classList.toggle("is-collapsed", expanded);
         if (wrap) wrap.classList.toggle("is-collapsed", expanded);
-        grid.innerHTML = REQUEST_SECTIONS.map((section) => {
+        const orderedSections = expanded
+            ? REQUEST_SECTIONS.slice().sort((a, b) => {
+                const aEmpty = !(grouped.get(a) || []).length;
+                const bEmpty = !(grouped.get(b) || []).length;
+                return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+            })
+            : REQUEST_SECTIONS;
+        grid.innerHTML = orderedSections.map((section) => {
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
             const active = section === state.requests.activeSection ? " active" : "";
@@ -7496,27 +7566,38 @@
                     collapseRequestsSection();
                     return;
                 }
+                const wasExpanded = state.requests.sectionExpanded;
                 state.requests.activeSection = clicked;
                 resetSectionFilters("requests");
-                expandRequestsSection();
+                if (wasExpanded) switchRequestsSection();
+                else expandRequestsSection();
             });
         });
         if (expanded) updatePickerThumb("requests");
     }
 
     function expandRequestsSection() {
-        state.requests.sectionExpanded = true;
+        animateSectionModeSwap("requestsSectionsGrid", () => {
+            state.requests.sectionExpanded = true;
+            renderRequests();
+        });
+    }
+
+    function switchRequestsSection() {
         animateReviewShellHeightChange(() => renderRequests());
     }
 
     function collapseRequestsSection() {
-        state.requests.sectionExpanded = false;
-        state.requests.filtersOpen = false;
-        animateReviewShellHeightChange(() => renderRequests());
+        animateSectionModeSwap("requestsSectionsGrid", () => {
+            state.requests.sectionExpanded = false;
+            state.requests.filtersOpen = false;
+            renderRequests();
+        });
     }
 
     function toggleRequestsFilters() {
         state.requests.filtersOpen = !state.requests.filtersOpen;
+        if (state.requests.filtersOpen) state.requests.filtersJustOpened = true;
         animateReviewShellHeightChange(() => renderRequestsTable(requestsGroupedRows()));
     }
 
@@ -7565,14 +7646,18 @@
         state.review.sort = previousSort;
         if (filtersTarget) {
             if (state.requests.filtersOpen) {
-                filtersTarget.innerHTML = renderSectionFilters("requests", baseRows, rows);
+                filtersTarget.innerHTML = renderSectionFilters("requests", baseRows, rows, state.requests.filtersJustOpened);
+                state.requests.filtersJustOpened = false;
                 bindSectionFilterEvents(filtersTarget, "requests", () => renderRequestsTable(requestsGroupedRows()));
             } else {
                 filtersTarget.innerHTML = "";
             }
         }
         const filtersToggle = $("requestsFiltersToggle");
-        if (filtersToggle) filtersToggle.classList.toggle("active", state.requests.filtersOpen);
+        if (filtersToggle) {
+            filtersToggle.classList.toggle("active", state.requests.filtersOpen);
+            filtersToggle.classList.toggle("has-active-filters", !state.requests.filtersOpen && hasActiveFilters("requests"));
+        }
         target.querySelectorAll("[data-review-sort]").forEach((button) => {
             button.addEventListener("click", () => {
                 const key = button.dataset.reviewSort || "price";
