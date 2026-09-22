@@ -611,6 +611,7 @@
             loading: false,
             loaded: false,
             activeGroup: "deferred",
+            groupExpanded: false,
             sort: { key: "updated", dir: "desc" },
             counts: { deferred: 0, completed: 0 },
         },
@@ -2476,6 +2477,28 @@
         if (!track || !statusBar) return;
         const available = statusBar.getBoundingClientRect().width;
         if (available > 0) track.style.setProperty("--pager-panel-w", available + "px");
+    }
+
+    function updateReviewTableMaxHeight() {
+        // .tasks-wrap, not the window, is the actual scroll container (body
+        // itself is overflow:hidden) -- sizing against window.innerHeight
+        // left a several-px gap the wrap's own edge didn't have.
+        const wrap = document.querySelector(".tasks-wrap");
+        const bottomLimit = wrap ? wrap.getBoundingClientRect().bottom : window.innerHeight;
+        document.querySelectorAll(".review-table-scroll").forEach((el) => {
+            const top = el.getBoundingClientRect().top;
+            const available = bottomLimit - top - 16;
+            el.style.maxHeight = Math.max(200, Math.round(available)) + "px";
+        });
+    }
+
+    let reviewTableHeightRaf = null;
+    function scheduleReviewTableMaxHeight() {
+        if (reviewTableHeightRaf) return;
+        reviewTableHeightRaf = requestAnimationFrame(() => {
+            reviewTableHeightRaf = null;
+            updateReviewTableMaxHeight();
+        });
     }
 
     // Grid containers stay in the DOM across renders even though their card
@@ -10789,7 +10812,11 @@
 
     function renderInactive() {
         const grid = $("inactiveSectionsGrid");
+        const wrap = $("inactivePickerRow");
         if (!grid) return;
+        const expanded = state.inactive.groupExpanded;
+        grid.classList.toggle("is-collapsed", expanded);
+        if (wrap) wrap.classList.toggle("is-collapsed", expanded);
         const counts = state.inactive.counts || { deferred: 0, completed: 0 };
         if (!state.inactive.activeGroup) state.inactive.activeGroup = "deferred";
         const groups = [
@@ -10798,23 +10825,53 @@
         ];
         grid.innerHTML = groups.map((item) => {
             const active = state.inactive.activeGroup === item.key ? " active" : "";
-            return "<button type='button' class='review-section-pill" + active + "' data-inactive-group='" + escapeHtml(item.key) + "'>"
-                + escapeHtml(item.title) + "<span class='review-section-pill-count'>" + item.count + "</span></button>";
+            if (expanded) {
+                return "<button type='button' class='review-section-pill" + active + "' data-inactive-group='" + escapeHtml(item.key) + "'>"
+                    + escapeHtml(item.title) + "<span class='review-section-pill-count'>" + item.count + "</span></button>";
+            }
+            const total = inactiveRowsByGroup(item.key).reduce((acc, row) => acc + reviewPrice(row), 0);
+            return "<button type='button' class='review-section-card" + active + "' data-inactive-group='" + escapeHtml(item.key) + "'>"
+                + "<div class='review-section-name'><span>" + escapeHtml(item.title) + "</span><strong>" + item.count + "</strong></div>"
+                + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
+                + "</button>";
         }).join("");
         grid.querySelectorAll("[data-inactive-group]").forEach((button) => {
             button.addEventListener("click", () => {
-                if (state.inactive.activeGroup === button.dataset.inactiveGroup) return;
-                state.inactive.activeGroup = button.dataset.inactiveGroup || "deferred";
-                renderInactive();
+                const clicked = button.dataset.inactiveGroup || "deferred";
+                if (state.inactive.groupExpanded && state.inactive.activeGroup === clicked) {
+                    collapseInactiveGroup();
+                    return;
+                }
+                const wasExpanded = state.inactive.groupExpanded;
+                state.inactive.activeGroup = clicked;
+                if (wasExpanded) switchInactiveGroup();
+                else expandInactiveGroup();
             });
         });
-        updatePickerThumb("inactive");
+        if (expanded) updatePickerThumb("inactive");
         renderInactiveTable();
+    }
+
+    function expandInactiveGroup() {
+        animateSectionModeSwap("inactiveSectionsGrid", () => {
+            state.inactive.groupExpanded = true;
+            renderInactive();
+        });
+    }
+
+    function switchInactiveGroup() {
+        animateReviewShellHeightChange(() => renderInactive());
+    }
+
+    function collapseInactiveGroup() {
+        animateSectionModeSwap("inactiveSectionsGrid", () => {
+            state.inactive.groupExpanded = false;
+            renderInactive();
+        });
     }
 
     function renderInactiveTable() {
         const group = state.inactive.activeGroup || "deferred";
-        const title = group === "completed" ? "Разбор завершен" : "Ожидают переоткрытия";
         const target = $("inactiveTableWrap");
         if (!target) return;
         if (state.inactive.loading) {
@@ -10838,14 +10895,7 @@
                 + "<td><span class='review-pill'>" + escapeHtml(taskStatus(row)) + "</span><div class='review-task-sub'>" + escapeHtml(statusLine) + "</div></td>"
                 + "</tr>";
         }).join("");
-        const totalCount = (state.inactive.counts || {})[group] || 0;
-        const countLabel = totalCount > rows.length
-            ? "Задач: " + totalCount + " (показаны последние " + rows.length + ")."
-            : "Задач: " + rows.length + ".";
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(title) + "</h3><div class='review-table-subtitle'>" + escapeHtml(countLabel) + "</div></div><div class='file-row' style='margin-top:0'><button id='refreshInactiveTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
-            + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>Задача</th><th>Тип задачи</th><th>Наименование</th><th>Стоимость</th><th>Статус</th></tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>Пока пусто.</div>");
-        const refresh = $("refreshInactiveTasks");
-        if (refresh) refresh.addEventListener("click", () => { void loadInactiveTasks(); });
+        target.innerHTML = rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>Задача</th><th>Тип задачи</th><th>Наименование</th><th>Стоимость</th><th>Статус</th></tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>Пока пусто.</div>";
         target.querySelectorAll("[data-inactive-task-detail]").forEach((row) => {
             row.addEventListener("click", () => openTaskDetail(row.dataset.inactiveTaskDetail, "inactive"));
         });
@@ -17018,7 +17068,21 @@
             if (state.view === "review") {
                 updatePagerPanelWidth();
                 updateReviewViewThumb();
+                scheduleReviewTableMaxHeight();
             }
+        });
+        // Tables used a fixed vh max-height, which either left a big blank
+        // "chin" under a short table on tall screens or, combined with
+        // everything above it, still pushed the whole page a few px past
+        // the viewport into its own scrollbar on shorter ones. Measuring
+        // the real remaining space (like updatePagerPanelWidth already
+        // does for width) fixes both -- a MutationObserver per table wrap
+        // means every render path (sort, filters, group switch, reload)
+        // gets picked up without threading a call through each of them.
+        ["reviewTableWrap", "requestsTableWrap", "inactiveTableWrap"].forEach((id) => {
+            const wrap = $(id);
+            if (!wrap) return;
+            new MutationObserver(scheduleReviewTableMaxHeight).observe(wrap, { childList: true, subtree: true });
         });
         $("openActualizeTasks").addEventListener("click", () => { void openActualizeTasksModal(); });
         $("closeActualizeTasks").addEventListener("click", closeActualizeTasksModal);
