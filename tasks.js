@@ -571,7 +571,7 @@
             sectionExpanded: false,
             filtersOpen: false,
             filtersJustOpened: false,
-            activeTab: 0,
+            activeTab: 1,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
         },
@@ -2395,6 +2395,7 @@
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.add("active");
+        setReviewTab(REVIEW_TAB_PRESORT);
         updatePagerPanelWidth();
         animateReviewShellHeightChange(() => {
             renderReview();
@@ -2403,24 +2404,33 @@
         void ensureReviewTasksLoaded();
     }
 
+    // Tab order in the switcher (and matching pager panel order) --
+    // Неактивные sits left of Предразбор, but the page always opens on
+    // Предразбор regardless of visual position.
+    const REVIEW_TAB_INACTIVE = 0;
+    const REVIEW_TAB_PRESORT = 1;
+    const REVIEW_TAB_TASKS = 2;
+    const REVIEW_TAB_PRESPISOK = 3;
+    const REVIEW_TAB_PURE_LOSSES = 4;
+
     function setReviewTab(index) {
         state.review.activeTab = index;
-        if (index <= 3) $("reviewViewThumb").style.transform = "translateX(" + (index * 100) + "%)";
+        $("reviewViewThumb").style.transform = "translateX(" + (index * 100) + "%)";
         [
-            [$("reviewTabPresort"), 0],
-            [$("reviewTabTasks"), 1],
-            [$("reviewTabPrespisok"), 2],
-            [$("reviewTabPureLosses"), 3],
+            [$("reviewTabInactive"), REVIEW_TAB_INACTIVE],
+            [$("reviewTabPresort"), REVIEW_TAB_PRESORT],
+            [$("reviewTabTasks"), REVIEW_TAB_TASKS],
+            [$("reviewTabPrespisok"), REVIEW_TAB_PRESPISOK],
+            [$("reviewTabPureLosses"), REVIEW_TAB_PURE_LOSSES],
         ].forEach(([button, tabIndex]) => {
             const active = tabIndex === index;
             button.classList.toggle("active", active);
             button.setAttribute("aria-selected", active ? "true" : "false");
         });
-        $("reviewTabInactive").classList.toggle("active", index === 4);
         renderReviewContextTools();
         slidePagerTo(index);
-        if (index === 1) void scanIncomingFlowDuplicates();
-        if (index === 4) {
+        if (index === REVIEW_TAB_TASKS) void scanIncomingFlowDuplicates();
+        if (index === REVIEW_TAB_INACTIVE) {
             renderInactive();
             if (!state.inactive.loaded && !state.inactive.loading) void loadInactiveTasks();
         }
@@ -7298,9 +7308,9 @@
     }
 
     function renderReviewContextTools() {
-        const tab = state.review.activeTab || 0;
+        const tab = state.review.activeTab;
         let sectionConfig = null;
-        if (tab === 0) {
+        if (tab === REVIEW_TAB_PRESORT && state.review.sectionExpanded) {
             const section = state.review.activeSection;
             if (section === "Предсортировка") {
                 sectionConfig = { icon: "∅", title: "Быстрая проверка “Без ШК”" };
@@ -7309,9 +7319,9 @@
             }
         }
         let modeConfig = null;
-        if (tab === 0) {
+        if (tab === REVIEW_TAB_PRESORT) {
             modeConfig = { icon: "⛔", title: "Добавить ШК в исключения", handler: openShkExclusionModal };
-        } else if (tab === 2) {
+        } else if (tab === REVIEW_TAB_PRESPISOK) {
             modeConfig = { icon: "🗂", title: "Журнал предсписка", handler: () => { void openPrespisokJournalModal(); } };
         }
         setContextButton($("reviewSectionContextBtn"), sectionConfig);
@@ -16974,11 +16984,11 @@
         $("repeatUpload").addEventListener("click", resetCurrentUpload);
         $("closeMaster").addEventListener("click", () => setFlowModalOpen("masterWork", false));
         $("closeBackfillCalendar").addEventListener("click", () => setFlowModalOpen("backfillCalendarModal", false));
-        $("reviewTabPresort").addEventListener("click", () => setReviewTab(0));
-        $("reviewTabTasks").addEventListener("click", () => setReviewTab(1));
-        $("reviewTabPrespisok").addEventListener("click", () => setReviewTab(2));
-        $("reviewTabPureLosses").addEventListener("click", () => setReviewTab(3));
-        $("reviewTabInactive").addEventListener("click", () => setReviewTab(4));
+        $("reviewTabInactive").addEventListener("click", () => setReviewTab(REVIEW_TAB_INACTIVE));
+        $("reviewTabPresort").addEventListener("click", () => setReviewTab(REVIEW_TAB_PRESORT));
+        $("reviewTabTasks").addEventListener("click", () => setReviewTab(REVIEW_TAB_TASKS));
+        $("reviewTabPrespisok").addEventListener("click", () => setReviewTab(REVIEW_TAB_PRESPISOK));
+        $("reviewTabPureLosses").addEventListener("click", () => setReviewTab(REVIEW_TAB_PURE_LOSSES));
         $("reviewPickerPrev").addEventListener("click", () => scrollPicker("review", -1));
         $("reviewPickerNext").addEventListener("click", () => scrollPicker("review", 1));
         $("requestsPickerPrev").addEventListener("click", () => scrollPicker("requests", -1));
