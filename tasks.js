@@ -2413,9 +2413,20 @@
     const REVIEW_TAB_PRESPISOK = 3;
     const REVIEW_TAB_PURE_LOSSES = 4;
 
+    // The Неактивные slot is narrower than the 4 text tabs (icon-only), so
+    // the active thumb can't just be a 1/5-width CSS percentage anymore --
+    // it's measured from the actual button box, same pattern as the
+    // participant-picker thumb in updatePickerThumb().
+    function updateReviewViewThumb() {
+        const thumb = $("reviewViewThumb");
+        const active = document.querySelector(".review-view-tabs-5 .review-view-tab.active");
+        if (!thumb || !active) return;
+        thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
+        thumb.style.width = active.offsetWidth + "px";
+    }
+
     function setReviewTab(index) {
         state.review.activeTab = index;
-        $("reviewViewThumb").style.transform = "translateX(" + (index * 100) + "%)";
         [
             [$("reviewTabInactive"), REVIEW_TAB_INACTIVE],
             [$("reviewTabPresort"), REVIEW_TAB_PRESORT],
@@ -2427,6 +2438,7 @@
             button.classList.toggle("active", active);
             button.setAttribute("aria-selected", active ? "true" : "false");
         });
+        updateReviewViewThumb();
         renderReviewContextTools();
         slidePagerTo(index);
         if (index === REVIEW_TAB_TASKS) void scanIncomingFlowDuplicates();
@@ -16996,7 +17008,10 @@
         $("reviewFiltersToggle").addEventListener("click", toggleReviewFilters);
         $("requestsFiltersToggle").addEventListener("click", toggleRequestsFilters);
         window.addEventListener("resize", () => {
-            if (state.view === "review") updatePagerPanelWidth();
+            if (state.view === "review") {
+                updatePagerPanelWidth();
+                updateReviewViewThumb();
+            }
         });
         $("openActualizeTasks").addEventListener("click", () => { void openActualizeTasksModal(); });
         $("closeActualizeTasks").addEventListener("click", closeActualizeTasksModal);
