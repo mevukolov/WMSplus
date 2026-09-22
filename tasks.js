@@ -2257,8 +2257,20 @@
         }
     }
 
+    function updatePrespisokTabAlert() {
+        const tab = $("reviewTabPrespisok");
+        if (!tab) return;
+        const run = state.prespisokHome.run;
+        const status = normalizeText(run && run.status);
+        const completed = status === "completed" || Boolean(state.prespisok.finished);
+        const active = status === "started" || status === "in_progress";
+        const info = prespisokWindowInfo();
+        tab.classList.toggle("has-alert", !completed && !active && info.inWindow);
+    }
+
     function renderPrespisokHomeCard() {
         renderPrespisokHomeLeaderboard();
+        updatePrespisokTabAlert();
         const card = $("openPrespisok");
         if (!card) return;
         const text = card.querySelector(".tasks-action-text");
@@ -2393,18 +2405,18 @@
 
     function setReviewTab(index) {
         state.review.activeTab = index;
-        $("reviewViewThumb").style.transform = "translateX(" + (index * 100) + "%)";
+        if (index <= 3) $("reviewViewThumb").style.transform = "translateX(" + (index * 100) + "%)";
         [
             [$("reviewTabPresort"), 0],
             [$("reviewTabTasks"), 1],
             [$("reviewTabPrespisok"), 2],
             [$("reviewTabPureLosses"), 3],
-            [$("reviewTabInactive"), 4],
         ].forEach(([button, tabIndex]) => {
             const active = tabIndex === index;
             button.classList.toggle("active", active);
             button.setAttribute("aria-selected", active ? "true" : "false");
         });
+        $("reviewTabInactive").classList.toggle("active", index === 4);
         renderReviewContextTools();
         slidePagerTo(index);
         if (index === 1) void scanIncomingFlowDuplicates();
@@ -7265,28 +7277,45 @@
     // tab and, inside Предразбор, on the currently picked section. Rebuilt
     // wholesale on every call since it's cheap and only ever a couple of
     // square buttons.
+    // Two fixed slots so the buttons themselves animate in/out (CSS
+    // transition on .is-away) instead of being torn down and rebuilt --
+    // rebuilding via innerHTML would restart the elements and skip the
+    // transition entirely. Section-level button always sits left of the
+    // mode-level one, so the mode button's position never jumps around
+    // depending on whether the current section has its own button.
+    function setContextButton(btn, config) {
+        if (!btn) return;
+        const show = Boolean(config);
+        btn.classList.toggle("is-away", !show);
+        if (show) {
+            btn.textContent = config.icon;
+            btn.title = config.title;
+            btn.setAttribute("aria-label", config.title);
+            btn.onclick = config.handler || null;
+        } else {
+            btn.onclick = null;
+        }
+    }
+
     function renderReviewContextTools() {
-        const container = $("reviewContextTools");
-        if (!container) return;
         const tab = state.review.activeTab || 0;
-        let html = "";
+        let sectionConfig = null;
         if (tab === 0) {
-            html += "<button id='openShkExclusion' class='review-tool-square' type='button' title='Добавить ШК в исключения'>⛔</button>";
             const section = state.review.activeSection;
             if (section === "Предсортировка") {
-                html += "<button id='reviewQuickNoShkContext' class='review-tool-square' type='button' title='Быстрая проверка “Без ШК”'>∅</button>";
+                sectionConfig = { icon: "∅", title: "Быстрая проверка “Без ШК”" };
             } else if (section === "ПМ" || section === "Почта") {
-                html += "<button id='reviewCalcContext' class='review-tool-square' type='button' title='Калькулятор'>🧮</button>";
+                sectionConfig = { icon: "🧮", title: "Калькулятор" };
             }
-        } else if (tab === 2) {
-            html += "<button id='openPrespisokJournalContext' class='review-tool-square' type='button' title='Журнал предсписка'>🗂</button>";
         }
-        container.innerHTML = html;
-        container.classList.toggle("is-away", !html);
-        const shkBtn = $("openShkExclusion");
-        if (shkBtn) shkBtn.addEventListener("click", openShkExclusionModal);
-        const journalBtn = $("openPrespisokJournalContext");
-        if (journalBtn) journalBtn.addEventListener("click", () => { void openPrespisokJournalModal(); });
+        let modeConfig = null;
+        if (tab === 0) {
+            modeConfig = { icon: "⛔", title: "Добавить ШК в исключения", handler: openShkExclusionModal };
+        } else if (tab === 2) {
+            modeConfig = { icon: "🗂", title: "Журнал предсписка", handler: () => { void openPrespisokJournalModal(); } };
+        }
+        setContextButton($("reviewSectionContextBtn"), sectionConfig);
+        setContextButton($("reviewModeContextBtn"), modeConfig);
     }
 
     // Pill widths vary (unlike the equal-width top-level view tabs), so the
@@ -7555,7 +7584,8 @@
         }
         const grouped = requestsGroupedRows();
         const incomingFlowCount = (grouped.get("Запросы входящего потока") || []).length;
-        $("reviewTabTasks").classList.toggle("has-alert", incomingFlowCount > 0);
+        const secondLineCount = (grouped.get("2-я линия предсписка") || []).length;
+        $("reviewTabTasks").classList.toggle("has-alert", incomingFlowCount > 0 || secondLineCount > 0);
         if (!state.requests.activeSection || !REQUEST_SECTIONS.includes(state.requests.activeSection)) {
             state.requests.activeSection = REQUEST_SECTIONS.find((section) => (grouped.get(section) || []).length) || REQUEST_SECTIONS[0];
         }

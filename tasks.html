@@ -914,27 +914,29 @@
         .backfill-day.is-selected { outline: 2px solid var(--accent); background: #ede9fe; }
         .review-shell { padding: 16px; }
         .review-status-card { padding: 14px 16px; margin-bottom: 16px; overflow: hidden; }
-        .review-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-        .review-tool-square { width: 42px; height: 42px; border: 0; border-radius: 12px; background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); font-size: 20px; font-weight: 900; cursor: pointer; }
+        .review-status-bar { display: flex; align-items: center; justify-content: flex-start; gap: 12px; flex-wrap: wrap; }
+        .review-status-bar-left { display: flex; align-items: center; gap: 12px; }
+        .review-tool-square { position: relative; width: 42px; height: 42px; border: 0; border-radius: 12px; background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); font-size: 20px; font-weight: 900; cursor: pointer; transition: opacity .22s ease, transform .32s cubic-bezier(.34,1.56,.64,1), color .2s ease, box-shadow .16s ease; }
         .review-tool-square:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); color: var(--accent); }
+        .review-tool-square.is-away { opacity: 0; transform: scale(.5); pointer-events: none; transition: opacity .16s ease, transform .22s cubic-bezier(.5,-.3,.7,.4); }
+        .review-tool-square.active { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); }
+        .review-tool-square.active:hover { color: #fff; }
         .review-view-tabs { display: inline-flex; gap: 8px; padding: 4px; border-radius: 14px; background: #f1f5f9; }
-        .review-view-tabs-5 { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; }
-        .review-view-thumb { position: absolute; inset: 4px; width: calc((100% - 8px) / 5); border-radius: 11px; background: rgba(255,255,255,.78); backdrop-filter: blur(8px) saturate(160%); -webkit-backdrop-filter: blur(8px) saturate(160%); box-shadow: var(--shadow-sm), 0 1px 0 rgba(255,255,255,.7) inset; transition: transform .48s cubic-bezier(.32,1.2,.4,1); z-index: 0; }
-        .review-view-tabs-5 .review-view-tab { position: relative; z-index: 1; border: 0; border-radius: 11px; padding: 9px 4px; background: transparent; color: #64748b; font-weight: 800; font-size: 12px; white-space: nowrap; cursor: pointer; text-align: center; transition: color .2s ease; }
-        .review-view-tabs-5 .review-view-tab.active { color: var(--accent-dark); background: transparent; box-shadow: none; }
+        .review-view-tabs-4 { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+        .review-view-thumb { position: absolute; inset: 4px; width: calc((100% - 8px) / 4); border-radius: 11px; background: rgba(255,255,255,.78); backdrop-filter: blur(8px) saturate(160%); -webkit-backdrop-filter: blur(8px) saturate(160%); box-shadow: var(--shadow-sm), 0 1px 0 rgba(255,255,255,.7) inset; transition: transform .48s cubic-bezier(.32,1.2,.4,1); z-index: 0; }
+        .review-view-tabs-4 .review-view-tab { position: relative; z-index: 1; border: 0; border-radius: 11px; padding: 9px 8px; background: transparent; color: #64748b; font-weight: 800; font-size: 12.5px; white-space: nowrap; cursor: pointer; text-align: center; transition: color .2s ease; }
+        .review-view-tabs-4 .review-view-tab.active { color: var(--accent-dark); background: transparent; box-shadow: none; }
         .review-view-tab { border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }
         .review-view-tab.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
         .review-view-tab.has-alert::after { content: ''; position: absolute; top: 3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 2; }
-        .review-view-tab-icon { font-size: 17px; padding: 9px 6px; }
         .review-pager-viewport { contain: inline-size; clip-path: inset(-64px); }
         .review-pager-track { display: flex; gap: 96px; width: calc(5 * var(--pager-panel-w, 20%) + 384px); transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 var(--pager-panel-w, 100%); min-width: 0; }
-        .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; transform-origin: center bottom; transition: opacity .22s ease, transform .38s cubic-bezier(.34,1.9,.5,1); }
-        .review-toolbar-presort-only.is-away { opacity: 0; transition: opacity .18s ease, transform .3s cubic-bezier(.5,-.3,.7,.4); transform: translateY(30px) scale(.6); pointer-events: none; }
+        .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; margin-left: auto; }
         .review-status { color: #64748b; font-size: 13px; min-height: 18px; }
         .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; perspective: 900px; transition: opacity .2s ease, transform .34s cubic-bezier(.34,1.56,.64,1); }
-        .review-sections-grid.is-mode-out { opacity: 0; transform: scale(.92) translateX(-10px); }
-        .review-sections-grid.is-mode-in { opacity: 0; transform: scale(.9) translateX(-18px); }
+        .review-sections-grid.is-mode-out { opacity: 0; transform: scale(.92); }
+        .review-sections-grid.is-mode-in { opacity: 0; transform: scale(.9); }
         @keyframes sectionItemPop { 0% { opacity: 0; transform: translateY(12px) scale(.88); } 65% { opacity: 1; transform: translateY(-3px) scale(1.03); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
         .review-section-card.is-entering-item, .review-section-pill.is-entering-item { animation: sectionItemPop .46s cubic-bezier(.34,1.56,.64,1) both; }
         .review-section-card { position: relative; min-height: 116px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 18px; text-align: left; cursor: pointer; transform-style: preserve-3d; will-change: transform; transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s ease, border-color .25s ease, background-color .25s ease; }
@@ -1972,16 +1974,21 @@
     <section id="reviewPage" class="tasks-page">
         <section class="card review-status-card">
             <div class="review-status-bar">
-                <button id="openActualizeTasks" class="review-tool-square" type="button" title="Актуализировать активные задачи">⟳</button>
-                <div class="review-view-tabs review-view-tabs-5" aria-label="Вид разбора">
-                    <span id="reviewViewThumb" class="review-view-thumb" aria-hidden="true"></span>
-                    <button id="reviewTabPresort" class="review-view-tab active" type="button" data-tab-index="0" aria-selected="true">Предразбор</button>
-                    <button id="reviewTabTasks" class="review-view-tab" type="button" data-tab-index="1" aria-selected="false">Задачи</button>
-                    <button id="reviewTabPrespisok" class="review-view-tab" type="button" data-tab-index="2" aria-selected="false">Предсписок</button>
-                    <button id="reviewTabPureLosses" class="review-view-tab" type="button" data-tab-index="3" aria-selected="false">Чистые списания</button>
-                    <button id="reviewTabInactive" class="review-view-tab review-view-tab-icon" type="button" data-tab-index="4" aria-selected="false" title="Неактивные задачи" aria-label="Неактивные задачи">◌</button>
+                <div class="review-status-bar-left">
+                    <button id="reviewTabInactive" class="review-tool-square" type="button" title="Неактивные задачи" aria-label="Неактивные задачи">◌</button>
+                    <button id="openActualizeTasks" class="review-tool-square" type="button" title="Актуализировать активные задачи">⟳</button>
+                    <div class="review-view-tabs review-view-tabs-4" aria-label="Вид разбора">
+                        <span id="reviewViewThumb" class="review-view-thumb" aria-hidden="true"></span>
+                        <button id="reviewTabPresort" class="review-view-tab active" type="button" data-tab-index="0" aria-selected="true">Предразбор</button>
+                        <button id="reviewTabTasks" class="review-view-tab" type="button" data-tab-index="1" aria-selected="false">Задачи</button>
+                        <button id="reviewTabPrespisok" class="review-view-tab" type="button" data-tab-index="2" aria-selected="false">Предсписок</button>
+                        <button id="reviewTabPureLosses" class="review-view-tab" type="button" data-tab-index="3" aria-selected="false">Чистые списания</button>
+                    </div>
                 </div>
-                <div id="reviewContextTools" class="review-toolbar-presort-only"></div>
+                <div id="reviewContextTools" class="review-toolbar-presort-only">
+                    <button id="reviewSectionContextBtn" class="review-tool-square is-away" type="button"></button>
+                    <button id="reviewModeContextBtn" class="review-tool-square is-away" type="button"></button>
+                </div>
             </div>
         </section>
         <div id="writebackFailuresBanner" class="status-line warn" style="display:none;"></div>
