@@ -11215,8 +11215,7 @@
                 + "<span class='journal-day-dot'></span>"
                 + "</" + tag + ">";
         }).join("");
-        target.innerHTML = (state.prespisokJournal.loading ? "<div class='empty-state'>Загружаю последние 30 дней...</div>" : "")
-            + (state.prespisokJournal.error ? "<div class='status-line error'>Не удалось открыть журнал: " + escapeHtml(state.prespisokJournal.error) + "</div>" : "")
+        target.innerHTML = (state.prespisokJournal.error ? "<div class='status-line error'>Не удалось открыть журнал: " + escapeHtml(state.prespisokJournal.error) + "</div>" : "")
             + "<div class='journal-scroll'><div class='journal-layout'>"
             + "<section class='journal-panel'><div class='journal-weekdays'><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div><div class='journal-day-grid'>" + daysHtml + "</div></section>"
             + "</div></div>";
@@ -17255,6 +17254,9 @@
             else if ($("prespisokSecondLineModal").classList.contains("active")) setFlowModalOpen("prespisokSecondLineModal", false);
             else if ($("prespisokJournalModal").classList.contains("active")) closePrespisokJournalModal();
             else if ($("actualizeTasksModal").classList.contains("active")) closeActualizeTasksModal();
+            else if ($("shkExclusionModal").classList.contains("active")) closeShkExclusionModal();
+            else if ($("reviewCalculatorModal").classList.contains("active")) setFlowModalOpen("reviewCalculatorModal", false);
+            else if ($("reviewNoShkCheckModal").classList.contains("active")) setFlowModalOpen("reviewNoShkCheckModal", false);
             else if ($("shiftOpeningModal").classList.contains("active")) closeShiftOpeningModal();
             else if ($("masterWork").classList.contains("active")) setFlowModalOpen("masterWork", false);
             else if ($("uploadWork").classList.contains("active")) openChooser(state.manualDate);
