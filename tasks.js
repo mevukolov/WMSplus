@@ -442,6 +442,7 @@
         "Запросы входящего потока",
         "Списания AWH",
         "Коробки на входе",
+        "2-я линия предсписка",
     ];
     const FLOW_SKIP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
     const FLOW_SCORE_VERSION = "flow-mvp-2026-08-24";
@@ -2098,7 +2099,6 @@
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
-        $("inactivePage").classList.remove("active");
         renderPrespisokHomeCard();
         renderFlowAccessGate();
         void refreshPrespisokHomeState();
@@ -2331,7 +2331,6 @@
         $("tasksHome").style.display = "none";
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
-        $("inactivePage").classList.remove("active");
         $("flowPage").classList.add("active");
         state.flow.loading = true;
         state.flow.status = "Собираю активные задачи и считаю приоритеты...";
@@ -2370,7 +2369,6 @@
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
-        $("inactivePage").classList.remove("active");
         $("uploadsPage").classList.add("active");
         $("uploadsStatus").textContent = "Загружаю журнал и настройки...";
         const ok = await loadUploadMeta();
@@ -2384,7 +2382,6 @@
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
-        $("inactivePage").classList.remove("active");
         $("reviewPage").classList.add("active");
         updatePagerPanelWidth();
         animateReviewShellHeightChange(() => {
@@ -2400,15 +2397,21 @@
         [
             [$("reviewTabPresort"), 0],
             [$("reviewTabTasks"), 1],
-            [$("reviewTabPureLosses"), 2],
+            [$("reviewTabPrespisok"), 2],
+            [$("reviewTabPureLosses"), 3],
+            [$("reviewTabInactive"), 4],
         ].forEach(([button, tabIndex]) => {
             const active = tabIndex === index;
             button.classList.toggle("active", active);
             button.setAttribute("aria-selected", active ? "true" : "false");
         });
-        $("reviewToolbarPresortOnly").classList.toggle("is-away", index !== 0);
+        renderReviewContextTools();
         slidePagerTo(index);
         if (index === 1) void scanIncomingFlowDuplicates();
+        if (index === 4) {
+            renderInactive();
+            if (!state.inactive.loaded && !state.inactive.loading) void loadInactiveTasks();
+        }
     }
 
     // Panels have a real 96px gap between them (see .review-pager-track) so
@@ -2560,17 +2563,6 @@
         }
     }
 
-    function showInactivePage() {
-        state.view = "inactive";
-        closeFlowModals();
-        $("tasksHome").style.display = "none";
-        $("flowPage").classList.remove("active");
-        $("uploadsPage").classList.remove("active");
-        $("reviewPage").classList.remove("active");
-        $("inactivePage").classList.add("active");
-        renderInactive();
-        void loadInactiveTasks();
-    }
 
     function setShiftOpeningStatus(message, type) {
         const el = $("shiftOpeningStatus");
@@ -6847,6 +6839,10 @@
     function requestsGroupedRows() {
         const grouped = new Map(REQUEST_SECTIONS.map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
+            if (isPrespisokTask(row)) {
+                grouped.get("2-я линия предсписка").push(row);
+                return;
+            }
             const section = requestSectionName(row);
             if (section && grouped.has(section)) grouped.get(section).push(row);
         });
@@ -7262,6 +7258,35 @@
         const grouped = reviewGroupedRows();
         renderReviewSections(grouped);
         renderReviewLanding(grouped);
+        renderReviewContextTools();
+    }
+
+    // Right-side toolbar is contextual: it depends on the active top-level
+    // tab and, inside Предразбор, on the currently picked section. Rebuilt
+    // wholesale on every call since it's cheap and only ever a couple of
+    // square buttons.
+    function renderReviewContextTools() {
+        const container = $("reviewContextTools");
+        if (!container) return;
+        const tab = state.review.activeTab || 0;
+        let html = "";
+        if (tab === 0) {
+            html += "<button id='openShkExclusion' class='review-tool-square' type='button' title='Добавить ШК в исключения'>⛔</button>";
+            const section = state.review.activeSection;
+            if (section === "Предсортировка") {
+                html += "<button id='reviewQuickNoShkContext' class='review-tool-square' type='button' title='Быстрая проверка “Без ШК”'>∅</button>";
+            } else if (section === "ПМ" || section === "Почта") {
+                html += "<button id='reviewCalcContext' class='review-tool-square' type='button' title='Калькулятор'>🧮</button>";
+            }
+        } else if (tab === 2) {
+            html += "<button id='openPrespisokJournalContext' class='review-tool-square' type='button' title='Журнал предсписка'>🗂</button>";
+        }
+        container.innerHTML = html;
+        container.classList.toggle("is-away", !html);
+        const shkBtn = $("openShkExclusion");
+        if (shkBtn) shkBtn.addEventListener("click", openShkExclusionModal);
+        const journalBtn = $("openPrespisokJournalContext");
+        if (journalBtn) journalBtn.addEventListener("click", () => { void openPrespisokJournalModal(); });
     }
 
     // Pill widths vary (unlike the equal-width top-level view tabs), so the
@@ -7531,7 +7556,7 @@
         const grouped = requestsGroupedRows();
         const incomingFlowCount = (grouped.get("Запросы входящего потока") || []).length;
         $("reviewTabTasks").classList.toggle("has-alert", incomingFlowCount > 0);
-        if (!state.requests.activeSection || !(grouped.get(state.requests.activeSection) || []).length) {
+        if (!state.requests.activeSection || !REQUEST_SECTIONS.includes(state.requests.activeSection)) {
             state.requests.activeSection = REQUEST_SECTIONS.find((section) => (grouped.get(section) || []).length) || REQUEST_SECTIONS[0];
         }
         setRequestsStatus(state.review.loaded ? "" : "Задачи еще не загружены.");
@@ -16843,7 +16868,6 @@
         $("startFlowBanner").addEventListener("click", () => { void showFlowPage(); });
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
-        $("openInactive").addEventListener("click", showInactivePage);
         $("openQuickNoShkReview").addEventListener("click", () => { void openQuickNoShkModal(); });
         $("openPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("openPrespisokSecondLineHome").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
@@ -16911,7 +16935,6 @@
         $("confirmFlowSkip").addEventListener("click", () => { void skipFlowTaskFromModal(); });
         $("homeFromUploads").addEventListener("click", showHome);
         $("homeFromReview").addEventListener("click", showHome);
-        $("homeFromInactive").addEventListener("click", showHome);
         $("makeUpload").addEventListener("click", () => openChooser(""));
         $("backfillUpload").addEventListener("click", openBackfillChooser);
         $("makeMasterUpload").addEventListener("click", openMaster);
@@ -16923,7 +16946,9 @@
         $("closeBackfillCalendar").addEventListener("click", () => setFlowModalOpen("backfillCalendarModal", false));
         $("reviewTabPresort").addEventListener("click", () => setReviewTab(0));
         $("reviewTabTasks").addEventListener("click", () => setReviewTab(1));
-        $("reviewTabPureLosses").addEventListener("click", () => setReviewTab(2));
+        $("reviewTabPrespisok").addEventListener("click", () => setReviewTab(2));
+        $("reviewTabPureLosses").addEventListener("click", () => setReviewTab(3));
+        $("reviewTabInactive").addEventListener("click", () => setReviewTab(4));
         $("reviewPickerPrev").addEventListener("click", () => scrollPicker("review", -1));
         $("reviewPickerNext").addEventListener("click", () => scrollPicker("review", 1));
         $("requestsPickerPrev").addEventListener("click", () => scrollPicker("requests", -1));
@@ -16940,7 +16965,6 @@
             const file = $("actualizeSupersetFile").files && $("actualizeSupersetFile").files[0];
             if (file) void handleActualizeSupersetFile(file);
         });
-        $("openShkExclusion").addEventListener("click", openShkExclusionModal);
         $("closeShkExclusion").addEventListener("click", closeShkExclusionModal);
         $("shkExclusionFile").addEventListener("change", () => {
             const file = $("shkExclusionFile").files && $("shkExclusionFile").files[0];
