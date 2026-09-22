@@ -326,16 +326,16 @@
         .journal-panel { border: 1px solid #e2e8f0; border-radius: 22px; background: #fff; padding: 16px; box-shadow: var(--shadow-sm); }
         .journal-panel-title { margin: 0 0 12px; color: var(--accent-dark); font-size: 18px; font-weight: 1000; }
         .journal-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; color: #64748b; font-size: 12px; font-weight: 1000; text-align: center; text-transform: uppercase; }
-        .journal-day-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
-        .journal-day { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; padding: 10px; text-align: left; cursor: default; min-height: 86px; font: inherit; color: #242038; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease; }
+        .journal-day-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+        .journal-day { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; padding: 6px 4px; display: grid; justify-items: center; gap: 4px; text-align: center; cursor: default; min-height: 44px; font: inherit; color: #242038; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease; }
         .journal-day.has-run { cursor: pointer; background: #fff; box-shadow: var(--shadow-sm); }
         .journal-day.has-run:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
-        .journal-day.completed { border-color: #bbf7d0; background: #ecfdf5; }
-        .journal-day.active-run { border-color: #fde68a; background: #fffbeb; }
         .journal-day.is-selected { outline: 2px solid var(--accent); box-shadow: 0 18px 42px rgba(98,60,234,.14); }
-        .journal-day-empty { min-height: 86px; border-radius: 14px; background: transparent; }
-        .journal-day-date { display: block; color: var(--accent-dark); font-weight: 1000; font-size: 15px; line-height: 1.05; }
-        .journal-day-status { display: block; margin-top: 8px; color: #64748b; font-size: 12px; line-height: 1.25; font-weight: 850; }
+        .journal-day-empty { min-height: 44px; border-radius: 12px; background: transparent; }
+        .journal-day-date { display: block; color: var(--accent-dark); font-weight: 900; font-size: 13px; line-height: 1; }
+        .journal-day-dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; }
+        .journal-day.completed .journal-day-dot { background: #22c55e; }
+        .journal-day.active-run .journal-day-dot { background: #f59e0b; }
         .journal-detail-card { flex: 1; min-height: 0; display: flex; flex-direction: column; border-radius: 18px; background: #fff; border: 0; padding: 0; }
         .journal-stats-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
         .journal-stat { border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; padding: 12px; min-width: 0; }
@@ -528,13 +528,6 @@
         .side-drawer-modal .work-head { flex-wrap: nowrap; }
         .side-drawer-modal .work-head > div:first-child { min-width: 0; flex: 1; }
         .side-drawer-modal .work-head .btn-square { flex: none; }
-        /* The journal's calendar assumes a wide (7-day-row) modal; in the
-           440px drawer that squeezes each cell to nothing and clips the
-           date/counts. A weekday-aligned header stops making sense once
-           the row breaks below 7 columns, so it's dropped here instead of
-           shown misaligned. */
-        #prespisokJournalModal.side-drawer-modal .journal-weekdays { display: none; }
-        #prespisokJournalModal.side-drawer-modal .journal-day-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .profile-info-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(15,23,42,.06); font-size: 14px; }
         .profile-info-row span:first-child { color: #64748b; }
         .profile-info-row span:last-child { font-weight: 700; color: #242038; text-align: right; }
@@ -1202,7 +1195,7 @@
         .task-compose-bar.tone-green .task-verdict-trigger { background: #86efac; color: #14532d; }
         .task-compose-bar.tone-yellow .task-verdict-trigger { background: #fde047; color: #713f12; }
         .task-compose-bar.tone-red .task-verdict-trigger { background: #fca5a5; color: #7f1d1d; }
-        .task-compose-bar .task-compose-input { flex: 1 1 auto; min-height: 42px; max-height: 160px; resize: none; border-radius: 18px; padding: 10px 14px; line-height: 1.35; overflow-y: auto; }
+        .task-form .task-compose-input { flex: 1 1 auto; min-height: 42px; max-height: 160px; resize: none; border-radius: 18px; padding: 10px 14px; line-height: 1.35; overflow-y: auto; }
         .task-compose-send { display: none; flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 0; background: #16a34a; color: #fff; font-size: 17px; font-weight: 900; cursor: pointer; align-items: center; justify-content: center; transition: transform .12s ease, background .12s ease; }
         .task-compose-send.is-visible { display: inline-flex; }
         .task-compose-send:hover { background: #15803d; transform: scale(1.05); }
@@ -1346,6 +1339,18 @@
         .shift-list-title { margin: 0 0 8px; color: #242038; font-weight: 900; }
         .shift-list-row { display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid #f1f5f9; padding: 7px 0; color: #334155; font-size: 13px; }
         .actualize-step { margin-top: 14px; display: grid; gap: 12px; }
+        .wizard-steps { display: flex; align-items: center; gap: 6px; }
+        .wizard-steps span { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: #eef0ff; border: 2px solid #dfe3fb; color: #7d84c9; font-weight: 900; font-size: 12px; transition: background .25s ease, border-color .25s ease, color .25s ease; flex: none; }
+        .wizard-steps span.is-done { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .wizard-steps span.is-current { box-shadow: 0 0 0 4px rgba(98,60,234,.16); }
+        .wizard-steps i { flex: 1 1 auto; height: 2px; min-width: 12px; background: #dfe3fb; font-style: normal; transition: background .25s ease; }
+        .wizard-steps i.is-done { background: var(--accent); }
+        .wizard-slide { display: none; }
+        .wizard-slide.is-active { display: grid; gap: 12px; animation: wizardSlideIn .28s cubic-bezier(.22,.9,.28,1.05); }
+        @keyframes wizardSlideIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+        .wizard-step-text { margin: 0; color: #334155; font-size: 14px; line-height: 1.4; }
+        .wizard-step-text a { color: var(--accent); font-weight: 800; }
+        .wizard-nav { display: flex; gap: 8px; }
         .movement-list { display: grid; gap: 8px; margin-top: 12px; }
         .movement-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 10px 12px; }
         .movement-row.removed { opacity: .45; text-decoration: line-through; }
@@ -2047,9 +2052,24 @@
                         <div id="requestsTableWrap" class="review-table-card"></div>
                     </div>
                     <div class="review-pager-panel">
-                        <div class="card" style="padding:32px;text-align:center;">
-                            <h3 style="margin:0 0 8px;">Предсписок</h3>
-                            <p class="empty-state" style="margin:0;">Раздел в разработке.</p>
+                        <div class="tasks-home-group-head" style="margin-bottom:14px;">
+                            <div>
+                                <h2 class="tasks-home-group-title">Предсписок</h2>
+                                <p class="tasks-home-group-note">Финальная проверка перед списанием. Боевой интервал: 14:30-20:00.</p>
+                            </div>
+                            <div id="reviewPrespisokCountdownBadge" class="tasks-home-timer">Проверяю окно</div>
+                        </div>
+                        <div class="tasks-actions" style="grid-template-columns:repeat(2, minmax(0, 1fr));">
+                            <div id="reviewPrespisokLeaderboardCard" class="tasks-action-card prespisok-leader-card hidden">
+                                <span class="tasks-action-icon">♕</span>
+                                <h2 class="tasks-action-title">Лидеры</h2>
+                                <p class="tasks-action-text">Скорость прохождения предсписка.</p>
+                            </div>
+                            <button id="reviewOpenPrespisok" class="tasks-action-card prespisok-entry" type="button">
+                                <span class="tasks-action-icon">⚡</span>
+                                <h2 class="tasks-action-title">Предсписок</h2>
+                                <p class="tasks-action-text">Аркадная проверка ШК и тар перед списанием, с журналом и задачами второй линии.</p>
+                            </button>
                         </div>
                     </div>
                     <div class="review-pager-panel">
@@ -2095,15 +2115,33 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Актуализировать активные задачи</h3>
-                <p class="work-subtitle">Скопируйте активные ШК, выгрузите по ним Superset и подтвердите движение.</p>
             </div>
             <button id="closeActualizeTasks" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
         <div class="actualize-step drawer-body-scroll">
-            <div class="file-row">
-                <button id="copyActiveShk" class="btn btn-rect" type="button">Копировать активные ШК</button>
-                <label id="actualizeUploadLabel" class="btn btn-outline hidden" for="actualizeSupersetFile">Добавить данные из Superset</label>
-                <input id="actualizeSupersetFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+            <div class="wizard-steps" id="actualizeSteps"><span class="is-current">1</span><i></i><span>2</span><i></i><span>3</span></div>
+            <div id="actualizeStepsBody">
+                <div class="wizard-slide is-active" data-step="1">
+                    <p class="wizard-step-text">Шаг 1 · Скопируйте список активных ШК.</p>
+                    <button id="copyActiveShk" class="btn btn-rect" type="button">Скопировать список ШК</button>
+                </div>
+                <div class="wizard-slide" data-step="2">
+                    <p class="wizard-step-text">Шаг 2 · Пропустите ШК через отчёт «<a href="https://do-superset.wb.ru/superset/dashboard/report_043_1/" target="_blank" rel="noopener">043.1. Стоимость ШК (расширенный)</a>» в Superset.</p>
+                    <div class="wizard-nav">
+                        <button id="actualizeStep2Back" class="btn btn-outline" type="button">← Назад</button>
+                        <button id="actualizeStep2Next" class="btn btn-rect" type="button">Далее</button>
+                    </div>
+                </div>
+                <div class="wizard-slide" data-step="3">
+                    <p class="wizard-step-text">Шаг 3 · Загрузите полученный файл.</p>
+                    <div class="file-row">
+                        <label id="actualizeUploadLabel" class="btn btn-outline hidden" for="actualizeSupersetFile">Выбрать файл</label>
+                        <input id="actualizeSupersetFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+                    </div>
+                    <div class="wizard-nav">
+                        <button id="actualizeStep3Back" class="btn btn-outline" type="button">← Назад</button>
+                    </div>
+                </div>
             </div>
             <div id="actualizeStatus" class="status-line">Сначала скопируйте список активных ШК.</div>
             <div id="actualizeResults"></div>
@@ -2116,22 +2154,73 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Добавить ШК в исключения</h3>
-                <p class="work-subtitle">Загрузите XLSX с одним столбцом ШК — все активные задачи по этим ШК отложатся на указанный срок, как при вердикте «Исключён из автосписания».</p>
             </div>
             <button id="closeShkExclusion" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
         <div class="actualize-step drawer-body-scroll">
-            <div class="file-row">
-                <label id="shkExclusionUploadLabel" class="btn btn-outline" for="shkExclusionFile">Загрузить XLSX со ШК</label>
-                <input id="shkExclusionFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+            <div class="wizard-steps" id="shkExclusionSteps"><span class="is-current">1</span><i></i><span>2</span><i></i><span>3</span><i></i><span>4</span></div>
+            <div id="shkExclusionStepsBody">
+                <div class="wizard-slide is-active" data-step="1">
+                    <p class="wizard-step-text">Шаг 1 · Загрузите файл с ШК.</p>
+                    <div class="file-row">
+                        <label id="shkExclusionUploadLabel" class="btn btn-outline" for="shkExclusionFile">Загрузить XLSX со ШК</label>
+                        <input id="shkExclusionFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+                    </div>
+                </div>
+                <div class="wizard-slide" data-step="2">
+                    <p class="wizard-step-text">Шаг 2 · Укажите срок исключения в часах.</p>
+                    <label>Срок исключения, ч<br><input id="shkExclusionHours" type="number" inputmode="numeric" min="1" step="1" class="input" placeholder="12" value="12" style="width:120px;"></label>
+                    <div class="wizard-nav">
+                        <button id="shkExclusionStep2Back" class="btn btn-outline" type="button">← Назад</button>
+                        <button id="shkExclusionStep2Next" class="btn btn-rect" type="button">Далее</button>
+                    </div>
+                </div>
+                <div class="wizard-slide" data-step="3">
+                    <p class="wizard-step-text">Шаг 3 · Добавьте ссылку на запрос из Band.</p>
+                    <label style="display:block;">Ссылка на запрос из Band<br><input id="shkExclusionComment" type="text" class="input" placeholder="Ссылка на запрос из Band"></label>
+                    <div class="wizard-nav">
+                        <button id="shkExclusionStep3Back" class="btn btn-outline" type="button">← Назад</button>
+                        <button id="shkExclusionStep3Next" class="btn btn-rect" type="button">Далее</button>
+                    </div>
+                </div>
+                <div class="wizard-slide" data-step="4">
+                    <p class="wizard-step-text">Шаг 4 · Подтвердите исключение.</p>
+                    <div class="wizard-nav">
+                        <button id="shkExclusionStep4Back" class="btn btn-outline" type="button">← Назад</button>
+                        <button id="applyShkExclusion" class="btn btn-rect" type="button" disabled>Исключить</button>
+                    </div>
+                </div>
             </div>
-            <div class="file-row">
-                <label>Срок исключения, ч<br><input id="shkExclusionHours" type="number" inputmode="numeric" min="1" step="1" class="input" placeholder="12" value="12" style="width:120px;"></label>
-                <label style="flex:1;min-width:220px;">Комментарий / ссылка (необязательно)<br><input id="shkExclusionComment" type="text" class="input" placeholder="Ссылка на исключение или причина"></label>
-            </div>
-            <button id="applyShkExclusion" class="btn btn-rect" type="button" disabled>Применить</button>
             <div id="shkExclusionStatus" class="status-line">Сначала загрузите XLSX со ШК.</div>
             <div id="shkExclusionResults"></div>
+        </div>
+    </div>
+</section>
+
+<section id="reviewCalculatorModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Калькулятор</h3>
+            </div>
+            <button id="closeReviewCalculator" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="actualize-step drawer-body-scroll">
+            <p class="empty-state" style="margin:0;">Раздел в разработке.</p>
+        </div>
+    </div>
+</section>
+
+<section id="reviewNoShkCheckModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Быстрая проверка «Без ШК»</h3>
+            </div>
+            <button id="closeReviewNoShkCheck" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="actualize-step drawer-body-scroll">
+            <p class="empty-state" style="margin:0;">Раздел в разработке.</p>
         </div>
     </div>
 </section>
@@ -2721,7 +2810,13 @@
 </section>
 
 <section id="prespisokJournalModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
-    <div class="tasks-flow-card review-full-card">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Журнал предсписка</h3>
+            </div>
+            <button id="closePrespisokJournal" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
         <div id="prespisokJournalWrap" class="review-table-card drawer-body-scroll"></div>
     </div>
 </section>

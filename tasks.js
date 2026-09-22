@@ -1653,6 +1653,9 @@
         }
         setFlowModalOpen("shiftOpeningModal", false);
         setFlowModalOpen("actualizeTasksModal", false);
+        setFlowModalOpen("shkExclusionModal", false);
+        setFlowModalOpen("reviewCalculatorModal", false);
+        setFlowModalOpen("reviewNoShkCheckModal", false);
         setFlowModalOpen("quickNoShkModal", false);
         setFlowModalOpen("noShkReviewModal", false);
         setFlowModalOpen("moduleChooser", false);
@@ -2206,9 +2209,16 @@
         return Array.from(byUser.values()).filter((row) => row.shk_count > 0 && row.elapsed_ms > 0);
     }
 
+    // Rendered in two places now -- the tasksHome group and natively inside
+    // the review page's Предсписок tab (see resetReviewModesToLanding's
+    // sibling render calls) -- so every target id-set gets the same markup
+    // instead of the caller having to know which one is currently mounted.
+    const PRESPISOK_HOME_CARD_IDS = [
+        { entry: "openPrespisok", leaderboard: "prespisokLeaderboardCard", badge: "prespisokCountdownBadge" },
+        { entry: "reviewOpenPrespisok", leaderboard: "reviewPrespisokLeaderboardCard", badge: "reviewPrespisokCountdownBadge" },
+    ];
+
     function renderPrespisokHomeLeaderboard() {
-        const card = $("prespisokLeaderboardCard");
-        if (!card) return;
         const sourceRows = state.prespisokHome.leaderboard && state.prespisokHome.leaderboard.length
             ? state.prespisokHome.leaderboard
             : loadPrespisokLeaderboard();
@@ -2218,10 +2228,14 @@
         const list = rows.length
             ? rows.map((row, index) => "<div class='prespisok-leader-row'><span><strong>" + (index + 1) + ". " + escapeHtml(row.name || "Без имени") + "</strong><br>" + escapeHtml((row.shk_count || row.actions || 0) + " ШК · " + (row.runs || 1) + " смен") + "</span><span>" + escapeHtml(formatPrespisokLeaderSpeed(row)) + "</span></div>").join("")
             : "<div class='prespisok-leader-row'><span>За 14 дней забегов нет.</span></div>";
-        card.innerHTML = "<span class='tasks-action-icon'>♕</span>"
+        const html = "<span class='tasks-action-icon'>♕</span>"
             + "<h2 class='tasks-action-title'>Лидеры</h2>"
             + "<p class='tasks-action-text'>Среднее время на 1 ШК за 14 дней.</p>"
             + "<div class='prespisok-leader-list'>" + list + "</div>";
+        PRESPISOK_HOME_CARD_IDS.forEach(({ leaderboard }) => {
+            const card = $(leaderboard);
+            if (card) card.innerHTML = html;
+        });
     }
 
     async function refreshPrespisokLeaderboard() {
@@ -2271,18 +2285,27 @@
     function renderPrespisokHomeCard() {
         renderPrespisokHomeLeaderboard();
         updatePrespisokTabAlert();
-        const card = $("openPrespisok");
-        if (!card) return;
-        const text = card.querySelector(".tasks-action-text");
-        const badge = $("prespisokCountdownBadge");
         const run = state.prespisokHome.run;
         const status = normalizeText(run && run.status);
         const info = prespisokWindowInfo();
         const completed = status === "completed" || Boolean(state.prespisok.finished);
         const active = status === "started" || status === "in_progress";
         const muted = state.prespisokHome.loading || completed || (!active && !info.inWindow);
-        card.classList.toggle("is-muted", muted);
-        if (badge) {
+        let text;
+        if (state.prespisokHome.loading) text = "Проверяю сегодняшний запуск предсписка...";
+        else if (completed) text = "Сегодня предсписок уже завершён. Детали смотри в журнале или во второй линии.";
+        else if (active) text = "Предсписок уже в работе. Можно наблюдать прогресс или подключиться вторым номером.";
+        else if (!info.inWindow) text = "До начала: " + info.waitDurationLabel + ". Окно " + info.windowLabel + ". Пока можно смотреть журнал и вторую линию.";
+        else text = "Аркадная проверка ШК и тар перед списанием, с журналом и задачами второй линии.";
+        PRESPISOK_HOME_CARD_IDS.forEach(({ entry, badge: badgeId }) => {
+            const card = $(entry);
+            if (card) {
+                card.classList.toggle("is-muted", muted);
+                const textEl = card.querySelector(".tasks-action-text");
+                if (textEl) textEl.textContent = text;
+            }
+            const badge = $(badgeId);
+            if (!badge) return;
             badge.className = "tasks-home-timer";
             if (state.prespisokHome.loading) {
                 badge.textContent = "Проверяю окно";
@@ -2296,19 +2319,7 @@
                 badge.textContent = "До старта: " + info.waitDurationLabel;
                 badge.classList.add("is-wait");
             }
-        }
-        if (!text) return;
-        if (state.prespisokHome.loading) {
-            text.textContent = "Проверяю сегодняшний запуск предсписка...";
-        } else if (completed) {
-            text.textContent = "Сегодня предсписок уже завершён. Детали смотри в журнале или во второй линии.";
-        } else if (active) {
-            text.textContent = "Предсписок уже в работе. Можно наблюдать прогресс или подключиться вторым номером.";
-        } else if (!info.inWindow) {
-            text.textContent = "До начала: " + info.waitDurationLabel + ". Окно " + info.windowLabel + ". Пока можно смотреть журнал и вторую линию.";
-        } else {
-            text.textContent = "Аркадная проверка ШК и тар перед списанием, с журналом и задачами второй линии.";
-        }
+        });
     }
 
     function startPrespisokHomeTimer() {
@@ -2425,7 +2436,23 @@
         thumb.style.width = active.offsetWidth + "px";
     }
 
+    // Switching between review/tasks/inactive modes resets each mode back to
+    // its big-card landing state -- otherwise a mode left expanded (a
+    // section's table open) would still show that way the next time its tab
+    // is revisited, even though the user never asked to stay drilled in.
+    function resetReviewModesToLanding() {
+        state.review.sectionExpanded = false;
+        state.review.filtersOpen = false;
+        state.requests.sectionExpanded = false;
+        state.requests.filtersOpen = false;
+        state.inactive.groupExpanded = false;
+        renderReview();
+        renderRequests();
+        renderInactive();
+    }
+
     function setReviewTab(index) {
+        if (state.review.activeTab !== index) resetReviewModesToLanding();
         state.review.activeTab = index;
         [
             [$("reviewTabInactive"), REVIEW_TAB_INACTIVE],
@@ -2913,6 +2940,40 @@
         if (state.requests.sectionExpanded) renderRequestsTable(requestsGroupedRows());
     }
 
+    // Shared driver for the step-wizard modals (actualize/exclusion): swaps
+    // which .wizard-slide is visible and updates the numbered dots, same
+    // pattern as quick-no-shk's own step indicator, just themed for the
+    // light drawer modals instead of its full-screen dark UI.
+    function setWizardStep(bodyId, stepsId, step) {
+        const body = $(bodyId);
+        if (body) {
+            body.querySelectorAll(".wizard-slide").forEach((slide) => {
+                slide.classList.toggle("is-active", Number(slide.dataset.step) === step);
+            });
+        }
+        const stepsEl = $(stepsId);
+        if (!stepsEl) return;
+        const spans = Array.from(stepsEl.children).filter((el) => el.tagName === "SPAN");
+        spans.forEach((el, idx) => {
+            const n = idx + 1;
+            el.classList.toggle("is-done", step >= n);
+            el.classList.toggle("is-current", step === n);
+        });
+        Array.from(stepsEl.children).filter((el) => el.tagName === "I").forEach((el, idx) => {
+            el.classList.toggle("is-done", step > idx + 1);
+        });
+    }
+
+    function actualizeGoToStep(step) {
+        state.actualize.step = step;
+        setWizardStep("actualizeStepsBody", "actualizeSteps", step);
+    }
+
+    function shkExclusionGoToStep(step) {
+        state.shkExclusion.step = step;
+        setWizardStep("shkExclusionStepsBody", "shkExclusionSteps", step);
+    }
+
     function setActualizeStatus(message, type) {
         const el = $("actualizeStatus");
         if (!el) return;
@@ -2920,37 +2981,17 @@
         el.className = "status-line" + (type ? " " + type : "");
     }
 
-    const SUPERSET_CACHE_STALE_HOURS = 12;
-
-    async function warnIfSupersetCacheStale() {
-        try {
-            const { data, error } = await supabaseDb()
-                .from(SUPERSET_CACHE_TABLE)
-                .select("updated_at")
-                .eq("wh_id", WH_ID)
-                .order("updated_at", { ascending: false })
-                .limit(1);
-            if (error || !data || !data.length) return;
-            const ageHours = (Date.now() - new Date(data[0].updated_at).getTime()) / 3600000;
-            if (!(ageHours >= SUPERSET_CACHE_STALE_HOURS)) return;
-            const ageLabel = ageHours >= 24 ? Math.round(ageHours / 24) + " дн." : Math.round(ageHours) + " ч.";
-            setActualizeStatus("Сначала скопируйте список активных ШК. Кэш Superset в базе не обновлялся " + ageLabel + " — актуализация по нему может пропустить свежие движения, загрузите новый файл.", "warn");
-        } catch (error) {
-            console.warn("superset cache freshness check skipped:", error);
-        }
-    }
-
     async function openActualizeTasksModal() {
         closeFlowModals();
-        state.actualize = { copied: false, rows: [], candidates: [], removedShks: new Set(), tareActions: {}, stats: null, supersetDebug: null, processing: false };
+        state.actualize = { copied: false, rows: [], candidates: [], removedShks: new Set(), tareActions: {}, stats: null, supersetDebug: null, processing: false, step: 1 };
         if ($("actualizeSupersetFile")) $("actualizeSupersetFile").value = "";
         if ($("actualizeUploadLabel")) $("actualizeUploadLabel").classList.add("hidden");
         if ($("actualizeResults")) $("actualizeResults").innerHTML = "";
         setActualizeStatus("Сначала скопируйте список активных ШК.");
+        actualizeGoToStep(1);
         setFlowModalOpen("actualizeTasksModal", true);
         if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
         await ensureFullActiveTasksLoaded();
-        await warnIfSupersetCacheStale();
     }
 
     function closeActualizeTasksModal() {
@@ -2965,13 +3006,14 @@
     }
 
     function openShkExclusionModal() {
-        state.shkExclusion = { shks: [], processing: false };
+        state.shkExclusion = { shks: [], processing: false, step: 1 };
         if ($("shkExclusionFile")) $("shkExclusionFile").value = "";
         if ($("shkExclusionComment")) $("shkExclusionComment").value = "";
         if ($("shkExclusionHours")) $("shkExclusionHours").value = "12";
         if ($("shkExclusionResults")) $("shkExclusionResults").innerHTML = "";
         if ($("applyShkExclusion")) $("applyShkExclusion").disabled = true;
         setShkExclusionStatus("Сначала загрузите XLSX со ШК.");
+        shkExclusionGoToStep(1);
         setFlowModalOpen("shkExclusionModal", true);
     }
 
@@ -3008,8 +3050,9 @@
             state.shkExclusion.shks = shks;
             if ($("applyShkExclusion")) $("applyShkExclusion").disabled = !shks.length;
             setShkExclusionStatus(shks.length
-                ? "Загружено ШК: " + shks.length + ". Укажите срок и нажмите «Применить»."
+                ? "Загружено ШК: " + shks.length + "."
                 : "В файле не найдено ни одного ШК.", shks.length ? "good" : "warn");
+            if (shks.length) shkExclusionGoToStep(2);
         } catch (error) {
             console.error("shk exclusion file failed:", error);
             setShkExclusionStatus("Не удалось прочитать файл: " + (error && error.message ? error.message : String(error)), "error");
@@ -3152,7 +3195,8 @@
         const copied = await copyText(ids.join("\n"));
         state.actualize.copied = copied;
         if ($("actualizeUploadLabel")) $("actualizeUploadLabel").classList.toggle("hidden", !copied);
-        setActualizeStatus(copied ? "Скопировано активных ШК: " + ids.length + ". Теперь добавьте XLSX из Superset." : "Браузер заблокировал копирование. Попробуйте еще раз.", copied ? "good" : "error");
+        setActualizeStatus(copied ? "Скопировано активных ШК: " + ids.length + "." : "Браузер заблокировал копирование. Попробуйте еще раз.", copied ? "good" : "error");
+        if (copied) actualizeGoToStep(2);
     }
 
     async function handleActualizeSupersetFile(file) {
@@ -7347,9 +7391,9 @@
         if (tab === REVIEW_TAB_PRESORT && state.review.sectionExpanded) {
             const section = state.review.activeSection;
             if (section === "Предсортировка") {
-                sectionConfig = { icon: "∅", title: "Быстрая проверка “Без ШК”" };
+                sectionConfig = { icon: "∅", title: "Быстрая проверка “Без ШК”", handler: () => setFlowModalOpen("reviewNoShkCheckModal", true) };
             } else if (section === "ПМ" || section === "Почта") {
-                sectionConfig = { icon: "🧮", title: "Калькулятор" };
+                sectionConfig = { icon: "🧮", title: "Калькулятор", handler: () => setFlowModalOpen("reviewCalculatorModal", true) };
             }
         }
         let modeConfig = null;
@@ -9826,6 +9870,14 @@
             if (textarea.parentElement !== belowInner) belowInner.appendChild(textarea);
             textarea.placeholder = "Если есть что запомнить";
         }
+        // Moving the node can happen mid-transition (the inline slot's own
+        // flex-grow animates open), so measuring scrollHeight right here can
+        // catch it at a transiently near-zero width and wildly overshoot.
+        // An empty box has nothing worth measuring anyway -- min-height in
+        // CSS already gives the correct single-line size -- so only recompute
+        // when there's real content to fit.
+        if (textarea.value) autoGrowTextarea(textarea);
+        else textarea.style.height = "";
     }
 
     function updateComposeRows(verdict, tone, extraValue) {
@@ -10786,7 +10838,7 @@
             state.inactive.rows = rows.filter((row) => isCompletedTask(row) || isWaitingReopenTask(row));
             state.inactive.counts = counts;
             state.inactive.loaded = true;
-            setInactiveStatus("Загружено неактивных задач: " + state.inactive.rows.length + ".");
+            setInactiveStatus("");
         } catch (error) {
             console.error("wms inactive load failed:", error);
             state.inactive.rows = [];
@@ -10871,9 +10923,13 @@
     }
 
     function renderInactiveTable() {
-        const group = state.inactive.activeGroup || "deferred";
         const target = $("inactiveTableWrap");
         if (!target) return;
+        if (!state.inactive.groupExpanded) {
+            target.innerHTML = "";
+            return;
+        }
+        const group = state.inactive.activeGroup || "deferred";
         if (state.inactive.loading) {
             target.innerHTML = "<div class='empty-state'>Загружаю неактивные задачи...</div>";
             return;
@@ -11150,26 +11206,20 @@
         const leadingBlanks = days.length ? weekdayIndexMonday(days[0]) : 0;
         const daysHtml = Array.from({ length: leadingBlanks }).map(() => "<div class='journal-day-empty'></div>").join("") + days.map((date) => {
             const run = byDate.get(date);
-            const status = run ? prespisokRunStatusLabel(run.status) : "Не сделан";
             const selected = run && run.id === state.prespisokJournal.selectedRunId ? " is-selected" : "";
             const cls = run ? " has-run " + (normalizeText(run.status) === "completed" ? "completed" : "active-run") + selected : "";
-            const attrs = run ? " type='button' data-prespisok-journal-run='" + escapeHtml(run.id) + "'" : "";
+            const attrs = run ? " type='button' data-prespisok-journal-run='" + escapeHtml(run.id) + "' title='" + escapeHtml(formatRuDate(date) + " · " + prespisokRunStatusLabel(run.status)) + "'" : " title='" + escapeHtml(formatRuDate(date)) + "'";
             const tag = run ? "button" : "div";
             return "<" + tag + " class='journal-day" + cls + "'" + attrs + ">"
-                + "<span class='journal-day-date'>" + escapeHtml(formatRuDate(date)) + "</span>"
-                + "<span class='journal-day-status'>" + escapeHtml(status) + "</span>"
-                + (run ? "<span class='journal-day-status'>Разобрано: " + escapeHtml(String(run.completed_items || 0)) + "/" + escapeHtml(String(run.total_items || 0)) + "</span>" : "")
+                + "<span class='journal-day-date'>" + Number(date.slice(-2)) + "</span>"
+                + "<span class='journal-day-dot'></span>"
                 + "</" + tag + ">";
         }).join("");
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>Журнал предсписка</h3><div class='review-table-subtitle'>" + (state.prespisokJournal.loading ? "Загружаю последние 30 дней..." : "Последние 30 дней: видно, был ли предсписок и что по нему решили.") + "</div></div><div class='file-row' style='margin-top:0'><button id='refreshPrespisokJournal' class='btn btn-outline' type='button'>Обновить</button><button id='closePrespisokJournal' class='btn btn-square' type='button'>×</button></div></div>"
+        target.innerHTML = (state.prespisokJournal.loading ? "<div class='empty-state'>Загружаю последние 30 дней...</div>" : "")
             + (state.prespisokJournal.error ? "<div class='status-line error'>Не удалось открыть журнал: " + escapeHtml(state.prespisokJournal.error) + "</div>" : "")
             + "<div class='journal-scroll'><div class='journal-layout'>"
-            + "<section class='journal-panel'><h4 class='journal-panel-title'>Календарь</h4><div class='journal-weekdays'><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div><div class='journal-day-grid'>" + daysHtml + "</div></section>"
+            + "<section class='journal-panel'><div class='journal-weekdays'><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div><div class='journal-day-grid'>" + daysHtml + "</div></section>"
             + "</div></div>";
-        const close = $("closePrespisokJournal");
-        if (close) close.addEventListener("click", closePrespisokJournalModal);
-        const refresh = $("refreshPrespisokJournal");
-        if (refresh) refresh.addEventListener("click", () => { void loadPrespisokJournal(); });
         target.querySelectorAll("[data-prespisok-journal-run]").forEach((button) => {
             button.addEventListener("click", () => { void selectPrespisokJournalRun(button.dataset.prespisokJournalRun || ""); });
         });
@@ -16979,8 +17029,10 @@
         $("openReview").addEventListener("click", showReviewPage);
         $("openQuickNoShkReview").addEventListener("click", () => { void openQuickNoShkModal(); });
         $("openPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
+        $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("openPrespisokSecondLineHome").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
         $("openPrespisokJournal").addEventListener("click", () => { void openPrespisokJournalModal(); });
+        $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
         $("openPureLosses").addEventListener("click", () => { window.location.href = "pure_losses.html"; });
         $("openNoShkReview").addEventListener("click", openNoShkReviewModal);
         $("openAchievements").addEventListener("click", () => { void openAchievementsModal(); });
@@ -17097,6 +17149,16 @@
             if (file) void handleShkExclusionFile(file);
         });
         $("applyShkExclusion").addEventListener("click", () => { void applyShkExclusion(); });
+        $("actualizeStep2Back").addEventListener("click", () => actualizeGoToStep(1));
+        $("actualizeStep2Next").addEventListener("click", () => actualizeGoToStep(3));
+        $("actualizeStep3Back").addEventListener("click", () => actualizeGoToStep(2));
+        $("shkExclusionStep2Back").addEventListener("click", () => shkExclusionGoToStep(1));
+        $("shkExclusionStep2Next").addEventListener("click", () => shkExclusionGoToStep(3));
+        $("shkExclusionStep3Back").addEventListener("click", () => shkExclusionGoToStep(2));
+        $("shkExclusionStep3Next").addEventListener("click", () => shkExclusionGoToStep(4));
+        $("shkExclusionStep4Back").addEventListener("click", () => shkExclusionGoToStep(3));
+        $("closeReviewCalculator").addEventListener("click", () => setFlowModalOpen("reviewCalculatorModal", false));
+        $("closeReviewNoShkCheck").addEventListener("click", () => setFlowModalOpen("reviewNoShkCheckModal", false));
         $("copyMasterTransfers").addEventListener("click", () => { void copyMasterTransfers(); });
         $("buildMasterPreview").addEventListener("click", () => { void buildMasterPreview(); });
         $("showRejects").addEventListener("click", showMasterRejects);
