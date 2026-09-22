@@ -1672,7 +1672,6 @@
         setFlowModalOpen("reopenConfirmModal", false);
         setFlowModalOpen("expensiveWriteoffModal", false);
         setFlowModalOpen("splitShkConfirmModal", false);
-        setFlowModalOpen("inactiveTasksModal", false);
         setFlowModalOpen("prespisokSecondLineModal", false);
         setFlowModalOpen("prespisokJournalModal", false);
         setFlowModalOpen("achievementDetailModal", false);
@@ -7345,9 +7344,16 @@
     // than a CSS percentage transform. First reveal after expanding snaps
     // instantly (no stale fly-in from 0,0); switching between pills after
     // that animates with the same spring easing as .review-view-thumb.
+    const PICKER_THUMB_IDS = {
+        review: ["reviewSectionsGrid", "reviewPickerThumb"],
+        requests: ["requestsSectionsGrid", "requestsPickerThumb"],
+        inactive: ["inactiveSectionsGrid", "inactivePickerThumb"],
+    };
+
     function updatePickerThumb(mode) {
-        const grid = $(mode === "review" ? "reviewSectionsGrid" : "requestsSectionsGrid");
-        const thumb = $(mode === "review" ? "reviewPickerThumb" : "requestsPickerThumb");
+        const [gridId, thumbId] = PICKER_THUMB_IDS[mode] || PICKER_THUMB_IDS.review;
+        const grid = $(gridId);
+        const thumb = $(thumbId);
         if (!grid || !thumb) return;
         const active = grid.querySelector(".review-section-pill.active");
         if (!active) {
@@ -10734,7 +10740,6 @@
             closeReopenConfirm();
             closeTaskDetail();
             renderInactive();
-            if ($("inactiveTasksModal") && $("inactiveTasksModal").classList.contains("active")) renderInactiveTasksTable();
             if (state.view === "review") renderReview();
             setReviewStatus("Задача переоткрыта.", "good");
         } catch (error) {
@@ -10766,7 +10771,6 @@
         } finally {
             state.inactive.loading = false;
             renderInactive();
-            if ($("inactiveTasksModal") && $("inactiveTasksModal").classList.contains("active")) renderInactiveTasksTable();
         }
     }
 
@@ -10784,38 +10788,43 @@
     }
 
     function renderInactive() {
-        const target = $("inactiveGrid");
+        const grid = $("inactiveSectionsGrid");
+        if (!grid) return;
+        const counts = state.inactive.counts || { deferred: 0, completed: 0 };
+        if (!state.inactive.activeGroup) state.inactive.activeGroup = "deferred";
+        const groups = [
+            { key: "deferred", title: "Ожидают переоткрытия", count: counts.deferred },
+            { key: "completed", title: "Разбор завершен", count: counts.completed },
+        ];
+        grid.innerHTML = groups.map((item) => {
+            const active = state.inactive.activeGroup === item.key ? " active" : "";
+            return "<button type='button' class='review-section-pill" + active + "' data-inactive-group='" + escapeHtml(item.key) + "'>"
+                + escapeHtml(item.title) + "<span class='review-section-pill-count'>" + item.count + "</span></button>";
+        }).join("");
+        grid.querySelectorAll("[data-inactive-group]").forEach((button) => {
+            button.addEventListener("click", () => {
+                if (state.inactive.activeGroup === button.dataset.inactiveGroup) return;
+                state.inactive.activeGroup = button.dataset.inactiveGroup || "deferred";
+                renderInactive();
+            });
+        });
+        updatePickerThumb("inactive");
+        renderInactiveTable();
+    }
+
+    function renderInactiveTable() {
+        const group = state.inactive.activeGroup || "deferred";
+        const title = group === "completed" ? "Разбор завершен" : "Ожидают переоткрытия";
+        const target = $("inactiveTableWrap");
         if (!target) return;
         if (state.inactive.loading) {
             target.innerHTML = "<div class='empty-state'>Загружаю неактивные задачи...</div>";
             return;
         }
-        const counts = state.inactive.counts || { deferred: 0, completed: 0 };
-        target.innerHTML = [
-            { key: "deferred", title: "Ожидают переоткрытия", count: counts.deferred, note: "Отложенные задачи. В карточке показывается дата, когда они снова появятся в активном разборе." },
-            { key: "completed", title: "Разбор завершен", count: counts.completed, note: "Задачи, которые закрыты окончательно и больше не должны возвращаться в активный разбор." },
-        ].map((item) => "<button class='inactive-card' type='button' data-inactive-group='" + escapeHtml(item.key) + "'>"
-            + "<div class='inactive-card-title'><span>" + escapeHtml(item.title) + "</span><strong>" + item.count + "</strong></div>"
-            + "<div class='inactive-card-note'>" + escapeHtml(item.note) + "</div>"
-            + "</button>").join("");
-        target.querySelectorAll("[data-inactive-group]").forEach((button) => {
-            button.addEventListener("click", () => {
-                state.inactive.activeGroup = button.dataset.inactiveGroup || "deferred";
-                renderInactiveTasksTable();
-                setFlowModalOpen("inactiveTasksModal", true);
-            });
-        });
-    }
-
-    function renderInactiveTasksTable() {
-        const group = state.inactive.activeGroup || "deferred";
-        const title = group === "completed" ? "Разбор завершен" : "Ожидают переоткрытия";
         const rows = inactiveRowsByGroup(group).slice().sort((a, b) => {
             if (group === "deferred") return reopenTime(a) - reopenTime(b);
             return String(b.completed_at || b.updated_at || "").localeCompare(String(a.completed_at || a.updated_at || ""));
         });
-        const target = $("inactiveTasksTableWrap");
-        if (!target) return;
         const body = rows.map((row) => {
             const statusLine = group === "deferred"
                 ? "Переоткрытие: " + formatRuDateTime(row.reopen_after)
@@ -10833,12 +10842,10 @@
         const countLabel = totalCount > rows.length
             ? "Задач: " + totalCount + " (показаны последние " + rows.length + ")."
             : "Задач: " + rows.length + ".";
-        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(title) + "</h3><div class='review-table-subtitle'>" + escapeHtml(countLabel) + "</div></div><div class='file-row' style='margin-top:0'><button id='refreshInactiveTasks' class='btn btn-outline' type='button'>Обновить</button><button id='closeInactiveTasksModal' class='btn btn-square' type='button'>×</button></div></div>"
+        target.innerHTML = "<div class='review-table-head'><div><h3 class='review-table-title'>" + escapeHtml(title) + "</h3><div class='review-table-subtitle'>" + escapeHtml(countLabel) + "</div></div><div class='file-row' style='margin-top:0'><button id='refreshInactiveTasks' class='btn btn-outline' type='button'>Обновить</button></div></div>"
             + (rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>Задача</th><th>Тип задачи</th><th>Наименование</th><th>Стоимость</th><th>Статус</th></tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>Пока пусто.</div>");
         const refresh = $("refreshInactiveTasks");
         if (refresh) refresh.addEventListener("click", () => { void loadInactiveTasks(); });
-        const closeBtn = $("closeInactiveTasksModal");
-        if (closeBtn) closeBtn.addEventListener("click", () => setFlowModalOpen("inactiveTasksModal", false));
         target.querySelectorAll("[data-inactive-task-detail]").forEach((row) => {
             row.addEventListener("click", () => openTaskDetail(row.dataset.inactiveTaskDetail, "inactive"));
         });
@@ -17082,7 +17089,6 @@
         $("uploadWork").addEventListener("click", (event) => { if (event.target === $("uploadWork")) openChooser(state.manualDate); });
         $("masterWork").addEventListener("click", (event) => { if (event.target === $("masterWork")) setFlowModalOpen("masterWork", false); });
         $("backfillCalendarModal").addEventListener("click", (event) => { if (event.target === $("backfillCalendarModal")) setFlowModalOpen("backfillCalendarModal", false); });
-        $("inactiveTasksModal").addEventListener("click", (event) => { if (event.target === $("inactiveTasksModal")) setFlowModalOpen("inactiveTasksModal", false); });
         $("prespisokSecondLineModal").addEventListener("click", (event) => { if (event.target === $("prespisokSecondLineModal")) setFlowModalOpen("prespisokSecondLineModal", false); });
         $("prespisokJournalModal").addEventListener("click", (event) => { if (event.target === $("prespisokJournalModal")) closePrespisokJournalModal(); });
         document.addEventListener("keydown", (event) => {
@@ -17122,7 +17128,6 @@
             else if ($("prespisokModal").classList.contains("active")) requestPrespisokClose();
             else if ($("prespisokSecondLineModal").classList.contains("active")) setFlowModalOpen("prespisokSecondLineModal", false);
             else if ($("prespisokJournalModal").classList.contains("active")) closePrespisokJournalModal();
-            else if ($("inactiveTasksModal").classList.contains("active")) setFlowModalOpen("inactiveTasksModal", false);
             else if ($("actualizeTasksModal").classList.contains("active")) closeActualizeTasksModal();
             else if ($("shiftOpeningModal").classList.contains("active")) closeShiftOpeningModal();
             else if ($("masterWork").classList.contains("active")) setFlowModalOpen("masterWork", false);

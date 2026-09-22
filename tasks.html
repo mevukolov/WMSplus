@@ -525,6 +525,16 @@
         }
         @keyframes tasksDrawerOut { from { transform: translateX(0) scale(1); opacity: 1; } to { transform: translateX(115%) scale(.9, .95); opacity: 0; } }
         .drawer-body-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+        .side-drawer-modal .work-head { flex-wrap: nowrap; }
+        .side-drawer-modal .work-head > div:first-child { min-width: 0; flex: 1; }
+        .side-drawer-modal .work-head .btn-square { flex: none; }
+        /* The journal's calendar assumes a wide (7-day-row) modal; in the
+           440px drawer that squeezes each cell to nothing and clips the
+           date/counts. A weekday-aligned header stops making sense once
+           the row breaks below 7 columns, so it's dropped here instead of
+           shown misaligned. */
+        #prespisokJournalModal.side-drawer-modal .journal-weekdays { display: none; }
+        #prespisokJournalModal.side-drawer-modal .journal-day-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .profile-info-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(15,23,42,.06); font-size: 14px; }
         .profile-info-row span:first-child { color: #64748b; }
         .profile-info-row span:last-child { font-weight: 700; color: #242038; text-align: right; }
@@ -923,7 +933,7 @@
         .review-tool-square.active:hover { color: #fff; }
         .review-view-tabs { display: inline-flex; gap: 8px; padding: 4px; border-radius: 14px; background: #f1f5f9; }
         .review-view-tabs-5 { position: relative; display: grid; grid-template-columns: 44px repeat(4, minmax(0, 1fr)); gap: 0; }
-        .review-view-thumb { position: absolute; top: 4px; bottom: 4px; left: 4px; width: 0; border-radius: 11px; background: rgba(255,255,255,.78); backdrop-filter: blur(8px) saturate(160%); -webkit-backdrop-filter: blur(8px) saturate(160%); box-shadow: var(--shadow-sm), 0 1px 0 rgba(255,255,255,.7) inset; transition: transform .48s cubic-bezier(.32,1.2,.4,1), width .48s cubic-bezier(.32,1.2,.4,1); z-index: 0; }
+        .review-view-thumb { position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: 11px; background: rgba(255,255,255,.78); backdrop-filter: blur(8px) saturate(160%); -webkit-backdrop-filter: blur(8px) saturate(160%); box-shadow: var(--shadow-sm), 0 1px 0 rgba(255,255,255,.7) inset; transition: transform .48s cubic-bezier(.32,1.2,.4,1), width .48s cubic-bezier(.32,1.2,.4,1); z-index: 0; }
         .review-view-tabs-5 .review-view-tab { position: relative; z-index: 1; border: 0; border-radius: 11px; padding: 9px 4px; background: transparent; color: #64748b; font-weight: 800; font-size: 12px; white-space: nowrap; cursor: pointer; text-align: center; transition: color .2s ease; }
         .review-view-tabs-5 .review-view-tab.active { color: var(--accent-dark); background: transparent; box-shadow: none; }
         .review-view-tab { border: 0; border-radius: 11px; padding: 9px 13px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }
@@ -1998,7 +2008,13 @@
                 <div id="reviewPagerTrack" class="review-pager-track">
                     <div class="review-pager-panel">
                         <p id="inactiveStatus" class="tasks-page-note" style="margin:0 0 10px;"></p>
-                        <div id="inactiveGrid" class="inactive-grid"></div>
+                        <div id="inactivePickerRow" class="review-picker-row is-collapsed">
+                            <div class="review-picker-scroll">
+                                <span id="inactivePickerThumb" class="review-picker-thumb" aria-hidden="true"></span>
+                                <div id="inactiveSectionsGrid" class="review-sections-grid is-collapsed"></div>
+                            </div>
+                        </div>
+                        <div id="inactiveTableWrap" class="review-table-card"></div>
                     </div>
                     <div class="review-pager-panel">
                         <div id="reviewPickerRow" class="review-picker-row">
@@ -2074,7 +2090,7 @@
     </div>
 </section>
 
-<section id="actualizeTasksModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+<section id="actualizeTasksModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
     <div class="tasks-flow-card tasks-flow-card-wide">
         <div class="work-head">
             <div>
@@ -2083,7 +2099,7 @@
             </div>
             <button id="closeActualizeTasks" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="actualize-step">
+        <div class="actualize-step drawer-body-scroll">
             <div class="file-row">
                 <button id="copyActiveShk" class="btn btn-rect" type="button">Копировать активные ШК</button>
                 <label id="actualizeUploadLabel" class="btn btn-outline hidden" for="actualizeSupersetFile">Добавить данные из Superset</label>
@@ -2095,7 +2111,7 @@
     </div>
 </section>
 
-<section id="shkExclusionModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+<section id="shkExclusionModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
     <div class="tasks-flow-card tasks-flow-card-wide">
         <div class="work-head">
             <div>
@@ -2104,7 +2120,7 @@
             </div>
             <button id="closeShkExclusion" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="actualize-step">
+        <div class="actualize-step drawer-body-scroll">
             <div class="file-row">
                 <label id="shkExclusionUploadLabel" class="btn btn-outline" for="shkExclusionFile">Загрузить XLSX со ШК</label>
                 <input id="shkExclusionFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
@@ -2681,12 +2697,6 @@
     </div>
 </section>
 
-<section id="inactiveTasksModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card review-full-card">
-        <div id="inactiveTasksTableWrap" class="review-table-card"></div>
-    </div>
-</section>
-
 <section id="achievementsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card achievements-card">
         <div class="work-head">
@@ -2710,9 +2720,9 @@
     </div>
 </section>
 
-<section id="prespisokJournalModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+<section id="prespisokJournalModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
     <div class="tasks-flow-card review-full-card">
-        <div id="prespisokJournalWrap" class="review-table-card"></div>
+        <div id="prespisokJournalWrap" class="review-table-card drawer-body-scroll"></div>
     </div>
 </section>
 
