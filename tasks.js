@@ -7385,6 +7385,111 @@
         }
     }
 
+    // Buffer calculator: same grouping-by-parking idea as the standalone
+    // buffer_constructor.html/constructor.js tool, but sourced from the
+    // section's own active tasks instead of an uploaded Superset file --
+    // each ПМ/Почта task already IS one передача (source_tare_id), so there
+    // is nothing left to parse or filter by status.
+    function bufferCalculatorGroups(section) {
+        const rows = (reviewGroupedRows().get(section) || []).filter(isActiveReviewTask);
+        const byMx = new Map();
+        rows.forEach((row) => {
+            const mx = taskRouteLabel(row) || "Без парковки";
+            const transferId = normalizeIdentifier(row.source_tare_id) || row.id;
+            const current = byMx.get(mx) || { mx, transfers: [], shkCount: 0, totalCost: 0 };
+            current.transfers.push(transferId);
+            current.shkCount += (Array.isArray(row.source_shk_ids) ? row.source_shk_ids.length : 0);
+            current.totalCost += reviewPrice(row);
+            byMx.set(mx, current);
+        });
+        return Array.from(byMx.values())
+            .map((group) => ({ ...group, transfers: Array.from(new Set(group.transfers)).sort((a, b) => a.localeCompare(b, "ru", { numeric: true })) }))
+            .sort((a, b) => b.transfers.length - a.transfers.length);
+    }
+
+    function openReviewCalculatorModal() {
+        state.bufferCalculator = { section: state.review.activeSection, selected: new Set() };
+        renderBufferCalculator();
+        setFlowModalOpen("reviewCalculatorModal", true);
+    }
+
+    function renderBufferCalculator() {
+        const wrap = $("bufferCalculatorWrap");
+        if (!wrap) return;
+        const section = state.bufferCalculator.section;
+        const selected = state.bufferCalculator.selected;
+        const groups = bufferCalculatorGroups(section);
+        const totalTransfers = groups.reduce((acc, group) => acc + group.transfers.length, 0);
+        const totalShk = groups.reduce((acc, group) => acc + group.shkCount, 0);
+        const totalCost = groups.reduce((acc, group) => acc + group.totalCost, 0);
+        const maxCost = Math.max(...groups.map((group) => group.totalCost), 1);
+        const allSelected = groups.length > 0 && groups.every((group) => selected.has(group.mx));
+
+        const totalBlockHtml = "<div class='buffer-block" + (allSelected ? " is-selected" : "") + "' data-buffer-all style='background:#e2e8f0;border:2px solid " + (allSelected ? "var(--accent)" : "transparent") + ";'>"
+            + "<div style='font-weight:900;'>Все парковки</div><div>Передач: " + totalTransfers + "</div><div>ШК: " + totalShk + "</div><div>Сумма: " + escapeHtml(formatMoney(totalCost)) + "</div>"
+            + "</div>";
+        const blocksHtml = groups.map((group) => {
+            const isSelected = selected.has(group.mx);
+            const intensity = Math.min(1, group.totalCost / maxCost);
+            const r = Math.round(51 + (224 - 51) * intensity);
+            const g = Math.round(196 + (111 - 196) * intensity);
+            const b = Math.round(129 + (150 - 129) * intensity);
+            return "<div class='buffer-block" + (isSelected ? " is-selected" : "") + "' data-buffer-mx='" + escapeHtml(group.mx) + "' style='background:rgb(" + r + "," + g + "," + b + ");border:2px solid " + (isSelected ? "var(--accent-dark)" : "transparent") + ";'>"
+                + "<div style='font-weight:900;'>" + escapeHtml(group.mx) + "</div><div>Передач: " + group.transfers.length + "</div><div>ШК: " + group.shkCount + "</div><div>Сумма: " + escapeHtml(formatMoney(group.totalCost)) + "</div>"
+                + "</div>";
+        }).join("");
+
+        const resultLines = [];
+        groups.filter((group) => selected.has(group.mx)).forEach((group) => {
+            resultLines.push(group.mx);
+            group.transfers.forEach((transfer) => resultLines.push(transfer));
+            resultLines.push("");
+        });
+        const resultText = resultLines.join("\n").trim();
+
+        wrap.innerHTML = "<p class='wizard-step-text' style='margin:0 0 12px;'>" + escapeHtml(section) + " · активных передач: " + totalTransfers + "</p>"
+            + (groups.length ? "<div style='display:flex;gap:16px;flex-wrap:wrap;'>"
+                + "<div style='flex:2;min-width:260px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:50vh;overflow:auto;align-content:start;'>" + totalBlockHtml + blocksHtml + "</div>"
+                + "<div style='flex:1;min-width:220px;'>"
+                + "<div style='margin-bottom:8px;font-weight:700;'>Результат</div>"
+                + "<textarea id='bufferCalculatorResult' class='input' readonly style='width:100%;height:40vh;resize:vertical;box-sizing:border-box;'>" + escapeHtml(resultText) + "</textarea>"
+                + "<div class='file-row' style='margin-top:10px;'>"
+                + "<button id='copyBufferCalculator' class='btn btn-rect' type='button'" + (resultText ? "" : " disabled") + ">Копировать</button>"
+                + "<button id='downloadBufferCalculator' class='btn btn-outline' type='button'" + (resultText ? "" : " disabled") + ">Сохранить .txt</button>"
+                + "</div></div></div>"
+                : "<p class='empty-state'>Активных передач нет.</p>");
+
+        wrap.querySelectorAll("[data-buffer-mx]").forEach((el) => {
+            el.addEventListener("click", () => {
+                const mx = el.dataset.bufferMx;
+                if (selected.has(mx)) selected.delete(mx); else selected.add(mx);
+                renderBufferCalculator();
+            });
+        });
+        const allBtn = wrap.querySelector("[data-buffer-all]");
+        if (allBtn) allBtn.addEventListener("click", () => {
+            if (allSelected) selected.clear();
+            else groups.forEach((group) => selected.add(group.mx));
+            renderBufferCalculator();
+        });
+        const copyBtn = $("copyBufferCalculator");
+        if (copyBtn) copyBtn.addEventListener("click", () => {
+            void copyText(resultText).then((ok) => toast(ok ? "Скопировано в буфер обмена" : "Браузер заблокировал копирование", ok ? "success" : "error"));
+        });
+        const downloadBtn = $("downloadBufferCalculator");
+        if (downloadBtn) downloadBtn.addEventListener("click", () => {
+            const blob = new Blob([resultText], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "Буфер.txt";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        });
+    }
+
     function renderReviewContextTools() {
         const tab = state.review.activeTab;
         let sectionConfig = null;
@@ -7393,7 +7498,7 @@
             if (section === "Предсортировка") {
                 sectionConfig = { icon: "∅", title: "Быстрая проверка “Без ШК”", handler: () => setFlowModalOpen("reviewNoShkCheckModal", true) };
             } else if (section === "ПМ" || section === "Почта") {
-                sectionConfig = { icon: "🧮", title: "Калькулятор", handler: () => setFlowModalOpen("reviewCalculatorModal", true) };
+                sectionConfig = { icon: "🧮", title: "Калькулятор буфера", handler: () => openReviewCalculatorModal() };
             }
         }
         let modeConfig = null;
