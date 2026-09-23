@@ -7386,108 +7386,269 @@
     }
 
     // Buffer calculator: same grouping-by-parking idea as the standalone
-    // buffer_constructor.html/constructor.js tool, but sourced from the
-    // section's own active tasks instead of an uploaded Superset file --
-    // each ПМ/Почта task already IS one передача (source_tare_id), so there
-    // is nothing left to parse or filter by status.
-    function bufferCalculatorGroups(section) {
-        const rows = (reviewGroupedRows().get(section) || []).filter(isActiveReviewTask);
-        const byMx = new Map();
+    // buffer_constructor.html/constructor.js tool, but sourced from active
+    // tasks instead of an uploaded Superset file -- each ПМ/Почта task
+    // already IS one передача (source_tare_id), so there is nothing left to
+    // parse or filter by status. "all" mode pools both sections so a whole
+    // buffer sweep doesn't need two separate passes.
+    function bufferCalculatorSections(mode) {
+        return mode === "ПМ" || mode === "Почта" ? [mode] : ["ПМ", "Почта"];
+    }
+
+    function bufferCalculatorRows(mode) {
+        const grouped = reviewGroupedRows();
+        return bufferCalculatorSections(mode).flatMap((section) => grouped.get(section) || []).filter(isActiveReviewTask);
+    }
+
+    // Flat per-передача list first (dedup by tare id -- a передача can be
+    // split across more than one active task row), then rolled up by MX for
+    // the parking-level tiles.
+    function bufferCalculatorTransfers(mode) {
+        const rows = bufferCalculatorRows(mode);
+        const byTransfer = new Map();
         rows.forEach((row) => {
             const mx = taskRouteLabel(row) || "Без парковки";
             const transferId = normalizeIdentifier(row.source_tare_id) || row.id;
-            const current = byMx.get(mx) || { mx, transfers: [], shkCount: 0, totalCost: 0 };
-            current.transfers.push(transferId);
-            current.shkCount += (Array.isArray(row.source_shk_ids) ? row.source_shk_ids.length : 0);
-            current.totalCost += reviewPrice(row);
-            byMx.set(mx, current);
+            const current = byTransfer.get(transferId) || { transferId, mx, shkCount: 0, cost: 0 };
+            current.shkCount += Array.isArray(row.source_shk_ids) ? row.source_shk_ids.length : 0;
+            current.cost += reviewPrice(row);
+            byTransfer.set(transferId, current);
+        });
+        return Array.from(byTransfer.values());
+    }
+
+    function bufferCalculatorGroups(mode) {
+        const byMx = new Map();
+        bufferCalculatorTransfers(mode).forEach((transfer) => {
+            const group = byMx.get(transfer.mx) || { mx: transfer.mx, transfers: [], cost: 0 };
+            group.transfers.push(transfer);
+            group.cost += transfer.cost;
+            byMx.set(transfer.mx, group);
         });
         return Array.from(byMx.values())
-            .map((group) => ({ ...group, transfers: Array.from(new Set(group.transfers)).sort((a, b) => a.localeCompare(b, "ru", { numeric: true })) }))
+            .map((group) => ({ ...group, transfers: group.transfers.sort((a, b) => a.transferId.localeCompare(b.transferId, "ru", { numeric: true })) }))
             .sort((a, b) => b.transfers.length - a.transfers.length);
     }
 
+    // "Парковка 109" -> "109" -- the tile only has room for the number, and
+    // it's what a picker actually scans for on the floor.
+    function parkingNumberLabel(mx) {
+        const match = normalizeText(mx).match(/(\d+)\s*$/);
+        return match ? match[1] : (normalizeText(mx) || "-");
+    }
+
+    // Last 4 digits are enough to recognize a передача on sight without the
+    // tile turning into an unreadable number soup; the full id still goes
+    // into the copyable/searchable result text.
+    function maskTransferId(id) {
+        const digits = normalizeText(id);
+        return digits.length > 4 ? "*" + digits.slice(-4) : digits;
+    }
+
+    // Same tiers as priceStyle (used for the price pill everywhere else in
+    // Разбор), just expressed as a border accent instead of a bg+text pill --
+    // the site-wide price color language, without the tile getting its own
+    // busy palette.
+    function priceTierColor(value) {
+        const price = Number(value) || 0;
+        if (price >= 10000) return "#ef4444";
+        if (price >= 5000) return "#f97316";
+        if (price >= 1000) return "#eab308";
+        if (price > 0) return "#22c55e";
+        return "#cbd5e1";
+    }
+
+    function bufferSelectionResultText(mode) {
+        const selected = state.bufferCalculator.selected;
+        const lines = [];
+        bufferCalculatorGroups(mode).forEach((group) => {
+            const chosen = group.transfers.filter((transfer) => selected.has(transfer.transferId));
+            if (!chosen.length) return;
+            lines.push(group.mx);
+            chosen.forEach((transfer) => lines.push(transfer.transferId));
+            lines.push("");
+        });
+        return lines.join("\n").trim();
+    }
+
     function openReviewCalculatorModal() {
-        state.bufferCalculator = { section: state.review.activeSection, selected: new Set() };
+        state.bufferCalculator = { mode: state.review.activeSection === "Почта" ? "Почта" : "ПМ", selected: new Set() };
         renderBufferCalculator();
         setFlowModalOpen("reviewCalculatorModal", true);
+    }
+
+    function downloadBufferCalculatorResult(text) {
+        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "Буфер.txt";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    // Bulk analogue of the single-task "Отложить" flow (see
+    // deferTaskFromModal): every selected передача's task(s) get deferred
+    // 2 hours with no verdict touched, plus a history line crediting whoever
+    // clicked -- no comment, per spec, so reopen_after only goes into
+    // wms_review (read elsewhere) and never into the history payload (which
+    // would auto-render it as a comment).
+    async function sendBufferSelectionToSearch() {
+        const selected = state.bufferCalculator.selected;
+        if (!selected.size) return;
+        const mode = state.bufferCalculator.mode;
+        const resultText = bufferSelectionResultText(mode);
+        const db = supabaseDb();
+        if (!db) { toast("Нет подключения к базе.", "error"); return; }
+        const rows = bufferCalculatorRows(mode);
+        const selectedIds = Array.from(selected);
+        const targetRows = rows.filter((row) => selectedIds.includes(normalizeIdentifier(row.source_tare_id) || row.id));
+        if (!targetRows.length) return;
+        const button = $("sendBufferToSearch");
+        if (button) button.disabled = true;
+        const copied = await copyText(resultText);
+        const user = currentWmsUser();
+        const reopenAfter = new Date(Date.now() + 2 * 3600000).toISOString();
+        let ok = 0;
+        let failed = 0;
+        for (const row of targetRows) {
+            const now = new Date().toISOString();
+            const nextPayload = {
+                ...taskPayload(row),
+                wms_review: {
+                    ...taskReviewPayload(row),
+                    reopen_after: reopenAfter,
+                    sent_to_search_by_id: user.id || null,
+                    sent_to_search_by_name: user.name || null,
+                    sent_to_search_at: now,
+                },
+            };
+            const payload = { task_status: "Отложено", reopen_after: reopenAfter, completed_at: null, source_payload: nextPayload, updated_at: now };
+            try {
+                if (!state.flow.debugMode) {
+                    const { error } = await db.from(WMS_TASKS_TABLE).update(payload).eq("id", row.id);
+                    if (error) throw error;
+                }
+                void writeTaskHistory({ ...row, ...payload }, "task_sent_to_search", { title: displayTaskTitle(row) });
+                ok += 1;
+            } catch (error) {
+                console.error("send to search failed:", row.id, error);
+                failed += 1;
+            }
+        }
+        await loadReviewTasks();
+        renderReview();
+        state.bufferCalculator.selected.clear();
+        renderBufferCalculator();
+        toast(
+            (ok ? "Отправлено на поиск: " + ok + "." : "Не удалось отправить.") + (failed ? " Ошибок: " + failed + "." : "") + (copied ? "" : " Скопировать не удалось."),
+            failed && !ok ? "error" : "success"
+        );
     }
 
     function renderBufferCalculator() {
         const wrap = $("bufferCalculatorWrap");
         if (!wrap) return;
-        const section = state.bufferCalculator.section;
+        const mode = state.bufferCalculator.mode;
         const selected = state.bufferCalculator.selected;
-        const groups = bufferCalculatorGroups(section);
+        const groups = bufferCalculatorGroups(mode);
         const totalTransfers = groups.reduce((acc, group) => acc + group.transfers.length, 0);
-        const totalShk = groups.reduce((acc, group) => acc + group.shkCount, 0);
-        const totalCost = groups.reduce((acc, group) => acc + group.totalCost, 0);
-        const maxCost = Math.max(...groups.map((group) => group.totalCost), 1);
-        const allSelected = groups.length > 0 && groups.every((group) => selected.has(group.mx));
+        const totalCost = groups.reduce((acc, group) => acc + group.cost, 0);
+        const allTransferIds = groups.flatMap((group) => group.transfers.map((transfer) => transfer.transferId));
+        const allSelected = allTransferIds.length > 0 && allTransferIds.every((id) => selected.has(id));
 
-        const totalBlockHtml = "<div class='buffer-block" + (allSelected ? " is-selected" : "") + "' data-buffer-all style='background:#e2e8f0;border:2px solid " + (allSelected ? "var(--accent)" : "transparent") + ";'>"
-            + "<div style='font-weight:900;'>Все парковки</div><div>Передач: " + totalTransfers + "</div><div>ШК: " + totalShk + "</div><div>Сумма: " + escapeHtml(formatMoney(totalCost)) + "</div>"
-            + "</div>";
-        const blocksHtml = groups.map((group) => {
-            const isSelected = selected.has(group.mx);
-            const intensity = Math.min(1, group.totalCost / maxCost);
-            const r = Math.round(51 + (224 - 51) * intensity);
-            const g = Math.round(196 + (111 - 196) * intensity);
-            const b = Math.round(129 + (150 - 129) * intensity);
-            return "<div class='buffer-block" + (isSelected ? " is-selected" : "") + "' data-buffer-mx='" + escapeHtml(group.mx) + "' style='background:rgb(" + r + "," + g + "," + b + ");border:2px solid " + (isSelected ? "var(--accent-dark)" : "transparent") + ";'>"
-                + "<div style='font-weight:900;'>" + escapeHtml(group.mx) + "</div><div>Передач: " + group.transfers.length + "</div><div>ШК: " + group.shkCount + "</div><div>Сумма: " + escapeHtml(formatMoney(group.totalCost)) + "</div>"
-                + "</div>";
+        const tabsHtml = ["ПМ", "Почта", "all"].map((m) => {
+            const label = m === "all" ? "Весь буфер" : m;
+            return "<button type='button' class='review-view-tab" + (mode === m ? " active" : "") + "' data-buffer-mode='" + m + "'>" + escapeHtml(label) + "</button>";
         }).join("");
 
-        const resultLines = [];
-        groups.filter((group) => selected.has(group.mx)).forEach((group) => {
-            resultLines.push(group.mx);
-            group.transfers.forEach((transfer) => resultLines.push(transfer));
-            resultLines.push("");
-        });
-        const resultText = resultLines.join("\n").trim();
+        const totalHtml = "<div class='buffer-tile buffer-calc-total" + (allSelected ? " is-selected" : "") + "' data-buffer-total>"
+            + "<div class='buffer-calc-total-title'>Всего</div>"
+            + "<div class='buffer-calc-total-meta'>Передач: " + totalTransfers + " · " + escapeHtml(formatMoney(totalCost)) + "</div>"
+            + "</div>";
 
-        wrap.innerHTML = "<p class='wizard-step-text' style='margin:0 0 12px;'>" + escapeHtml(section) + " · активных передач: " + totalTransfers + "</p>"
-            + (groups.length ? "<div style='display:flex;gap:16px;flex-wrap:wrap;'>"
-                + "<div style='flex:2;min-width:260px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:50vh;overflow:auto;align-content:start;'>" + totalBlockHtml + blocksHtml + "</div>"
-                + "<div style='flex:1;min-width:220px;'>"
-                + "<div style='margin-bottom:8px;font-weight:700;'>Результат</div>"
-                + "<textarea id='bufferCalculatorResult' class='input' readonly style='width:100%;height:40vh;resize:vertical;box-sizing:border-box;'>" + escapeHtml(resultText) + "</textarea>"
-                + "<div class='file-row' style='margin-top:10px;'>"
-                + "<button id='copyBufferCalculator' class='btn btn-rect' type='button'" + (resultText ? "" : " disabled") + ">Копировать</button>"
-                + "<button id='downloadBufferCalculator' class='btn btn-outline' type='button'" + (resultText ? "" : " disabled") + ">Сохранить .txt</button>"
-                + "</div></div></div>"
-                : "<p class='empty-state'>Активных передач нет.</p>");
+        const groupsHtml = groups.map((group) => {
+            const selectedCount = group.transfers.filter((transfer) => selected.has(transfer.transferId)).length;
+            const parkingSelected = selectedCount > 0 && selectedCount === group.transfers.length;
+            const parkingPartial = selectedCount > 0 && !parkingSelected;
+            const parkingBorder = parkingSelected || parkingPartial ? "var(--accent)" : priceTierColor(group.cost);
+            const parkingTile = "<div class='buffer-tile buffer-parking-tile" + (parkingSelected ? " is-selected" : "") + (parkingPartial ? " is-partial" : "") + "' data-buffer-parking='" + escapeHtml(group.mx) + "' style='border-color:" + parkingBorder + ";' title='" + escapeHtml(group.mx) + " · Передач: " + group.transfers.length + " · " + escapeHtml(formatMoney(group.cost)) + "'>"
+                + "<span class='buffer-parking-number'>" + escapeHtml(parkingNumberLabel(group.mx)) + "</span>"
+                + "</div>";
+            const chipsHtml = group.transfers.map((transfer) => {
+                const isSelected = selected.has(transfer.transferId);
+                const chipBorder = isSelected ? "#7c3aed" : priceTierColor(transfer.cost);
+                return "<div class='buffer-tile buffer-transfer-chip" + (isSelected ? " is-selected" : "") + "' data-buffer-transfer='" + escapeHtml(transfer.transferId) + "' style='border-color:" + chipBorder + ";' title='Передача " + escapeHtml(transfer.transferId) + " · " + escapeHtml(formatMoney(transfer.cost)) + "'>"
+                    + escapeHtml(maskTransferId(transfer.transferId))
+                    + "</div>";
+            }).join("");
+            return "<div class='buffer-calc-group-row'>" + parkingTile + "<div class='buffer-transfer-chips'>" + chipsHtml + "</div></div>";
+        }).join("");
 
-        wrap.querySelectorAll("[data-buffer-mx]").forEach((el) => {
-            el.addEventListener("click", () => {
-                const mx = el.dataset.bufferMx;
-                if (selected.has(mx)) selected.delete(mx); else selected.add(mx);
+        const resultText = bufferSelectionResultText(mode);
+
+        wrap.innerHTML = "<div class='review-view-tabs'>" + tabsHtml + "</div>"
+            + "<div style='margin-top:14px;'>" + totalHtml + "</div>"
+            + (groups.length ? "<div class='buffer-calc-groups' style='margin-top:12px;'>" + groupsHtml + "</div>" : "<p class='empty-state' style='margin-top:12px;'>Активных передач нет.</p>")
+            + "<div class='buffer-calc-result'>"
+            + "<textarea id='bufferCalculatorResult' class='input' readonly>" + escapeHtml(resultText) + "</textarea>"
+            + "<div class='buffer-calc-actions'>"
+            + "<button id='sendBufferToSearch' class='btn btn-rect' type='button'" + (resultText ? "" : " disabled") + ">Отправить на поиск</button>"
+            + "<button id='downloadBufferCalculator' class='btn btn-outline' type='button'" + (resultText ? "" : " disabled") + ">Сохранить .txt</button>"
+            + "</div></div>";
+
+        wrap.querySelectorAll("[data-buffer-mode]").forEach((button) => {
+            button.addEventListener("click", () => {
+                if (state.bufferCalculator.mode === button.dataset.bufferMode) return;
+                state.bufferCalculator.mode = button.dataset.bufferMode;
+                state.bufferCalculator.selected.clear();
                 renderBufferCalculator();
             });
         });
-        const allBtn = wrap.querySelector("[data-buffer-all]");
-        if (allBtn) allBtn.addEventListener("click", () => {
+        const totalEl = wrap.querySelector("[data-buffer-total]");
+        if (totalEl) totalEl.addEventListener("click", () => {
             if (allSelected) selected.clear();
-            else groups.forEach((group) => selected.add(group.mx));
+            else allTransferIds.forEach((id) => selected.add(id));
             renderBufferCalculator();
         });
-        const copyBtn = $("copyBufferCalculator");
-        if (copyBtn) copyBtn.addEventListener("click", () => {
-            void copyText(resultText).then((ok) => toast(ok ? "Скопировано в буфер обмена" : "Браузер заблокировал копирование", ok ? "success" : "error"));
+        wrap.querySelectorAll("[data-buffer-parking]").forEach((el) => {
+            el.addEventListener("click", () => {
+                const group = groups.find((item) => item.mx === el.dataset.bufferParking);
+                if (!group) return;
+                const isFull = group.transfers.every((transfer) => selected.has(transfer.transferId));
+                group.transfers.forEach((transfer) => { if (isFull) selected.delete(transfer.transferId); else selected.add(transfer.transferId); });
+                renderBufferCalculator();
+            });
         });
+        wrap.querySelectorAll("[data-buffer-transfer]").forEach((el) => {
+            el.addEventListener("click", () => {
+                const id = el.dataset.bufferTransfer;
+                if (selected.has(id)) selected.delete(id); else selected.add(id);
+                renderBufferCalculator();
+            });
+        });
+        // Every render pops tiles back in with a short stagger -- cheap way
+        // to give "add animation to everything" real coverage without a
+        // bespoke transition per interaction, since the grid is rebuilt
+        // wholesale on each click anyway.
+        const tiles = Array.from(wrap.querySelectorAll(".buffer-tile"));
+        tiles.forEach((tile, index) => {
+            tile.classList.add("is-entering-item");
+            tile.style.animationDelay = Math.min(index * 10, 260) + "ms";
+        });
+        setTimeout(() => {
+            tiles.forEach((tile) => {
+                tile.classList.remove("is-entering-item");
+                tile.style.animationDelay = "";
+            });
+        }, 700);
+
+        const sendBtn = $("sendBufferToSearch");
+        if (sendBtn) sendBtn.addEventListener("click", () => { void sendBufferSelectionToSearch(); });
         const downloadBtn = $("downloadBufferCalculator");
-        if (downloadBtn) downloadBtn.addEventListener("click", () => {
-            const blob = new Blob([resultText], { type: "text/plain;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "Буфер.txt";
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-        });
+        if (downloadBtn) downloadBtn.addEventListener("click", () => downloadBufferCalculatorResult(resultText));
     }
 
     function renderReviewContextTools() {
@@ -8875,6 +9036,7 @@
         task_started: "Начато",
         task_completed: "Завершено",
         task_deferred: "Отложено",
+        task_sent_to_search: "Передача отправлена на поиск",
         task_reopened: "Переоткрыто вручную",
         task_auto_reopened: "Переоткрыто автоматически",
         task_system_closed: "Закрыто системой (актуализация)",
