@@ -7500,20 +7500,19 @@
 
     // The "wave" from paging between участки (animateSectionModeSwap's
     // staggered pop) without the opacity dip that caused it to blink here --
-    // a pure transform bounce on already-visible tiles, staggered by DOM
-    // order so it still reads as a sweep across the grid.
-    function waveBufferTiles() {
-        const wrap = $("bufferCalculatorWrap");
-        if (!wrap) return;
-        const tiles = Array.from(wrap.querySelectorAll(".buffer-tile"));
-        tiles.forEach((tile, index) => {
+    // a pure transform bounce on already-visible tiles. Only plays on the
+    // tile(s) a click actually just changed (passed in by the caller), not
+    // the whole grid -- a parking click still staggers across its own
+    // передача chips, which is what reads as a "wave" for that click.
+    function waveBufferTiles(tiles) {
+        (tiles || []).forEach((tile, index) => {
             tile.classList.remove("is-waving");
             void tile.offsetWidth;
             tile.style.animationDelay = Math.min(index * 8, 220) + "ms";
             tile.classList.add("is-waving");
         });
         setTimeout(() => {
-            tiles.forEach((tile) => {
+            (tiles || []).forEach((tile) => {
                 tile.classList.remove("is-waving");
                 tile.style.animationDelay = "";
             });
@@ -7631,7 +7630,9 @@
                 if (!group) return;
                 const isFull = group.transfers.every((transfer) => selected.has(transfer.transferId));
                 group.transfers.forEach((transfer) => { if (isFull) selected.delete(transfer.transferId); else selected.add(transfer.transferId); });
-                refreshBufferCalculatorSelection();
+                const row = el.closest(".buffer-calc-group-row");
+                const waveTargets = row ? [el, ...row.querySelectorAll("[data-buffer-transfer]")] : [el];
+                refreshBufferCalculatorSelection(true, waveTargets);
             });
         });
         groupsWrap.querySelectorAll("[data-buffer-transfer]").forEach((el) => {
@@ -7639,7 +7640,10 @@
                 const selected = state.bufferCalculator.selected;
                 const id = el.dataset.bufferTransfer;
                 if (selected.has(id)) selected.delete(id); else selected.add(id);
-                refreshBufferCalculatorSelection();
+                const row = el.closest(".buffer-calc-group-row");
+                const parkingTile = row ? row.querySelector("[data-buffer-parking]") : null;
+                const waveTargets = parkingTile ? [el, parkingTile] : [el];
+                refreshBufferCalculatorSelection(true, waveTargets);
             });
         });
 
@@ -7668,7 +7672,7 @@
     // rest of the grid never gets torn down and repainted (that rebuild was
     // the blink) and CSS transitions on border-color/background get to
     // actually animate between a real before/after state.
-    function refreshBufferCalculatorSelection(animate) {
+    function refreshBufferCalculatorSelection(animate, waveTiles) {
         const wrap = $("bufferCalculatorWrap");
         if (!wrap) return;
         const mode = state.bufferCalculator.mode;
@@ -7713,7 +7717,7 @@
         if (sendBtn) sendBtn.disabled = !resultText;
         const downloadBtn = $("downloadBufferCalculator");
         if (downloadBtn) downloadBtn.disabled = !resultText;
-        if (animate !== false) waveBufferTiles();
+        if (animate !== false) waveBufferTiles(waveTiles);
     }
 
     function renderReviewContextTools() {
@@ -17505,7 +17509,8 @@
             const allSelected = allTransferIds.length > 0 && allTransferIds.every((id) => selected.has(id));
             if (allSelected) selected.clear();
             else allTransferIds.forEach((id) => selected.add(id));
-            refreshBufferCalculatorSelection();
+            const waveTargets = Array.from($("bufferCalculatorWrap").querySelectorAll(".buffer-tile"));
+            refreshBufferCalculatorSelection(true, waveTargets);
         });
         $("sendBufferToSearch").addEventListener("click", () => { void sendBufferSelectionToSearch(); });
         $("downloadBufferCalculator").addEventListener("click", () => downloadBufferCalculatorResult($("bufferCalculatorResult").value));
