@@ -55,7 +55,7 @@
     // This mirrors exactly the field set print-tspl.js's element builders
     // read (Task 3), so nothing entered here is silently ignored by TSPL
     // generation.
-    const NUMERIC_FIELDS = ["x_mm", "y_mm", "width_mm", "height_mm", "font_size"];
+    const NUMERIC_FIELDS = ["x_mm", "y_mm", "width_mm", "height_mm", "font_size", "wrap_width_mm", "line_height_mm", "max_lines"];
 
     // Visual drag-and-drop editor: elements are boxes positioned on a
     // to-scale rectangle representing the physical label. Dragging updates
@@ -192,7 +192,12 @@
 
     function propFieldHtml(element) {
         const type = element.type || "text";
-        if (type === "text") return "<label>Размер шрифта<br><input data-prop-field='font_size' type='number' value='" + (element.font_size || 10) + "' style='width:100%;'></label>";
+        if (type === "text") {
+            return "<label>Размер шрифта<br><input data-prop-field='font_size' type='number' value='" + (element.font_size || 10) + "' style='width:100%;'></label>"
+                + "<label>Перенос: ширина, мм (0 = без переноса)<br><input data-prop-field='wrap_width_mm' type='number' value='" + (element.wrap_width_mm || 0) + "' style='width:100%;'></label>"
+                + "<label>Высота строки при переносе, мм<br><input data-prop-field='line_height_mm' type='number' value='" + (element.line_height_mm || 0) + "' style='width:100%;'></label>"
+                + "<label>Макс. строк при переносе<br><input data-prop-field='max_lines' type='number' value='" + (element.max_lines || 2) + "' style='width:100%;'></label>";
+        }
         if (type === "barcode") {
             return "<label>Высота, мм<br><input data-prop-field='height_mm' type='number' value='" + (element.height_mm || 10) + "' style='width:100%;'></label>"
                 + "<label>Тип штрихкода<br><select data-prop-field='barcode_type'><option value='code128'" + (element.barcode_type !== "ean13" ? " selected" : "") + ">Code128</option><option value='ean13'" + (element.barcode_type === "ean13" ? " selected" : "") + ">EAN13</option></select></label>";

@@ -4,23 +4,22 @@
 -- one sticker per КГТ item recorded that shift, carrying the item's own
 -- name instead of a box number/QR (a КГТ item never goes into a box).
 --
--- name prints larger than the date lines (font_size 24 vs 14) so the
--- item's name -- the one thing this sticker exists to show -- stays
--- visually most prominent. An earlier revision pushed name to font_size
--- 30 (multiplier 3) to escape a rounding collision with the date lines,
--- but that blew the name field's character budget past the label's
--- actual printable width and item names started running off the right
--- edge. Fixed properly this time by going the other way: date_line1/2
--- drop to font_size 14 (multiplier 1, was 20/multiplier 2) so name
--- (multiplier 2) is still a clear step above them without needing to be
--- oversized itself. intake.js's kgtLabelNameMaxLen() now also computes
--- the actual truncation length from this template's own x_mm/font_size/
--- width_mm at print time instead of a hardcoded character count, so this
--- class of drift (font_size changed, truncation length silently not)
--- can't happen again -- including for future edits made live via
--- print_templates_admin.html, with no code change needed.
--- y_mm nudged from 5 to 7 to keep it clear of the date lines starting at
--- y_mm 28.
+-- name has gone through three revisions chasing "make it fit":
+--   1. font_size 14 with a hardcoded 28-char truncation in intake.js --
+--      wrong from day one, 28 chars never fit at any font_size tried.
+--   2/3. font_size bumped to 24 then 30 for visual prominence over the
+--      date lines, which only made the overflow worse (at 30 the label
+--      could fit ~6 characters, not 28).
+-- Fixed properly now: print-tspl.js's textCommand gained real word-wrap
+-- (wrap_width_mm/line_height_mm/max_lines on a text element), so name
+-- goes back to a modest font_size 14 (same as the date lines) and wraps
+-- across up to 2 lines instead of needing one oversized, truncated line.
+-- wrap_width_mm 42 = 50mm label width - x_mm 5 - a 3mm right-edge margin.
+-- line_height_mm 9 keeps line 2 (y 7+9=16) well clear of date_line1 at
+-- y_mm 28. intake.js no longer truncates item_text itself at all -- the
+-- template's own geometry now drives wrapping/truncation entirely, so
+-- this can't drift out of sync again, including from a future edit made
+-- live via print_templates_admin.html with no code change needed.
 --
 -- insert ... select ... where not exists guards against a duplicate row:
 -- print_label_templates.name has no unique constraint, and this insert
@@ -34,7 +33,7 @@ select
     50,
     50,
     '[
-        {"type":"text","field":"name","x_mm":5,"y_mm":7,"font_size":24},
+        {"type":"text","field":"name","x_mm":5,"y_mm":7,"font_size":14,"wrap_width_mm":42,"line_height_mm":9,"max_lines":2},
         {"type":"text","field":"date_line1","x_mm":5,"y_mm":28,"font_size":14},
         {"type":"text","field":"date_line2","x_mm":5,"y_mm":36,"font_size":14},
         {"type":"text","field":"area","x_mm":5,"y_mm":44,"font_size":10}
