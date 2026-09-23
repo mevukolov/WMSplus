@@ -18,10 +18,12 @@
         display: flex;
         flex-direction: column;
         background: linear-gradient(135deg, #ffffff 0%, #f4f0ff 58%, #ebe5ff 100%);
+        transition: background .8s ease;
     }
     .display-header {
         flex: none;
         padding: 16px 28px 4px;
+        transition: opacity .8s ease;
     }
     .display-header h1 {
         margin: 0;
@@ -37,6 +39,18 @@
         display: flex;
         flex-direction: column;
         gap: 12px;
+        transition: opacity .8s ease;
+    }
+    /* Night mode (20:30-07:30, toggled by display.js): nobody's on the
+       floor overnight, but the monitor stays on -- so instead of turning
+       it off, the page itself goes to a plain black screen. The QR
+       overlay (z-index 100) still shows over it if a broadcast happens to
+       land during this window -- night mode only hides the zone view. */
+    body.is-night { background: #000; }
+    body.is-night .display-header,
+    body.is-night .display-zone {
+        opacity: 0;
+        pointer-events: none;
     }
 
     /* ---------- Below: same "Без ШК" zone classes/markup as

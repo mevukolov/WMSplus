@@ -281,6 +281,20 @@
         if (!stillOutside) hideQrOverlay();
     }
 
+    // ---------- Night mode (20:30-07:30): nobody's on the floor overnight,
+    // but the monitor stays on, so the page goes to a plain black screen
+    // instead -- toggled purely by CSS class (body.is-night), no content
+    // is torn down, so it comes right back at 07:30 with whatever the
+    // last loadZone() had rendered (which keeps running underneath, same
+    // as always, so it's not stale when the screen turns back "on"). ----------
+    function isNightBlackout(date) {
+        const totalMinutes = date.getHours() * 60 + date.getMinutes();
+        return totalMinutes >= (20 * 60 + 30) || totalMinutes < (7 * 60 + 30);
+    }
+    function updateNightMode() {
+        document.body.classList.toggle("is-night", isNightBlackout(new Date()));
+    }
+
     // ---------- Live updates ----------
     supabaseClient
         .channel("display_zone_changes")
@@ -299,4 +313,7 @@
     // poll-plus-subscription combo: a dropped Realtime connection on an
     // unattended screen should never mean a permanently stale display.
     setInterval(() => { void loadZone(); }, 20000);
+
+    updateNightMode();
+    setInterval(updateNightMode, 60000);
 })();
