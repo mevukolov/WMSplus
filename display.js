@@ -80,11 +80,7 @@
         return shelves.reduce((max, s) => Math.max(max, s.capacity || 0), 1);
     }
 
-    // maxCapacity is the RACK's widest shelf, not this shelf's own capacity
-    // -- every shelf in a rack gets the same number of grid columns
-    // (--cap) so they all line up, same as the original fixed-pixel-width
-    // design did.
-    function shelfSkeuoHtml(shelf, maxCapacity) {
+    function shelfSkeuoHtml(shelf) {
         const boxes = (shelf.wms_no_shk_boxes || []).slice().sort((a, b) => a.box_number - b.box_number);
         const isFull = boxes.length >= shelf.capacity;
         const boxesHtml = boxes.map(boxTileHtml).join("");
@@ -93,7 +89,7 @@
             + "<span>" + escapeHtmlLocal(shelf.name) + "</span>"
             + "<span class='no-shk-shelf-fill" + (isFull ? " is-full" : "") + "'>" + boxes.length + " / " + shelf.capacity + "</span>"
             + "</div>"
-            + "<div class='no-shk-boxes-row' style='--cap:" + maxCapacity + ";'>" + (boxesHtml || "<span style='color:#94a3b8;font-size:12px;'>пусто</span>") + "</div>"
+            + "<div class='no-shk-boxes-row'>" + (boxesHtml || "<span style='color:#94a3b8;font-size:12px;'>пусто</span>") + "</div>"
             + "</div>";
     }
 
@@ -128,6 +124,32 @@
     // needed -- its container is flex:0 0 auto, sized by this content).
     const OUTSIDE_SLOTS = 3;
 
+    const SHELF_PADDING_H = 20; // .no-shk-shelf horizontal padding (10px * 2)
+    const RACK_TILE_GAP = 6;    // .no-shk-shelf .no-shk-boxes-row gap
+    const RACK_TILE_MAX = 64;   // never bigger than the Вне ОПП/На полу tiles
+    const RACK_TILE_MIN = 24;   // floor so a high-capacity shelf doesn't shrink to nothing
+
+    // Computes one square tile size that fits every rack's own widest
+    // shelf within its (equal-width) column, then applies the smallest of
+    // those as a single shared size on .no-shk-racks-row -- every box
+    // tile across all racks ends up the same square size, and each shelf
+    // is exactly tall enough for one row of them (min-height: var(--tile)
+    // in CSS) instead of stretched to fill whatever vertical space is
+    // left over.
+    function sizeRackTilesToFitSquare() {
+        const frames = document.querySelectorAll(".no-shk-rack-frame[data-max-cap]");
+        if (!frames.length) return;
+        let tile = RACK_TILE_MAX;
+        frames.forEach((frame) => {
+            const cap = Number(frame.dataset.maxCap) || 1;
+            const usable = frame.clientWidth - SHELF_PADDING_H - (cap - 1) * RACK_TILE_GAP;
+            tile = Math.min(tile, Math.floor(usable / cap));
+        });
+        tile = Math.max(RACK_TILE_MIN, Math.min(RACK_TILE_MAX, tile));
+        const racksRow = document.querySelector(".no-shk-racks-row");
+        if (racksRow) racksRow.style.setProperty("--tile", tile + "px");
+    }
+
     function renderZoneView() {
         const wrap = document.getElementById("displayZoneWrap");
         if (!wrap) return;
@@ -148,7 +170,7 @@
                 const shelves = rack.wms_no_shk_shelves || [];
                 const maxCapacity = rackMaxCapacity(rack);
                 const shelvesHtml = shelves.length
-                    ? "<div class='no-shk-rack-frame'>" + shelvesTopToBottom(rack).map((shelf) => shelfSkeuoHtml(shelf, maxCapacity)).join("") + "</div>"
+                    ? "<div class='no-shk-rack-frame' data-max-cap='" + maxCapacity + "'>" + shelvesTopToBottom(rack).map(shelfSkeuoHtml).join("") + "</div>"
                     : "<p style='color:#64748b;font-size:13px;'>Полок пока нет.</p>";
                 return "<div class='no-shk-rack'>"
                     + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
@@ -169,6 +191,8 @@
             const slots = computeSlots(floorRow.clientWidth);
             floorRow.innerHTML = slotRowHtml(floorBoxes, slots, boxTileHtml);
         }
+
+        sizeRackTilesToFitSquare();
 
         const nextSeen = new Set();
         outsideBoxes.forEach((box) => nextSeen.add(box.id));
