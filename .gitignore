@@ -2,3 +2,4 @@ supabase/.temp/
 .superpowers/
 print-bridge/.env
 print-bridge/node_modules/
+print-bridge/print-bridge.log
