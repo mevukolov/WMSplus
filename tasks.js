@@ -2209,12 +2209,7 @@
         return Array.from(byUser.values()).filter((row) => row.shk_count > 0 && row.elapsed_ms > 0);
     }
 
-    // Rendered in two places now -- the tasksHome group and natively inside
-    // the review page's Предсписок tab (see resetReviewModesToLanding's
-    // sibling render calls) -- so every target id-set gets the same markup
-    // instead of the caller having to know which one is currently mounted.
     const PRESPISOK_HOME_CARD_IDS = [
-        { entry: "openPrespisok", leaderboard: "prespisokLeaderboardCard", badge: "prespisokCountdownBadge" },
         { entry: "reviewOpenPrespisok", leaderboard: "reviewPrespisokLeaderboardCard", badge: "reviewPrespisokCountdownBadge" },
     ];
 
@@ -17363,10 +17358,7 @@
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
         $("openQuickNoShkReview").addEventListener("click", () => { void openQuickNoShkModal(); });
-        $("openPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
-        $("openPrespisokSecondLineHome").addEventListener("click", () => { void openPrespisokSecondLineModal(); });
-        $("openPrespisokJournal").addEventListener("click", () => { void openPrespisokJournalModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
         $("openPureLosses").addEventListener("click", () => { window.location.href = "pure_losses.html"; });
         $("openNoShkReview").addEventListener("click", openNoShkReviewModal);
