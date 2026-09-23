@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>WMS+ mobile — Инвентаризация</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+</head>
+<body style="display:flex;flex-direction:column;align-items:center;min-height:100dvh;margin:0;padding:20px;box-sizing:border-box;">
+<div class="card" style="padding:24px;width:100%;max-width:420px;text-align:center;">
+    <h1 id="stepTitle">Инвентаризация «Без ШК»</h1>
+    <p id="stepMsg" style="margin:0 0 16px;font-size:14px;color:#64748b;"></p>
+    <video id="invVideo" playsinline muted style="width:100%;max-width:320px;border-radius:var(--radius-md);background:#000;display:none;"></video>
+    <canvas id="invCanvas" style="display:none;"></canvas>
+    <div id="stepButtons" style="display:flex;flex-direction:column;gap:10px;margin-top:16px;"></div>
+</div>
+<script src="mobile-inventory.js"></script>
+</body>
+</html>
