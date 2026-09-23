@@ -130,7 +130,130 @@
             }
             stepTitle.textContent = "Отсканируйте полку";
             stepMsg.textContent = "";
-            // Task 5 implements the shelf-scan step from here.
+            void startShelfScan();
+        });
+    }
+
+    // ---------- Per-shelf loop ----------
+    async function startShelfScan() {
+        stepTitle.textContent = "Отсканируйте полку";
+        stepMsg.textContent = "";
+        stepButtons.innerHTML = "";
+        await supabaseClient
+            .from("wms_no_shk_inventory_sessions")
+            .update({ step: "scan_shelf", current_shelf_id: null, last_activity_at: new Date().toISOString() })
+            .eq("id", activeSession.id);
+
+        void startScanner(async (text) => {
+            // WMSP.PLCE.WSHK.{rack_number}.{shelf_number}
+            const match = /^WMSP\.PLCE\.WSHK\.(\d+)\.(\d+)$/.exec(text);
+            if (!match) return; // not a shelf code, keep scanning
+            const rackNumber = Number(match[1]);
+            const shelfNumber = Number(match[2]);
+            const { data: shelfRows } = await supabaseClient
+                .from("wms_no_shk_shelves")
+                .select("id,name,capacity,rack_id,wms_no_shk_racks!inner(rack_number)")
+                .eq("shelf_number", shelfNumber)
+                .eq("wms_no_shk_racks.rack_number", rackNumber)
+                .limit(1);
+            const shelf = shelfRows && shelfRows[0];
+            if (!shelf) {
+                stepMsg.textContent = "Полка не найдена в системе";
+                return;
+            }
+            stopScanner();
+
+            // Reopen (or create) this session's audit row for the shelf --
+            // re-scanning an already-audited shelf this session should
+            // redo it cleanly, not create a duplicate/conflicting record.
+            await supabaseClient.from("wms_no_shk_inventory_box_results").delete().eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
+            const { data: existingAudit } = await supabaseClient
+                .from("wms_no_shk_inventory_shelf_audits")
+                .select("id")
+                .eq("session_id", activeSession.id)
+                .eq("shelf_id", shelf.id)
+                .maybeSingle();
+            if (existingAudit) {
+                await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
+                    .update({ started_at: new Date().toISOString(), finished_at: null, boxes_found_count: 0, boxes_missing_sticker_count: 0, boxes_not_found_count: 0 })
+                    .eq("id", existingAudit.id);
+            } else {
+                await supabaseClient.from("wms_no_shk_inventory_shelf_audits").insert({ session_id: activeSession.id, shelf_id: shelf.id });
+            }
+
+            activeSession.shelfId = shelf.id;
+            activeSession.shelf = shelf;
+            await supabaseClient
+                .from("wms_no_shk_inventory_sessions")
+                .update({ step: "scan_boxes", current_shelf_id: shelf.id, last_activity_at: new Date().toISOString() })
+                .eq("id", activeSession.id);
+            void startBoxScan(shelf);
+        });
+    }
+
+    async function scannedCountForCurrentShelf() {
+        const { count } = await supabaseClient
+            .from("wms_no_shk_inventory_box_results")
+            .select("id", { count: "exact", head: true })
+            .eq("session_id", activeSession.id)
+            .eq("shelf_id", activeSession.shelfId);
+        return count || 0;
+    }
+
+    function renderShelfButtons(scannedCount, shelf) {
+        stepButtons.innerHTML = "";
+        const finishLabel = scannedCount === 0 ? "На полке нет коробов" : "На полке больше нет коробов";
+        const finishBtn = document.createElement("button");
+        finishBtn.className = "btn";
+        finishBtn.textContent = finishLabel;
+        finishBtn.addEventListener("click", () => void finishShelf());
+        stepButtons.appendChild(finishBtn);
+
+        if (scannedCount < shelf.capacity) {
+            const missingBtn = document.createElement("button");
+            missingBtn.className = "btn btn-outline";
+            missingBtn.textContent = "Короб без наклейки";
+            missingBtn.addEventListener("click", () => void openMissingStickerList());
+            stepButtons.appendChild(missingBtn);
+        }
+    }
+
+    async function startBoxScan(shelf) {
+        stepTitle.textContent = "Отсканируйте все короба на полке слева направо";
+        stepMsg.textContent = shelf.name;
+        const count = await scannedCountForCurrentShelf();
+        renderShelfButtons(count, shelf);
+
+        void startScanner(async (text) => {
+            const match = /^WMSP\.BOX\.(\d+)$/.exec(text);
+            if (!match) return;
+            const boxNumber = Number(match[1]);
+            const { data: boxRows } = await supabaseClient.from("wms_no_shk_boxes").select("id").eq("box_number", boxNumber).limit(1);
+            const box = boxRows && boxRows[0];
+            if (!box) { stepMsg.textContent = "Короб №" + boxNumber + " не найден"; return; }
+
+            const { data: dup } = await supabaseClient
+                .from("wms_no_shk_inventory_box_results")
+                .select("id")
+                .eq("session_id", activeSession.id)
+                .eq("shelf_id", shelf.id)
+                .eq("box_id", box.id)
+                .maybeSingle();
+            if (dup) { stepMsg.textContent = "Короб №" + boxNumber + " уже отсканирован"; return; }
+
+            await supabaseClient.from("wms_no_shk_inventory_box_results").insert({ session_id: activeSession.id, shelf_id: shelf.id, box_id: box.id, result: "found" });
+            await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id);
+            const newCount = await scannedCountForCurrentShelf();
+            await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
+                .update({ boxes_found_count: newCount })
+                .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
+            await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
+
+            stepMsg.textContent = "Короб №" + boxNumber + " добавлен (" + shelf.name + ")";
+            renderShelfButtons(newCount, shelf);
+            // keep scanning -- do NOT stop the scanner here, the loop in
+            // startScanner already re-arms via requestAnimationFrame for
+            // every call that doesn't return early
         });
     }
 
