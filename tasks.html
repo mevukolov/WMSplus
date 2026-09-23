@@ -1374,6 +1374,11 @@
         .buffer-calc-result textarea { width: 100%; box-sizing: border-box; height: 76px; resize: vertical; border-radius: 14px; padding: 10px 12px; font-size: 12px; line-height: 1.4; }
         .buffer-calc-actions { display: flex; gap: 8px; margin-top: 8px; }
         .buffer-tile.is-entering-item { animation: sectionItemPop .4s cubic-bezier(.34,1.56,.64,1) both; }
+        @keyframes bufferTileWave { 0% { transform: scale(1); } 45% { transform: scale(1.08); } 100% { transform: scale(1); } }
+        .buffer-tile.is-waving { animation: bufferTileWave .36s cubic-bezier(.34,1.56,.64,1); }
+        .buffer-mode-tabs { position: relative; }
+        .buffer-mode-tabs .review-view-tab { position: relative; z-index: 1; }
+        .buffer-mode-tabs .review-view-tab.active { background: transparent; box-shadow: none; }
         .movement-list { display: grid; gap: 8px; margin-top: 12px; }
         .movement-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 10px 12px; }
         .movement-row.removed { opacity: .45; text-decoration: line-through; }
@@ -2228,7 +2233,28 @@
             </div>
             <button id="closeReviewCalculator" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div id="bufferCalculatorWrap" class="drawer-body-scroll"></div>
+        <div id="bufferCalculatorWrap" class="drawer-body-scroll">
+            <div class="review-view-tabs buffer-mode-tabs">
+                <span id="bufferModeThumb" class="review-view-thumb" aria-hidden="true"></span>
+                <button type="button" class="review-view-tab" data-buffer-mode="ПМ">ПМ</button>
+                <button type="button" class="review-view-tab" data-buffer-mode="Почта">Почта</button>
+                <button type="button" class="review-view-tab" data-buffer-mode="all">Весь буфер</button>
+            </div>
+            <div style="margin-top:14px;">
+                <div class="buffer-tile buffer-calc-total" data-buffer-total>
+                    <div class="buffer-calc-total-title">Всего</div>
+                    <div class="buffer-calc-total-meta" data-buffer-total-meta></div>
+                </div>
+            </div>
+            <div id="bufferCalculatorGroups" class="buffer-calc-groups" style="margin-top:12px;"></div>
+            <div class="buffer-calc-result">
+                <textarea id="bufferCalculatorResult" class="input" readonly></textarea>
+                <div class="buffer-calc-actions">
+                    <button id="sendBufferToSearch" class="btn btn-rect" type="button">Отправить на поиск</button>
+                    <button id="downloadBufferCalculator" class="btn btn-outline" type="button">Сохранить .txt</button>
+                </div>
+            </div>
+        </div>
     </div>
 </section>
 

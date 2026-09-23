@@ -7473,8 +7473,51 @@
 
     function openReviewCalculatorModal() {
         state.bufferCalculator = { mode: state.review.activeSection === "Почта" ? "Почта" : "ПМ", selected: new Set() };
-        renderBufferCalculator();
+        // Modal must be visible before the thumb measures the active tab's
+        // offsetWidth -- while still display:none (pre-.active) every tab
+        // reads 0-width, which is why the thumb used to start collapsed.
         setFlowModalOpen("reviewCalculatorModal", true);
+        renderBufferCalculator(true);
+    }
+
+    // Same JS-measured sliding pill as the top mode switcher
+    // (updateReviewViewThumb) -- offsetLeft/offsetWidth of the active tab,
+    // not a CSS percentage, since "ПМ" and "Весь буфер" aren't equal width.
+    // `instant` skips the transition for the very first render so the thumb
+    // doesn't fly in from the left edge before anything is visible yet.
+    function updateBufferModeThumb(instant) {
+        const thumb = $("bufferModeThumb");
+        const active = document.querySelector("#bufferCalculatorWrap .review-view-tab.active");
+        if (!thumb || !active) return;
+        if (instant) thumb.style.transition = "none";
+        thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
+        thumb.style.width = active.offsetWidth + "px";
+        if (instant) {
+            void thumb.offsetWidth;
+            thumb.style.transition = "";
+        }
+    }
+
+    // The "wave" from paging between участки (animateSectionModeSwap's
+    // staggered pop) without the opacity dip that caused it to blink here --
+    // a pure transform bounce on already-visible tiles, staggered by DOM
+    // order so it still reads as a sweep across the grid.
+    function waveBufferTiles() {
+        const wrap = $("bufferCalculatorWrap");
+        if (!wrap) return;
+        const tiles = Array.from(wrap.querySelectorAll(".buffer-tile"));
+        tiles.forEach((tile, index) => {
+            tile.classList.remove("is-waving");
+            void tile.offsetWidth;
+            tile.style.animationDelay = Math.min(index * 8, 220) + "ms";
+            tile.classList.add("is-waving");
+        });
+        setTimeout(() => {
+            tiles.forEach((tile) => {
+                tile.classList.remove("is-waving");
+                tile.style.animationDelay = "";
+            });
+        }, 500);
     }
 
     function downloadBufferCalculatorResult(text) {
@@ -7553,23 +7596,25 @@
     // (opening the modal, switching mode, or a send-to-search reshaping the
     // active list) -- calling this from a plain selection click was exactly
     // why every click used to blink the whole grid back in from opacity 0.
-    function renderBufferCalculator() {
+    // The tabs/thumb, "Всего" tile, result textarea and action buttons are
+    // static markup in tasks.html now (bound once in initEvents) -- only
+    // #bufferCalculatorGroups gets rebuilt here. Rebuilding the tabs
+    // themselves on every mode switch used to destroy and recreate
+    // #bufferModeThumb each time, so it always animated in from width:0
+    // instead of sliding from its previous position; keeping that node
+    // alive is what makes updateBufferModeThumb's transition a real slide.
+    function renderBufferCalculator(instantThumb) {
         const wrap = $("bufferCalculatorWrap");
-        if (!wrap) return;
+        const groupsWrap = $("bufferCalculatorGroups");
+        if (!wrap || !groupsWrap) return;
         const mode = state.bufferCalculator.mode;
         const groups = bufferCalculatorGroups(mode);
 
-        const tabsHtml = ["ПМ", "Почта", "all"].map((m) => {
-            const label = m === "all" ? "Весь буфер" : m;
-            return "<button type='button' class='review-view-tab" + (mode === m ? " active" : "") + "' data-buffer-mode='" + m + "'>" + escapeHtml(label) + "</button>";
-        }).join("");
+        wrap.querySelectorAll("[data-buffer-mode]").forEach((button) => {
+            button.classList.toggle("active", button.dataset.bufferMode === mode);
+        });
 
-        const totalHtml = "<div class='buffer-tile buffer-calc-total' data-buffer-total>"
-            + "<div class='buffer-calc-total-title'>Всего</div>"
-            + "<div class='buffer-calc-total-meta' data-buffer-total-meta></div>"
-            + "</div>";
-
-        const groupsHtml = groups.map((group) => {
+        groupsWrap.innerHTML = groups.length ? groups.map((group) => {
             const parkingTile = "<div class='buffer-tile buffer-parking-tile' data-buffer-parking='" + escapeHtml(group.mx) + "' title='" + escapeHtml(group.mx) + " · Передач: " + group.transfers.length + " · " + escapeHtml(formatMoney(group.cost)) + "'>"
                 + "<span class='buffer-parking-number'>" + escapeHtml(parkingNumberLabel(group.mx)) + "</span>"
                 + "</div>";
@@ -7577,36 +7622,9 @@
                 + escapeHtml(maskTransferId(transfer.transferId))
                 + "</div>").join("");
             return "<div class='buffer-calc-group-row'>" + parkingTile + "<div class='buffer-transfer-chips'>" + chipsHtml + "</div></div>";
-        }).join("");
+        }).join("") : "<p class='empty-state'>Активных передач нет.</p>";
 
-        wrap.innerHTML = "<div class='review-view-tabs'>" + tabsHtml + "</div>"
-            + "<div style='margin-top:14px;'>" + totalHtml + "</div>"
-            + (groups.length ? "<div class='buffer-calc-groups' style='margin-top:12px;'>" + groupsHtml + "</div>" : "<p class='empty-state' style='margin-top:12px;'>Активных передач нет.</p>")
-            + "<div class='buffer-calc-result'>"
-            + "<textarea id='bufferCalculatorResult' class='input' readonly></textarea>"
-            + "<div class='buffer-calc-actions'>"
-            + "<button id='sendBufferToSearch' class='btn btn-rect' type='button'>Отправить на поиск</button>"
-            + "<button id='downloadBufferCalculator' class='btn btn-outline' type='button'>Сохранить .txt</button>"
-            + "</div></div>";
-
-        wrap.querySelectorAll("[data-buffer-mode]").forEach((button) => {
-            button.addEventListener("click", () => {
-                if (state.bufferCalculator.mode === button.dataset.bufferMode) return;
-                state.bufferCalculator.mode = button.dataset.bufferMode;
-                state.bufferCalculator.selected.clear();
-                renderBufferCalculator();
-            });
-        });
-        const totalEl = wrap.querySelector("[data-buffer-total]");
-        if (totalEl) totalEl.addEventListener("click", () => {
-            const selected = state.bufferCalculator.selected;
-            const allTransferIds = groups.flatMap((group) => group.transfers.map((transfer) => transfer.transferId));
-            const allSelected = allTransferIds.length > 0 && allTransferIds.every((id) => selected.has(id));
-            if (allSelected) selected.clear();
-            else allTransferIds.forEach((id) => selected.add(id));
-            refreshBufferCalculatorSelection();
-        });
-        wrap.querySelectorAll("[data-buffer-parking]").forEach((el) => {
+        groupsWrap.querySelectorAll("[data-buffer-parking]").forEach((el) => {
             el.addEventListener("click", () => {
                 const selected = state.bufferCalculator.selected;
                 const group = groups.find((item) => item.mx === el.dataset.bufferParking);
@@ -7616,7 +7634,7 @@
                 refreshBufferCalculatorSelection();
             });
         });
-        wrap.querySelectorAll("[data-buffer-transfer]").forEach((el) => {
+        groupsWrap.querySelectorAll("[data-buffer-transfer]").forEach((el) => {
             el.addEventListener("click", () => {
                 const selected = state.bufferCalculator.selected;
                 const id = el.dataset.bufferTransfer;
@@ -7624,14 +7642,12 @@
                 refreshBufferCalculatorSelection();
             });
         });
-        const sendBtn = $("sendBufferToSearch");
-        if (sendBtn) sendBtn.addEventListener("click", () => { void sendBufferSelectionToSearch(); });
-        const downloadBtn = $("downloadBufferCalculator");
-        if (downloadBtn) downloadBtn.addEventListener("click", () => downloadBufferCalculatorResult($("bufferCalculatorResult").value));
+
+        updateBufferModeThumb(instantThumb);
 
         // Stagger-pop only plays here, on a genuine tile rebuild -- not on
         // every selection click (see refreshBufferCalculatorSelection).
-        const tiles = Array.from(wrap.querySelectorAll(".buffer-tile"));
+        const tiles = Array.from(groupsWrap.querySelectorAll(".buffer-tile"));
         tiles.forEach((tile, index) => {
             tile.classList.add("is-entering-item");
             tile.style.animationDelay = Math.min(index * 10, 260) + "ms";
@@ -7643,7 +7659,7 @@
             });
         }, 700);
 
-        refreshBufferCalculatorSelection();
+        refreshBufferCalculatorSelection(false);
     }
 
     // Selection-only update: toggles classes/colors on the EXISTING tile
@@ -7652,7 +7668,7 @@
     // rest of the grid never gets torn down and repainted (that rebuild was
     // the blink) and CSS transitions on border-color/background get to
     // actually animate between a real before/after state.
-    function refreshBufferCalculatorSelection() {
+    function refreshBufferCalculatorSelection(animate) {
         const wrap = $("bufferCalculatorWrap");
         if (!wrap) return;
         const mode = state.bufferCalculator.mode;
@@ -7697,6 +7713,7 @@
         if (sendBtn) sendBtn.disabled = !resultText;
         const downloadBtn = $("downloadBufferCalculator");
         if (downloadBtn) downloadBtn.disabled = !resultText;
+        if (animate !== false) waveBufferTiles();
     }
 
     function renderReviewContextTools() {
@@ -17473,6 +17490,25 @@
         $("shkExclusionStep4Back").addEventListener("click", () => shkExclusionGoToStep(3));
         $("closeReviewCalculator").addEventListener("click", () => setFlowModalOpen("reviewCalculatorModal", false));
         $("closeReviewNoShkCheck").addEventListener("click", () => setFlowModalOpen("reviewNoShkCheckModal", false));
+        document.querySelectorAll("#bufferCalculatorWrap [data-buffer-mode]").forEach((button) => {
+            button.addEventListener("click", () => {
+                if (state.bufferCalculator.mode === button.dataset.bufferMode) return;
+                state.bufferCalculator.mode = button.dataset.bufferMode;
+                state.bufferCalculator.selected.clear();
+                renderBufferCalculator();
+            });
+        });
+        $("bufferCalculatorWrap").querySelector("[data-buffer-total]").addEventListener("click", () => {
+            const selected = state.bufferCalculator.selected;
+            const groups = bufferCalculatorGroups(state.bufferCalculator.mode);
+            const allTransferIds = groups.flatMap((group) => group.transfers.map((transfer) => transfer.transferId));
+            const allSelected = allTransferIds.length > 0 && allTransferIds.every((id) => selected.has(id));
+            if (allSelected) selected.clear();
+            else allTransferIds.forEach((id) => selected.add(id));
+            refreshBufferCalculatorSelection();
+        });
+        $("sendBufferToSearch").addEventListener("click", () => { void sendBufferSelectionToSearch(); });
+        $("downloadBufferCalculator").addEventListener("click", () => downloadBufferCalculatorResult($("bufferCalculatorResult").value));
         $("copyMasterTransfers").addEventListener("click", () => { void copyMasterTransfers(); });
         $("buildMasterPreview").addEventListener("click", () => { void buildMasterPreview(); });
         $("showRejects").addEventListener("click", showMasterRejects);
