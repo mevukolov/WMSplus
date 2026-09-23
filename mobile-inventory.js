@@ -13,7 +13,15 @@
         window.location.href = "mobile-login.html";
         return;
     }
-    const user = JSON.parse(userRaw);
+    let user;
+    try {
+        user = JSON.parse(userRaw);
+    } catch (e) {
+        // Corrupted/hand-edited localStorage value -- treat exactly like
+        // "not logged in" instead of throwing into a blank page.
+        window.location.href = "mobile-login.html";
+        return;
+    }
 
     const stepTitle = document.getElementById("stepTitle");
     const stepMsg = document.getElementById("stepMsg");
@@ -34,6 +42,7 @@
         try {
             scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         } catch (error) {
+            video.style.display = "none";
             stepMsg.textContent = "Не удалось открыть камеру: " + error.message;
             return;
         }
@@ -49,10 +58,11 @@
                 const code = jsQR(imageData.data, imageData.width, imageData.height);
                 if (code && code.data) {
                     onMatch(code.data);
-                    return; // caller decides whether to restart via stopScanner()+startScanner() again
                 }
             }
-            scanRafId = requestAnimationFrame(tick);
+            if (scanStream) { // still running unless onMatch called stopScanner()
+                scanRafId = requestAnimationFrame(tick);
+            }
         }
         scanRafId = requestAnimationFrame(tick);
     }
@@ -65,19 +75,25 @@
 
     // ---------- Pairing ----------
     async function findActiveSession() {
-        const { data } = await supabaseClient
+        const { data, error } = await supabaseClient
             .from("wms_no_shk_inventory_sessions")
             .select("id,status,step,started_by_name,started_at")
             .in("status", ["waiting_for_phone", "in_progress"])
             .order("started_at", { ascending: false })
             .limit(1)
             .maybeSingle();
+        if (error) {
+            // Indistinguishable from "no active session" to the caller, but
+            // at least not invisible for debugging.
+            console.error("findActiveSession query failed", error);
+        }
         return data || null;
     }
 
     async function startPairing() {
         const existing = await findActiveSession();
         if (existing) {
+            activeSession = existing; // lets the abandon-recovery watcher below react if this session (found, not started here) later gets marked abandoned or completes.
             stepTitle.textContent = "Инвентаризация уже идёт";
             stepMsg.textContent = "Начал(а): " + (existing.started_by_name || "неизвестно") + " в " + new Date(existing.started_at).toLocaleTimeString("ru-RU");
             return;
@@ -89,7 +105,12 @@
             .select("id")
             .single();
         if (error || !data) {
-            stepMsg.textContent = "Не удалось начать инвентаризацию: " + (error ? error.message : "");
+            // Covers both a real failure and the app-level check above
+            // losing a race to the DB's own unique-active-session index --
+            // either way the friendly message is right, never the raw
+            // Postgres constraint text.
+            if (error) console.error("Failed to start inventory session", error);
+            stepMsg.textContent = "Инвентаризация уже идёт, попробуйте позже";
             return;
         }
         activeSession = { id: data.id };
