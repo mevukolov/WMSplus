@@ -21,6 +21,7 @@
     const msg = document.getElementById("loginMsg");
 
     async function doLogin() {
+        if (btn.disabled) return;
         const id = idInput.value.trim();
         const pass = passInput.value;
         if (!id || !pass) {
@@ -29,14 +30,20 @@
         }
         btn.disabled = true;
         msg.textContent = "Вхожу...";
-        const { data, error } = await supabaseClient.rpc("login_user", { p_id: id, p_pass: pass });
-        btn.disabled = false;
-        if (error || !data) {
-            msg.textContent = "Неверный ID или пароль";
-            return;
+        try {
+            const { data, error } = await supabaseClient.rpc("login_user", { p_id: id, p_pass: pass });
+            if (error || !data) {
+                msg.textContent = "Неверный ID или пароль";
+                return;
+            }
+            localStorage.setItem(LS_KEY, JSON.stringify({ id: data.id, name: data.fio || data.name || "" }));
+            window.location.href = "mobile-inventory.html";
+        } catch (e) {
+            console.error("Login exception", e);
+            msg.textContent = "Ошибка сервера, попробуйте позже";
+        } finally {
+            btn.disabled = false;
         }
-        localStorage.setItem(LS_KEY, JSON.stringify({ id: data.id, name: data.fio || data.name || "" }));
-        window.location.href = "mobile-inventory.html";
     }
 
     btn.addEventListener("click", doLogin);
