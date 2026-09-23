@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>WMS+ mobile — Вход</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body style="display:flex;align-items:center;justify-content:center;min-height:100dvh;margin:0;">
+<div class="card" style="padding:28px;width:100%;max-width:360px;">
+    <h1>WMS+ mobile</h1>
+    <label style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Табельный номер</label>
+    <input id="idInput" class="field" type="number" inputmode="numeric" placeholder="ID" style="width:100%;margin-bottom:12px;">
+    <label style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Пароль</label>
+    <input id="passInput" class="field" type="password" placeholder="Пароль" style="width:100%;margin-bottom:16px;">
+    <button id="loginBtn" class="btn" type="button" style="width:100%;">Войти</button>
+    <div id="loginMsg" style="margin-top:12px;font-size:13px;font-weight:600;text-align:center;min-height:18px;"></div>
+</div>
+<script src="mobile-login.js"></script>
+</body>
+</html>
