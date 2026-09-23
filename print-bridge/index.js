@@ -1,25 +1,35 @@
-// print-bridge/index.js — one always-on process, warehouse LAN.
-// Watches print_jobs for status='queued' rows and relays their tspl text
-// to the printer. Never parses or builds label content -- print-tspl.js
-// (in the main repo, browser side) already did that.
+// print-bridge/index.js — one always-on process, on a Windows 10 PC with
+// the thermal printer attached via USB (no network/IP involved). Watches
+// print_jobs for status='queued' rows and relays their tspl bytes to the
+// printer. Never parses or builds label content -- print-tspl.js (in the
+// main repo, browser side) already did that.
 "use strict";
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const PRINTER_IP = process.env.PRINTER_IP;
-const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
+const PRINTER_NAME = process.env.PRINTER_NAME;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !PRINTER_IP) {
-    console.error("Missing required env vars: SUPABASE_URL, SUPABASE_SERVICE_KEY, PRINTER_IP. See .env.example.");
+if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !PRINTER_NAME) {
+    console.error("Missing required env vars: SUPABASE_URL, SUPABASE_SERVICE_KEY, PRINTER_NAME. See .env.example.");
     process.exit(1);
 }
 
 const client = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-const net = require("node:net");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { execFile } = require("node:child_process");
 
+const SEND_RAW_SCRIPT = path.join(__dirname, "send-raw.ps1");
+
+// USB printers have no socket to write to -- Windows only exposes them as
+// an installed printer object. send-raw.ps1 pushes the bytes through the
+// Print Spooler's RAW datatype (winspool.drv), which passes them through
+// untouched regardless of driver, the same way the old TCP:9100 write did.
 function sendToPrinter(payloadBase64) {
     return new Promise((resolve, reject) => {
         // print_jobs.tspl is base64-wrapped bytes, not text -- print-tspl.js
@@ -28,22 +38,24 @@ function sendToPrinter(payloadBase64) {
         // BITMAP images. This bridge has no charset knowledge of its own:
         // decode base64, write the raw bytes, done.
         const bytes = Buffer.from(payloadBase64, "base64");
-        const socket = net.createConnection({ host: PRINTER_IP, port: PRINTER_PORT }, () => {
-            socket.write(bytes, () => {
-                socket.end();
-            });
-        });
-        socket.setTimeout(10000);
-        socket.on("timeout", () => {
-            socket.destroy();
-            reject(new Error("Таймаут соединения с принтером (" + PRINTER_IP + ":" + PRINTER_PORT + ")"));
-        });
-        socket.on("error", (error) => {
-            reject(new Error("Ошибка соединения с принтером: " + error.message));
-        });
-        socket.on("close", (hadError) => {
-            if (!hadError) resolve();
-        });
+        const tempFile = path.join(os.tmpdir(), "wmsplus-print-" + crypto.randomUUID() + ".bin");
+        fs.writeFile(tempFile, bytes)
+            .then(() => {
+                execFile(
+                    "powershell",
+                    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SEND_RAW_SCRIPT, "-PrinterName", PRINTER_NAME, "-FilePath", tempFile],
+                    { timeout: 15000 },
+                    (error, stdout, stderr) => {
+                        void fs.unlink(tempFile).catch(() => {}); // best-effort cleanup, doesn't affect print result
+                        if (error) {
+                            reject(new Error("Ошибка печати через " + PRINTER_NAME + ": " + (stderr || error.message).trim()));
+                        } else {
+                            resolve();
+                        }
+                    }
+                );
+            })
+            .catch((error) => reject(new Error("Не удалось записать временный файл: " + error.message)));
     });
 }
 
@@ -95,7 +107,7 @@ function startRealtimeSubscription() {
         });
 }
 
-console.log("[print-bridge] starting, printer target:", PRINTER_IP + ":" + PRINTER_PORT);
+console.log("[print-bridge] starting, printer target:", PRINTER_NAME);
 void pollOnce(); // catch anything queued before this process started
 startRealtimeSubscription();
 // Safety net: Realtime can drop silently on network blips (this repo's
