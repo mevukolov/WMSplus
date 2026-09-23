@@ -7548,55 +7548,45 @@
         );
     }
 
+    // Structural render: (re)builds every tile from scratch, with the
+    // entrance stagger. Only called when the tile SET actually changes
+    // (opening the modal, switching mode, or a send-to-search reshaping the
+    // active list) -- calling this from a plain selection click was exactly
+    // why every click used to blink the whole grid back in from opacity 0.
     function renderBufferCalculator() {
         const wrap = $("bufferCalculatorWrap");
         if (!wrap) return;
         const mode = state.bufferCalculator.mode;
-        const selected = state.bufferCalculator.selected;
         const groups = bufferCalculatorGroups(mode);
-        const totalTransfers = groups.reduce((acc, group) => acc + group.transfers.length, 0);
-        const totalCost = groups.reduce((acc, group) => acc + group.cost, 0);
-        const allTransferIds = groups.flatMap((group) => group.transfers.map((transfer) => transfer.transferId));
-        const allSelected = allTransferIds.length > 0 && allTransferIds.every((id) => selected.has(id));
 
         const tabsHtml = ["ПМ", "Почта", "all"].map((m) => {
             const label = m === "all" ? "Весь буфер" : m;
             return "<button type='button' class='review-view-tab" + (mode === m ? " active" : "") + "' data-buffer-mode='" + m + "'>" + escapeHtml(label) + "</button>";
         }).join("");
 
-        const totalHtml = "<div class='buffer-tile buffer-calc-total" + (allSelected ? " is-selected" : "") + "' data-buffer-total>"
+        const totalHtml = "<div class='buffer-tile buffer-calc-total' data-buffer-total>"
             + "<div class='buffer-calc-total-title'>Всего</div>"
-            + "<div class='buffer-calc-total-meta'>Передач: " + totalTransfers + " · " + escapeHtml(formatMoney(totalCost)) + "</div>"
+            + "<div class='buffer-calc-total-meta' data-buffer-total-meta></div>"
             + "</div>";
 
         const groupsHtml = groups.map((group) => {
-            const selectedCount = group.transfers.filter((transfer) => selected.has(transfer.transferId)).length;
-            const parkingSelected = selectedCount > 0 && selectedCount === group.transfers.length;
-            const parkingPartial = selectedCount > 0 && !parkingSelected;
-            const parkingBorder = parkingSelected || parkingPartial ? "var(--accent)" : priceTierColor(group.cost);
-            const parkingTile = "<div class='buffer-tile buffer-parking-tile" + (parkingSelected ? " is-selected" : "") + (parkingPartial ? " is-partial" : "") + "' data-buffer-parking='" + escapeHtml(group.mx) + "' style='border-color:" + parkingBorder + ";' title='" + escapeHtml(group.mx) + " · Передач: " + group.transfers.length + " · " + escapeHtml(formatMoney(group.cost)) + "'>"
+            const parkingTile = "<div class='buffer-tile buffer-parking-tile' data-buffer-parking='" + escapeHtml(group.mx) + "' title='" + escapeHtml(group.mx) + " · Передач: " + group.transfers.length + " · " + escapeHtml(formatMoney(group.cost)) + "'>"
                 + "<span class='buffer-parking-number'>" + escapeHtml(parkingNumberLabel(group.mx)) + "</span>"
                 + "</div>";
-            const chipsHtml = group.transfers.map((transfer) => {
-                const isSelected = selected.has(transfer.transferId);
-                const chipBorder = isSelected ? "#7c3aed" : priceTierColor(transfer.cost);
-                return "<div class='buffer-tile buffer-transfer-chip" + (isSelected ? " is-selected" : "") + "' data-buffer-transfer='" + escapeHtml(transfer.transferId) + "' style='border-color:" + chipBorder + ";' title='Передача " + escapeHtml(transfer.transferId) + " · " + escapeHtml(formatMoney(transfer.cost)) + "'>"
-                    + escapeHtml(maskTransferId(transfer.transferId))
-                    + "</div>";
-            }).join("");
+            const chipsHtml = group.transfers.map((transfer) => "<div class='buffer-tile buffer-transfer-chip' data-buffer-transfer='" + escapeHtml(transfer.transferId) + "' title='Передача " + escapeHtml(transfer.transferId) + " · " + escapeHtml(formatMoney(transfer.cost)) + "'>"
+                + escapeHtml(maskTransferId(transfer.transferId))
+                + "</div>").join("");
             return "<div class='buffer-calc-group-row'>" + parkingTile + "<div class='buffer-transfer-chips'>" + chipsHtml + "</div></div>";
         }).join("");
-
-        const resultText = bufferSelectionResultText(mode);
 
         wrap.innerHTML = "<div class='review-view-tabs'>" + tabsHtml + "</div>"
             + "<div style='margin-top:14px;'>" + totalHtml + "</div>"
             + (groups.length ? "<div class='buffer-calc-groups' style='margin-top:12px;'>" + groupsHtml + "</div>" : "<p class='empty-state' style='margin-top:12px;'>Активных передач нет.</p>")
             + "<div class='buffer-calc-result'>"
-            + "<textarea id='bufferCalculatorResult' class='input' readonly>" + escapeHtml(resultText) + "</textarea>"
+            + "<textarea id='bufferCalculatorResult' class='input' readonly></textarea>"
             + "<div class='buffer-calc-actions'>"
-            + "<button id='sendBufferToSearch' class='btn btn-rect' type='button'" + (resultText ? "" : " disabled") + ">Отправить на поиск</button>"
-            + "<button id='downloadBufferCalculator' class='btn btn-outline' type='button'" + (resultText ? "" : " disabled") + ">Сохранить .txt</button>"
+            + "<button id='sendBufferToSearch' class='btn btn-rect' type='button'>Отправить на поиск</button>"
+            + "<button id='downloadBufferCalculator' class='btn btn-outline' type='button'>Сохранить .txt</button>"
             + "</div></div>";
 
         wrap.querySelectorAll("[data-buffer-mode]").forEach((button) => {
@@ -7609,30 +7599,38 @@
         });
         const totalEl = wrap.querySelector("[data-buffer-total]");
         if (totalEl) totalEl.addEventListener("click", () => {
+            const selected = state.bufferCalculator.selected;
+            const allTransferIds = groups.flatMap((group) => group.transfers.map((transfer) => transfer.transferId));
+            const allSelected = allTransferIds.length > 0 && allTransferIds.every((id) => selected.has(id));
             if (allSelected) selected.clear();
             else allTransferIds.forEach((id) => selected.add(id));
-            renderBufferCalculator();
+            refreshBufferCalculatorSelection();
         });
         wrap.querySelectorAll("[data-buffer-parking]").forEach((el) => {
             el.addEventListener("click", () => {
+                const selected = state.bufferCalculator.selected;
                 const group = groups.find((item) => item.mx === el.dataset.bufferParking);
                 if (!group) return;
                 const isFull = group.transfers.every((transfer) => selected.has(transfer.transferId));
                 group.transfers.forEach((transfer) => { if (isFull) selected.delete(transfer.transferId); else selected.add(transfer.transferId); });
-                renderBufferCalculator();
+                refreshBufferCalculatorSelection();
             });
         });
         wrap.querySelectorAll("[data-buffer-transfer]").forEach((el) => {
             el.addEventListener("click", () => {
+                const selected = state.bufferCalculator.selected;
                 const id = el.dataset.bufferTransfer;
                 if (selected.has(id)) selected.delete(id); else selected.add(id);
-                renderBufferCalculator();
+                refreshBufferCalculatorSelection();
             });
         });
-        // Every render pops tiles back in with a short stagger -- cheap way
-        // to give "add animation to everything" real coverage without a
-        // bespoke transition per interaction, since the grid is rebuilt
-        // wholesale on each click anyway.
+        const sendBtn = $("sendBufferToSearch");
+        if (sendBtn) sendBtn.addEventListener("click", () => { void sendBufferSelectionToSearch(); });
+        const downloadBtn = $("downloadBufferCalculator");
+        if (downloadBtn) downloadBtn.addEventListener("click", () => downloadBufferCalculatorResult($("bufferCalculatorResult").value));
+
+        // Stagger-pop only plays here, on a genuine tile rebuild -- not on
+        // every selection click (see refreshBufferCalculatorSelection).
         const tiles = Array.from(wrap.querySelectorAll(".buffer-tile"));
         tiles.forEach((tile, index) => {
             tile.classList.add("is-entering-item");
@@ -7645,10 +7643,60 @@
             });
         }, 700);
 
+        refreshBufferCalculatorSelection();
+    }
+
+    // Selection-only update: toggles classes/colors on the EXISTING tile
+    // nodes and refreshes the result text + action buttons, without
+    // touching innerHTML -- this is what every tile click calls, so the
+    // rest of the grid never gets torn down and repainted (that rebuild was
+    // the blink) and CSS transitions on border-color/background get to
+    // actually animate between a real before/after state.
+    function refreshBufferCalculatorSelection() {
+        const wrap = $("bufferCalculatorWrap");
+        if (!wrap) return;
+        const mode = state.bufferCalculator.mode;
+        const selected = state.bufferCalculator.selected;
+        const groups = bufferCalculatorGroups(mode);
+        const groupByMx = new Map(groups.map((group) => [group.mx, group]));
+        const transferById = new Map();
+        groups.forEach((group) => group.transfers.forEach((transfer) => transferById.set(transfer.transferId, transfer)));
+        const totalTransfers = groups.reduce((acc, group) => acc + group.transfers.length, 0);
+        const totalCost = groups.reduce((acc, group) => acc + group.cost, 0);
+        const allTransferIds = groups.flatMap((group) => group.transfers.map((transfer) => transfer.transferId));
+        const allSelected = allTransferIds.length > 0 && allTransferIds.every((id) => selected.has(id));
+
+        const totalEl = wrap.querySelector("[data-buffer-total]");
+        if (totalEl) {
+            totalEl.classList.toggle("is-selected", allSelected);
+            const meta = totalEl.querySelector("[data-buffer-total-meta]");
+            if (meta) meta.textContent = "Передач: " + totalTransfers + " · " + formatMoney(totalCost);
+        }
+        wrap.querySelectorAll("[data-buffer-parking]").forEach((el) => {
+            const group = groupByMx.get(el.dataset.bufferParking);
+            if (!group) return;
+            const selectedCount = group.transfers.filter((transfer) => selected.has(transfer.transferId)).length;
+            const parkingSelected = selectedCount > 0 && selectedCount === group.transfers.length;
+            const parkingPartial = selectedCount > 0 && !parkingSelected;
+            el.classList.toggle("is-selected", parkingSelected);
+            el.classList.toggle("is-partial", parkingPartial);
+            el.style.borderColor = parkingSelected || parkingPartial ? "var(--accent)" : priceTierColor(group.cost);
+        });
+        wrap.querySelectorAll("[data-buffer-transfer]").forEach((el) => {
+            const id = el.dataset.bufferTransfer;
+            const transfer = transferById.get(id);
+            const isSelected = selected.has(id);
+            el.classList.toggle("is-selected", isSelected);
+            el.style.borderColor = isSelected ? "#7c3aed" : priceTierColor(transfer ? transfer.cost : 0);
+        });
+
+        const resultText = bufferSelectionResultText(mode);
+        const resultEl = $("bufferCalculatorResult");
+        if (resultEl) resultEl.value = resultText;
         const sendBtn = $("sendBufferToSearch");
-        if (sendBtn) sendBtn.addEventListener("click", () => { void sendBufferSelectionToSearch(); });
+        if (sendBtn) sendBtn.disabled = !resultText;
         const downloadBtn = $("downloadBufferCalculator");
-        if (downloadBtn) downloadBtn.addEventListener("click", () => downloadBufferCalculatorResult(resultText));
+        if (downloadBtn) downloadBtn.disabled = !resultText;
     }
 
     function renderReviewContextTools() {
