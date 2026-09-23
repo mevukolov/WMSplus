@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WMS+ — Витрина «Без ШК»</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<style>
+    /* ---------- Page shell: unattended kiosk, no scrollbars/interaction ---------- */
+    html, body { height: 100%; overflow: hidden; }
+    body {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        background: linear-gradient(135deg, #ffffff 0%, #f4f0ff 58%, #ebe5ff 100%);
+    }
+    .display-header {
+        flex: none;
+        padding: 28px 40px 10px;
+    }
+    .display-header h1 {
+        margin: 0;
+        color: var(--accent-dark);
+        font-size: clamp(24px, 3vw, 34px);
+        letter-spacing: -.03em;
+    }
+    .display-zone {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 10px 40px 40px;
+    }
+    .display-zone::-webkit-scrollbar { width: 8px; }
+    .display-zone::-webkit-scrollbar-thumb { background: rgba(98,60,234,.26); border-radius: 999px; }
+    .display-zone::-webkit-scrollbar-track { background: transparent; }
+
+    /* ---------- Below: same "Без ШК" zone classes as tasks.html/no_shk_zone.js
+       (renderZoneView), copied verbatim so this page looks identical --
+       this file never edits no_shk_zone.js, it's a separate read-only
+       renderer built from the same field data. ---------- */
+    .no-shk-racks-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+        align-items: flex-start;
+    }
+    .no-shk-rack { margin-bottom: 0; }
+    .no-shk-rack-title {
+        font-weight: 700;
+        font-size: 14px;
+        color: #4c1d95;
+        margin: 0 0 8px;
+        letter-spacing: .01em;
+    }
+    .no-shk-rack-frame {
+        background: #faf9fd;
+        border: 3px solid #7c5cf0;
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .no-shk-shelf {
+        border-bottom: 2px solid #ded6f7;
+        padding: 10px 12px 12px;
+    }
+    .no-shk-rack-frame .no-shk-shelf:last-child { border-bottom: none; }
+    .no-shk-shelf-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 8px;
+        font-size: 12px;
+        color: #64748b;
+        font-weight: 600;
+    }
+    .no-shk-shelf-fill.is-full { color: #b91c1c; font-weight: 700; }
+    .no-shk-boxes-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    @keyframes no-shk-box-in {
+        from { opacity: 0; transform: scale(.85) translateY(4px); }
+        to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    @keyframes no-shk-box-pop {
+        0% { opacity: 0; transform: scale(.35) rotate(-10deg); }
+        55% { opacity: 1; transform: scale(1.14) rotate(4deg); }
+        80% { transform: scale(.96) rotate(-1deg); }
+        100% { opacity: 1; transform: scale(1) rotate(0); }
+    }
+    .no-shk-box {
+        position: relative;
+        width: 64px;
+        height: 60px;
+        background: #eceef3;
+        border: 1.5px solid #c7ccd9;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        overflow: hidden;
+        transition: background .12s ease, transform .12s ease, border-color .12s ease;
+        animation: no-shk-box-in .3s ease-out both;
+    }
+    .no-shk-box-number { position: relative; z-index: 1; font-size: 12px; font-weight: 700; color: #334155; }
+    .no-shk-box-date {
+        position: relative;
+        z-index: 1;
+        font-size: 9px;
+        font-weight: 600;
+        border-radius: 4px;
+        padding: 1px 5px;
+        transition: background .12s ease, color .12s ease;
+    }
+    .no-shk-box.area-sort .no-shk-box-date { background: rgba(250,204,21,.32); color: #7c5e07; }
+    .no-shk-box.area-repack .no-shk-box-date { background: rgba(167,139,250,.32); color: #4c2f8f; }
+    .no-shk-box::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        bottom: 0;
+        width: 8px;
+        margin-left: -4px;
+    }
+    .no-shk-box.area-sort::before { background: #facc15; }
+    .no-shk-box.area-repack::before { background: #a78bfa; }
+    .no-shk-box.is-new { animation: no-shk-box-pop .55s cubic-bezier(.34,1.56,.64,1) both; }
+    .no-shk-floor {
+        border: 2px dashed #cbd5e1;
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin-bottom: 24px;
+    }
+    .no-shk-floor-title {
+        font-weight: 700;
+        font-size: 13px;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin: 0 0 10px;
+    }
+
+    /* ---------- QR overlay: shown on a "show_qr" broadcast from the mobile
+       form's "Закрыть короб" button. Hidden by default (opacity+pointer-
+       events, no display:none so the pop animation can replay cleanly). ---------- */
+    .qr-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(36,32,56,.82);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .35s ease;
+        z-index: 100;
+    }
+    .qr-overlay.is-visible { opacity: 1; pointer-events: auto; }
+    @keyframes qr-card-in {
+        0% { opacity: 0; transform: scale(.7) translateY(24px); }
+        60% { opacity: 1; transform: scale(1.06) translateY(-6px); }
+        100% { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .qr-card {
+        background: #fff;
+        border-radius: var(--radius-lg);
+        padding: 44px 56px;
+        text-align: center;
+        box-shadow: var(--shadow-md);
+    }
+    .qr-overlay.is-visible .qr-card {
+        animation: qr-card-in .55s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    .qr-card-title {
+        margin: 0 0 8px;
+        font-size: 30px;
+        font-weight: 800;
+        color: var(--accent-dark);
+        letter-spacing: -.02em;
+    }
+    .qr-card-context {
+        margin: 0 0 28px;
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--accent);
+    }
+    .qr-code-box {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 22px;
+    }
+    .qr-code-box img, .qr-code-box canvas { border-radius: var(--radius-sm); }
+    .qr-card-hint {
+        margin: 0;
+        font-size: 14px;
+        color: #94a3b8;
+    }
+</style>
+</head>
+<body>
+
+<header class="display-header">
+    <h1>Зона «Без ШК»</h1>
+</header>
+<div id="displayZoneWrap" class="display-zone"></div>
+
+<div id="qrOverlay" class="qr-overlay" aria-hidden="true">
+    <div class="qr-card">
+        <p class="qr-card-title">Закрытие короба</p>
+        <p class="qr-card-context" id="qrOverlayContext"></p>
+        <div id="qrOverlayCode" class="qr-code-box"></div>
+        <p class="qr-card-hint">Отсканируйте телефоном</p>
+    </div>
+</div>
+
+<script src="display.js"></script>
+</body>
+</html>
