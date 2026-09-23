@@ -75,14 +75,16 @@
         return (rack.wms_no_shk_shelves || []).slice().sort((a, b) => b.shelf_number - a.shelf_number);
     }
 
-    const BOX_TILE_PX = 64 + 8; // .no-shk-box width + .no-shk-boxes-row gap
-    function rackFrameWidthPx(rack) {
+    function rackMaxCapacity(rack) {
         const shelves = rack.wms_no_shk_shelves || [];
-        const maxCapacity = shelves.reduce((max, s) => Math.max(max, s.capacity || 0), 1);
-        return maxCapacity * BOX_TILE_PX + 28;
+        return shelves.reduce((max, s) => Math.max(max, s.capacity || 0), 1);
     }
 
-    function shelfSkeuoHtml(shelf) {
+    // maxCapacity is the RACK's widest shelf, not this shelf's own capacity
+    // -- every shelf in a rack gets the same number of grid columns
+    // (--cap) so they all line up, same as the original fixed-pixel-width
+    // design did.
+    function shelfSkeuoHtml(shelf, maxCapacity) {
         const boxes = (shelf.wms_no_shk_boxes || []).slice().sort((a, b) => a.box_number - b.box_number);
         const isFull = boxes.length >= shelf.capacity;
         const boxesHtml = boxes.map(boxTileHtml).join("");
@@ -91,36 +93,62 @@
             + "<span>" + escapeHtmlLocal(shelf.name) + "</span>"
             + "<span class='no-shk-shelf-fill" + (isFull ? " is-full" : "") + "'>" + boxes.length + " / " + shelf.capacity + "</span>"
             + "</div>"
-            + "<div class='no-shk-boxes-row'>" + (boxesHtml || "<span style='color:#94a3b8;font-size:12px;'>пусто</span>") + "</div>"
+            + "<div class='no-shk-boxes-row' style='--cap:" + maxCapacity + ";'>" + (boxesHtml || "<span style='color:#94a3b8;font-size:12px;'>пусто</span>") + "</div>"
             + "</div>";
     }
+
+    // "+N" tile standing in for boxes that didn't fit the row's slot
+    // budget -- looks like a box tile (same size/grid cell) but carries a
+    // count instead of a specific box.
+    function moreTileHtml(count) {
+        return "<div class='no-shk-box no-shk-box-more'><span class='no-shk-box-more-count'>+" + count + "</span></div>";
+    }
+
+    const BOX_TILE_W = 64;
+    const BOX_TILE_GAP = 8;
+    // How many .no-shk-box tiles (width + gap) fit in a given pixel width.
+    function computeSlots(availableWidthPx) {
+        if (!availableWidthPx || availableWidthPx <= 0) return 1;
+        return Math.max(1, Math.floor((availableWidthPx + BOX_TILE_GAP) / (BOX_TILE_W + BOX_TILE_GAP)));
+    }
+
+    // Renders up to `slots` tiles; if there are more boxes than that,
+    // shows (slots - 1) real tiles + one "+N" tile for the rest, so the
+    // row never exceeds its slot budget regardless of how many boxes
+    // actually exist.
+    function slotRowHtml(boxes, slots, tileHtmlFn) {
+        if (!boxes.length) return "<span style='color:#94a3b8;font-size:12px;'>пусто</span>";
+        if (boxes.length <= slots) return boxes.map(tileHtmlFn).join("");
+        const shown = Math.max(0, slots - 1);
+        const rest = boxes.length - shown;
+        return boxes.slice(0, shown).map(tileHtmlFn).join("") + moreTileHtml(rest);
+    }
+
+    // Вне ОПП always budgets exactly 3 slots (fixed, no measurement
+    // needed -- its container is flex:0 0 auto, sized by this content).
+    const OUTSIDE_SLOTS = 3;
 
     function renderZoneView() {
         const wrap = document.getElementById("displayZoneWrap");
         if (!wrap) return;
 
-        const outsideHtml = "<div class='no-shk-floor'>"
+        const topRowHtml = "<div class='no-shk-top-row'>"
+            + "<div class='no-shk-floor no-shk-floor-outside'>"
             + "<p class='no-shk-floor-title'>Вне ОПП" + (outsideBoxes.length ? " (" + outsideBoxes.length + ")" : "") + "</p>"
-            + "<div class='no-shk-boxes-row'>"
-            + (outsideBoxes.length
-                ? outsideBoxes.map(outsideBoxTileHtml).join("")
-                : "<span style='color:#94a3b8;font-size:12px;'>пусто</span>")
-            + "</div></div>";
-
-        const floorHtml = "<div class='no-shk-floor'>"
+            + "<div class='no-shk-boxes-row'>" + slotRowHtml(outsideBoxes, OUTSIDE_SLOTS, outsideBoxTileHtml) + "</div>"
+            + "</div>"
+            + "<div class='no-shk-floor no-shk-floor-onfloor'>"
             + "<p class='no-shk-floor-title'>На полу" + (floorBoxes.length ? " (" + floorBoxes.length + ")" : "") + "</p>"
-            + "<div class='no-shk-boxes-row'>"
-            + (floorBoxes.length
-                ? floorBoxes.map(boxTileHtml).join("")
-                : "<span style='color:#94a3b8;font-size:12px;'>пусто</span>")
-            + "</div></div>";
+            + "<div class='no-shk-boxes-row' id='floorBoxesRow'></div>"
+            + "</div>"
+            + "</div>";
 
         const racksHtml = racks.length
             ? "<div class='no-shk-racks-row'>" + racks.map((rack) => {
                 const shelves = rack.wms_no_shk_shelves || [];
-                const width = rackFrameWidthPx(rack);
+                const maxCapacity = rackMaxCapacity(rack);
                 const shelvesHtml = shelves.length
-                    ? "<div class='no-shk-rack-frame' style='width:" + width + "px;'>" + shelvesTopToBottom(rack).map(shelfSkeuoHtml).join("") + "</div>"
+                    ? "<div class='no-shk-rack-frame'>" + shelvesTopToBottom(rack).map((shelf) => shelfSkeuoHtml(shelf, maxCapacity)).join("") + "</div>"
                     : "<p style='color:#64748b;font-size:13px;'>Полок пока нет.</p>";
                 return "<div class='no-shk-rack'>"
                     + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
@@ -129,7 +157,18 @@
             }).join("") + "</div>"
             : "";
 
-        wrap.innerHTML = outsideHtml + floorHtml + racksHtml;
+        wrap.innerHTML = topRowHtml + racksHtml;
+
+        // На полу has no fixed slot count -- it takes whatever width is
+        // left after Вне ОПП in the same row (flex:1 in CSS). Measure that
+        // now that the row's widths have settled, then fill it in --
+        // reading clientWidth here forces the layout pass, no need to
+        // wait a frame.
+        const floorRow = document.getElementById("floorBoxesRow");
+        if (floorRow) {
+            const slots = computeSlots(floorRow.clientWidth);
+            floorRow.innerHTML = slotRowHtml(floorBoxes, slots, boxTileHtml);
+        }
 
         const nextSeen = new Set();
         outsideBoxes.forEach((box) => nextSeen.add(box.id));

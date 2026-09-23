@@ -9,78 +9,146 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <style>
-    /* ---------- Page shell: unattended kiosk, no scrollbars/interaction ---------- */
-    html, body { height: 100%; overflow: hidden; }
+    /* ---------- Page shell: unattended kiosk, nothing to scroll with, so
+       nothing on this page ever scrolls -- everything divides the
+       viewport's actual height/width via flex, instead of a fixed CSS
+       "no_shk_zone.js" pixel layout that would just overflow off-screen. ---------- */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
     body {
-        margin: 0;
         display: flex;
         flex-direction: column;
         background: linear-gradient(135deg, #ffffff 0%, #f4f0ff 58%, #ebe5ff 100%);
     }
     .display-header {
         flex: none;
-        padding: 28px 40px 10px;
+        padding: 16px 28px 4px;
     }
     .display-header h1 {
         margin: 0;
         color: var(--accent-dark);
-        font-size: clamp(24px, 3vw, 34px);
+        font-size: clamp(18px, 2.2vw, 26px);
         letter-spacing: -.03em;
     }
     .display-zone {
         flex: 1 1 auto;
         min-height: 0;
-        overflow-y: auto;
-        padding: 10px 40px 40px;
+        overflow: hidden;
+        padding: 4px 28px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
     }
-    .display-zone::-webkit-scrollbar { width: 8px; }
-    .display-zone::-webkit-scrollbar-thumb { background: rgba(98,60,234,.26); border-radius: 999px; }
-    .display-zone::-webkit-scrollbar-track { background: transparent; }
 
-    /* ---------- Below: same "Без ШК" zone classes as tasks.html/no_shk_zone.js
-       (renderZoneView), copied verbatim so this page looks identical --
-       this file never edits no_shk_zone.js, it's a separate read-only
-       renderer built from the same field data. ---------- */
+    /* ---------- Below: same "Без ШК" zone classes/markup as
+       tasks.html/no_shk_zone.js's renderZoneView(), same data -- but laid
+       out to fill a fixed viewport instead of growing/wrapping/scrolling:
+       racks are always one row (equal-width columns), shelves within a
+       rack always share the rack's height equally regardless of how many
+       boxes are on each one, and "Вне ОПП"/"На полу" sit side by side in
+       a single row instead of stacked. This file never edits
+       no_shk_zone.js -- it's a separate read-only renderer. ---------- */
+
+    /* Вне ОПП (fixed-width, sized to exactly 3 tiles by its own content)
+       and На полу (flex:1, takes whatever width is left) in one row. */
+    .no-shk-top-row {
+        display: flex;
+        gap: 16px;
+        align-items: stretch;
+        flex: none;
+    }
+    .no-shk-floor {
+        border: 2px dashed #cbd5e1;
+        border-radius: 8px;
+        padding: 8px 14px;
+    }
+    .no-shk-floor-outside { flex: 0 0 auto; }
+    .no-shk-floor-onfloor { flex: 1 1 auto; min-width: 0; }
+    .no-shk-floor-title {
+        font-weight: 700;
+        font-size: 12px;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin: 0 0 8px;
+    }
+    .no-shk-boxes-row {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow: hidden;
+        gap: 8px;
+    }
+
+    /* Racks: always exactly one row, every rack an equal share of the
+       width; each rack's shelves equally share ITS height, so a shelf's
+       size never depends on whether it happens to hold a box. */
     .no-shk-racks-row {
         display: flex;
-        flex-wrap: wrap;
-        gap: 24px;
-        align-items: flex-start;
+        flex-wrap: nowrap;
+        gap: 14px;
+        flex: 1 1 auto;
+        min-height: 0;
     }
-    .no-shk-rack { margin-bottom: 0; }
+    .no-shk-rack {
+        flex: 1 1 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
     .no-shk-rack-title {
+        flex: none;
         font-weight: 700;
-        font-size: 14px;
+        font-size: 13px;
         color: #4c1d95;
-        margin: 0 0 8px;
+        margin: 0 0 6px;
         letter-spacing: .01em;
     }
     .no-shk-rack-frame {
+        width: 100%;
         background: #faf9fd;
         border: 3px solid #7c5cf0;
         border-radius: 10px;
         overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
     }
     .no-shk-shelf {
         border-bottom: 2px solid #ded6f7;
-        padding: 10px 12px 12px;
+        padding: 5px 10px 6px;
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
     }
     .no-shk-rack-frame .no-shk-shelf:last-child { border-bottom: none; }
     .no-shk-shelf-head {
+        flex: none;
         display: flex;
         justify-content: space-between;
         align-items: baseline;
-        margin-bottom: 8px;
-        font-size: 12px;
+        margin-bottom: 4px;
+        font-size: 11px;
         color: #64748b;
         font-weight: 600;
     }
     .no-shk-shelf-fill.is-full { color: #b91c1c; font-weight: 700; }
-    .no-shk-boxes-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
+    /* Only inside a shelf: boxes-row becomes a grid with one column per
+       slot in the RACK's widest shelf (--cap, set inline per rack so
+       every shelf in it lines up), filling the shelf's full height --
+       this is what keeps every shelf the same height whether it's full,
+       partly full, or empty ("пусто" still occupies the same grid area). */
+    .no-shk-shelf .no-shk-boxes-row {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: repeat(var(--cap, 1), 1fr);
+        gap: 6px;
+        align-items: stretch;
     }
+    .no-shk-shelf .no-shk-boxes-row > span { align-self: center; }
+
     @keyframes no-shk-box-in {
         from { opacity: 0; transform: scale(.85) translateY(4px); }
         to { opacity: 1; transform: scale(1) translateY(0); }
@@ -93,6 +161,7 @@
     }
     .no-shk-box {
         position: relative;
+        flex: none;
         width: 64px;
         height: 60px;
         background: #eceef3;
@@ -107,6 +176,9 @@
         transition: background .12s ease, transform .12s ease, border-color .12s ease;
         animation: no-shk-box-in .3s ease-out both;
     }
+    /* Inside a shelf's grid, a box fills its own cell instead of the
+       fixed 64x60 size used in the Вне ОПП/На полу row. */
+    .no-shk-shelf .no-shk-box { width: auto; height: 100%; min-height: 0; }
     .no-shk-box-number { position: relative; z-index: 1; font-size: 12px; font-weight: 700; color: #334155; }
     .no-shk-box-date {
         position: relative;
@@ -131,20 +203,15 @@
     .no-shk-box.area-sort::before { background: #facc15; }
     .no-shk-box.area-repack::before { background: #a78bfa; }
     .no-shk-box.is-new { animation: no-shk-box-pop .55s cubic-bezier(.34,1.56,.64,1) both; }
-    .no-shk-floor {
-        border: 2px dashed #cbd5e1;
-        border-radius: 8px;
-        padding: 12px 14px;
-        margin-bottom: 24px;
+
+    /* "+N" summary tile standing in for boxes that didn't fit their row's
+       slot budget (3 for Вне ОПП, however many fit for На полу). */
+    .no-shk-box-more {
+        background: #ede9fe;
+        border: 1.5px dashed #a78bfa;
     }
-    .no-shk-floor-title {
-        font-weight: 700;
-        font-size: 13px;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: .04em;
-        margin: 0 0 10px;
-    }
+    .no-shk-box-more::before { content: none; }
+    .no-shk-box-more-count { font-size: 15px; font-weight: 800; color: #5b21b6; }
 
     /* ---------- QR overlay: shown on a "show_qr" broadcast from the mobile
        form's "Закрыть короб" button. Hidden by default (opacity+pointer-
