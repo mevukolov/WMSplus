@@ -1370,7 +1370,7 @@
         .buffer-transfer-chip:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
         .buffer-transfer-chip:active { transform: scale(.9); }
         .buffer-transfer-chip.is-selected { background: rgba(124,58,237,.1); }
-        .buffer-calc-result { margin-top: 14px; }
+        .buffer-calc-result { flex: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
         .buffer-calc-result textarea { width: 100%; box-sizing: border-box; height: 76px; resize: vertical; border-radius: 14px; padding: 10px 12px; font-size: 12px; line-height: 1.4; }
         .buffer-calc-actions { display: flex; gap: 8px; margin-top: 8px; }
         .buffer-tile.is-entering-item { animation: sectionItemPop .4s cubic-bezier(.34,1.56,.64,1) both; }
@@ -2247,12 +2247,12 @@
                 </div>
             </div>
             <div id="bufferCalculatorGroups" class="buffer-calc-groups" style="margin-top:12px;"></div>
-            <div class="buffer-calc-result">
-                <textarea id="bufferCalculatorResult" class="input" readonly></textarea>
-                <div class="buffer-calc-actions">
-                    <button id="sendBufferToSearch" class="btn btn-rect" type="button">Отправить на поиск</button>
-                    <button id="downloadBufferCalculator" class="btn btn-outline" type="button">Сохранить .txt</button>
-                </div>
+        </div>
+        <div class="buffer-calc-result">
+            <textarea id="bufferCalculatorResult" class="input" readonly></textarea>
+            <div class="buffer-calc-actions">
+                <button id="sendBufferToSearch" class="btn btn-rect" type="button">Отправить на поиск</button>
+                <button id="downloadBufferCalculator" class="btn btn-outline" type="button">Сохранить .txt</button>
             </div>
         </div>
     </div>
