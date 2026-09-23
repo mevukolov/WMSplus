@@ -201,6 +201,7 @@
         seenBoxIds = nextSeen;
 
         checkQrOverlayShouldHide();
+        void loadActiveInventorySession();
     }
 
     async function loadZone() {
@@ -281,6 +282,95 @@
         if (!stillOutside) hideQrOverlay();
     }
 
+    // ---------- Inventory mode: driven entirely by wms_no_shk_inventory_sessions.
+    // Reuses the existing racks-row rendering (renderZoneView already
+    // builds it every loadZone() cycle) -- inventory mode only overlays
+    // step instructions/QR on top and adds is-audited/is-pending classes
+    // to the already-rendered .no-shk-rack elements, it never replaces the
+    // racks markup itself. ----------
+    let activeSession = null;
+    let auditedShelfIdsThisSession = new Set();
+
+    async function loadActiveInventorySession() {
+        const { data } = await supabaseClient
+            .from("wms_no_shk_inventory_sessions")
+            .select("id,status,step,current_shelf_id,started_at,finished_at,last_activity_at")
+            .in("status", ["waiting_for_phone", "in_progress"])
+            .order("started_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        activeSession = data || null;
+        if (activeSession) {
+            const { data: auditRows } = await supabaseClient
+                .from("wms_no_shk_inventory_shelf_audits")
+                .select("shelf_id,finished_at")
+                .eq("session_id", activeSession.id)
+                .not("finished_at", "is", null);
+            auditedShelfIdsThisSession = new Set((auditRows || []).map((r) => r.shelf_id));
+        } else {
+            auditedShelfIdsThisSession = new Set();
+        }
+        renderInventoryOverlay();
+        applyRackAuditColors();
+    }
+
+    function renderInventoryOverlay() {
+        const overlay = document.getElementById("inventoryOverlay");
+        const stepText = document.getElementById("inventoryStepText");
+        const qrBox = document.getElementById("inventoryQrBox");
+        const arrow = document.getElementById("inventoryArrow");
+        if (!overlay) return;
+
+        // Note: "completed" is deliberately NOT included in this early exit --
+        // Task 8 adds a step==="completed" branch below that needs the
+        // overlay to stay visible for the confetti/checkmark, then hides it
+        // itself on a timeout. Only "no session" and "abandoned" close
+        // immediately here.
+        if (!activeSession || activeSession.status === "abandoned") {
+            overlay.classList.remove("is-visible");
+            overlay.setAttribute("aria-hidden", "true");
+            return;
+        }
+
+        overlay.classList.add("is-visible");
+        overlay.setAttribute("aria-hidden", "false");
+        arrow.style.display = "none";
+        qrBox.innerHTML = "";
+
+        if (activeSession.step === "pairing") {
+            stepText.textContent = "Отсканируйте QR телефоном";
+            new QRCode(qrBox, { text: "WMSP.INV." + activeSession.id, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+        } else if (activeSession.step === "scan_shelf") {
+            stepText.textContent = auditedShelfIdsThisSession.size > 0 ? "Отсканируйте следующую полку" : "Отсканируйте полку";
+        } else if (activeSession.step === "scan_boxes") {
+            stepText.textContent = "Отсканируйте все короба на полке слева направо";
+            arrow.style.display = "";
+        }
+        // Task 8 inserts a step==="completed" branch here (before the
+        // function's closing brace), handling the confetti/checkmark/elapsed
+        // time and hiding the overlay itself after a pause.
+    }
+
+    // Adds is-audited (green) to every .no-shk-rack whose shelves are ALL
+    // in auditedShelfIdsThisSession, is-pending (red) otherwise. Runs after
+    // every zone re-render (loadZone -> renderZoneView already calls this
+    // at the end, same place checkQrOverlayShouldHide() is called) so rack
+    // coloring never lags behind a fresh renderZoneView() innerHTML swap.
+    function applyRackAuditColors() {
+        if (!activeSession) {
+            document.querySelectorAll(".no-shk-rack").forEach((el) => el.classList.remove("is-audited", "is-pending"));
+            return;
+        }
+        document.querySelectorAll(".no-shk-rack").forEach((rackEl, i) => {
+            const rack = racks[i];
+            if (!rack) return;
+            const shelves = rack.wms_no_shk_shelves || [];
+            const allDone = shelves.length > 0 && shelves.every((s) => auditedShelfIdsThisSession.has(s.id));
+            rackEl.classList.toggle("is-audited", allDone);
+            rackEl.classList.toggle("is-pending", !allDone);
+        });
+    }
+
     // ---------- Night mode (20:30-07:30): nobody's on the floor overnight,
     // but the monitor stays on, so the page goes to a plain black screen
     // instead -- toggled purely by CSS class (body.is-night), no content
@@ -307,6 +397,23 @@
         .channel("shift_close_display")
         .on("broadcast", { event: "show_qr" }, (message) => { showQrOverlay(message.payload); })
         .subscribe();
+
+    supabaseClient
+        .channel("inventory_session_changes")
+        .on("postgres_changes", { event: "*", schema: "public", table: "wms_no_shk_inventory_sessions" }, () => { void loadActiveInventorySession(); })
+        .on("postgres_changes", { event: "*", schema: "public", table: "wms_no_shk_inventory_shelf_audits" }, () => { void loadActiveInventorySession(); })
+        .subscribe();
+
+    void loadActiveInventorySession();
+
+    const INVENTORY_ABANDON_MS = 30 * 60 * 1000;
+    setInterval(async () => {
+        if (!activeSession) return;
+        const staleMs = Date.now() - new Date(activeSession.last_activity_at).getTime();
+        if (staleMs > INVENTORY_ABANDON_MS) {
+            await supabaseClient.from("wms_no_shk_inventory_sessions").update({ status: "abandoned" }).eq("id", activeSession.id);
+        }
+    }, 20000);
 
     void loadZone();
     // Safety net alongside Realtime -- same reasoning as print-bridge's own

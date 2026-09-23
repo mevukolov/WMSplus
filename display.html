@@ -271,6 +271,15 @@
         font-size: 14px;
         color: #94a3b8;
     }
+
+    /* ---------- Inventory-mode rack coloring: applied to the existing
+       .no-shk-rack elements (rendered by renderZoneView(), never replaced
+       by inventory mode) while a wms_no_shk_inventory_sessions row is
+       active. ---------- */
+    .no-shk-rack.is-audited .no-shk-rack-title { color: #15803d; }
+    .no-shk-rack.is-audited .no-shk-rack-frame { border-color: #22c55e; }
+    .no-shk-rack.is-pending .no-shk-rack-title { color: #b91c1c; }
+    .no-shk-rack.is-pending .no-shk-rack-frame { border-color: #ef4444; }
 </style>
 </head>
 <body>
@@ -286,6 +295,14 @@
         <p class="qr-card-context" id="qrOverlayContext"></p>
         <div id="qrOverlayCode" class="qr-code-box"></div>
         <p class="qr-card-hint">Отсканируйте телефоном</p>
+    </div>
+</div>
+
+<div id="inventoryOverlay" class="qr-overlay" aria-hidden="true">
+    <div class="qr-card" id="inventoryCard">
+        <p class="qr-card-title" id="inventoryStepText">Инвентаризация «Без ШК»</p>
+        <div id="inventoryQrBox" class="qr-code-box"></div>
+        <div id="inventoryArrow" style="display:none;font-size:64px;color:var(--accent);margin:8px 0;">→</div>
     </div>
 </div>
 
