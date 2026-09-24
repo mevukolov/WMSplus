@@ -537,6 +537,30 @@
         void startShelfScan();
     }
 
+    // ---------- Completion ----------
+    async function showCompletion() {
+        stepButtons.innerHTML = "";
+        video.style.display = "none";
+        const { data, error } = await supabaseClient.from("wms_no_shk_inventory_sessions").select("started_at,finished_at").eq("id", activeSession.id).single();
+        stepTitle.textContent = "✓ Инвентаризация завершена";
+        if (error || !data) {
+            // The session itself already completed successfully (finishShelf()
+            // wouldn't have called showCompletion() otherwise) -- this is just
+            // the follow-up read for the elapsed-time display failing, so fall
+            // back to a generic message instead of crashing on
+            // `new Date(undefined)` below.
+            stepMsg.textContent = "Готово!";
+        } else {
+            const elapsedMs = new Date(data.finished_at).getTime() - new Date(data.started_at).getTime();
+            const totalSec = Math.max(0, Math.round(elapsedMs / 1000));
+            const hh = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+            const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+            const ss = String(totalSec % 60).padStart(2, "0");
+            stepMsg.textContent = "Время: " + hh + ":" + mm + ":" + ss;
+        }
+        setTimeout(() => { window.location.href = "mobile-inventory.html"; }, 3000);
+    }
+
     // Recovers a phone left open on a session that got marked abandoned
     // (by display.js's own 30-minute staleness check, or by this same
     // check running on ANOTHER idle phone) -- whichever side notices

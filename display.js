@@ -234,11 +234,30 @@
     let qrOverlayHideTimer = null;
     let qrOverlayBoxNumber = null;
 
+    // Mutual exclusion with #inventoryOverlay (both share the .qr-overlay
+    // class/z-index -- see hideQrOverlay()'s own call into
+    // renderInventoryOverlay-triggered hiding for the reverse direction).
+    // Deliberately NOT hideQrOverlay-style state-clearing here: the
+    // inventory overlay's own visibility is fully owned by
+    // renderInventoryOverlay()/loadActiveInventorySession(), which will
+    // put it right back up on its own next tick if the session is still
+    // active -- this just gets it out of the way immediately so it can't
+    // render on top of (or under) the print-QR card.
+    function hideInventoryOverlayIfVisible() {
+        const invOverlay = document.getElementById("inventoryOverlay");
+        if (invOverlay && invOverlay.classList.contains("is-visible")) {
+            invOverlay.classList.remove("is-visible");
+            invOverlay.setAttribute("aria-hidden", "true");
+        }
+    }
+
     function showQrOverlay(payload) {
         const overlay = document.getElementById("qrOverlay");
         const context = document.getElementById("qrOverlayContext");
         const codeBox = document.getElementById("qrOverlayCode");
         if (!overlay || !codeBox) return;
+
+        hideInventoryOverlayIfVisible();
 
         qrOverlayBoxNumber = payload && payload.box_number != null ? payload.box_number : null;
         context.textContent = payload
@@ -290,12 +309,41 @@
     // racks markup itself. ----------
     let activeSession = null;
     let auditedShelfIdsThisSession = new Set();
+    // Guards against re-firing the confetti burst / restarting the 5s
+    // auto-hide timer if a completed session's row re-renders more than
+    // once (abandon-timeout interval tick, another unrelated Realtime
+    // event on this table, etc).
+    let completionShownForSessionId = null;
+    // The pending "hide the completion card" timeout, so a NEW session
+    // starting pairing within 5s of a PREVIOUS session completing can't
+    // have that old timer yank the overlay (and the new session's QR)
+    // out from under it -- see the step==="completed" branch below.
+    let completionHideTimerId = null;
+    // Set once a completed session's card has already run its full
+    // show-then-auto-hide cycle (by the setTimeout in the step==="completed"
+    // branch below). Needed because "completed" rows never get any further
+    // DB update, so this same session keeps being the most-recent row
+    // returned by the query below until a newer session starts -- without
+    // this guard, every later loadActiveInventorySession() call (the 20s
+    // loadZone poll, any unrelated boxes/racks/shelves Realtime event) would
+    // re-enter the "completed" branch and pop the checkmark card back up
+    // (harmlessly re-toggling display, not re-firing confetti thanks to
+    // completionShownForSessionId, but still visibly wrong on an idle kiosk).
+    let completionDismissedForSessionId = null;
 
     async function loadActiveInventorySession() {
         const { data } = await supabaseClient
             .from("wms_no_shk_inventory_sessions")
             .select("id,status,step,current_shelf_id,started_at,finished_at,last_activity_at")
-            .in("status", ["waiting_for_phone", "in_progress"])
+            // "completed" is included (unlike Task 3's original filter) so
+            // the split-second window between finishShelf() flipping a
+            // session's status straight to "completed" and a new session
+            // starting still surfaces this row to renderInventoryOverlay()'s
+            // step==="completed" branch -- otherwise the completion
+            // animation could never render at all: the realtime UPDATE that
+            // announces the session finished is the exact same write that
+            // takes it out of ["waiting_for_phone","in_progress"].
+            .in("status", ["waiting_for_phone", "in_progress", "completed"])
             .order("started_at", { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -314,6 +362,24 @@
         applyRackAuditColors();
     }
 
+    // Minimal CSS-only confetti burst: a handful of absolutely-positioned
+    // divs animated via the confetti-fall keyframe (display.html), appended
+    // to <body> and removed once their fall animation finishes. No new CDN
+    // dependency.
+    function fireConfetti() {
+        const colors = ["#623CEA", "#22c55e", "#facc15", "#ef4444", "#38bdf8"];
+        for (let i = 0; i < 40; i++) {
+            const piece = document.createElement("div");
+            piece.style.cssText = "position:fixed;top:-10px;width:8px;height:8px;z-index:200;pointer-events:none;border-radius:2px;"
+                + "left:" + Math.random() * 100 + "vw;"
+                + "background:" + colors[i % colors.length] + ";"
+                + "animation:confetti-fall " + (1.8 + Math.random()) + "s ease-in forwards;"
+                + "animation-delay:" + (Math.random() * 0.4) + "s;";
+            document.body.appendChild(piece);
+            setTimeout(() => piece.remove(), 3000);
+        }
+    }
+
     function renderInventoryOverlay() {
         const overlay = document.getElementById("inventoryOverlay");
         const stepText = document.getElementById("inventoryStepText");
@@ -322,20 +388,40 @@
         if (!overlay) return;
 
         // Note: "completed" is deliberately NOT included in this early exit --
-        // Task 8 adds a step==="completed" branch below that needs the
-        // overlay to stay visible for the confetti/checkmark, then hides it
-        // itself on a timeout. Only "no session" and "abandoned" close
-        // immediately here.
+        // the step==="completed" branch below needs the overlay to stay
+        // visible for the confetti/checkmark, then hides it itself on a
+        // timeout. Only "no session" and "abandoned" close immediately here.
         if (!activeSession || activeSession.status === "abandoned") {
             overlay.classList.remove("is-visible");
             overlay.setAttribute("aria-hidden", "true");
             return;
         }
 
+        // This exact completed session already ran its full show-then-hide
+        // cycle (see the setTimeout in the step==="completed" branch below)
+        // -- since a "completed" row never updates again, it would otherwise
+        // keep being the most-recent session on every later poll/Realtime
+        // tick and keep popping the checkmark card back up. Treat it the
+        // same as "no session" from here on, until a newer session exists.
+        if (activeSession.status === "completed" && completionDismissedForSessionId === activeSession.id) {
+            overlay.classList.remove("is-visible");
+            overlay.setAttribute("aria-hidden", "true");
+            return;
+        }
+
+        // About to show inventory-mode content (pairing/scan_shelf/
+        // scan_boxes/completed) -- #qrOverlay and #inventoryOverlay share
+        // the same fixed full-screen .qr-overlay class/z-index, so if the
+        // print-QR overlay happens to be up (someone tapped "Закрыть
+        // короб" on the intake form while this session is active on the
+        // same kiosk), get it out of the way first.
+        hideQrOverlay();
+
         overlay.classList.add("is-visible");
         overlay.setAttribute("aria-hidden", "false");
         arrow.style.display = "none";
         qrBox.innerHTML = "";
+        document.getElementById("inventoryCompleteBlock").style.display = "none";
 
         if (activeSession.step === "pairing") {
             stepText.textContent = "Отсканируйте QR телефоном";
@@ -345,10 +431,38 @@
         } else if (activeSession.step === "scan_boxes") {
             stepText.textContent = "Отсканируйте все короба на полке слева направо";
             arrow.style.display = "";
+        } else if (activeSession.step === "completed") {
+            document.getElementById("inventoryCompleteBlock").style.display = "";
+            stepText.style.display = "none";
+            if (completionShownForSessionId !== activeSession.id) {
+                completionShownForSessionId = activeSession.id;
+                const elapsedMs = new Date(activeSession.finished_at).getTime() - new Date(activeSession.started_at).getTime();
+                const totalSec = Math.max(0, Math.round(elapsedMs / 1000));
+                const hh = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+                const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+                const ss = String(totalSec % 60).padStart(2, "0");
+                document.getElementById("inventoryElapsedText").textContent = hh + ":" + mm + ":" + ss;
+                fireConfetti();
+
+                // Capture this session's own id so the timeout below only
+                // ever acts on ITS session -- if a new session starts
+                // pairing within 5s of this one completing, activeSession
+                // will have moved on by the time this fires, and the stale
+                // timer becomes a no-op instead of hiding the new session's
+                // QR out from under it.
+                const completedSessionId = activeSession.id;
+                clearTimeout(completionHideTimerId);
+                completionHideTimerId = setTimeout(() => {
+                    completionHideTimerId = null;
+                    completionDismissedForSessionId = completedSessionId;
+                    if (!activeSession || activeSession.id !== completedSessionId) return;
+                    overlay.classList.remove("is-visible");
+                    overlay.setAttribute("aria-hidden", "true");
+                    document.getElementById("inventoryCompleteBlock").style.display = "none";
+                    stepText.style.display = "";
+                }, 5000);
+            }
         }
-        // Task 8 inserts a step==="completed" branch here (before the
-        // function's closing brace), handling the confetti/checkmark/elapsed
-        // time and hiding the overlay itself after a pause.
     }
 
     // Adds is-audited (green) to every .no-shk-rack whose shelves are ALL
