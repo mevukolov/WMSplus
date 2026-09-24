@@ -330,6 +330,25 @@
     // (harmlessly re-toggling display, not re-firing confetti thanks to
     // completionShownForSessionId, but still visibly wrong on an idle kiosk).
     let completionDismissedForSessionId = null;
+    // Signature ("<session id>|<step>") of the inventory content last
+    // rendered, so renderInventoryOverlay() can tell a GENUINE transition
+    // (new session, or a step change on the same session) apart from a
+    // redundant re-render of content that hasn't actually changed. Needed
+    // because renderInventoryOverlay() re-runs far more often than the
+    // content it shows actually changes -- any Realtime event on
+    // wms_no_shk_inventory_sessions/_shelf_audits (including
+    // last_activity_at bumping on every single box scan) or the 20s
+    // loadZone() poll re-invokes it even when nothing about the current
+    // step is different. Only a genuine transition should be allowed to
+    // steal the screen back from #qrOverlay if it happens to be up (see
+    // the signature check below) -- checking #qrOverlay's own visibility
+    // alone is not enough: the moment #qrOverlay takes over, it hides
+    // #inventoryOverlay too (see hideInventoryOverlayIfVisible(), called
+    // from showQrOverlay()), so #inventoryOverlay's OWN visibility looks
+    // like "was hidden" on every subsequent re-render regardless -- only
+    // this signature reliably distinguishes "genuinely new" from "same
+    // step, re-rendered again".
+    let lastRenderedInventorySignature = null;
 
     async function loadActiveInventorySession() {
         const { data } = await supabaseClient
@@ -385,6 +404,7 @@
         const stepText = document.getElementById("inventoryStepText");
         const qrBox = document.getElementById("inventoryQrBox");
         const arrow = document.getElementById("inventoryArrow");
+        const completeBlock = document.getElementById("inventoryCompleteBlock");
         if (!overlay) return;
 
         // Note: "completed" is deliberately NOT included in this early exit --
@@ -409,19 +429,69 @@
             return;
         }
 
-        // About to show inventory-mode content (pairing/scan_shelf/
+        // About to (maybe) show inventory-mode content (pairing/scan_shelf/
         // scan_boxes/completed) -- #qrOverlay and #inventoryOverlay share
-        // the same fixed full-screen .qr-overlay class/z-index, so if the
-        // print-QR overlay happens to be up (someone tapped "Закрыть
-        // короб" on the intake form while this session is active on the
-        // same kiosk), get it out of the way first.
-        hideQrOverlay();
+        // the same fixed full-screen .qr-overlay class/z-index (with
+        // #inventoryOverlay later in the DOM, so it visually wins any tie),
+        // so if the print-QR overlay is up (someone tapped "Закрыть короб"
+        // on the intake form while this session is active on the same
+        // kiosk), it must only be interrupted on a GENUINE transition (a
+        // new session, or a step change on the same session) -- never by a
+        // redundant re-render of the SAME step. renderInventoryOverlay()
+        // re-runs far more often than its content actually changes (any
+        // Realtime event on the sessions/shelf_audits tables -- including
+        // last_activity_at bumping on every single box scan -- plus the 20s
+        // loadZone() poll), so two things are both needed here, not just
+        // gating the hideQrOverlay() call:
+        //   1. #qrOverlay's own current visibility is NOT by itself a
+        //      reliable "should I take over" signal: the moment it takes
+        //      over, it hides #inventoryOverlay too (see
+        //      hideInventoryOverlayIfVisible(), called from
+        //      showQrOverlay()), so #inventoryOverlay's own visibility
+        //      looks like "was hidden" on every subsequent re-render
+        //      regardless of whether anything genuinely changed.
+        //   2. Even skipping the hideQrOverlay() call is not enough on its
+        //      own -- the code below this still unconditionally does
+        //      `overlay.classList.add("is-visible")` for #inventoryOverlay,
+        //      which (same z-index, later in the DOM) visually covers
+        //      #qrOverlay regardless of whether #qrOverlay itself was ever
+        //      told to hide. So when the print overlay currently owns the
+        //      screen and nothing inventory-side has genuinely changed,
+        //      this function must return WITHOUT touching #inventoryOverlay
+        //      at all, leaving #qrOverlay as the sole visible overlay.
+        // The moment #qrOverlay clears on its own (its own
+        // QR_OVERLAY_TIMEOUT_MS, or checkQrOverlayShouldHide() finding the
+        // box no longer outside), the next re-render (bounded by the same
+        // 20s loadZone() poll/Realtime activity that got us here) finds
+        // qrOverlayVisible false and falls through normally, so the
+        // inventory overlay reliably reclaims the screen -- self-healing,
+        // same reasoning as this file's other poll-plus-Realtime paths.
+        const inventorySignature = activeSession.id + "|" + activeSession.step;
+        const isGenuineTransition = inventorySignature !== lastRenderedInventorySignature;
+        lastRenderedInventorySignature = inventorySignature;
+        const qrOverlayVisible = document.getElementById("qrOverlay").classList.contains("is-visible");
+        if (qrOverlayVisible && !isGenuineTransition) {
+            return; // print overlay owns the screen, nothing changed -- leave it alone
+        }
+        if (qrOverlayVisible) {
+            hideQrOverlay();
+        }
 
         overlay.classList.add("is-visible");
         overlay.setAttribute("aria-hidden", "false");
         arrow.style.display = "none";
         qrBox.innerHTML = "";
-        document.getElementById("inventoryCompleteBlock").style.display = "none";
+        completeBlock.style.display = "none";
+        // Unconditional reset (like arrow/qrBox/completeBlock above) --
+        // without this, a session that "overtakes" a stale completion
+        // timer (a new session starts pairing within 5s of a PREVIOUS
+        // session completing) would stay stuck with stepText hidden
+        // forever: the step==="completed" branch below hides it, but the
+        // ONLY place that un-hides it is inside the 5s timeout's own
+        // callback, guarded on activeSession still being THAT completed
+        // session -- which is false once a newer session has taken over,
+        // so that guard returns early and never reaches the reset.
+        stepText.style.display = "";
 
         if (activeSession.step === "pairing") {
             stepText.textContent = "Отсканируйте QR телефоном";
@@ -432,7 +502,7 @@
             stepText.textContent = "Отсканируйте все короба на полке слева направо";
             arrow.style.display = "";
         } else if (activeSession.step === "completed") {
-            document.getElementById("inventoryCompleteBlock").style.display = "";
+            completeBlock.style.display = "";
             stepText.style.display = "none";
             if (completionShownForSessionId !== activeSession.id) {
                 completionShownForSessionId = activeSession.id;
@@ -458,7 +528,7 @@
                     if (!activeSession || activeSession.id !== completedSessionId) return;
                     overlay.classList.remove("is-visible");
                     overlay.setAttribute("aria-hidden", "true");
-                    document.getElementById("inventoryCompleteBlock").style.display = "none";
+                    completeBlock.style.display = "none";
                     stepText.style.display = "";
                 }, 5000);
             }
