@@ -229,11 +229,21 @@
         const finishBtn = document.createElement("button");
         finishBtn.className = "btn";
         finishBtn.textContent = finishLabel;
-        finishBtn.addEventListener("click", () => void finishShelf());
+        let missingBtn = null;
+        finishBtn.addEventListener("click", () => {
+            // Disable synchronously, before any await, so a fast double-tap
+            // can't re-enter finishShelf() while the first call is still in
+            // flight (which would insert duplicate not_found rows and could
+            // race the session-completion check) -- same disable-on-click
+            // guard selectMissingStickerBox's caller uses below.
+            finishBtn.disabled = true;
+            if (missingBtn) missingBtn.disabled = true;
+            void finishShelf();
+        });
         stepButtons.appendChild(finishBtn);
 
         if (scannedCount < shelf.capacity) {
-            const missingBtn = document.createElement("button");
+            missingBtn = document.createElement("button");
             missingBtn.className = "btn btn-outline";
             missingBtn.textContent = "Короб без наклейки";
             missingBtn.addEventListener("click", () => void openMissingStickerList());
@@ -438,6 +448,64 @@
             .eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId).eq("result", "missing_sticker");
         if (error) console.error("Failed to count missing_sticker results", error);
         return count || 0;
+    }
+
+    // ---------- Finishing a shelf ----------
+    async function finishShelf() {
+        stopScanner();
+        const shelf = activeSession.shelf;
+
+        // Boxes the DB currently says are on this shelf but weren't
+        // matched (found or missing_sticker) during this pass -> not_found.
+        const { data: dbBoxesHere, error: dbBoxesHereError } = await supabaseClient
+            .from("wms_no_shk_boxes")
+            .select("id")
+            .eq("shelf_id", shelf.id);
+        if (dbBoxesHereError) { stepMsg.textContent = "Ошибка: " + dbBoxesHereError.message; return; }
+        const { data: accountedFor, error: accountedForError } = await supabaseClient
+            .from("wms_no_shk_inventory_box_results")
+            .select("box_id")
+            .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
+        if (accountedForError) { stepMsg.textContent = "Ошибка: " + accountedForError.message; return; }
+        const accountedIds = new Set((accountedFor || []).map((r) => r.box_id));
+        const notFound = (dbBoxesHere || []).filter((b) => !accountedIds.has(b.id));
+        if (notFound.length) {
+            const { error: notFoundInsertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert(
+                notFound.map((b) => ({ session_id: activeSession.id, shelf_id: shelf.id, box_id: b.id, result: "not_found" }))
+            );
+            if (notFoundInsertError) { stepMsg.textContent = "Ошибка: " + notFoundInsertError.message; return; }
+        }
+
+        const { error: auditFinishError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
+            .update({ finished_at: new Date().toISOString(), boxes_not_found_count: notFound.length })
+            .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
+        if (auditFinishError) { stepMsg.textContent = "Ошибка: " + auditFinishError.message; return; }
+
+        const { count: totalShelves, error: totalShelvesError } = await supabaseClient
+            .from("wms_no_shk_shelves")
+            .select("id", { count: "exact", head: true });
+        if (totalShelvesError) { stepMsg.textContent = "Ошибка: " + totalShelvesError.message; return; }
+        const { data: finishedRows, error: finishedRowsError } = await supabaseClient
+            .from("wms_no_shk_inventory_shelf_audits")
+            .select("shelf_id")
+            .eq("session_id", activeSession.id)
+            .not("finished_at", "is", null);
+        if (finishedRowsError) { stepMsg.textContent = "Ошибка: " + finishedRowsError.message; return; }
+        const finishedCount = new Set((finishedRows || []).map((r) => r.shelf_id)).size;
+
+        if (totalShelves != null && finishedCount >= totalShelves) {
+            const { error: completeSessionError } = await supabaseClient
+                .from("wms_no_shk_inventory_sessions")
+                .update({ status: "completed", step: "completed", finished_at: new Date().toISOString(), last_activity_at: new Date().toISOString() })
+                .eq("id", activeSession.id);
+            if (completeSessionError) { stepMsg.textContent = "Ошибка: " + completeSessionError.message; return; }
+            void showCompletion();
+            return;
+        }
+
+        activeSession.shelfId = null;
+        activeSession.shelf = null;
+        void startShelfScan();
     }
 
     // Recovers a phone left open on a session that got marked abandoned
