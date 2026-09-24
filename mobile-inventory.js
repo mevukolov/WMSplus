@@ -32,6 +32,13 @@
     let activeSession = null;
     let scanStream = null;
     let scanRafId = null;
+    // Tracks the currently-rendered shelf-step buttons so finishShelf()'s
+    // error paths can re-enable them -- they were disabled synchronously
+    // by renderShelfButtons' click handler (the re-entrancy guard) before
+    // finishShelf() ran, and a failure must leave the worker able to
+    // retry rather than stuck with two dead buttons.
+    let shelfFinishBtn = null;
+    let shelfMissingBtn = null;
 
     // ---------- Reusable camera scanner (shelf codes here, box codes in
     // Task 6, pairing code below) -- mirrors intake.js's
@@ -249,6 +256,11 @@
             missingBtn.addEventListener("click", () => void openMissingStickerList());
             stepButtons.appendChild(missingBtn);
         }
+
+        // Recorded so finishShelf()'s error paths can re-enable exactly
+        // these buttons (see the module-level declaration above).
+        shelfFinishBtn = finishBtn;
+        shelfMissingBtn = missingBtn;
     }
 
     async function startBoxScan(shelf) {
@@ -451,6 +463,17 @@
     }
 
     // ---------- Finishing a shelf ----------
+    // Re-enables the shelf-step buttons on an error return below -- they
+    // were disabled synchronously by renderShelfButtons' click handler
+    // (the re-entrancy guard) before finishShelf() ran, so a failure here
+    // must give the worker a way to retry instead of leaving both buttons
+    // permanently dead (same reasoning as selectMissingStickerBox's own
+    // re-enable-on-error, one function away in this same file).
+    function reenableShelfButtons() {
+        if (shelfFinishBtn) shelfFinishBtn.disabled = false;
+        if (shelfMissingBtn) shelfMissingBtn.disabled = false;
+    }
+
     async function finishShelf() {
         stopScanner();
         const shelf = activeSession.shelf;
@@ -461,36 +484,36 @@
             .from("wms_no_shk_boxes")
             .select("id")
             .eq("shelf_id", shelf.id);
-        if (dbBoxesHereError) { stepMsg.textContent = "Ошибка: " + dbBoxesHereError.message; return; }
+        if (dbBoxesHereError) { stepMsg.textContent = "Ошибка: " + dbBoxesHereError.message; reenableShelfButtons(); return; }
         const { data: accountedFor, error: accountedForError } = await supabaseClient
             .from("wms_no_shk_inventory_box_results")
             .select("box_id")
             .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
-        if (accountedForError) { stepMsg.textContent = "Ошибка: " + accountedForError.message; return; }
+        if (accountedForError) { stepMsg.textContent = "Ошибка: " + accountedForError.message; reenableShelfButtons(); return; }
         const accountedIds = new Set((accountedFor || []).map((r) => r.box_id));
         const notFound = (dbBoxesHere || []).filter((b) => !accountedIds.has(b.id));
         if (notFound.length) {
             const { error: notFoundInsertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert(
                 notFound.map((b) => ({ session_id: activeSession.id, shelf_id: shelf.id, box_id: b.id, result: "not_found" }))
             );
-            if (notFoundInsertError) { stepMsg.textContent = "Ошибка: " + notFoundInsertError.message; return; }
+            if (notFoundInsertError) { stepMsg.textContent = "Ошибка: " + notFoundInsertError.message; reenableShelfButtons(); return; }
         }
 
         const { error: auditFinishError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
             .update({ finished_at: new Date().toISOString(), boxes_not_found_count: notFound.length })
             .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
-        if (auditFinishError) { stepMsg.textContent = "Ошибка: " + auditFinishError.message; return; }
+        if (auditFinishError) { stepMsg.textContent = "Ошибка: " + auditFinishError.message; reenableShelfButtons(); return; }
 
         const { count: totalShelves, error: totalShelvesError } = await supabaseClient
             .from("wms_no_shk_shelves")
             .select("id", { count: "exact", head: true });
-        if (totalShelvesError) { stepMsg.textContent = "Ошибка: " + totalShelvesError.message; return; }
+        if (totalShelvesError) { stepMsg.textContent = "Ошибка: " + totalShelvesError.message; reenableShelfButtons(); return; }
         const { data: finishedRows, error: finishedRowsError } = await supabaseClient
             .from("wms_no_shk_inventory_shelf_audits")
             .select("shelf_id")
             .eq("session_id", activeSession.id)
             .not("finished_at", "is", null);
-        if (finishedRowsError) { stepMsg.textContent = "Ошибка: " + finishedRowsError.message; return; }
+        if (finishedRowsError) { stepMsg.textContent = "Ошибка: " + finishedRowsError.message; reenableShelfButtons(); return; }
         const finishedCount = new Set((finishedRows || []).map((r) => r.shelf_id)).size;
 
         if (totalShelves != null && finishedCount >= totalShelves) {
@@ -498,7 +521,13 @@
                 .from("wms_no_shk_inventory_sessions")
                 .update({ status: "completed", step: "completed", finished_at: new Date().toISOString(), last_activity_at: new Date().toISOString() })
                 .eq("id", activeSession.id);
-            if (completeSessionError) { stepMsg.textContent = "Ошибка: " + completeSessionError.message; return; }
+            // The shelf itself is already finished in the DB by this point
+            // (the shelf_audits update above succeeded) -- only the
+            // session-completion update failed, so re-enabling here lets
+            // the worker retry the finish tap, which safely re-runs this
+            // now-idempotent shelf-finish work and tries the completion
+            // update again, rather than being stuck on a dead screen.
+            if (completeSessionError) { stepMsg.textContent = "Ошибка: " + completeSessionError.message; reenableShelfButtons(); return; }
             void showCompletion();
             return;
         }
