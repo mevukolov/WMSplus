@@ -708,6 +708,20 @@
             letter-spacing: .04em;
             margin: 0 0 10px;
         }
+        /* Недостача: boxes an inventory pass expected on a shelf but
+           didn't find -- styled as a problem, not just another storage
+           bucket like Вне ОПП/На полу. */
+        .no-shk-floor-shortage {
+            border-color: #fca5a5;
+            background: rgba(239, 68, 68, .06);
+        }
+        .no-shk-floor-shortage .no-shk-floor-title { color: #b91c1c; }
+        .no-shk-box-shortage .no-shk-box-number,
+        .no-shk-box-shortage .no-shk-box-date {
+            background: rgba(239, 68, 68, .16);
+            color: #991b1b;
+        }
+        .no-shk-box-shortage::before { background: #ef4444; }
         .no-shk-move-log-row {
             animation: no-shk-log-in .22s ease-out both;
         }

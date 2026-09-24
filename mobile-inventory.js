@@ -30,7 +30,7 @@
     // didn't work" until the actual print_jobs row was inspected directly).
     // Bump CLIENT_VERSION here AND version.json's "v" together whenever
     // this file, print-tspl.js, or inventory-dates.js changes.
-    const CLIENT_VERSION = 8;
+    const CLIENT_VERSION = 9;
     setInterval(() => {
         fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
             .then((res) => res.json())
@@ -464,7 +464,10 @@
         // other's result) -- run in parallel rather than sequentially.
         const [{ error: insertError }, { error: boxUpdateError }] = await Promise.all([
             supabaseClient.from("wms_no_shk_inventory_box_results").insert({ session_id: activeSession.id, shelf_id: shelf.id, box_id: box.id, result: "found" }),
-            supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id),
+            // shortage:false -- a box scanned onto a shelf is by definition
+            // no longer missing, even if a PREVIOUS shelf's finishShelf()
+            // had flagged it (see finishShelf() below).
+            supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id, shortage: false }).eq("id", box.id),
         ]);
         if (insertError) { stepMsg.textContent = "Ошибка: " + insertError.message; return; }
         if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
@@ -528,19 +531,32 @@
         const dateInput = document.createElement("input");
         dateInput.type = "date";
         dateInput.className = "field";
-        dateInput.value = new Date().toISOString().slice(0, 10);
+        // Left empty (not defaulted to today) on purpose -- the shift
+        // buttons below only appear once the worker actually picks a date,
+        // via the dateInput 'change' listener below.
         dateInput.style.marginBottom = "10px";
         stepButtons.appendChild(dateInput);
 
+        // Hidden until a date is actually picked -- showing both shift
+        // buttons up front, before the worker has chosen a date, invited
+        // tapping one before the date field was even touched.
         const dayBtn = document.createElement("button");
         dayBtn.className = "btn btn-rect";
         dayBtn.textContent = "Короб День";
+        dayBtn.style.display = "none";
         stepButtons.appendChild(dayBtn);
 
         const nightBtn = document.createElement("button");
         nightBtn.className = "btn btn-rect";
         nightBtn.textContent = "Короб Ночь";
+        nightBtn.style.display = "none";
         stepButtons.appendChild(nightBtn);
+
+        dateInput.addEventListener("change", () => {
+            const show = Boolean(dateInput.value);
+            dayBtn.style.display = show ? "" : "none";
+            nightBtn.style.display = show ? "" : "none";
+        });
 
         function pick(shiftType) {
             if (dayBtn.disabled) return; // both disabled together, checking one covers both
@@ -598,7 +614,7 @@
             session_id: activeSession.id, shelf_id: activeSession.shelfId, box_id: box.id, result: "missing_sticker",
         });
         if (resultInsertError) { stepMsg.textContent = "Ошибка: " + resultInsertError.message; return; }
-        const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: activeSession.shelfId }).eq("id", box.id);
+        const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: activeSession.shelfId, shortage: false }).eq("id", box.id);
         if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
 
         // Reprint this box's own sticker -- same payload shape
@@ -690,10 +706,21 @@
         const accountedIds = new Set((accountedFor || []).map((r) => r.box_id));
         const notFound = (dbBoxesHere || []).filter((b) => !accountedIds.has(b.id));
         if (notFound.length) {
-            const { error: notFoundInsertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert(
-                notFound.map((b) => ({ session_id: activeSession.id, shelf_id: shelf.id, box_id: b.id, result: "not_found" }))
-            );
+            // A box that was supposed to be here but wasn't scanned this
+            // pass no longer belongs to this shelf -- clear shelf_id and
+            // flag it shortage:true so it drops out of the shelf entirely
+            // and surfaces in the display's "Недостача" section instead of
+            // silently still showing up here on the next render. Cleared
+            // again (shortage:false) the moment it's actually found on any
+            // shelf -- see recordFoundBox()/selectMissingStickerBox() above.
+            const [{ error: notFoundInsertError }, { error: shortageUpdateError }] = await Promise.all([
+                supabaseClient.from("wms_no_shk_inventory_box_results").insert(
+                    notFound.map((b) => ({ session_id: activeSession.id, shelf_id: shelf.id, box_id: b.id, result: "not_found" }))
+                ),
+                supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: null, shortage: true }).in("id", notFound.map((b) => b.id)),
+            ]);
             if (notFoundInsertError) { stepMsg.textContent = "Ошибка: " + notFoundInsertError.message; reenableShelfButtons(); return; }
+            if (shortageUpdateError) { stepMsg.textContent = "Ошибка: " + shortageUpdateError.message; reenableShelfButtons(); return; }
         }
 
         const { error: auditFinishError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")

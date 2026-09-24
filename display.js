@@ -26,7 +26,7 @@
     // 24/7 with nobody around to manually reload it, so it's the single
     // most important place for this check. Bump CLIENT_VERSION here AND
     // version.json's "v" together whenever this file changes.
-    const CLIENT_VERSION = 8;
+    const CLIENT_VERSION = 9;
     setInterval(() => {
         fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
             .then((res) => res.json())
@@ -60,6 +60,7 @@
     let racks = [];
     let floorBoxes = [];
     let outsideBoxes = [];
+    let shortageBoxes = [];
     // Same "seen before -> calm fade, new -> bouncy pop" split as
     // no_shk_zone.js, so boxes that just appeared are the ones that catch
     // the eye on an unattended screen.
@@ -82,6 +83,16 @@
         return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;'>"
             + "<span class='no-shk-box-number'>" + escapeHtmlLocal(box.area) + "</span>"
             + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + " · " + box.total_items + " шт.</span>"
+            + "</div>";
+    }
+
+    function shortageBoxTileHtml(box, index) {
+        const isNew = !seenBoxIds.has(box.id);
+        const cls = "no-shk-box no-shk-box-shortage" + (isNew ? " is-new" : "");
+        const delay = Math.min(index, 10) * 30;
+        return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;'>"
+            + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
+            + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span>"
             + "</div>";
     }
 
@@ -168,6 +179,13 @@
         const wrap = document.getElementById("displayZoneWrap");
         if (!wrap) return;
 
+        const shortageHtml = shortageBoxes.length
+            ? "<div class='no-shk-floor no-shk-floor-shortage'>"
+                + "<p class='no-shk-floor-title'>Недостача (" + shortageBoxes.length + ")</p>"
+                + "<div class='no-shk-boxes-row'>" + slotRowHtml(shortageBoxes, OUTSIDE_SLOTS, shortageBoxTileHtml) + "</div>"
+                + "</div>"
+            : "";
+
         const topRowHtml = "<div class='no-shk-top-row'>"
             + "<div class='no-shk-floor no-shk-floor-outside'>"
             + "<p class='no-shk-floor-title'>Вне ОПП" + (outsideBoxes.length ? " (" + outsideBoxes.length + ")" : "") + "</p>"
@@ -177,6 +195,7 @@
             + "<p class='no-shk-floor-title'>На полу" + (floorBoxes.length ? " (" + floorBoxes.length + ")" : "") + "</p>"
             + "<div class='no-shk-boxes-row' id='floorBoxesRow'></div>"
             + "</div>"
+            + shortageHtml
             + "</div>";
 
         const racksHtml = racks.length
@@ -211,6 +230,7 @@
         const nextSeen = new Set();
         outsideBoxes.forEach((box) => nextSeen.add(box.id));
         floorBoxes.forEach((box) => nextSeen.add(box.id));
+        shortageBoxes.forEach((box) => nextSeen.add(box.id));
         racks.forEach((rack) => (rack.wms_no_shk_shelves || []).forEach((shelf) => (shelf.wms_no_shk_boxes || []).forEach((box) => nextSeen.add(box.id))));
         seenBoxIds = nextSeen;
 
@@ -219,7 +239,7 @@
     }
 
     async function loadZone() {
-        const [racksRes, floorRes, outsideRes] = await Promise.all([
+        const [racksRes, floorRes, outsideRes, shortageRes] = await Promise.all([
             supabaseClient
                 .from("wms_no_shk_racks")
                 .select("id,name,rack_number,position,created_at,wms_no_shk_shelves(id,name,shelf_number,capacity,created_at,wms_no_shk_boxes(" + BOX_FIELDS + "))")
@@ -230,16 +250,25 @@
                 .select(BOX_FIELDS)
                 .is("shelf_id", null)
                 .eq("outside_opp", false)
+                // shortage boxes have shelf_id null too, but belong in
+                // their own section below, not mixed into "На полу".
+                .eq("shortage", false)
                 .order("box_number", { ascending: true }),
             supabaseClient
                 .from("wms_no_shk_boxes")
                 .select(BOX_FIELDS)
                 .eq("outside_opp", true)
                 .order("created_at", { ascending: false }),
+            supabaseClient
+                .from("wms_no_shk_boxes")
+                .select(BOX_FIELDS)
+                .eq("shortage", true)
+                .order("box_number", { ascending: true }),
         ]);
         racks = racksRes.error ? [] : (racksRes.data || []);
         floorBoxes = floorRes.error ? [] : (floorRes.data || []);
         outsideBoxes = outsideRes.error ? [] : (outsideRes.data || []);
+        shortageBoxes = shortageRes.error ? [] : (shortageRes.data || []);
         renderZoneView();
     }
 

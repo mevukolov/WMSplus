@@ -96,6 +96,7 @@
     let racks = [];
     let floorBoxes = [];
     let outsideBoxes = [];
+    let shortageBoxes = [];
     // Boxes already rendered once get a calm fade on re-render; a box seen
     // for the first time (just created, or freshly moved into view) gets
     // the bouncier pop-in -- see .no-shk-box.is-new in tasks.html.
@@ -110,7 +111,7 @@
     async function loadZone() {
         const client = db();
         if (!client) return;
-        const [racksRes, floorRes, outsideRes] = await Promise.all([
+        const [racksRes, floorRes, outsideRes, shortageRes] = await Promise.all([
             client
                 .from("wms_no_shk_racks")
                 .select("id,name,rack_number,position,created_at,wms_no_shk_shelves(id,name,shelf_number,capacity,created_at,wms_no_shk_boxes(" + BOX_FIELDS + "))")
@@ -121,12 +122,20 @@
                 .select(BOX_FIELDS)
                 .is("shelf_id", null)
                 .eq("outside_opp", false)
+                // shortage boxes have shelf_id null too, but belong in
+                // their own section below, not mixed into "На полу".
+                .eq("shortage", false)
                 .order("box_number", { ascending: true }),
             client
                 .from("wms_no_shk_boxes")
                 .select(BOX_FIELDS)
                 .eq("outside_opp", true)
                 .order("created_at", { ascending: false }),
+            client
+                .from("wms_no_shk_boxes")
+                .select(BOX_FIELDS)
+                .eq("shortage", true)
+                .order("box_number", { ascending: true }),
         ]);
         if (racksRes.error) {
             racks = [];
@@ -137,6 +146,7 @@
         racks = racksRes.data || [];
         floorBoxes = floorRes.error ? [] : (floorRes.data || []);
         outsideBoxes = outsideRes.error ? [] : (outsideRes.data || []);
+        shortageBoxes = shortageRes.error ? [] : (shortageRes.data || []);
         renderZoneView();
         renderAdminView();
         if (!boxLabelTemplate) void loadTemplate("Короб «Без ШК»", (tpl) => { boxLabelTemplate = tpl; });
@@ -187,6 +197,16 @@
         return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "'>"
             + "<span class='no-shk-box-number'>" + escapeHtmlLocal(box.area) + "</span>"
             + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + " · " + box.total_items + " шт.</span>"
+            + "</div>";
+    }
+
+    function shortageBoxTileHtml(box, index) {
+        const isNew = !seenBoxIds.has(box.id);
+        const cls = "no-shk-box no-shk-box-shortage" + (isNew ? " is-new" : "");
+        const delay = Math.min(index, 10) * 30;
+        return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "'>"
+            + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
+            + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span>"
             + "</div>";
     }
 
@@ -283,6 +303,12 @@
                 : "<span style='color:#94a3b8;font-size:12px;'>пусто</span>")
             + "</div></div>";
 
+        const shortageHtml = shortageBoxes.length
+            ? "<div class='no-shk-floor no-shk-floor-shortage'>"
+                + "<p class='no-shk-floor-title'>Недостача (" + shortageBoxes.length + ")</p>"
+                + "<div class='no-shk-boxes-row'>" + shortageBoxes.map(shortageBoxTileHtml).join("") + "</div></div>"
+            : "";
+
         const racksHtml = racks.length
             ? "<div class='no-shk-racks-row'>" + racks.map((rack) => {
                 const shelves = rack.wms_no_shk_shelves || [];
@@ -297,7 +323,7 @@
             }).join("") + "</div>"
             : "<p style='color:#64748b;'>Стеллажей пока нет. Нажми ✎, чтобы добавить.</p>";
 
-        wrap.innerHTML = outsideHtml + floorHtml + racksHtml;
+        wrap.innerHTML = outsideHtml + floorHtml + shortageHtml + racksHtml;
 
         wrap.querySelectorAll("[data-box-id]").forEach((box) => {
             box.addEventListener("click", () => openBoxDetailModal(box.dataset.boxId));
@@ -307,6 +333,7 @@
         const nextSeen = new Set();
         outsideBoxes.forEach((box) => nextSeen.add(box.id));
         floorBoxes.forEach((box) => nextSeen.add(box.id));
+        shortageBoxes.forEach((box) => nextSeen.add(box.id));
         racks.forEach((rack) => (rack.wms_no_shk_shelves || []).forEach((shelf) => (shelf.wms_no_shk_boxes || []).forEach((box) => nextSeen.add(box.id))));
         seenBoxIds = nextSeen;
     }
@@ -484,6 +511,8 @@
         if (floorBox) return { box: floorBox, shelf: null, rack: null };
         const outsideBox = outsideBoxes.find((b) => b.id === boxId);
         if (outsideBox) return { box: outsideBox, shelf: null, rack: null };
+        const shortageBox = shortageBoxes.find((b) => b.id === boxId);
+        if (shortageBox) return { box: shortageBox, shelf: null, rack: null };
         return null;
     }
 
@@ -494,7 +523,9 @@
                 if (box) return box;
             }
         }
-        return floorBoxes.find((b) => b.box_number === boxNumber) || null;
+        return floorBoxes.find((b) => b.box_number === boxNumber)
+            || shortageBoxes.find((b) => b.box_number === boxNumber)
+            || null;
     }
 
     // ---- New box modal (always created "на полу") ----
@@ -566,7 +597,9 @@
         if (!ctx) return;
         activeBoxId = boxId;
         const { box, shelf, rack } = ctx;
-        const location = box.outside_opp ? "Вне ОПП (Формируется)" : (shelf ? escapeHtmlLocal(rack.name) + " — " + escapeHtmlLocal(shelf.name) : "На полу");
+        const location = box.outside_opp
+            ? "Вне ОПП (Формируется)"
+            : (shelf ? escapeHtmlLocal(rack.name) + " — " + escapeHtmlLocal(shelf.name) : (box.shortage ? "Недостача" : "На полу"));
         $("noShkBoxDetailWrap").innerHTML = "<div style='display:flex;flex-direction:column;gap:6px;font-size:14px;'>"
             + "<div><strong>Короб без ШК " + box.box_number + "</strong></div>"
             + "<div>Дата: " + escapeHtmlLocal(computeDateLabel(box)) + " (" + escapeHtmlLocal(box.shift_type) + ")</div>"
@@ -935,7 +968,7 @@
                 return;
             }
             const client = db();
-            const { error } = await client.from("wms_no_shk_boxes").update({ shelf_id: moveActiveShelf.id }).eq("id", box.id);
+            const { error } = await client.from("wms_no_shk_boxes").update({ shelf_id: moveActiveShelf.id, shortage: false }).eq("id", box.id);
             if (error) { flashMoveError("Ошибка: " + error.message); return; }
             await loadZone();
             // loadZone() replaced the racks array -- keep moveActiveShelf pointing at fresh data

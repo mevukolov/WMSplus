@@ -82,6 +82,21 @@
     }
     .no-shk-floor-outside { flex: 0 0 auto; }
     .no-shk-floor-onfloor { flex: 1 1 auto; min-width: 0; }
+    /* Недостача: boxes finishShelf() expected on a shelf but didn't find
+       this audit pass -- deliberately styled as a problem, not just
+       another storage bucket like Вне ОПП/На полу. */
+    .no-shk-floor-shortage {
+        flex: 0 0 auto;
+        border-color: #fca5a5;
+        background: rgba(239, 68, 68, .06);
+    }
+    .no-shk-floor-shortage .no-shk-floor-title { color: #b91c1c; }
+    .no-shk-box-shortage .no-shk-box-number,
+    .no-shk-box-shortage .no-shk-box-date {
+        background: rgba(239, 68, 68, .16);
+        color: #991b1b;
+    }
+    .no-shk-box-shortage::before { background: #ef4444; }
     .no-shk-floor-title {
         font-weight: 700;
         font-size: 12px;
@@ -398,6 +413,6 @@
 
 <!-- Cache-busting query string -- see the same comment in
      mobile-inventory.html; bump alongside it whenever display.js changes. -->
-<script src="display.js?v=8"></script>
+<script src="display.js?v=9"></script>
 </body>
 </html>
