@@ -22,6 +22,20 @@
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJncGhsbG16bWx3dXJmbmJhZ2hvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTQwNzIsImV4cCI6MjA3ODUzMDA3Mn0.a1_Wbtpbs9P-_UDqwjGqAIjvwK5WbT_M3B7g5BHtR2Q";
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // Auto-reload on a new deploy -- this kiosk page is meant to stay open
+    // 24/7 with nobody around to manually reload it, so it's the single
+    // most important place for this check. Bump CLIENT_VERSION here AND
+    // version.json's "v" together whenever this file changes.
+    const CLIENT_VERSION = 7;
+    setInterval(() => {
+        fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
+            .then((res) => res.json())
+            .then((data) => {
+                if (data && data.v && data.v !== CLIENT_VERSION) window.location.reload();
+            })
+            .catch(() => {}); // best-effort -- a failed check just skips this cycle
+    }, 20000);
+
     function escapeHtmlLocal(value) {
         const div = document.createElement("div");
         div.textContent = value == null ? "" : String(value);

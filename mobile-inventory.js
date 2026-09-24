@@ -23,6 +23,23 @@
         return;
     }
 
+    // Auto-reload on a new deploy -- this page can stay open on a phone for
+    // a whole inventory session (unlike display.js's kiosk analog, this one
+    // has bitten us for real: a reprint queued via stale in-memory JS from
+    // before a fix landed produced output indistinguishable from "the fix
+    // didn't work" until the actual print_jobs row was inspected directly).
+    // Bump CLIENT_VERSION here AND version.json's "v" together whenever
+    // this file, print-tspl.js, or inventory-dates.js changes.
+    const CLIENT_VERSION = 7;
+    setInterval(() => {
+        fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
+            .then((res) => res.json())
+            .then((data) => {
+                if (data && data.v && data.v !== CLIENT_VERSION) window.location.reload();
+            })
+            .catch(() => {}); // best-effort -- a failed check just skips this cycle
+    }, 20000);
+
     const stepTitle = document.getElementById("stepTitle");
     const stepMsg = document.getElementById("stepMsg");
     const scanDebug = document.getElementById("scanDebug");
