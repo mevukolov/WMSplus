@@ -95,24 +95,47 @@
         // startScanner() call so a stale `true` from a previous scan
         // session can never wedge a later one.
         let processingMatch = false;
+        let scanFrameCount = 0;
         function tick() {
             if (video.readyState === video.HAVE_ENOUGH_DATA && !processingMatch) {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
-                if (code && code.data) {
-                    // Diagnostic: prove a decode happened at all, regardless
-                    // of whether onMatch below accepts it -- see the comment
-                    // on #scanDebug in mobile-inventory.html.
-                    if (scanDebug) {
-                        scanDebug.textContent = "Прочитано: " + code.data;
-                        clearTimeout(scanDebugTimer);
-                        scanDebugTimer = setTimeout(() => { scanDebug.textContent = ""; }, 2500);
+                // Wrapped in try/catch: an uncaught throw anywhere in here
+                // (e.g. getImageData/jsQR) would otherwise silently kill
+                // this rAF loop for good, since the requestAnimationFrame(tick)
+                // call below is never reached after a throw -- the scanner
+                // would freeze on the very first bad frame with literally no
+                // visible symptom, which matches a reported "nothing happens
+                // at all" complaint closely enough to rule out rather than
+                // assume away.
+                try {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const code = jsQR(imageData.data, imageData.width, imageData.height);
+                    scanFrameCount++;
+                    // Diagnostic: proves the loop is actually alive and what
+                    // resolution it's really decoding at, regardless of
+                    // whether any code is currently in frame -- separate
+                    // from the "Прочитано" text below, which only fires on
+                    // an actual decode. Throttled so it doesn't repaint the
+                    // DOM 60x/sec.
+                    if (scanDebug && !processingMatch && scanFrameCount % 15 === 0) {
+                        scanDebug.textContent = "Кадр " + scanFrameCount + ": " + canvas.width + "x" + canvas.height;
                     }
-                    processingMatch = true;
-                    Promise.resolve(onMatch(code.data)).finally(() => { processingMatch = false; });
+                    if (code && code.data) {
+                        // Diagnostic: prove a decode happened at all,
+                        // regardless of whether onMatch below accepts it.
+                        if (scanDebug) {
+                            scanDebug.textContent = "Прочитано: " + code.data;
+                            clearTimeout(scanDebugTimer);
+                            scanDebugTimer = setTimeout(() => { scanDebug.textContent = ""; }, 2500);
+                        }
+                        processingMatch = true;
+                        Promise.resolve(onMatch(code.data)).finally(() => { processingMatch = false; });
+                    }
+                } catch (tickError) {
+                    console.error("Scanner tick failed", tickError);
+                    if (scanDebug) scanDebug.textContent = "Ошибка сканера: " + tickError.message;
                 }
             }
             if (scanStream) { // still running unless onMatch called stopScanner()
