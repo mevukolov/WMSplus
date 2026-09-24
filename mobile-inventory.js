@@ -298,11 +298,25 @@
     }
 
     // ---------- Короб без наклейки ----------
+    // Same date helpers as no_shk_zone.js's printActiveBox() (that file's
+    // lines ~541-550) -- duplicated here rather than shared because this
+    // repo has no module system (print-tspl.js is duplicated the same way
+    // across repos).
+    function formatDateShort(isoDate) {
+        const parts = String(isoDate).split("-");
+        if (parts.length !== 3) return String(isoDate);
+        return parts[2] + "." + parts[1] + "." + parts[0].slice(2);
+    }
+    function addDays(isoDate, days) {
+        const d = new Date(isoDate + "T00:00:00Z");
+        d.setUTCDate(d.getUTCDate() + days);
+        return d.toISOString().slice(0, 10);
+    }
+
     async function openMissingStickerList() {
         stopScanner();
         stepTitle.textContent = "Выберите короб";
         stepMsg.textContent = "";
-        video.style.display = "none";
 
         const { data: allBoxes, error: allBoxesError } = await supabaseClient
             .from("wms_no_shk_boxes")
@@ -339,7 +353,15 @@
                 item.className = "btn btn-outline";
                 item.style.textAlign = "left";
                 item.textContent = "№" + box.box_number + " — " + box.area + ", " + box.box_type;
-                item.addEventListener("click", () => void selectMissingStickerBox(box));
+                item.addEventListener("click", () => {
+                    // Disable synchronously, before any await, so a fast
+                    // double-click/tap on the same box can't re-enter
+                    // selectMissingStickerBox while the first click is
+                    // still in flight (which would insert a duplicate
+                    // box_results row and queue a second print job).
+                    item.disabled = true;
+                    void selectMissingStickerBox(box, item);
+                });
                 list.appendChild(item);
             });
         }
@@ -353,13 +375,21 @@
         stepButtons.appendChild(backBtn);
     }
 
-    async function selectMissingStickerBox(box) {
+    async function selectMissingStickerBox(box, btn) {
         const { error: resultInsertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert({
             session_id: activeSession.id, shelf_id: activeSession.shelfId, box_id: box.id, result: "missing_sticker",
         });
-        if (resultInsertError) { stepMsg.textContent = "Ошибка: " + resultInsertError.message; return; }
+        if (resultInsertError) {
+            stepMsg.textContent = "Ошибка: " + resultInsertError.message;
+            if (btn) btn.disabled = false; // let the worker retry instead of leaving a dead button
+            return;
+        }
         const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: activeSession.shelfId }).eq("id", box.id);
-        if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
+        if (boxUpdateError) {
+            stepMsg.textContent = "Ошибка: " + boxUpdateError.message;
+            if (btn) btn.disabled = false;
+            return;
+        }
 
         // Reprint this box's own sticker -- same payload shape
         // no_shk_zone.js's printActiveBox() builds for the "Короб «Без
@@ -371,14 +401,13 @@
             .maybeSingle();
         if (templateError) console.error("Failed to load print template", templateError); // reprint is best-effort here -- the box result above already succeeded
         if (template) {
-            const dateLine1 = box.shift_date;
             const tsplData = {
                 box_code: "WMSP.BOX." + String(box.box_number).padStart(5, "0"),
                 box_number: String(box.box_number),
                 box_type: box.box_type,
                 area: box.area,
-                date_line1: dateLine1,
-                date_line2: box.shift_type === "Ночная" ? dateLine1 : "",
+                date_line1: formatDateShort(box.shift_date),
+                date_line2: box.shift_type === "Ночная" ? formatDateShort(addDays(box.shift_date, 1)) : "",
                 shift: box.shift_type === "Ночная" ? "Ночь" : "День",
             };
             const { error: printJobError } = await supabaseClient.from("print_jobs").insert({
