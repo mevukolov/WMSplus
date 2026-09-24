@@ -30,7 +30,7 @@
     // didn't work" until the actual print_jobs row was inspected directly).
     // Bump CLIENT_VERSION here AND version.json's "v" together whenever
     // this file, print-tspl.js, or inventory-dates.js changes.
-    const CLIENT_VERSION = 7;
+    const CLIENT_VERSION = 8;
     setInterval(() => {
         fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
             .then((res) => res.json())
@@ -42,7 +42,7 @@
 
     const stepTitle = document.getElementById("stepTitle");
     const stepMsg = document.getElementById("stepMsg");
-    const scanDebug = document.getElementById("scanDebug");
+    const scanFrame = document.getElementById("scanFrame");
     const video = document.getElementById("invVideo");
     const canvas = document.getElementById("invCanvas");
     const stepButtons = document.getElementById("stepButtons");
@@ -50,7 +50,6 @@
     let activeSession = null;
     let scanStream = null;
     let scanRafId = null;
-    let scanDebugTimer = null;
     // Tracks the currently-rendered shelf-step buttons so finishShelf()'s
     // error paths can re-enable them -- they were disabled synchronously
     // by renderShelfButtons' click handler (the re-entrancy guard) before
@@ -64,7 +63,7 @@
     // startCloseQrScan/scanCloseQrFrame pattern (wmsplus-intake-form repo).
     async function startScanner(onMatch) {
         stopScanner();
-        video.style.display = "";
+        if (scanFrame) scanFrame.style.display = "block"; // #scanFrame's default CSS is display:none -- clearing to "" would just fall back to that
         try {
             // Box QR stickers are small thermal-printed labels -- a
             // browser's default getUserMedia stream (often ~640x480 when
@@ -78,7 +77,7 @@
                 video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
             });
         } catch (error) {
-            video.style.display = "none";
+            if (scanFrame) scanFrame.style.display = "none";
             stepMsg.textContent = "Не удалось открыть камеру: " + error.message;
             return;
         }
@@ -112,7 +111,6 @@
         // startScanner() call so a stale `true` from a previous scan
         // session can never wedge a later one.
         let processingMatch = false;
-        let scanFrameCount = 0;
         function tick() {
             if (video.readyState === video.HAVE_ENOUGH_DATA && !processingMatch) {
                 // Wrapped in try/catch: an uncaught throw anywhere in here
@@ -120,39 +118,19 @@
                 // this rAF loop for good, since the requestAnimationFrame(tick)
                 // call below is never reached after a throw -- the scanner
                 // would freeze on the very first bad frame with literally no
-                // visible symptom, which matches a reported "nothing happens
-                // at all" complaint closely enough to rule out rather than
-                // assume away.
+                // visible symptom.
                 try {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                     const code = jsQR(imageData.data, imageData.width, imageData.height);
-                    scanFrameCount++;
-                    // Diagnostic: proves the loop is actually alive and what
-                    // resolution it's really decoding at, regardless of
-                    // whether any code is currently in frame -- separate
-                    // from the "Прочитано" text below, which only fires on
-                    // an actual decode. Throttled so it doesn't repaint the
-                    // DOM 60x/sec.
-                    if (scanDebug && !processingMatch && scanFrameCount % 15 === 0) {
-                        scanDebug.textContent = "Кадр " + scanFrameCount + ": " + canvas.width + "x" + canvas.height;
-                    }
                     if (code && code.data) {
-                        // Diagnostic: prove a decode happened at all,
-                        // regardless of whether onMatch below accepts it.
-                        if (scanDebug) {
-                            scanDebug.textContent = "Прочитано: " + code.data;
-                            clearTimeout(scanDebugTimer);
-                            scanDebugTimer = setTimeout(() => { scanDebug.textContent = ""; }, 2500);
-                        }
                         processingMatch = true;
                         Promise.resolve(onMatch(code.data)).finally(() => { processingMatch = false; });
                     }
                 } catch (tickError) {
                     console.error("Scanner tick failed", tickError);
-                    if (scanDebug) scanDebug.textContent = "Ошибка сканера: " + tickError.message;
                 }
             }
             if (scanStream) { // still running unless onMatch called stopScanner()
@@ -162,9 +140,37 @@
         scanRafId = requestAnimationFrame(tick);
     }
 
-    // Visible + tactile confirmation that a box was actually recorded --
-    // the text-only "добавлен" message was easy to miss while looking at
-    // the box/camera rather than the screen.
+    // Short two-tone "success" chime via Web Audio -- no audio file to
+    // host, and a shared lazily-created AudioContext (rather than one per
+    // call) avoids hitting a per-page context limit on rapid successive
+    // scans. Created on first use, which by then is always well after a
+    // real user gesture (tapping "Начать инвентаризацию" etc.), so
+      // autoplay-policy audio-unlock is not a concern here.
+    let audioCtx = null;
+    function playSuccessSound() {
+        try {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+        } catch (e) {
+            // Best-effort only -- some browsers/contexts block audio
+            // without a more direct user gesture than we have here.
+        }
+    }
+
+    // Visible + audible + tactile confirmation that a box was actually
+    // recorded -- a text-only "добавлен" message was easy to miss while
+    // looking at the box/camera rather than the screen.
     function flashScanSuccess() {
         const card = document.querySelector(".card");
         if (card) {
@@ -172,6 +178,7 @@
             void card.offsetWidth;
             card.classList.add("is-scan-success");
         }
+        playSuccessSound();
         if (navigator.vibrate) {
             try { navigator.vibrate(80); } catch (e) { /* best-effort only */ }
         }
@@ -180,7 +187,7 @@
     function stopScanner() {
         if (scanRafId) { cancelAnimationFrame(scanRafId); scanRafId = null; }
         if (scanStream) { scanStream.getTracks().forEach((t) => t.stop()); scanStream = null; }
-        video.style.display = "none";
+        if (scanFrame) scanFrame.style.display = "none";
     }
 
     // ---------- Pairing / session bootstrap ----------
@@ -353,19 +360,13 @@
             // Reopen (or create) this session's audit row for the shelf --
             // re-scanning an already-audited shelf this session should
             // redo it cleanly, not create a duplicate/conflicting record.
-            const { error: clearError } = await supabaseClient
-                .from("wms_no_shk_inventory_box_results")
-                .delete()
-                .eq("session_id", activeSession.id)
-                .eq("shelf_id", shelf.id);
+            // The delete and the audit-row lookup touch different tables
+            // with no dependency between them -- run in parallel.
+            const [{ error: clearError }, { data: existingAudit, error: auditLookupError }] = await Promise.all([
+                supabaseClient.from("wms_no_shk_inventory_box_results").delete().eq("session_id", activeSession.id).eq("shelf_id", shelf.id),
+                supabaseClient.from("wms_no_shk_inventory_shelf_audits").select("id").eq("session_id", activeSession.id).eq("shelf_id", shelf.id).maybeSingle(),
+            ]);
             if (clearError) { stepMsg.textContent = "Ошибка: " + clearError.message; return; }
-
-            const { data: existingAudit, error: auditLookupError } = await supabaseClient
-                .from("wms_no_shk_inventory_shelf_audits")
-                .select("id")
-                .eq("session_id", activeSession.id)
-                .eq("shelf_id", shelf.id)
-                .maybeSingle();
             if (auditLookupError) { stepMsg.textContent = "Ошибка: " + auditLookupError.message; return; }
 
             if (existingAudit) {
@@ -421,38 +422,9 @@
             missingBtn = document.createElement("button");
             missingBtn.className = "btn btn-outline";
             missingBtn.textContent = "Короб без наклейки";
-            missingBtn.addEventListener("click", () => void openMissingStickerList());
+            missingBtn.addEventListener("click", () => void openMissingStickerCalendar());
             stepButtons.appendChild(missingBtn);
         }
-
-        // Fallback for while box QR stickers aren't scanning reliably --
-        // the sticker's box number is printed as plain text right next to
-        // its QR code, so the worker can read it off by eye and type it in
-        // instead of being blocked entirely. Goes through the exact same
-        // recordFoundBox() as a successful scan.
-        const manualWrap = document.createElement("div");
-        manualWrap.style.cssText = "display:flex;gap:8px;margin-top:14px;";
-        const manualInput = document.createElement("input");
-        manualInput.className = "field";
-        manualInput.type = "text";
-        manualInput.inputMode = "numeric";
-        manualInput.placeholder = "№ короба вручную...";
-        manualInput.style.flex = "1";
-        const manualBtn = document.createElement("button");
-        manualBtn.className = "btn btn-rect";
-        manualBtn.textContent = "OK";
-        function submitManual() {
-            if (manualBtn.disabled) return; // Enter key bypasses the button's own disabled state otherwise
-            const num = Number(manualInput.value.trim());
-            if (!num || num <= 0) { stepMsg.textContent = "Введите корректный номер короба"; return; }
-            manualBtn.disabled = true;
-            void recordFoundBox(num, shelf).finally(() => { manualBtn.disabled = false; });
-        }
-        manualBtn.addEventListener("click", submitManual);
-        manualInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitManual(); });
-        manualWrap.appendChild(manualInput);
-        manualWrap.appendChild(manualBtn);
-        stepButtons.appendChild(manualWrap);
 
         // Recorded so finishShelf()'s error paths can re-enable exactly
         // these buttons (see the module-level declaration above).
@@ -460,11 +432,18 @@
         shelfMissingBtn = missingBtn;
     }
 
-    // Shared by the QR scanner's onMatch AND the manual-entry fallback
-    // input below -- both need to react identically to "this box number
-    // is now accounted for on this shelf". Split out so a worker whose
-    // box stickers won't scan reliably isn't blocked from finishing the
-    // audit while that gets fixed on the print side.
+    // Shared by the QR scanner's onMatch AND (formerly) the manual-entry
+    // fallback -- reacts to "this box number is now accounted for on this
+    // shelf".
+    //
+    // Perf note: only the box lookup, dup-check, insert, and shelf_id
+    // update are on the critical path (blocks the next scan via
+    // startScanner's processingMatch guard). Everything after
+    // flashScanSuccess() is denormalized-counter/session-touch
+    // housekeeping that doesn't need to finish before the worker scans
+    // the next box, so it runs in the background instead of adding 3-4
+    // more sequential network round trips to every single scan -- this
+    // was the main source of the app feeling slow during rapid scanning.
     async function recordFoundBox(boxNumber, shelf) {
         const { data: boxRows, error: boxLookupError } = await supabaseClient.from("wms_no_shk_boxes").select("id").eq("box_number", boxNumber).limit(1);
         if (boxLookupError) { stepMsg.textContent = "Ошибка: " + boxLookupError.message; return; }
@@ -481,38 +460,36 @@
         if (dupError) { stepMsg.textContent = "Ошибка: " + dupError.message; return; }
         if (dup) { stepMsg.textContent = "Короб №" + boxNumber + " уже отсканирован"; return; }
 
-        // These two must both succeed before we tell the worker the box
-        // was recorded -- an insert failure here must NOT be followed by
-        // a false-positive "добавлен" message (the whole reason this
-        // block now checks `error` at every step).
-        const { error: insertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert({ session_id: activeSession.id, shelf_id: shelf.id, box_id: box.id, result: "found" });
+        // Independent writes (different tables, neither depends on the
+        // other's result) -- run in parallel rather than sequentially.
+        const [{ error: insertError }, { error: boxUpdateError }] = await Promise.all([
+            supabaseClient.from("wms_no_shk_inventory_box_results").insert({ session_id: activeSession.id, shelf_id: shelf.id, box_id: box.id, result: "found" }),
+            supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id),
+        ]);
         if (insertError) { stepMsg.textContent = "Ошибка: " + insertError.message; return; }
-        const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id);
         if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
 
-        // The box is now safely recorded (both awaits above succeeded) --
-        // flash/vibrate right here rather than after the counter update
-        // below, since that part is best-effort and shouldn't delay the
-        // worker's confirmation.
+        // The box is now safely recorded -- give immediate feedback and
+        // let scanning resume right away; counter/session housekeeping
+        // below runs in the background.
         flashScanSuccess();
+        stepMsg.textContent = "Короб №" + boxNumber + " добавлен (" + shelf.name + ")";
 
-        const newCount = await scannedCountForCurrentShelf(); // total (found+missing_sticker), for button state
-        const foundCount = await currentFoundCount(); // "found" only -- boxes_found_count must not double-count missing_sticker rows
-        const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
-            .update({ boxes_found_count: foundCount })
-            .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
-        const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
-        if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only, box result above already recorded
-
-        // The box itself is safely recorded by this point (both awaits
-        // above succeeded) -- a boxes_found_count update failure here is
-        // a denormalized-counter hiccup, not a lost scan, so it's
-        // surfaced but doesn't block rendering the (independently
-        // queried, so still accurate) button state.
-        stepMsg.textContent = auditUpdateError
-            ? "Короб №" + boxNumber + " добавлен, но не удалось обновить счётчик: " + auditUpdateError.message
-            : "Короб №" + boxNumber + " добавлен (" + shelf.name + ")";
-        renderShelfButtons(newCount, shelf);
+        void (async () => {
+            const [{ count: newCount }, { count: foundCount }] = await Promise.all([
+                supabaseClient.from("wms_no_shk_inventory_box_results").select("id", { count: "exact", head: true }).eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId),
+                supabaseClient.from("wms_no_shk_inventory_box_results").select("id", { count: "exact", head: true }).eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId).eq("result", "found"),
+            ]);
+            // Only re-render if we're still on the SAME shelf -- the
+            // worker may have already moved on by the time this resolves.
+            if (activeSession.shelfId === shelf.id) renderShelfButtons(newCount || 0, shelf);
+            const [{ error: auditUpdateError }, { error: touchError }] = await Promise.all([
+                supabaseClient.from("wms_no_shk_inventory_shelf_audits").update({ boxes_found_count: foundCount || 0 }).eq("session_id", activeSession.id).eq("shelf_id", shelf.id),
+                supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id),
+            ]);
+            if (auditUpdateError) console.error("Failed to update boxes_found_count", auditUpdateError); // denormalized counter only -- the box result above already succeeded
+            if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only
+        })();
     }
 
     async function startBoxScan(shelf, statusMsg) {
@@ -536,73 +513,47 @@
     // tested global-scope module -- see inventory-dates.test.js), loaded
     // via <script> before this file in mobile-inventory.html.
 
-    // Boxes missing their sticker have nothing printed on them for the
-    // worker to read a box number off of -- so the picker identifies each
-    // one by what's actually visible/known about it (arrival date(s) +
-    // area + type) instead of a box_number nobody standing in the aisle
-    // can see.
-    function boxDisplayLabel(box) {
-        const dateLabel = box.shift_type === "Ночная"
-            ? formatDateShort(box.shift_date) + " / " + formatDateShort(addDays(box.shift_date, 1))
-            : formatDateShort(box.shift_date);
-        return dateLabel + " — " + box.area + ", " + box.box_type;
-    }
-
-    async function openMissingStickerList() {
+    // Instead of picking a specific box from a list (a full-warehouse list
+    // was unwieldy and easy to lose boxes in), the worker specifies the
+    // box by what's actually knowable about an unlabeled box on the shelf:
+    // its date and shift. Matches the first (lowest box_number) existing
+    // box for that date+shift; if none exists, offers to create one on the
+    // spot (box_number is a DB identity column -- auto-assigned).
+    function openMissingStickerCalendar() {
         stopScanner();
-        stepTitle.textContent = "Выберите короб";
-        stepMsg.textContent = "";
-
-        const { data: allBoxes, error: allBoxesError } = await supabaseClient
-            .from("wms_no_shk_boxes")
-            .select("id,box_number,area,shift_date,shift_type,box_type")
-            .order("box_number", { ascending: true });
-        if (allBoxesError) { stepMsg.textContent = "Ошибка: " + allBoxesError.message; return; }
-        const { data: alreadyAccounted, error: alreadyAccountedError } = await supabaseClient
-            .from("wms_no_shk_inventory_box_results")
-            .select("box_id")
-            .eq("session_id", activeSession.id)
-            .eq("shelf_id", activeSession.shelfId);
-        if (alreadyAccountedError) { stepMsg.textContent = "Ошибка: " + alreadyAccountedError.message; return; }
-        const excluded = new Set((alreadyAccounted || []).map((r) => r.box_id));
-        const candidates = (allBoxes || []).filter((b) => !excluded.has(b.id));
-
+        stepTitle.textContent = "Короб без наклейки";
+        stepMsg.textContent = "Выберите дату и смену";
         stepButtons.innerHTML = "";
-        const filterInput = document.createElement("input");
-        filterInput.className = "field";
-        filterInput.placeholder = "Дата или зона...";
-        filterInput.style.marginBottom = "10px";
-        stepButtons.appendChild(filterInput);
 
-        const list = document.createElement("div");
-        list.style.cssText = "display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;";
-        stepButtons.appendChild(list);
+        const dateInput = document.createElement("input");
+        dateInput.type = "date";
+        dateInput.className = "field";
+        dateInput.value = new Date().toISOString().slice(0, 10);
+        dateInput.style.marginBottom = "10px";
+        stepButtons.appendChild(dateInput);
 
-        function renderList(filterText) {
-            list.innerHTML = "";
-            const needle = filterText.toLowerCase();
-            const filtered = filterText
-                ? candidates.filter((b) => boxDisplayLabel(b).toLowerCase().includes(needle))
-                : candidates;
-            filtered.slice(0, 100).forEach((box) => {
-                const item = document.createElement("button");
-                item.className = "btn btn-outline";
-                item.style.textAlign = "left";
-                item.textContent = boxDisplayLabel(box);
-                item.addEventListener("click", () => {
-                    // Disable synchronously, before any await, so a fast
-                    // double-click/tap on the same box can't re-enter
-                    // selectMissingStickerBox while the first click is
-                    // still in flight (which would insert a duplicate
-                    // box_results row and queue a second print job).
-                    item.disabled = true;
-                    void selectMissingStickerBox(box, item);
-                });
-                list.appendChild(item);
+        const dayBtn = document.createElement("button");
+        dayBtn.className = "btn btn-rect";
+        dayBtn.textContent = "Короб День";
+        stepButtons.appendChild(dayBtn);
+
+        const nightBtn = document.createElement("button");
+        nightBtn.className = "btn btn-rect";
+        nightBtn.textContent = "Короб Ночь";
+        stepButtons.appendChild(nightBtn);
+
+        function pick(shiftType) {
+            if (dayBtn.disabled) return; // both disabled together, checking one covers both
+            if (!dateInput.value) { stepMsg.textContent = "Выберите дату"; return; }
+            dayBtn.disabled = true;
+            nightBtn.disabled = true;
+            void handleMissingStickerDateShift(dateInput.value, shiftType).finally(() => {
+                dayBtn.disabled = false;
+                nightBtn.disabled = false;
             });
         }
-        renderList("");
-        filterInput.addEventListener("input", () => renderList(filterInput.value.trim()));
+        dayBtn.addEventListener("click", () => pick("Дневная"));
+        nightBtn.addEventListener("click", () => pick("Ночная"));
 
         const backBtn = document.createElement("button");
         backBtn.className = "btn btn-outline";
@@ -611,21 +562,44 @@
         stepButtons.appendChild(backBtn);
     }
 
-    async function selectMissingStickerBox(box, btn) {
+    async function handleMissingStickerDateShift(dateStr, shiftType) {
+        stepMsg.textContent = "Ищу короб...";
+        const { data: matches, error } = await supabaseClient
+            .from("wms_no_shk_boxes")
+            .select("id,box_number,area,box_type,shift_date,shift_type")
+            .eq("shift_date", dateStr)
+            .eq("shift_type", shiftType)
+            .order("box_number", { ascending: true })
+            .limit(1);
+        if (error) { stepMsg.textContent = "Ошибка: " + error.message; return; }
+        let box = matches && matches[0];
+        if (!box) {
+            const label = formatDateShort(dateStr) + ", " + (shiftType === "Ночная" ? "ночь" : "день");
+            const confirmed = window.confirm("Короба за " + label + " не существует. Создать?");
+            if (!confirmed) { stepMsg.textContent = ""; return; }
+            const { data: newBox, error: createError } = await supabaseClient
+                .from("wms_no_shk_boxes")
+                .insert({ shift_date: dateStr, shift_type: shiftType })
+                .select("id,box_number,area,box_type,shift_date,shift_type")
+                .single();
+            if (createError) { stepMsg.textContent = "Не удалось создать: " + createError.message; return; }
+            box = newBox;
+        }
+        await selectMissingStickerBox(box);
+    }
+
+    // Perf note: same background-housekeeping split as recordFoundBox --
+    // only the result insert + shelf_id update + print-job queue are on
+    // the critical path before the worker sees "поставлен в печать" and
+    // scanning resumes; the denormalized counter and session touch run
+    // after.
+    async function selectMissingStickerBox(box) {
         const { error: resultInsertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert({
             session_id: activeSession.id, shelf_id: activeSession.shelfId, box_id: box.id, result: "missing_sticker",
         });
-        if (resultInsertError) {
-            stepMsg.textContent = "Ошибка: " + resultInsertError.message;
-            if (btn) btn.disabled = false; // let the worker retry instead of leaving a dead button
-            return;
-        }
+        if (resultInsertError) { stepMsg.textContent = "Ошибка: " + resultInsertError.message; return; }
         const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: activeSession.shelfId }).eq("id", box.id);
-        if (boxUpdateError) {
-            stepMsg.textContent = "Ошибка: " + boxUpdateError.message;
-            if (btn) btn.disabled = false;
-            return;
-        }
+        if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
 
         // Reprint this box's own sticker -- same payload shape
         // no_shk_zone.js's printActiveBox() builds for the "Короб «Без
@@ -654,16 +628,17 @@
             if (printJobError) console.error("Failed to queue print job", printJobError); // reprint is best-effort -- the box result above already succeeded
         }
 
-        const newCount = await scannedCountForCurrentShelf();
-        const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
-            .update({ boxes_missing_sticker_count: (await currentMissingStickerCount()) })
-            .eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId);
-        if (auditUpdateError) console.error("Failed to update boxes_missing_sticker_count", auditUpdateError); // denormalized counter only -- the box result above already succeeded
-        const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
-        if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only
-
+        flashScanSuccess();
         void startBoxScan(activeSession.shelf, "Стикер короба №" + box.box_number + " поставлен в печать");
-        void newCount; // count is re-read by startBoxScan's own renderShelfButtons call
+
+        void (async () => {
+            const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
+                .update({ boxes_missing_sticker_count: (await currentMissingStickerCount()) })
+                .eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId);
+            if (auditUpdateError) console.error("Failed to update boxes_missing_sticker_count", auditUpdateError); // denormalized counter only -- the box result above already succeeded
+            const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
+            if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only
+        })();
     }
 
     async function currentMissingStickerCount() {

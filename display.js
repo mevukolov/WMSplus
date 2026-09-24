@@ -26,7 +26,7 @@
     // 24/7 with nobody around to manually reload it, so it's the single
     // most important place for this check. Bump CLIENT_VERSION here AND
     // version.json's "v" together whenever this file changes.
-    const CLIENT_VERSION = 7;
+    const CLIENT_VERSION = 8;
     setInterval(() => {
         fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
             .then((res) => res.json())
@@ -577,13 +577,18 @@
     }
 
     // Adds is-audited (green) to every .no-shk-rack whose shelves are ALL
-    // in auditedShelfIdsThisSession, is-pending (red) otherwise. Runs after
-    // every zone re-render (loadZone -> renderZoneView already calls this
-    // at the end, same place checkQrOverlayShouldHide() is called) so rack
-    // coloring never lags behind a fresh renderZoneView() innerHTML swap.
+    // in auditedShelfIdsThisSession, is-pending (red) otherwise -- plus the
+    // same per-SHELF distinction on each individual .no-shk-shelf, since a
+    // rack only turns green once EVERY one of its shelves is done and a
+    // worker mid-rack needs to see which specific shelves within it are
+    // still pending, not just the rack as a whole. Runs after every zone
+    // re-render (loadZone -> renderZoneView already calls this at the end,
+    // same place checkQrOverlayShouldHide() is called) so coloring never
+    // lags behind a fresh renderZoneView() innerHTML swap.
     function applyRackAuditColors() {
         if (!activeSession) {
             document.querySelectorAll(".no-shk-rack").forEach((el) => el.classList.remove("is-audited", "is-pending"));
+            document.querySelectorAll(".no-shk-shelf").forEach((el) => el.classList.remove("is-shelf-audited", "is-shelf-pending"));
             return;
         }
         document.querySelectorAll(".no-shk-rack").forEach((rackEl, i) => {
@@ -593,6 +598,17 @@
             const allDone = shelves.length > 0 && shelves.every((s) => auditedShelfIdsThisSession.has(s.id));
             rackEl.classList.toggle("is-audited", allDone);
             rackEl.classList.toggle("is-pending", !allDone);
+            // shelvesTopToBottom(rack) is the exact order shelfSkeuoHtml()
+            // rendered .no-shk-shelf elements in, so index si here lines
+            // up with the si-th .no-shk-shelf child under this rack.
+            const shelfEls = rackEl.querySelectorAll(".no-shk-shelf");
+            shelvesTopToBottom(rack).forEach((shelf, si) => {
+                const shelfEl = shelfEls[si];
+                if (!shelfEl) return;
+                const done = auditedShelfIdsThisSession.has(shelf.id);
+                shelfEl.classList.toggle("is-shelf-audited", done);
+                shelfEl.classList.toggle("is-shelf-pending", !done);
+            });
         });
     }
 
