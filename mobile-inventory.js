@@ -408,10 +408,94 @@
             stepButtons.appendChild(missingBtn);
         }
 
+        // Fallback for while box QR stickers aren't scanning reliably --
+        // the sticker's box number is printed as plain text right next to
+        // its QR code, so the worker can read it off by eye and type it in
+        // instead of being blocked entirely. Goes through the exact same
+        // recordFoundBox() as a successful scan.
+        const manualWrap = document.createElement("div");
+        manualWrap.style.cssText = "display:flex;gap:8px;margin-top:14px;";
+        const manualInput = document.createElement("input");
+        manualInput.className = "field";
+        manualInput.type = "text";
+        manualInput.inputMode = "numeric";
+        manualInput.placeholder = "№ короба вручную...";
+        manualInput.style.flex = "1";
+        const manualBtn = document.createElement("button");
+        manualBtn.className = "btn btn-rect";
+        manualBtn.textContent = "OK";
+        function submitManual() {
+            if (manualBtn.disabled) return; // Enter key bypasses the button's own disabled state otherwise
+            const num = Number(manualInput.value.trim());
+            if (!num || num <= 0) { stepMsg.textContent = "Введите корректный номер короба"; return; }
+            manualBtn.disabled = true;
+            void recordFoundBox(num, shelf).finally(() => { manualBtn.disabled = false; });
+        }
+        manualBtn.addEventListener("click", submitManual);
+        manualInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitManual(); });
+        manualWrap.appendChild(manualInput);
+        manualWrap.appendChild(manualBtn);
+        stepButtons.appendChild(manualWrap);
+
         // Recorded so finishShelf()'s error paths can re-enable exactly
         // these buttons (see the module-level declaration above).
         shelfFinishBtn = finishBtn;
         shelfMissingBtn = missingBtn;
+    }
+
+    // Shared by the QR scanner's onMatch AND the manual-entry fallback
+    // input below -- both need to react identically to "this box number
+    // is now accounted for on this shelf". Split out so a worker whose
+    // box stickers won't scan reliably isn't blocked from finishing the
+    // audit while that gets fixed on the print side.
+    async function recordFoundBox(boxNumber, shelf) {
+        const { data: boxRows, error: boxLookupError } = await supabaseClient.from("wms_no_shk_boxes").select("id").eq("box_number", boxNumber).limit(1);
+        if (boxLookupError) { stepMsg.textContent = "Ошибка: " + boxLookupError.message; return; }
+        const box = boxRows && boxRows[0];
+        if (!box) { stepMsg.textContent = "Короб №" + boxNumber + " не найден"; return; }
+
+        const { data: dup, error: dupError } = await supabaseClient
+            .from("wms_no_shk_inventory_box_results")
+            .select("id")
+            .eq("session_id", activeSession.id)
+            .eq("shelf_id", shelf.id)
+            .eq("box_id", box.id)
+            .maybeSingle();
+        if (dupError) { stepMsg.textContent = "Ошибка: " + dupError.message; return; }
+        if (dup) { stepMsg.textContent = "Короб №" + boxNumber + " уже отсканирован"; return; }
+
+        // These two must both succeed before we tell the worker the box
+        // was recorded -- an insert failure here must NOT be followed by
+        // a false-positive "добавлен" message (the whole reason this
+        // block now checks `error` at every step).
+        const { error: insertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert({ session_id: activeSession.id, shelf_id: shelf.id, box_id: box.id, result: "found" });
+        if (insertError) { stepMsg.textContent = "Ошибка: " + insertError.message; return; }
+        const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id);
+        if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
+
+        // The box is now safely recorded (both awaits above succeeded) --
+        // flash/vibrate right here rather than after the counter update
+        // below, since that part is best-effort and shouldn't delay the
+        // worker's confirmation.
+        flashScanSuccess();
+
+        const newCount = await scannedCountForCurrentShelf(); // total (found+missing_sticker), for button state
+        const foundCount = await currentFoundCount(); // "found" only -- boxes_found_count must not double-count missing_sticker rows
+        const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
+            .update({ boxes_found_count: foundCount })
+            .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
+        const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
+        if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only, box result above already recorded
+
+        // The box itself is safely recorded by this point (both awaits
+        // above succeeded) -- a boxes_found_count update failure here is
+        // a denormalized-counter hiccup, not a lost scan, so it's
+        // surfaced but doesn't block rendering the (independently
+        // queried, so still accurate) button state.
+        stepMsg.textContent = auditUpdateError
+            ? "Короб №" + boxNumber + " добавлен, но не удалось обновить счётчик: " + auditUpdateError.message
+            : "Короб №" + boxNumber + " добавлен (" + shelf.name + ")";
+        renderShelfButtons(newCount, shelf);
     }
 
     async function startBoxScan(shelf, statusMsg) {
@@ -423,54 +507,7 @@
         void startScanner(async (text) => {
             const match = /^WMSP\.BOX\.(\d+)$/.exec(text);
             if (!match) return;
-            const boxNumber = Number(match[1]);
-            const { data: boxRows, error: boxLookupError } = await supabaseClient.from("wms_no_shk_boxes").select("id").eq("box_number", boxNumber).limit(1);
-            if (boxLookupError) { stepMsg.textContent = "Ошибка: " + boxLookupError.message; return; }
-            const box = boxRows && boxRows[0];
-            if (!box) { stepMsg.textContent = "Короб №" + boxNumber + " не найден"; return; }
-
-            const { data: dup, error: dupError } = await supabaseClient
-                .from("wms_no_shk_inventory_box_results")
-                .select("id")
-                .eq("session_id", activeSession.id)
-                .eq("shelf_id", shelf.id)
-                .eq("box_id", box.id)
-                .maybeSingle();
-            if (dupError) { stepMsg.textContent = "Ошибка: " + dupError.message; return; }
-            if (dup) { stepMsg.textContent = "Короб №" + boxNumber + " уже отсканирован"; return; }
-
-            // These two must both succeed before we tell the worker the box
-            // was recorded -- an insert failure here must NOT be followed by
-            // a false-positive "добавлен" message (the whole reason this
-            // block now checks `error` at every step).
-            const { error: insertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert({ session_id: activeSession.id, shelf_id: shelf.id, box_id: box.id, result: "found" });
-            if (insertError) { stepMsg.textContent = "Ошибка: " + insertError.message; return; }
-            const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id);
-            if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
-
-            // The box is now safely recorded (both awaits above succeeded)
-            // -- flash/vibrate right here rather than after the counter
-            // update below, since that part is best-effort and shouldn't
-            // delay the worker's confirmation.
-            flashScanSuccess();
-
-            const newCount = await scannedCountForCurrentShelf(); // total (found+missing_sticker), for button state
-            const foundCount = await currentFoundCount(); // "found" only -- boxes_found_count must not double-count missing_sticker rows
-            const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
-                .update({ boxes_found_count: foundCount })
-                .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
-            const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
-            if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only, box result above already recorded
-
-            // The box itself is safely recorded by this point (both awaits
-            // above succeeded) -- a boxes_found_count update failure here is
-            // a denormalized-counter hiccup, not a lost scan, so it's
-            // surfaced but doesn't block rendering the (independently
-            // queried, so still accurate) button state.
-            stepMsg.textContent = auditUpdateError
-                ? "Короб №" + boxNumber + " добавлен, но не удалось обновить счётчик: " + auditUpdateError.message
-                : "Короб №" + boxNumber + " добавлен (" + shelf.name + ")";
-            renderShelfButtons(newCount, shelf);
+            await recordFoundBox(Number(match[1]), shelf);
             // keep scanning -- do NOT stop the scanner here, the loop in
             // startScanner already re-arms via requestAnimationFrame for
             // every call that doesn't return early
