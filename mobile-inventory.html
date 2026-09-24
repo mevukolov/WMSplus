@@ -52,8 +52,13 @@ html, body { height: 100%; overflow: hidden; margin: 0; }
     <canvas id="invCanvas" style="display:none;"></canvas>
     <div id="stepButtons" style="display:flex;flex-direction:column;gap:10px;margin-top:16px;"></div>
 </div>
-<script src="print-tspl.js"></script>
-<script src="inventory-dates.js"></script>
-<script src="mobile-inventory.js"></script>
+<!-- Cache-busting query string -- GitHub Pages serves these with
+     cache-control: max-age=600, so a phone that loaded this page within
+     the last 10 minutes can otherwise keep running old JS after a normal
+     reload. Bump the number whenever mobile-inventory.js/print-tspl.js/
+     inventory-dates.js change so testers reliably get the new code. -->
+<script src="print-tspl.js?v=3"></script>
+<script src="inventory-dates.js?v=3"></script>
+<script src="mobile-inventory.js?v=3"></script>
 </body>
 </html>
