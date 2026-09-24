@@ -49,15 +49,25 @@
         video.srcObject = scanStream;
         await video.play();
         const ctx = canvas.getContext("2d");
+        // Re-entrancy guard: a code held steady in frame decodes on every
+        // tick, and onMatch is async (DB round-trips) -- without this, a
+        // second onMatch for the SAME decode can start before the first
+        // one finishes reacting to it (stopScanner(), dup-checks, etc.),
+        // racing itself. Frames keep being captured/decoded regardless;
+        // only the onMatch dispatch is serialized. Declared fresh per
+        // startScanner() call so a stale `true` from a previous scan
+        // session can never wedge a later one.
+        let processingMatch = false;
         function tick() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            if (video.readyState === video.HAVE_ENOUGH_DATA && !processingMatch) {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const code = jsQR(imageData.data, imageData.width, imageData.height);
                 if (code && code.data) {
-                    onMatch(code.data);
+                    processingMatch = true;
+                    Promise.resolve(onMatch(code.data)).finally(() => { processingMatch = false; });
                 }
             }
             if (scanStream) { // still running unless onMatch called stopScanner()
@@ -139,10 +149,11 @@
         stepTitle.textContent = "Отсканируйте полку";
         stepMsg.textContent = "";
         stepButtons.innerHTML = "";
-        await supabaseClient
+        const { error: resetStepError } = await supabaseClient
             .from("wms_no_shk_inventory_sessions")
             .update({ step: "scan_shelf", current_shelf_id: null, last_activity_at: new Date().toISOString() })
             .eq("id", activeSession.id);
+        if (resetStepError) console.error("Failed to reset session to scan_shelf", resetStepError); // housekeeping only -- scanning still starts below regardless
 
         void startScanner(async (text) => {
             // WMSP.PLCE.WSHK.{rack_number}.{shelf_number}
@@ -150,12 +161,13 @@
             if (!match) return; // not a shelf code, keep scanning
             const rackNumber = Number(match[1]);
             const shelfNumber = Number(match[2]);
-            const { data: shelfRows } = await supabaseClient
+            const { data: shelfRows, error: shelfError } = await supabaseClient
                 .from("wms_no_shk_shelves")
                 .select("id,name,capacity,rack_id,wms_no_shk_racks!inner(rack_number)")
                 .eq("shelf_number", shelfNumber)
                 .eq("wms_no_shk_racks.rack_number", rackNumber)
                 .limit(1);
+            if (shelfError) { stepMsg.textContent = "Ошибка: " + shelfError.message; return; }
             const shelf = shelfRows && shelfRows[0];
             if (!shelf) {
                 stepMsg.textContent = "Полка не найдена в системе";
@@ -166,27 +178,38 @@
             // Reopen (or create) this session's audit row for the shelf --
             // re-scanning an already-audited shelf this session should
             // redo it cleanly, not create a duplicate/conflicting record.
-            await supabaseClient.from("wms_no_shk_inventory_box_results").delete().eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
-            const { data: existingAudit } = await supabaseClient
+            const { error: clearError } = await supabaseClient
+                .from("wms_no_shk_inventory_box_results")
+                .delete()
+                .eq("session_id", activeSession.id)
+                .eq("shelf_id", shelf.id);
+            if (clearError) { stepMsg.textContent = "Ошибка: " + clearError.message; return; }
+
+            const { data: existingAudit, error: auditLookupError } = await supabaseClient
                 .from("wms_no_shk_inventory_shelf_audits")
                 .select("id")
                 .eq("session_id", activeSession.id)
                 .eq("shelf_id", shelf.id)
                 .maybeSingle();
+            if (auditLookupError) { stepMsg.textContent = "Ошибка: " + auditLookupError.message; return; }
+
             if (existingAudit) {
-                await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
+                const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
                     .update({ started_at: new Date().toISOString(), finished_at: null, boxes_found_count: 0, boxes_missing_sticker_count: 0, boxes_not_found_count: 0 })
                     .eq("id", existingAudit.id);
+                if (auditUpdateError) { stepMsg.textContent = "Ошибка: " + auditUpdateError.message; return; }
             } else {
-                await supabaseClient.from("wms_no_shk_inventory_shelf_audits").insert({ session_id: activeSession.id, shelf_id: shelf.id });
+                const { error: auditInsertError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits").insert({ session_id: activeSession.id, shelf_id: shelf.id });
+                if (auditInsertError) { stepMsg.textContent = "Ошибка: " + auditInsertError.message; return; }
             }
 
             activeSession.shelfId = shelf.id;
             activeSession.shelf = shelf;
-            await supabaseClient
+            const { error: sessionUpdateError } = await supabaseClient
                 .from("wms_no_shk_inventory_sessions")
                 .update({ step: "scan_boxes", current_shelf_id: shelf.id, last_activity_at: new Date().toISOString() })
                 .eq("id", activeSession.id);
+            if (sessionUpdateError) { stepMsg.textContent = "Ошибка: " + sessionUpdateError.message; return; }
             void startBoxScan(shelf);
         });
     }
@@ -228,28 +251,45 @@
             const match = /^WMSP\.BOX\.(\d+)$/.exec(text);
             if (!match) return;
             const boxNumber = Number(match[1]);
-            const { data: boxRows } = await supabaseClient.from("wms_no_shk_boxes").select("id").eq("box_number", boxNumber).limit(1);
+            const { data: boxRows, error: boxLookupError } = await supabaseClient.from("wms_no_shk_boxes").select("id").eq("box_number", boxNumber).limit(1);
+            if (boxLookupError) { stepMsg.textContent = "Ошибка: " + boxLookupError.message; return; }
             const box = boxRows && boxRows[0];
             if (!box) { stepMsg.textContent = "Короб №" + boxNumber + " не найден"; return; }
 
-            const { data: dup } = await supabaseClient
+            const { data: dup, error: dupError } = await supabaseClient
                 .from("wms_no_shk_inventory_box_results")
                 .select("id")
                 .eq("session_id", activeSession.id)
                 .eq("shelf_id", shelf.id)
                 .eq("box_id", box.id)
                 .maybeSingle();
+            if (dupError) { stepMsg.textContent = "Ошибка: " + dupError.message; return; }
             if (dup) { stepMsg.textContent = "Короб №" + boxNumber + " уже отсканирован"; return; }
 
-            await supabaseClient.from("wms_no_shk_inventory_box_results").insert({ session_id: activeSession.id, shelf_id: shelf.id, box_id: box.id, result: "found" });
-            await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id);
+            // These two must both succeed before we tell the worker the box
+            // was recorded -- an insert failure here must NOT be followed by
+            // a false-positive "добавлен" message (the whole reason this
+            // block now checks `error` at every step).
+            const { error: insertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert({ session_id: activeSession.id, shelf_id: shelf.id, box_id: box.id, result: "found" });
+            if (insertError) { stepMsg.textContent = "Ошибка: " + insertError.message; return; }
+            const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id);
+            if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
+
             const newCount = await scannedCountForCurrentShelf();
-            await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
+            const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
                 .update({ boxes_found_count: newCount })
                 .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
-            await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
+            const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
+            if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only, box result above already recorded
 
-            stepMsg.textContent = "Короб №" + boxNumber + " добавлен (" + shelf.name + ")";
+            // The box itself is safely recorded by this point (both awaits
+            // above succeeded) -- a boxes_found_count update failure here is
+            // a denormalized-counter hiccup, not a lost scan, so it's
+            // surfaced but doesn't block rendering the (independently
+            // queried, so still accurate) button state.
+            stepMsg.textContent = auditUpdateError
+                ? "Короб №" + boxNumber + " добавлен, но не удалось обновить счётчик: " + auditUpdateError.message
+                : "Короб №" + boxNumber + " добавлен (" + shelf.name + ")";
             renderShelfButtons(newCount, shelf);
             // keep scanning -- do NOT stop the scanner here, the loop in
             // startScanner already re-arms via requestAnimationFrame for
