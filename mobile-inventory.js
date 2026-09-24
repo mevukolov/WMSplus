@@ -90,11 +90,11 @@
         video.style.display = "none";
     }
 
-    // ---------- Pairing ----------
+    // ---------- Pairing / session bootstrap ----------
     async function findActiveSession() {
         const { data, error } = await supabaseClient
             .from("wms_no_shk_inventory_sessions")
-            .select("id,status,step,started_by_name,started_at")
+            .select("id,status,step,started_by_id,started_by_name,started_at,current_shelf_id")
             .in("status", ["waiting_for_phone", "in_progress"])
             .order("started_at", { ascending: false })
             .limit(1)
@@ -107,15 +107,45 @@
         return data || null;
     }
 
-    async function startPairing() {
-        const existing = await findActiveSession();
-        if (existing) {
-            activeSession = existing; // lets the abandon-recovery watcher below react if this session (found, not started here) later gets marked abandoned or completes.
-            stepTitle.textContent = "Инвентаризация уже идёт";
-            stepMsg.textContent = "Начал(а): " + (existing.started_by_name || "неизвестно") + " в " + new Date(existing.started_at).toLocaleTimeString("ru-RU");
+    // Shared by beginNewSession() and resumeSession()'s pairing branch --
+    // both need to react identically to the display's pairing QR being
+    // scanned, whether this is a session THIS phone just created or one it
+    // reconnected to after a reload.
+    async function handlePairingScan(text) {
+        if (text !== "WMSP.INV." + activeSession.id) return; // not our pairing code, keep scanning
+        stopScanner();
+        const { error: updateError } = await supabaseClient
+            .from("wms_no_shk_inventory_sessions")
+            .update({ status: "in_progress", step: "scan_shelf", last_activity_at: new Date().toISOString() })
+            .eq("id", activeSession.id);
+        if (updateError) {
+            stepMsg.textContent = "Ошибка: " + updateError.message;
             return;
         }
+        stepTitle.textContent = "Отсканируйте полку";
+        stepMsg.textContent = "";
+        void startShelfScan();
+    }
 
+    function renderStartScreen() {
+        activeSession = null;
+        stepTitle.textContent = "Инвентаризация «Без ШК»";
+        stepMsg.textContent = "";
+        stepButtons.innerHTML = "";
+        const startBtn = document.createElement("button");
+        startBtn.className = "btn";
+        startBtn.textContent = "Начать инвентаризацию";
+        startBtn.addEventListener("click", () => {
+            // Disable synchronously so a double-tap can't race two inserts
+            // before the first one's unique partial index would reject the
+            // second anyway.
+            startBtn.disabled = true;
+            void beginNewSession();
+        });
+        stepButtons.appendChild(startBtn);
+    }
+
+    async function beginNewSession() {
         const { data, error } = await supabaseClient
             .from("wms_no_shk_inventory_sessions")
             .insert({ status: "waiting_for_phone", step: "pairing", started_by_id: String(user.id), started_by_name: user.name })
@@ -131,24 +161,69 @@
             return;
         }
         activeSession = { id: data.id };
-
         stepTitle.textContent = "Отсканируйте QR на экране";
         stepMsg.textContent = "Экран, на который выводится инвентаризация";
-        void startScanner(async (text) => {
-            if (text !== "WMSP.INV." + activeSession.id) return; // not our pairing code, keep scanning
-            stopScanner();
-            const { error: updateError } = await supabaseClient
-                .from("wms_no_shk_inventory_sessions")
-                .update({ status: "in_progress", step: "scan_shelf", last_activity_at: new Date().toISOString() })
-                .eq("id", activeSession.id);
-            if (updateError) {
-                stepMsg.textContent = "Ошибка: " + updateError.message;
+        void startScanner(handlePairingScan);
+    }
+
+    // Rejoins an in-flight session that THIS phone (same started_by_id)
+    // already started, at whatever step the DB says it's on -- so a
+    // reload/backgrounded-tab-reload mid-audit doesn't strand the worker
+    // on a dead scan screen. This is the entire reason a persisted
+    // sessions TABLE was chosen over one-shot broadcast in the original
+    // design -- before this fix that guarantee only held on the display
+    // side.
+    async function resumeSession(session) {
+        activeSession = { id: session.id, shelfId: session.current_shelf_id || null };
+        if (session.step === "pairing") {
+            stepTitle.textContent = "Отсканируйте QR на экране";
+            stepMsg.textContent = "Экран, на который выводится инвентаризация";
+            void startScanner(handlePairingScan);
+            return;
+        }
+        if (session.step === "scan_shelf") {
+            void startShelfScan();
+            return;
+        }
+        if (session.step === "scan_boxes" && session.current_shelf_id) {
+            const { data: shelfRows, error } = await supabaseClient
+                .from("wms_no_shk_shelves")
+                .select("id,name,capacity,rack_id")
+                .eq("id", session.current_shelf_id)
+                .limit(1);
+            const shelf = shelfRows && shelfRows[0];
+            if (error || !shelf) {
+                // The shelf this session was mid-scanning on somehow no
+                // longer resolves -- fall back to a clean shelf scan rather
+                // than getting stuck.
+                void startShelfScan();
                 return;
             }
-            stepTitle.textContent = "Отсканируйте полку";
-            stepMsg.textContent = "";
-            void startShelfScan();
-        });
+            activeSession.shelfId = shelf.id;
+            activeSession.shelf = shelf;
+            void startBoxScan(shelf);
+            return;
+        }
+        // Unknown/unexpected step for an active session -- safest fallback.
+        void startShelfScan();
+    }
+
+    async function initInventoryFlow() {
+        const existing = await findActiveSession();
+        if (!existing) {
+            renderStartScreen();
+            return;
+        }
+        if (String(existing.started_by_id) === String(user.id)) {
+            await resumeSession(existing);
+            return;
+        }
+        // Someone else's session is active -- lets the abandon-recovery
+        // watcher below (and this phone's own staleness self-check) react
+        // if it later gets marked abandoned or completes.
+        activeSession = existing;
+        stepTitle.textContent = "Инвентаризация уже идёт";
+        stepMsg.textContent = "Начал(а): " + (existing.started_by_name || "неизвестно") + " в " + new Date(existing.started_at).toLocaleTimeString("ru-RU");
     }
 
     // ---------- Per-shelf loop ----------
@@ -263,9 +338,9 @@
         shelfMissingBtn = missingBtn;
     }
 
-    async function startBoxScan(shelf) {
+    async function startBoxScan(shelf, statusMsg) {
         stepTitle.textContent = "Отсканируйте все короба на полке слева направо";
-        stepMsg.textContent = shelf.name;
+        stepMsg.textContent = statusMsg || shelf.name;
         const count = await scannedCountForCurrentShelf();
         renderShelfButtons(count, shelf);
 
@@ -297,9 +372,10 @@
             const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id);
             if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
 
-            const newCount = await scannedCountForCurrentShelf();
+            const newCount = await scannedCountForCurrentShelf(); // total (found+missing_sticker), for button state
+            const foundCount = await currentFoundCount(); // "found" only -- boxes_found_count must not double-count missing_sticker rows
             const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
-                .update({ boxes_found_count: newCount })
+                .update({ boxes_found_count: foundCount })
                 .eq("session_id", activeSession.id).eq("shelf_id", shelf.id);
             const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
             if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only, box result above already recorded
@@ -320,20 +396,9 @@
     }
 
     // ---------- Короб без наклейки ----------
-    // Same date helpers as no_shk_zone.js's printActiveBox() (that file's
-    // lines ~541-550) -- duplicated here rather than shared because this
-    // repo has no module system (print-tspl.js is duplicated the same way
-    // across repos).
-    function formatDateShort(isoDate) {
-        const parts = String(isoDate).split("-");
-        if (parts.length !== 3) return String(isoDate);
-        return parts[2] + "." + parts[1] + "." + parts[0].slice(2);
-    }
-    function addDays(isoDate, days) {
-        const d = new Date(isoDate + "T00:00:00Z");
-        d.setUTCDate(d.getUTCDate() + days);
-        return d.toISOString().slice(0, 10);
-    }
+    // formatDateShort/addDays now live in inventory-dates.js (shared,
+    // tested global-scope module -- see inventory-dates.test.js), loaded
+    // via <script> before this file in mobile-inventory.html.
 
     async function openMissingStickerList() {
         stopScanner();
@@ -448,8 +513,7 @@
         const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
         if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only
 
-        stepMsg.textContent = "Стикер короба №" + box.box_number + " поставлен в печать";
-        void startBoxScan(activeSession.shelf);
+        void startBoxScan(activeSession.shelf, "Стикер короба №" + box.box_number + " поставлен в печать");
         void newCount; // count is re-read by startBoxScan's own renderShelfButtons call
     }
 
@@ -459,6 +523,15 @@
             .select("id", { count: "exact", head: true })
             .eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId).eq("result", "missing_sticker");
         if (error) console.error("Failed to count missing_sticker results", error);
+        return count || 0;
+    }
+
+    async function currentFoundCount() {
+        const { count, error } = await supabaseClient
+            .from("wms_no_shk_inventory_box_results")
+            .select("id", { count: "exact", head: true })
+            .eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId).eq("result", "found");
+        if (error) console.error("Failed to count found results", error);
         return count || 0;
     }
 
@@ -562,10 +635,10 @@
     }
 
     // Recovers a phone left open on a session that got marked abandoned
-    // (by display.js's own 30-minute staleness check, or by this same
-    // check running on ANOTHER idle phone) -- whichever side notices
-    // first wins, both react the same way: reload back to the start
-    // screen instead of sitting stuck on a dead scan prompt.
+    // (by display.js's own 30-minute staleness check, or by this phone's
+    // own staleness self-check below) -- whichever side notices first
+    // wins, both react the same way: reload back to the start screen
+    // instead of sitting stuck on a dead scan prompt.
     supabaseClient
         .channel("mobile_inventory_session_watch")
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "wms_no_shk_inventory_sessions" }, (payload) => {
@@ -575,5 +648,30 @@
         })
         .subscribe();
 
-    void startPairing();
+    // Same 30-minute staleness rule as display.js's own watcher, run here
+    // too so the feature doesn't depend on a display.html tab being open
+    // anywhere -- most relevant for the "Инвентаризация уже идёт" screen,
+    // where this phone is only observing someone ELSE's session and would
+    // otherwise have no way to notice it went stale.
+    const INVENTORY_ABANDON_MS = 30 * 60 * 1000;
+    setInterval(async () => {
+        if (!activeSession || !activeSession.id) return;
+        const { data, error } = await supabaseClient
+            .from("wms_no_shk_inventory_sessions")
+            .select("status,last_activity_at")
+            .eq("id", activeSession.id)
+            .maybeSingle();
+        if (error || !data) return;
+        if (data.status !== "waiting_for_phone" && data.status !== "in_progress") return;
+        const staleMs = Date.now() - new Date(data.last_activity_at).getTime();
+        if (staleMs > INVENTORY_ABANDON_MS) {
+            await supabaseClient
+                .from("wms_no_shk_inventory_sessions")
+                .update({ status: "abandoned" })
+                .eq("id", activeSession.id)
+                .in("status", ["waiting_for_phone", "in_progress"]);
+        }
+    }, 20000);
+
+    void initInventoryFlow();
 })();

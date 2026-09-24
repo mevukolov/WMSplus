@@ -479,6 +479,7 @@
 
         overlay.classList.add("is-visible");
         overlay.setAttribute("aria-hidden", "false");
+        overlay.classList.toggle("is-banner", activeSession.step === "scan_shelf" || activeSession.step === "scan_boxes");
         arrow.style.display = "none";
         qrBox.innerHTML = "";
         completeBlock.style.display = "none";
@@ -593,9 +594,21 @@
     const INVENTORY_ABANDON_MS = 30 * 60 * 1000;
     setInterval(async () => {
         if (!activeSession) return;
+        // Only "waiting_for_phone"/"in_progress" sessions can go stale --
+        // without this guard, a "completed" session (deliberately kept as
+        // this query's most-recent "active" row by loadActiveInventorySession
+        // so the completion animation has something to render) would get
+        // its audit-trail status silently corrupted to "abandoned" ~30min
+        // after every single completed inventory. Also re-checked
+        // server-side via .in() below, not just this client-side guard.
+        if (activeSession.status !== "waiting_for_phone" && activeSession.status !== "in_progress") return;
         const staleMs = Date.now() - new Date(activeSession.last_activity_at).getTime();
         if (staleMs > INVENTORY_ABANDON_MS) {
-            await supabaseClient.from("wms_no_shk_inventory_sessions").update({ status: "abandoned" }).eq("id", activeSession.id);
+            await supabaseClient
+                .from("wms_no_shk_inventory_sessions")
+                .update({ status: "abandoned" })
+                .eq("id", activeSession.id)
+                .in("status", ["waiting_for_phone", "in_progress"]);
         }
     }, 20000);
 

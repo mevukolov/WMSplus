@@ -52,6 +52,11 @@
         opacity: 0;
         pointer-events: none;
     }
+    body.is-night #qrOverlay,
+    body.is-night #inventoryOverlay {
+        opacity: 0;
+        pointer-events: none;
+    }
 
     /* ---------- Below: same "Без ШК" zone classes/markup as
        tasks.html/no_shk_zone.js's renderZoneView(), same data -- but laid
@@ -232,6 +237,28 @@
         z-index: 100;
     }
     .qr-overlay.is-visible { opacity: 1; pointer-events: auto; }
+
+    /* Banner mode: used only by #inventoryOverlay during scan_shelf/
+       scan_boxes (toggled in display.js's renderInventoryOverlay), so the
+       step-instruction card floats over the top of the screen instead of
+       blocking the green/red rack-completion map underneath -- the whole
+       point of showing that map "through every step of the flow", not
+       just pairing/completion. */
+    .qr-overlay.is-banner {
+        background: transparent;
+        align-items: flex-start;
+        justify-content: center;
+        padding-top: 20px;
+        pointer-events: none;
+    }
+    .qr-overlay.is-banner .qr-card {
+        pointer-events: auto;
+        padding: 18px 40px;
+    }
+    .qr-overlay.is-banner .qr-card-title {
+        font-size: 22px;
+        margin-bottom: 0;
+    }
     @keyframes qr-card-in {
         0% { opacity: 0; transform: scale(.7) translateY(24px); }
         60% { opacity: 1; transform: scale(1.06) translateY(-6px); }
