@@ -47,7 +47,17 @@
         stopScanner();
         video.style.display = "";
         try {
-            scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            // Box QR stickers are small thermal-printed labels -- a
+            // browser's default getUserMedia stream (often ~640x480 when
+            // only facingMode is given) doesn't carry enough detail for
+            // jsQR to decode one reliably at normal scanning distance,
+            // even though the same stream is plenty for the much larger
+            // shelf QR signs. Asking for a bigger frame directly targets
+            // that gap; `ideal` (not exact/min) so it degrades gracefully
+            // on a camera that can't do 1280x720.
+            scanStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+            });
         } catch (error) {
             video.style.display = "none";
             stepMsg.textContent = "Не удалось открыть камеру: " + error.message;
@@ -55,6 +65,24 @@
         }
         video.srcObject = scanStream;
         await video.play();
+        // Best-effort continuous autofocus -- a close-up small QR code is
+        // also where a phone camera's default (often single-shot/fixed)
+        // focus is most likely to leave the frame permanently blurry.
+        // Not all browsers/devices expose focus control this way (notably
+        // iOS Safari doesn't), so this silently no-ops there; scanning
+        // still works, just relying on whatever autofocus the device
+        // already does on its own.
+        const [scanTrack] = scanStream.getVideoTracks();
+        if (scanTrack && scanTrack.getCapabilities) {
+            try {
+                const caps = scanTrack.getCapabilities();
+                if (caps.focusMode && caps.focusMode.includes("continuous")) {
+                    await scanTrack.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+                }
+            } catch (focusError) {
+                console.error("Continuous focus not applied", focusError);
+            }
+        }
         const ctx = canvas.getContext("2d");
         // Re-entrancy guard: a code held steady in frame decodes on every
         // tick, and onMatch is async (DB round-trips) -- without this, a
@@ -133,7 +161,7 @@
         stepMsg.textContent = "";
         stepButtons.innerHTML = "";
         const startBtn = document.createElement("button");
-        startBtn.className = "btn";
+        startBtn.className = "btn btn-rect";
         startBtn.textContent = "Начать инвентаризацию";
         startBtn.addEventListener("click", () => {
             // Disable synchronously so a double-tap can't race two inserts
@@ -309,7 +337,7 @@
         stepButtons.innerHTML = "";
         const finishLabel = scannedCount === 0 ? "На полке нет коробов" : "На полке больше нет коробов";
         const finishBtn = document.createElement("button");
-        finishBtn.className = "btn";
+        finishBtn.className = "btn btn-rect";
         finishBtn.textContent = finishLabel;
         let missingBtn = null;
         finishBtn.addEventListener("click", () => {
@@ -400,6 +428,18 @@
     // tested global-scope module -- see inventory-dates.test.js), loaded
     // via <script> before this file in mobile-inventory.html.
 
+    // Boxes missing their sticker have nothing printed on them for the
+    // worker to read a box number off of -- so the picker identifies each
+    // one by what's actually visible/known about it (arrival date(s) +
+    // area + type) instead of a box_number nobody standing in the aisle
+    // can see.
+    function boxDisplayLabel(box) {
+        const dateLabel = box.shift_type === "Ночная"
+            ? formatDateShort(box.shift_date) + " / " + formatDateShort(addDays(box.shift_date, 1))
+            : formatDateShort(box.shift_date);
+        return dateLabel + " — " + box.area + ", " + box.box_type;
+    }
+
     async function openMissingStickerList() {
         stopScanner();
         stepTitle.textContent = "Выберите короб";
@@ -422,7 +462,7 @@
         stepButtons.innerHTML = "";
         const filterInput = document.createElement("input");
         filterInput.className = "field";
-        filterInput.placeholder = "Номер короба...";
+        filterInput.placeholder = "Дата или зона...";
         filterInput.style.marginBottom = "10px";
         stepButtons.appendChild(filterInput);
 
@@ -432,14 +472,15 @@
 
         function renderList(filterText) {
             list.innerHTML = "";
+            const needle = filterText.toLowerCase();
             const filtered = filterText
-                ? candidates.filter((b) => String(b.box_number).includes(filterText))
+                ? candidates.filter((b) => boxDisplayLabel(b).toLowerCase().includes(needle))
                 : candidates;
             filtered.slice(0, 100).forEach((box) => {
                 const item = document.createElement("button");
                 item.className = "btn btn-outline";
                 item.style.textAlign = "left";
-                item.textContent = "№" + box.box_number + " — " + box.area + ", " + box.box_type;
+                item.textContent = boxDisplayLabel(box);
                 item.addEventListener("click", () => {
                     // Disable synchronously, before any await, so a fast
                     // double-click/tap on the same box can't re-enter

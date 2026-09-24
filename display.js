@@ -479,8 +479,17 @@
 
         overlay.classList.add("is-visible");
         overlay.setAttribute("aria-hidden", "false");
-        overlay.classList.toggle("is-banner", activeSession.step === "scan_shelf" || activeSession.step === "scan_boxes");
+        // Banner (small, rack map visible through it) only while the
+        // worker is walking between shelves looking for the next one to
+        // audit. Once a specific shelf's box-scan has actually started,
+        // go full-screen with bigger text instead (.is-active-shelf) --
+        // at that point the worker is standing at one rack, so the
+        // floor-wide map matters less than legibility from a few steps
+        // back.
+        overlay.classList.toggle("is-banner", activeSession.step === "scan_shelf");
+        overlay.classList.toggle("is-active-shelf", activeSession.step === "scan_boxes");
         arrow.style.display = "none";
+        arrow.style.fontSize = "";
         qrBox.innerHTML = "";
         completeBlock.style.display = "none";
         // Unconditional reset (like arrow/qrBox/completeBlock above) --
@@ -502,6 +511,23 @@
         } else if (activeSession.step === "scan_boxes") {
             stepText.textContent = "Отсканируйте все короба на полке слева направо";
             arrow.style.display = "";
+            arrow.style.fontSize = "110px";
+            // One-shot "slides in" entry animation, only on a GENUINE
+            // transition into this step (not every redundant re-render --
+            // same isGenuineTransition signature this function already
+            // computed above for the qrOverlay mutual-exclusion check).
+            // Restarted via the same remove/reflow/add trick used
+            // elsewhere in this file (showQrOverlay) since a CSS
+            // animation doesn't replay just from re-adding a class that's
+            // already present.
+            if (isGenuineTransition) {
+                const card = document.getElementById("inventoryCard");
+                if (card) {
+                    card.classList.remove("is-entering");
+                    void card.offsetWidth;
+                    card.classList.add("is-entering");
+                }
+            }
         } else if (activeSession.step === "completed") {
             completeBlock.style.display = "";
             stepText.style.display = "none";

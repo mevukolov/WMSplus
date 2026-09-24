@@ -256,8 +256,27 @@
         padding: 18px 40px;
     }
     .qr-overlay.is-banner .qr-card-title {
-        font-size: 22px;
+        font-size: 28px;
         margin-bottom: 0;
+    }
+    /* Active-shelf mode: #inventoryOverlay during scan_boxes specifically
+       (worker is actively scanning boxes on a shelf they've already
+       reached, as opposed to scan_shelf's "walking to find the next
+       shelf" -- the rack map matters less here than legibility from a
+       few steps back). Full-screen (is-banner is NOT applied for this
+       step), with a bigger title/arrow and a one-shot "slides in" entry
+       animation (.is-entering, toggled by display.js only on a genuine
+       transition into this step -- see renderInventoryOverlay). */
+    .qr-overlay.is-active-shelf .qr-card-title {
+        font-size: 52px;
+    }
+    @keyframes inventory-shelf-in {
+        0% { opacity: 0; transform: scale(.72) translateY(48px); }
+        60% { opacity: 1; transform: scale(1.06) translateY(-8px); }
+        100% { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .qr-overlay.is-active-shelf .qr-card.is-entering {
+        animation: inventory-shelf-in .55s cubic-bezier(.34,1.56,.64,1) both;
     }
     @keyframes qr-card-in {
         0% { opacity: 0; transform: scale(.7) translateY(24px); }
@@ -276,7 +295,7 @@
     }
     .qr-card-title {
         margin: 0 0 8px;
-        font-size: 30px;
+        font-size: 34px;
         font-weight: 800;
         color: var(--accent-dark);
         letter-spacing: -.02em;

@@ -7,9 +7,32 @@
 <link rel="stylesheet" href="styles.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+/* Kiosk/mobile page, nothing to scroll with -- never let the page itself
+   scroll (mirrors display.html's same rule). Individual sub-elements
+   (e.g. the missing-sticker box picker's own list) may still scroll
+   internally within their own fixed max-height. */
+html, body { height: 100%; overflow: hidden; margin: 0; }
+.field {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 14px;
+  box-sizing: border-box;
+  background: #ffffff;
+  color: #101010;
+}
+.field:focus {
+  outline: none;
+  border-color: var(--accent, #0f5f7a);
+  box-shadow: 0 0 0 3px rgba(15, 95, 122, 0.12);
+}
+</style>
 </head>
-<body style="display:flex;flex-direction:column;align-items:center;min-height:100dvh;margin:0;padding:20px;box-sizing:border-box;">
-<div class="card" style="padding:24px;width:100%;max-width:420px;text-align:center;">
+<body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;margin:0;padding:20px;box-sizing:border-box;">
+<div class="card" style="padding:24px;width:100%;max-width:420px;max-height:100%;overflow-y:auto;box-sizing:border-box;text-align:center;">
     <h1 id="stepTitle">Инвентаризация «Без ШК»</h1>
     <p id="stepMsg" style="margin:0 0 16px;font-size:14px;color:#64748b;"></p>
     <video id="invVideo" playsinline muted style="width:100%;max-width:320px;border-radius:var(--radius-md);background:#000;display:none;"></video>
