@@ -297,6 +297,120 @@
         });
     }
 
+    // ---------- Короб без наклейки ----------
+    async function openMissingStickerList() {
+        stopScanner();
+        stepTitle.textContent = "Выберите короб";
+        stepMsg.textContent = "";
+        video.style.display = "none";
+
+        const { data: allBoxes, error: allBoxesError } = await supabaseClient
+            .from("wms_no_shk_boxes")
+            .select("id,box_number,area,shift_date,shift_type,box_type")
+            .order("box_number", { ascending: true });
+        if (allBoxesError) { stepMsg.textContent = "Ошибка: " + allBoxesError.message; return; }
+        const { data: alreadyAccounted, error: alreadyAccountedError } = await supabaseClient
+            .from("wms_no_shk_inventory_box_results")
+            .select("box_id")
+            .eq("session_id", activeSession.id)
+            .eq("shelf_id", activeSession.shelfId);
+        if (alreadyAccountedError) { stepMsg.textContent = "Ошибка: " + alreadyAccountedError.message; return; }
+        const excluded = new Set((alreadyAccounted || []).map((r) => r.box_id));
+        const candidates = (allBoxes || []).filter((b) => !excluded.has(b.id));
+
+        stepButtons.innerHTML = "";
+        const filterInput = document.createElement("input");
+        filterInput.className = "field";
+        filterInput.placeholder = "Номер короба...";
+        filterInput.style.marginBottom = "10px";
+        stepButtons.appendChild(filterInput);
+
+        const list = document.createElement("div");
+        list.style.cssText = "display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;";
+        stepButtons.appendChild(list);
+
+        function renderList(filterText) {
+            list.innerHTML = "";
+            const filtered = filterText
+                ? candidates.filter((b) => String(b.box_number).includes(filterText))
+                : candidates;
+            filtered.slice(0, 100).forEach((box) => {
+                const item = document.createElement("button");
+                item.className = "btn btn-outline";
+                item.style.textAlign = "left";
+                item.textContent = "№" + box.box_number + " — " + box.area + ", " + box.box_type;
+                item.addEventListener("click", () => void selectMissingStickerBox(box));
+                list.appendChild(item);
+            });
+        }
+        renderList("");
+        filterInput.addEventListener("input", () => renderList(filterInput.value.trim()));
+
+        const backBtn = document.createElement("button");
+        backBtn.className = "btn btn-outline";
+        backBtn.textContent = "Назад";
+        backBtn.addEventListener("click", () => void startBoxScan(activeSession.shelf));
+        stepButtons.appendChild(backBtn);
+    }
+
+    async function selectMissingStickerBox(box) {
+        const { error: resultInsertError } = await supabaseClient.from("wms_no_shk_inventory_box_results").insert({
+            session_id: activeSession.id, shelf_id: activeSession.shelfId, box_id: box.id, result: "missing_sticker",
+        });
+        if (resultInsertError) { stepMsg.textContent = "Ошибка: " + resultInsertError.message; return; }
+        const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: activeSession.shelfId }).eq("id", box.id);
+        if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
+
+        // Reprint this box's own sticker -- same payload shape
+        // no_shk_zone.js's printActiveBox() builds for the "Короб «Без
+        // ШК»" template.
+        const { data: template, error: templateError } = await supabaseClient
+            .from("print_label_templates")
+            .select("id,width_mm,height_mm,elements")
+            .eq("name", "Короб «Без ШК»")
+            .maybeSingle();
+        if (templateError) console.error("Failed to load print template", templateError); // reprint is best-effort here -- the box result above already succeeded
+        if (template) {
+            const dateLine1 = box.shift_date;
+            const tsplData = {
+                box_code: "WMSP.BOX." + String(box.box_number).padStart(5, "0"),
+                box_number: String(box.box_number),
+                box_type: box.box_type,
+                area: box.area,
+                date_line1: dateLine1,
+                date_line2: box.shift_type === "Ночная" ? dateLine1 : "",
+                shift: box.shift_type === "Ночная" ? "Ночь" : "День",
+            };
+            const { error: printJobError } = await supabaseClient.from("print_jobs").insert({
+                template_id: template.id, data: tsplData,
+                tspl: window.buildTsplPayloadBase64 ? window.buildTsplPayloadBase64(template, tsplData) : null,
+                created_by: user.id != null ? String(user.id) : null,
+            });
+            if (printJobError) console.error("Failed to queue print job", printJobError); // reprint is best-effort -- the box result above already succeeded
+        }
+
+        const newCount = await scannedCountForCurrentShelf();
+        const { error: auditUpdateError } = await supabaseClient.from("wms_no_shk_inventory_shelf_audits")
+            .update({ boxes_missing_sticker_count: (await currentMissingStickerCount()) })
+            .eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId);
+        if (auditUpdateError) console.error("Failed to update boxes_missing_sticker_count", auditUpdateError); // denormalized counter only -- the box result above already succeeded
+        const { error: touchError } = await supabaseClient.from("wms_no_shk_inventory_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", activeSession.id);
+        if (touchError) console.error("Failed to touch last_activity_at", touchError); // housekeeping only
+
+        stepMsg.textContent = "Стикер короба №" + box.box_number + " поставлен в печать";
+        void startBoxScan(activeSession.shelf);
+        void newCount; // count is re-read by startBoxScan's own renderShelfButtons call
+    }
+
+    async function currentMissingStickerCount() {
+        const { count, error } = await supabaseClient
+            .from("wms_no_shk_inventory_box_results")
+            .select("id", { count: "exact", head: true })
+            .eq("session_id", activeSession.id).eq("shelf_id", activeSession.shelfId).eq("result", "missing_sticker");
+        if (error) console.error("Failed to count missing_sticker results", error);
+        return count || 0;
+    }
+
     // Recovers a phone left open on a session that got marked abandoned
     // (by display.js's own 30-minute staleness check, or by this same
     // check running on ANOTHER idle phone) -- whichever side notices
