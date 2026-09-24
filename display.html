@@ -327,6 +327,25 @@
     .no-shk-rack.is-pending .no-shk-rack-title { color: #b91c1c; }
     .no-shk-rack.is-pending .no-shk-rack-frame { border-color: #ef4444; }
 
+    /* ---------- Inventory box-scan flash: a brief "✓ Короб добавлен"
+       shown inside #inventoryCard on every wms_no_shk_inventory_box_results
+       INSERT for the active session (display.js), then auto-hidden again.
+       Needed because .is-active-shelf's full-screen card (added so the
+       worker can read step instructions from a few steps back) now covers
+       the rack map's own existing box-appears pop animation for the whole
+       duration of scan_boxes -- this replaces that lost feedback with
+       something visible on the card itself. Reuses no-shk-box-pop's
+       keyframe (below) rather than a new one. ---------- */
+    #inventoryScanFlash {
+        display: none;
+        margin-top: 14px;
+        font-size: 24px;
+        font-weight: 700;
+    }
+    #inventoryScanFlash.is-popping {
+        animation: no-shk-box-pop .5s cubic-bezier(.34,1.56,.64,1) both;
+    }
+
     /* ---------- Inventory completion: confetti burst pieces (appended/
        removed by display.js's fireConfetti()) fall from the top of the
        viewport past the completion card. ---------- */
@@ -357,6 +376,7 @@
         <p class="qr-card-title" id="inventoryStepText">Инвентаризация «Без ШК»</p>
         <div id="inventoryQrBox" class="qr-code-box"></div>
         <div id="inventoryArrow" style="display:none;font-size:64px;color:var(--accent);margin:8px 0;">→</div>
+        <div id="inventoryScanFlash"></div>
         <div id="inventoryCompleteBlock" style="display:none;">
             <div style="font-size:72px;color:#22c55e;">✓</div>
             <p class="qr-card-title">Инвентаризация завершена</p>

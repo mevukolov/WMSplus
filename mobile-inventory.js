@@ -25,6 +25,7 @@
 
     const stepTitle = document.getElementById("stepTitle");
     const stepMsg = document.getElementById("stepMsg");
+    const scanDebug = document.getElementById("scanDebug");
     const video = document.getElementById("invVideo");
     const canvas = document.getElementById("invCanvas");
     const stepButtons = document.getElementById("stepButtons");
@@ -32,6 +33,7 @@
     let activeSession = null;
     let scanStream = null;
     let scanRafId = null;
+    let scanDebugTimer = null;
     // Tracks the currently-rendered shelf-step buttons so finishShelf()'s
     // error paths can re-enable them -- they were disabled synchronously
     // by renderShelfButtons' click handler (the re-entrancy guard) before
@@ -101,6 +103,14 @@
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const code = jsQR(imageData.data, imageData.width, imageData.height);
                 if (code && code.data) {
+                    // Diagnostic: prove a decode happened at all, regardless
+                    // of whether onMatch below accepts it -- see the comment
+                    // on #scanDebug in mobile-inventory.html.
+                    if (scanDebug) {
+                        scanDebug.textContent = "Прочитано: " + code.data;
+                        clearTimeout(scanDebugTimer);
+                        scanDebugTimer = setTimeout(() => { scanDebug.textContent = ""; }, 2500);
+                    }
                     processingMatch = true;
                     Promise.resolve(onMatch(code.data)).finally(() => { processingMatch = false; });
                 }
@@ -110,6 +120,21 @@
             }
         }
         scanRafId = requestAnimationFrame(tick);
+    }
+
+    // Visible + tactile confirmation that a box was actually recorded --
+    // the text-only "добавлен" message was easy to miss while looking at
+    // the box/camera rather than the screen.
+    function flashScanSuccess() {
+        const card = document.querySelector(".card");
+        if (card) {
+            card.classList.remove("is-scan-success");
+            void card.offsetWidth;
+            card.classList.add("is-scan-success");
+        }
+        if (navigator.vibrate) {
+            try { navigator.vibrate(80); } catch (e) { /* best-effort only */ }
+        }
     }
 
     function stopScanner() {
@@ -399,6 +424,12 @@
             if (insertError) { stepMsg.textContent = "Ошибка: " + insertError.message; return; }
             const { error: boxUpdateError } = await supabaseClient.from("wms_no_shk_boxes").update({ shelf_id: shelf.id }).eq("id", box.id);
             if (boxUpdateError) { stepMsg.textContent = "Ошибка: " + boxUpdateError.message; return; }
+
+            // The box is now safely recorded (both awaits above succeeded)
+            // -- flash/vibrate right here rather than after the counter
+            // update below, since that part is best-effort and shouldn't
+            // delay the worker's confirmation.
+            flashScanSuccess();
 
             const newCount = await scannedCountForCurrentShelf(); // total (found+missing_sticker), for button state
             const foundCount = await currentFoundCount(); // "found" only -- boxes_found_count must not double-count missing_sticker rows

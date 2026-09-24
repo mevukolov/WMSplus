@@ -582,6 +582,27 @@
         });
     }
 
+    // Brief "✓ Короб добавлен" shown inside #inventoryCard on every box
+    // scan for the active session (see the CSS comment in display.html) --
+    // replaces the rack map's own box-appears pop animation, which
+    // .is-active-shelf's full-screen card now covers for the duration of
+    // scan_boxes.
+    let scanFlashHideTimer = null;
+    function flashInventoryScanSuccess(result) {
+        if (!activeSession || activeSession.step !== "scan_boxes") return; // late/unrelated event -- nothing to flash onto right now
+        const flash = document.getElementById("inventoryScanFlash");
+        if (!flash) return;
+        const isMissing = result === "missing_sticker";
+        flash.textContent = isMissing ? "✓ Записан (без наклейки)" : "✓ Короб добавлен";
+        flash.style.color = isMissing ? "#b45309" : "#16a34a";
+        flash.style.display = "block"; // the element's default CSS is display:none -- clearing to "" would just fall back to that, not show it
+        flash.classList.remove("is-popping");
+        void flash.offsetWidth;
+        flash.classList.add("is-popping");
+        clearTimeout(scanFlashHideTimer);
+        scanFlashHideTimer = setTimeout(() => { flash.style.display = "none"; }, 1400);
+    }
+
     // ---------- Night mode (20:30-07:30): nobody's on the floor overnight,
     // but the monitor stays on, so the page goes to a plain black screen
     // instead -- toggled purely by CSS class (body.is-night), no content
@@ -602,6 +623,14 @@
         .on("postgres_changes", { event: "*", schema: "public", table: "wms_no_shk_boxes" }, () => { void loadZone(); })
         .on("postgres_changes", { event: "*", schema: "public", table: "wms_no_shk_racks" }, () => { void loadZone(); })
         .on("postgres_changes", { event: "*", schema: "public", table: "wms_no_shk_shelves" }, () => { void loadZone(); })
+        .subscribe();
+
+    supabaseClient
+        .channel("inventory_box_scan_flash")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "wms_no_shk_inventory_box_results" }, (payload) => {
+            if (!activeSession || payload.new.session_id !== activeSession.id) return;
+            flashInventoryScanSuccess(payload.new.result);
+        })
         .subscribe();
 
     supabaseClient
