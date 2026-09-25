@@ -439,6 +439,12 @@
         const bucketLine = item.no_shk_bucket && item.no_shk_bucket !== "Короб смены"
             ? "<div class='row'><b>Учёт:</b> " + escapeHtmlLocal(item.no_shk_bucket) + "</div>"
             : "";
+        const nmList = Array.isArray(item.wb_nm_candidates) ? item.wb_nm_candidates : [];
+        const nmLine = nmList.length
+            ? "<div class='row'><b>Вероятные номенклатуры:</b> " + nmList.map((nm) =>
+                "<a href='https://www.wildberries.ru/catalog/" + escapeHtmlLocal(nm) + "/detail.aspx' target='_blank' rel='noopener'>" + escapeHtmlLocal(nm) + "</a>"
+            ).join(", ") + "</div>"
+            : (item.wb_nm_checked_at ? "" : "<div class='row' style='color:#94a3b8;'>Вероятные номенклатуры: проверяется…</div>");
         const employeeLine = "<div class='row'><b>Сотрудник:</b> " + escapeHtmlLocal(item.full_name || "-")
             + (item.employee_id ? " (№" + escapeHtmlLocal(String(item.employee_id)) + ")" : "") + "</div>";
         img.src = buildIntakePhotoUrl(item.photo_path);
@@ -446,6 +452,7 @@
             + "<div class='name'>" + nameLine + "</div>"
             + (item.category ? "<div class='category'>" + escapeHtmlLocal(item.category) + "</div>" : "")
             + bucketLine
+            + nmLine
             + employeeLine
             + "<div class='row'><b>Тип:</b> " + escapeHtmlLocal(item.item_type || "-") + "</div>"
             + "<div class='row'><b>Когда:</b> " + when + "</div>"
