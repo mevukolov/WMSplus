@@ -9185,8 +9185,8 @@
         const isUploadMarker = item.event_type === "task_prespisok_uploaded";
         const isCrossModuleTouch = item.event_type === "task_cross_module_touch";
         const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
-        const isSystem = isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker || isCrossModuleTouch || (!rawActorName && !rawActorId);
-        const actorDisplay = (isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker || isCrossModuleTouch) ? "Система" : (rawActorName || rawActorId || "Система");
+        const isSystem = isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker || (!rawActorName && !rawActorId);
+        const actorDisplay = (isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker) ? "Система" : (rawActorName || rawActorId || "Система");
         const verdict = isForecast
             ? "Прогнозируемая дата списания"
             : isStatusLine
@@ -9401,11 +9401,23 @@
         const shkIds = Array.isArray(row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
         if (!tareId && !shkIds.length) return [];
         try {
-            let query = db.from(WMS_PRESPISOK_ACTIONS_TABLE).select("verdict,extra_value,created_at,operator_id,operator_name");
-            query = tareId ? query.eq("source_tare_id", tareId) : query.contains("source_shk_ids", [shkIds[0]]);
-            const { data, error } = await query.order("created_at", { ascending: true });
-            if (error) throw error;
-            return Array.isArray(data) ? data : [];
+            const base = () => db.from(WMS_PRESPISOK_ACTIONS_TABLE).select("verdict,extra_value,created_at,operator_id,operator_name,source_shk_ids,source_tare_id");
+            // A task's own source_tare_id doesn't mean its предсписок decision
+            // (if any) was tare-based too -- an item merged in from another
+            // module can carry a tare_id from ITS OWN origin while having
+            // been checked in предсписок by ШК alone. Check both, not either/or.
+            const queries = shkIds.length ? [base().contains("source_shk_ids", [shkIds[0]])] : [];
+            if (tareId) queries.push(base().eq("source_tare_id", tareId));
+            const settled = await Promise.allSettled(queries);
+            const byKey = new Map();
+            settled.forEach((result) => {
+                if (result.status !== "fulfilled" || (result.value && result.value.error)) return;
+                (Array.isArray(result.value.data) ? result.value.data : []).forEach((action) => {
+                    const key = normalizeText(action.created_at) + "|" + normalizeText(action.operator_id);
+                    if (!byKey.has(key)) byKey.set(key, action);
+                });
+            });
+            return Array.from(byKey.values()).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         } catch (error) {
             console.warn("prespisok action history fetch skipped:", error);
             return [];
@@ -9431,11 +9443,17 @@
         const shkIds = Array.isArray(row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
         if (!tareId && !shkIds.length) return [];
         try {
-            let query = db.from(WMS_PRESPISOK_RUNS_TABLE).select("id,started_at,created_at");
-            query = tareId ? query.contains("tare_ids", [tareId]) : query.contains("shk_ids", [shkIds[0]]);
-            const { data, error } = await query.order("started_at", { ascending: true }).limit(10);
-            if (error) throw error;
-            return Array.isArray(data) ? data : [];
+            const base = () => db.from(WMS_PRESPISOK_RUNS_TABLE).select("id,started_at,created_at").order("started_at", { ascending: true }).limit(10);
+            // Same either/or bug as fetchPrespisokActionsForTask -- check both.
+            const queries = shkIds.length ? [base().contains("shk_ids", [shkIds[0]])] : [];
+            if (tareId) queries.push(base().contains("tare_ids", [tareId]));
+            const settled = await Promise.allSettled(queries);
+            const byId = new Map();
+            settled.forEach((result) => {
+                if (result.status !== "fulfilled" || (result.value && result.value.error)) return;
+                (Array.isArray(result.value.data) ? result.value.data : []).forEach((run) => byId.set(run.id, run));
+            });
+            return Array.from(byId.values()).sort((a, b) => new Date(a.started_at || a.created_at) - new Date(b.started_at || b.created_at));
         } catch (error) {
             console.warn("prespisok upload marker fetch skipped:", error);
             return [];
