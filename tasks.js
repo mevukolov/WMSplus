@@ -9379,6 +9379,73 @@
         return true;
     }
 
+    // Стол старшего уже приклеил свой ШК на товар (snapshot.sticker_code) --
+    // значит по факту он уже списан под этим ШК, и задаче по старому ШК
+    // нужно сразу получить вердикт "Аннулирование после списания" (тот же
+    // deferred-вердикт, что и completeTaskFromDetail ставит вручную), а не
+    // просто запись в историю. reopen_after считаем тем же путём
+    // (reopenAfterForVerdict), чтобы задача так же переоткрылась к due_date.
+    async function applyNoShkStickerVerdict(row, stickerLabel) {
+        const db = supabaseDb();
+        if (!db || !row || !row.id) return;
+        const verdict = CANCELLATION_AFTER_WRITEOFF_VERDICT;
+        const comment = "Обработан через стол старшего под ШК: " + stickerLabel;
+        const user = currentWmsUser();
+        const now = new Date().toISOString();
+        const reopenAfter = reopenAfterForVerdict(verdict, row, null);
+        const reviewPayload = {
+            comment,
+            verdict,
+            attachment: "",
+            extra_label: DEFERRED_VERDICT_FIELDS[verdict] || "",
+            extra_value: comment,
+            exclusion_hours: null,
+            completed_by_id: user.id || null,
+            completed_by_name: user.name || null,
+            completed_at: now,
+            reopen_after: reopenAfter,
+        };
+        const nextPayload = {
+            ...taskPayload(row),
+            wms_review: { ...taskReviewPayload(row), ...reviewPayload },
+        };
+        const payload = {
+            opp_verdict: verdict,
+            task_status: "Отложено",
+            completed_at: now,
+            reopen_after: reopenAfter,
+            source_payload: nextPayload,
+            updated_at: now,
+        };
+        try {
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .update(payload)
+                .eq("id", row.id)
+                .select("id,source_payload,task_status,opp_verdict,assignee_employee_id,assignee_name,completed_at,reopen_after,updated_at")
+                .single();
+            if (error) throw error;
+            const merged = data || payload;
+            Object.assign(row, merged);
+            refreshTaskRow(row.id, merged);
+            const queued = (state.noShkQueue.rows || []).find((item) => item.id === row.id);
+            if (queued) Object.assign(queued, merged);
+            state.review.rows = (state.review.rows || []).filter((item) => item.id !== row.id || isActiveReviewTask(item));
+            void writeTaskHistory(row, "task_deferred", {
+                title: displayTaskTitle(row),
+                verdict,
+                comment,
+                extra_label: reviewPayload.extra_label,
+                extra_value: reviewPayload.extra_value,
+                completed_by_id: user.id || null,
+                completed_by_name: user.name || null,
+                reopen_after: reopenAfter,
+            });
+        } catch (error) {
+            toast("Не удалось выставить вердикт по ШК: " + (error && error.message ? error.message : String(error)), "error");
+        }
+    }
+
     async function confirmNoShkMatch(row, index) {
         const matches = taskNoShkMatches(row).slice();
         const match = matches[index];
@@ -9443,6 +9510,10 @@
             commentParts.push("Обработан через стол старшего под ШК: " + stickerLabel);
         }
         await writeTaskHistory(targetRow, "task_no_shk_found", { comment: commentParts.join(". "), submission: snapshot });
+        if (snapshot.sticker_code) {
+            const stickerLabel = decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code;
+            await applyNoShkStickerVerdict(targetRow, stickerLabel);
+        }
         const confirmedMatch = { ...match, decision: "confirmed", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
 
         if (targetRow === row) {
