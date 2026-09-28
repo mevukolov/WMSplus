@@ -2093,10 +2093,15 @@
                         </div>
                     </div>
                     <div class="review-pager-panel">
-                        <div class="card" style="padding:32px;text-align:center;">
-                            <h3 style="margin:0 0 8px;">Чистые списания</h3>
-                            <p class="empty-state" style="margin:0;">Группировка по критериям — в разработке.</p>
+                        <div id="pureLossesPickerRow" class="review-picker-row">
+                            <button id="pureLossesPickerPrev" class="review-picker-arrow" type="button" aria-label="Прошлые участки">‹</button>
+                            <div class="review-picker-scroll">
+                                <span id="pureLossesPickerThumb" class="review-picker-thumb" aria-hidden="true"></span>
+                                <div id="pureLossesSectionsGrid" class="review-sections-grid"></div>
+                            </div>
+                            <button id="pureLossesPickerNext" class="review-picker-arrow" type="button" aria-label="Следующие участки">›</button>
                         </div>
+                        <div id="pureLossesTableWrap" class="review-table-card"></div>
                     </div>
                 </div>
             </div>

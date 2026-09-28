@@ -444,6 +444,9 @@
         "Коробки на входе",
         "2-я линия предсписка",
     ];
+    // Участки чистых списаний -- значения колонки `lr` в pure_losses_rep,
+    // отображаются как "<lr> LR".
+    const PURE_LOSSES_LR_SECTIONS = [32, 26, 11, 27, 45, 47, 34];
     const FLOW_SKIP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
     const FLOW_SCORE_VERSION = "flow-mvp-2026-08-24";
     const FLOW_ALLOWED_USER_IDS = new Set(["1034305"]);
@@ -605,6 +608,14 @@
             filtersJustOpened: false,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
+        },
+        pureLosses: {
+            rows: [],
+            loading: false,
+            loaded: false,
+            loadPromise: null,
+            activeSection: PURE_LOSSES_LR_SECTIONS[0],
+            sectionExpanded: false,
         },
         inactive: {
             rows: [],
@@ -2406,6 +2417,7 @@
         animateReviewShellHeightChange(() => {
             renderReview();
             renderRequests();
+            renderPureLosses();
         });
         void ensureReviewTasksLoaded();
     }
@@ -2440,9 +2452,11 @@
         state.review.filtersOpen = false;
         state.requests.sectionExpanded = false;
         state.requests.filtersOpen = false;
+        state.pureLosses.sectionExpanded = false;
         state.inactive.groupExpanded = false;
         renderReview();
         renderRequests();
+        renderPureLosses();
         renderInactive();
     }
 
@@ -2467,6 +2481,10 @@
         if (index === REVIEW_TAB_INACTIVE) {
             renderInactive();
             if (!state.inactive.loaded && !state.inactive.loading) void loadInactiveTasks();
+        }
+        if (index === REVIEW_TAB_PURE_LOSSES) {
+            renderPureLosses();
+            if (!state.pureLosses.loaded && !state.pureLosses.loading) void loadPureLossesRows();
         }
     }
 
@@ -2527,7 +2545,7 @@
     // buttons get replaced on every renderReview()/renderRequests() call, so
     // listeners live on the grid (delegation) rather than on the cards.
     function initReviewCardTilt() {
-        const grids = [$("reviewSectionsGrid"), $("requestsSectionsGrid")].filter(Boolean);
+        const grids = [$("reviewSectionsGrid"), $("requestsSectionsGrid"), $("pureLossesSectionsGrid")].filter(Boolean);
         if (!grids.length) return;
         let activeCard = null;
 
@@ -7745,6 +7763,7 @@
         review: ["reviewSectionsGrid", "reviewPickerThumb"],
         requests: ["requestsSectionsGrid", "requestsPickerThumb"],
         inactive: ["inactiveSectionsGrid", "inactivePickerThumb"],
+        pureLosses: ["pureLossesSectionsGrid", "pureLossesPickerThumb"],
     };
 
     function updatePickerThumb(mode) {
@@ -7771,7 +7790,8 @@
     }
 
     function scrollPicker(mode, dir) {
-        const grid = $(mode === "review" ? "reviewSectionsGrid" : "requestsSectionsGrid");
+        const [gridId] = PICKER_THUMB_IDS[mode] || PICKER_THUMB_IDS.review;
+        const grid = $(gridId);
         const pills = grid ? Array.from(grid.querySelectorAll(".review-section-pill")) : [];
         if (!grid || !pills.length) return;
         const scrollEl = grid.parentElement;
@@ -11286,6 +11306,174 @@
         target.querySelectorAll("[data-inactive-task-detail]").forEach((row) => {
             row.addEventListener("click", () => openTaskDetail(row.dataset.inactiveTaskDetail, "inactive"));
         });
+    }
+
+    // "Чистые списания" разбор -- отдельный от WMS-задач источник
+    // (pure_losses_rep напрямую), сгруппированный по колонке `lr` вместо
+    // участков. Пока без вердиктов/детальной карточки -- просто список,
+    // тот же визуальный паттерн (плитки/таблица/анимации), что и у
+    // "Неактивные".
+    function pureLossesRowLr(row) {
+        const value = Number(row && row.lr);
+        return Number.isFinite(value) ? value : null;
+    }
+
+    function pureLossesSectionLabel(lr) {
+        return lr + " LR";
+    }
+
+    function pureLossesGroupedRows() {
+        const grouped = new Map(PURE_LOSSES_LR_SECTIONS.map((lr) => [lr, []]));
+        (state.pureLosses.rows || []).forEach((row) => {
+            const lr = pureLossesRowLr(row);
+            if (lr !== null && grouped.has(lr)) grouped.get(lr).push(row);
+        });
+        return grouped;
+    }
+
+    async function loadPureLossesRows() {
+        if (state.pureLosses.loadPromise) return state.pureLosses.loadPromise;
+        const db = supabaseDb();
+        if (!db) {
+            toast("Supabase SDK не загрузился.", "error");
+            return;
+        }
+        state.pureLosses.loadPromise = (async () => {
+            state.pureLosses.loading = true;
+            renderPureLosses();
+            try {
+                const rows = [];
+                const pageSize = 1000;
+                for (let from = 0; from < 20000; from += pageSize) {
+                    const { data, error } = await db
+                        .from(PURE_LOSSES_TABLE)
+                        .select("*")
+                        .eq("wh_id", WH_ID)
+                        .in("lr", PURE_LOSSES_LR_SECTIONS)
+                        .range(from, from + pageSize - 1);
+                    if (error) throw error;
+                    const batch = Array.isArray(data) ? data : [];
+                    rows.push(...batch);
+                    if (batch.length < pageSize) break;
+                }
+                state.pureLosses.rows = rows.filter(isPureRowPendingForAutoFound);
+                state.pureLosses.loaded = true;
+            } catch (error) {
+                console.error("pure losses load failed:", error);
+                state.pureLosses.rows = [];
+                toast("Не удалось загрузить чистые списания: " + (error && error.message ? error.message : String(error)), "error");
+            } finally {
+                state.pureLosses.loading = false;
+                state.pureLosses.loadPromise = null;
+                animateReviewShellHeightChange(() => renderPureLosses());
+            }
+        })();
+        return state.pureLosses.loadPromise;
+    }
+
+    function renderPureLosses() {
+        const grid = $("pureLossesSectionsGrid");
+        const wrap = $("pureLossesPickerRow");
+        if (!grid) return;
+        const grouped = pureLossesGroupedRows();
+        const expanded = state.pureLosses.sectionExpanded;
+        grid.classList.toggle("is-collapsed", expanded);
+        if (wrap) wrap.classList.toggle("is-collapsed", expanded);
+        if (!PURE_LOSSES_LR_SECTIONS.includes(state.pureLosses.activeSection)) {
+            state.pureLosses.activeSection = PURE_LOSSES_LR_SECTIONS[0];
+        }
+        const orderedSections = expanded
+            ? PURE_LOSSES_LR_SECTIONS.slice().sort((a, b) => {
+                const aEmpty = !(grouped.get(a) || []).length;
+                const bEmpty = !(grouped.get(b) || []).length;
+                return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+            })
+            : PURE_LOSSES_LR_SECTIONS;
+        grid.innerHTML = orderedSections.map((lr) => {
+            const rows = grouped.get(lr) || [];
+            const label = pureLossesSectionLabel(lr);
+            const total = rows.reduce((acc, row) => acc + (Number(row.price) || 0), 0);
+            const active = lr === state.pureLosses.activeSection ? " active" : "";
+            const empty = rows.length ? "" : " is-empty";
+            if (expanded) {
+                return "<button type='button' class='review-section-pill" + active + empty + "' data-pure-losses-lr='" + lr + "'>"
+                    + escapeHtml(label) + "<span class='review-section-pill-count'>" + rows.length + "</span></button>";
+            }
+            return "<button type='button' class='review-section-card" + active + empty + "' data-pure-losses-lr='" + lr + "'>"
+                + "<div class='review-section-name'><span>" + escapeHtml(label) + "</span><strong>" + rows.length + "</strong></div>"
+                + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
+                + "</button>";
+        }).join("");
+        grid.querySelectorAll("[data-pure-losses-lr]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const clicked = Number(button.dataset.pureLossesLr) || PURE_LOSSES_LR_SECTIONS[0];
+                if (state.pureLosses.sectionExpanded && state.pureLosses.activeSection === clicked) {
+                    collapsePureLossesSection();
+                    return;
+                }
+                const wasExpanded = state.pureLosses.sectionExpanded;
+                state.pureLosses.activeSection = clicked;
+                if (wasExpanded) switchPureLossesSection();
+                else expandPureLossesSection();
+            });
+        });
+        if (expanded) updatePickerThumb("pureLosses");
+        renderPureLossesTable();
+    }
+
+    function expandPureLossesSection() {
+        animateSectionModeSwap("pureLossesSectionsGrid", () => {
+            state.pureLosses.sectionExpanded = true;
+            renderPureLosses();
+        });
+    }
+
+    function switchPureLossesSection() {
+        animateReviewShellHeightChange(() => renderPureLosses());
+    }
+
+    function collapsePureLossesSection() {
+        animateSectionModeSwap("pureLossesSectionsGrid", () => {
+            state.pureLosses.sectionExpanded = false;
+            renderPureLosses();
+        });
+    }
+
+    function renderPureLossesTable() {
+        const target = $("pureLossesTableWrap");
+        if (!target) return;
+        if (!state.pureLosses.sectionExpanded) {
+            target.innerHTML = "";
+            return;
+        }
+        if (state.pureLosses.loading) {
+            target.innerHTML = "<div class='empty-state'>Загружаю чистые списания...</div>";
+            return;
+        }
+        if (!state.pureLosses.loaded) {
+            target.innerHTML = "<div class='empty-state'>Подождите загрузку из Supabase.</div>";
+            return;
+        }
+        const grouped = pureLossesGroupedRows();
+        const lr = state.pureLosses.activeSection || PURE_LOSSES_LR_SECTIONS[0];
+        const rows = (grouped.get(lr) || []).slice().sort((a, b) => (Number(b.price) || 0) - (Number(a.price) || 0));
+        if (!rows.length) {
+            target.innerHTML = "<div class='empty-state'>Пусто. Красиво, если это правда.</div>";
+            return;
+        }
+        const body = rows.map((row) => {
+            const name = normalizeText(row.decription || row.description) || "Наименование не найдено";
+            const nm = normalizeIdentifier(row.nm);
+            const shk = normalizeIdentifier(row.shk);
+            const dateLabel = formatRuDate(parseDateTime(row.date_lost).date);
+            return "<tr>"
+                + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(name) + "</div>" + (nm ? "<div class='review-task-sub'>НМ: " + escapeHtml(nm) + "</div>" : "") + "</td>"
+                + "<td>" + escapeHtml(shk || "-") + "</td>"
+                + "<td>" + escapeHtml(dateLabel) + "</td>"
+                + "<td class='review-price-cell' style='" + priceStyle(row.price) + "'>" + escapeHtml(formatMoney(row.price)) + "</td>"
+                + "</tr>";
+        }).join("");
+        target.innerHTML = "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>Наименование</th><th>ШК</th><th>Дата списания</th><th>Стоимость</th></tr></thead><tbody>" + body + "</tbody></table></div>";
     }
 
     async function loadPrespisokSecondLineTasks() {
@@ -17441,6 +17629,8 @@
         $("reviewPickerNext").addEventListener("click", () => scrollPicker("review", 1));
         $("requestsPickerPrev").addEventListener("click", () => scrollPicker("requests", -1));
         $("requestsPickerNext").addEventListener("click", () => scrollPicker("requests", 1));
+        $("pureLossesPickerPrev").addEventListener("click", () => scrollPicker("pureLosses", -1));
+        $("pureLossesPickerNext").addEventListener("click", () => scrollPicker("pureLosses", 1));
         $("reviewFiltersToggle").addEventListener("click", toggleReviewFilters);
         $("requestsFiltersToggle").addEventListener("click", toggleRequestsFilters);
         window.addEventListener("resize", () => {
