@@ -464,6 +464,19 @@
         setModalOpen("intakeSearchPhotoModal", true);
     }
 
+    // The one deliberate crack in this file's self-containment: tasks.js's
+    // task-history "Найден без ШК" row needs to reopen this exact lightbox
+    // for a specific submission it already has a snapshot of (no query
+    // needed -- see refreshTaskNoShkMatches's `snapshot` field). Mirrors the
+    // existing #openIntakeSearch DOM-click convention already used for
+    // cross-file wiring in this app, just as a plain function instead.
+    window.__openIntakeSubmissionCard = function (item) {
+        if (!item || !item.photo_path) return;
+        const id = "ext" + (++itemAutoId);
+        itemsById.set(id, item);
+        openPhotoLightbox(item, id);
+    };
+
     // ---- retroactive sticker assignment: equivalent to scanning a
     // sticker in the intake form itself, just from the admin side. ----
     function currentAdminActor() {
@@ -487,7 +500,15 @@
         if (input) input.value = "";
         if (preview) { preview.textContent = ""; preview.className = "intake-assign-preview"; }
         if (msg) { msg.textContent = ""; msg.className = "intake-assign-msg"; }
-        if (item.sticker_code) {
+        btn.classList.remove("is-assigned", "is-matched");
+        if (item.matched_task_id) {
+            const shk = item.matched_shk || "-";
+            btn.disabled = false;
+            btn.classList.add("is-matched");
+            btn.textContent = "ШК опознан: " + shk;
+            if (item.matched_shk) btn.setAttribute("data-copy-value", item.matched_shk);
+            else btn.removeAttribute("data-copy-value");
+        } else if (item.sticker_code) {
             const decoded = decodeStickerCode(item.sticker_code) || item.sticker_code;
             btn.disabled = false;
             btn.classList.add("is-assigned");
@@ -495,7 +516,6 @@
             btn.setAttribute("data-copy-value", decoded);
         } else {
             btn.disabled = false;
-            btn.classList.remove("is-assigned");
             btn.textContent = "Присвоить ШК";
             btn.removeAttribute("data-copy-value");
         }
