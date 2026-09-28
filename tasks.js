@@ -13774,6 +13774,16 @@
     function compactTaskItemForSave(item) {
         const normalized = normalizeTaskItem(item);
         if (!normalized) return null;
+        // Drop the bulky original row (raw) to keep saved payloads small, but
+        // keep the handful of employee-attribution columns lastMovementStatusEmployee
+        // reads -- otherwise the "last movement status" history line can never
+        // show a real actor for ANY task, regardless of when it was created.
+        const raw = normalized.raw && typeof normalized.raw === "object" ? normalized.raw : {};
+        const attribution = {};
+        if (raw.receiver_id) attribution.receiver_id = raw.receiver_id;
+        if (raw.responsible_id) attribution.responsible_id = raw.responsible_id;
+        if (raw.responsible) attribution.responsible = raw.responsible;
+        if (raw.employee_id) attribution.employee_id = raw.employee_id;
         return {
             shk: normalized.shk,
             name: normalized.name,
@@ -13783,6 +13793,7 @@
             mx: normalized.mx,
             movement: normalized.movement,
             row_number: normalized.row_number,
+            raw: attribution,
         };
     }
 
