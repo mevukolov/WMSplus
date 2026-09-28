@@ -9191,8 +9191,8 @@
         const isUploadMarker = item.event_type === "task_prespisok_uploaded";
         const isCrossModuleTouch = item.event_type === "task_cross_module_touch";
         const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
-        const isSystem = isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker || (!rawActorName && !rawActorId);
-        const actorDisplay = (isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker) ? "Система" : (rawActorName || rawActorId || "Система");
+        const isSystem = isSystemClosed || isForecast || isCreated || isUploadMarker || (!rawActorName && !rawActorId);
+        const actorDisplay = (isSystemClosed || isForecast || isCreated || isUploadMarker) ? "Система" : (rawActorName || rawActorId || "Система");
         const verdict = isForecast
             ? "Прогнозируемая дата списания"
             : isStatusLine
@@ -9264,6 +9264,19 @@
         return best;
     }
 
+    // Who actually put the item into the status the "last movement" history
+    // line reports -- not "Система". The column differs by upload format:
+    // Упаковка/RWP carries it as receiver_id (столбец G, "ID приёмщика/
+    // переупаковщика"), ПМ/Почта as responsible_id + responsible (столбец
+    // N, "ID Ответственного"), Движение после продажи as employee_id.
+    // taskItemFromSourceRow() keeps the whole original row under item.raw,
+    // so all three are already there -- just never read until now.
+    function lastMovementStatusEmployee(raw) {
+        const id = normalizeText(raw.responsible_id || raw.receiver_id || raw.employee_id);
+        if (!id) return { id: "", name: "" };
+        return { id, name: normalizeText(raw.responsible) || employeeNameById(id) };
+    }
+
     // Not real history rows -- computed live from the task's current items
     // and the live writeoff terms. Rendered alongside real history in
     // chronological order like any other entry.
@@ -9282,14 +9295,15 @@
         items.forEach((item) => {
             const parsed = parseDateTime(item.movement);
             if (!parsed.iso) return;
-            if (!lastMovement || parsed.ts > lastMovement.ts) lastMovement = { ts: parsed.ts, iso: parsed.iso, mx: normalizeText(item.mx), statusCode: latinStatusCode(item.status) };
+            if (!lastMovement || parsed.ts > lastMovement.ts) lastMovement = { ts: parsed.ts, iso: parsed.iso, mx: normalizeText(item.mx), statusCode: latinStatusCode(item.status), raw: (item.raw && typeof item.raw === "object") ? item.raw : {} };
         });
         if (lastMovement) {
+            const employee = lastMovementStatusEmployee(lastMovement.raw);
             entries.push({
                 created_at: lastMovement.iso,
                 event_type: "task_last_movement_status",
-                actor_name: "",
-                actor_employee_id: "",
+                actor_name: employee.name,
+                actor_employee_id: employee.id,
                 payload: { comment: lastMovement.mx || "Склад не указан", status_code: lastMovement.statusCode },
             });
         }
