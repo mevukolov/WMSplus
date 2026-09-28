@@ -37,6 +37,11 @@
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
+    // A task closed with this verdict through the normal Разбор flow is
+    // already physically resolved -- Без ШК matching skips it entirely
+    // (see 202609280007_no_shk_skip_final_verdict.sql for the same filter
+    // server-side).
+    const NO_SHK_SKIP_VERDICT = "Найден/Релиз/Списан";
     const SAVE_TASK_CHUNK_SIZE = 40;
     const SAVE_HEAVY_TASK_CHUNK_SIZE = 12;
     const SAVE_MAX_CHUNK_JSON_CHARS = 180000;
@@ -9101,6 +9106,7 @@
     // from source_payload, no re-query needed.
     async function refreshTaskNoShkMatches(row) {
         if (!row || !row.id || state.flow.debugMode) return;
+        if (normalizeText(row.opp_verdict) === NO_SHK_SKIP_VERDICT) return;
         const items = taskItems(row);
         const nms = Array.from(new Set(items.map((item) => normalizeIdentifier(item.nm)).filter(Boolean)));
         if (!nms.length) return;
@@ -9322,6 +9328,39 @@
         setFlowModalOpen("noShkMatchModal", true);
     }
 
+    // The queue drawer's own rows can go stale two ways: findTaskRow()
+    // would rather hand back a __isLight row from state.review.rows (no
+    // real source_payload, so taskNoShkMatches reads as empty) if this
+    // same task also happens to be in the currently loaded review section,
+    // and the match itself may have been decided by someone else (or in
+    // another tab) since the queue was loaded. A fresh fetch fixes both --
+    // this is the queue's own click path, not the pill inside an already-
+    // open (already-full) task card, which doesn't need it.
+    async function openNoShkMatchModalFresh(taskId) {
+        const db = supabaseDb();
+        if (!db) return;
+        let row;
+        try {
+            const { data, error } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("id", taskId).maybeSingle();
+            if (error) throw error;
+            row = data;
+        } catch (error) {
+            toast("Не удалось загрузить задачу: " + (error && error.message ? error.message : String(error)), "error");
+            return;
+        }
+        if (!row || row.is_deleted || normalizeText(row.opp_verdict) === NO_SHK_SKIP_VERDICT || !taskNoShkMatches(row).some((match) => match.decision === "pending")) {
+            removeFromNoShkQueue(taskId);
+            toast("Уже неактуально -- убрал из списка.", "info");
+            return;
+        }
+        refreshTaskRow(taskId, row);
+        const queueIndex = state.noShkQueue.rows.findIndex((queued) => queued.id === taskId);
+        if (queueIndex >= 0) state.noShkQueue.rows[queueIndex] = row;
+        state.noShkMatch.rowId = row.id;
+        renderNoShkMatchModal(row);
+        setFlowModalOpen("noShkMatchModal", true);
+    }
+
     async function persistNoShkMatches(row, matches) {
         const db = supabaseDb();
         if (!db) return false;
@@ -9470,7 +9509,7 @@
         }
         target.innerHTML = "<div class='no-shk-queue-list'>" + rows.map(noShkQueueRowHtml).join("") + "</div>";
         target.querySelectorAll("[data-no-shk-queue-open]").forEach((button) => {
-            button.addEventListener("click", () => openNoShkMatchModal(button.dataset.noShkQueueOpen));
+            button.addEventListener("click", () => { void openNoShkMatchModalFresh(button.dataset.noShkQueueOpen); });
         });
     }
 
