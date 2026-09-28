@@ -614,6 +614,7 @@
             loading: false,
             loaded: false,
             loadPromise: null,
+            activeMonth: "",
             activeSection: PURE_LOSSES_LR_SECTIONS[0],
             sectionExpanded: false,
         },
@@ -2453,6 +2454,7 @@
         state.requests.sectionExpanded = false;
         state.requests.filtersOpen = false;
         state.pureLosses.sectionExpanded = false;
+        state.pureLosses.activeMonth = "";
         state.inactive.groupExpanded = false;
         renderReview();
         renderRequests();
@@ -11309,10 +11311,10 @@
     }
 
     // "Чистые списания" разбор -- отдельный от WMS-задач источник
-    // (pure_losses_rep напрямую), сгруппированный по колонке `lr` вместо
-    // участков. Пока без вердиктов/детальной карточки -- просто список,
-    // тот же визуальный паттерн (плитки/таблица/анимации), что и у
-    // "Неактивные".
+    // (pure_losses_rep напрямую). Два слоя больших карточек: сперва месяц
+    // (по date_lost), затем внутри месяца -- участок по колонке `lr`. Пока
+    // без вердиктов/детальной карточки -- просто список, тот же визуальный
+    // паттерн (плитки/таблица/анимации), что и у "Неактивные".
     function pureLossesRowLr(row) {
         const value = Number(row && row.lr);
         return Number.isFinite(value) ? value : null;
@@ -11322,9 +11324,38 @@
         return lr + " LR";
     }
 
-    function pureLossesGroupedRows() {
+    function pureLossesRowMonthKey(row) {
+        const date = parseDateTime(row && row.date_lost).date;
+        return date ? date.slice(0, 7) : "";
+    }
+
+    function pureLossesMonthLabel(monthKey) {
+        if (!monthKey) return "Без даты";
+        const [year, month] = monthKey.split("-").map(Number);
+        const label = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric", timeZone: "UTC" })
+            .format(new Date(Date.UTC(year, month - 1, 1)));
+        return label.charAt(0).toUpperCase() + label.slice(1);
+    }
+
+    // Most recent month first; rows with no readable date_lost sort last
+    // regardless of direction.
+    function pureLossesMonthKeys() {
+        const keys = new Set();
+        (state.pureLosses.rows || []).forEach((row) => keys.add(pureLossesRowMonthKey(row)));
+        return Array.from(keys).sort((a, b) => {
+            if (!a) return 1;
+            if (!b) return -1;
+            return b.localeCompare(a);
+        });
+    }
+
+    function pureLossesRowsForMonth(monthKey) {
+        return (state.pureLosses.rows || []).filter((row) => pureLossesRowMonthKey(row) === monthKey);
+    }
+
+    function pureLossesGroupedRowsForMonth(monthKey) {
         const grouped = new Map(PURE_LOSSES_LR_SECTIONS.map((lr) => [lr, []]));
-        (state.pureLosses.rows || []).forEach((row) => {
+        pureLossesRowsForMonth(monthKey).forEach((row) => {
             const lr = pureLossesRowLr(row);
             if (lr !== null && grouped.has(lr)) grouped.get(lr).push(row);
         });
@@ -11372,10 +11403,68 @@
     }
 
     function renderPureLosses() {
+        if (!state.pureLosses.activeMonth) renderPureLossesMonths();
+        else renderPureLossesSections();
+    }
+
+    // Layer 1: month picked from big cards.
+    function renderPureLossesMonths() {
         const grid = $("pureLossesSectionsGrid");
         const wrap = $("pureLossesPickerRow");
         if (!grid) return;
-        const grouped = pureLossesGroupedRows();
+        grid.classList.remove("is-collapsed");
+        if (wrap) wrap.classList.remove("is-collapsed");
+        if ($("pureLossesTableWrap")) $("pureLossesTableWrap").innerHTML = "";
+        if (state.pureLosses.loading) {
+            grid.innerHTML = "<div class='empty-state'>Загружаю чистые списания...</div>";
+            return;
+        }
+        if (!state.pureLosses.loaded) {
+            grid.innerHTML = "<div class='empty-state'>Подождите загрузку из Supabase.</div>";
+            return;
+        }
+        const months = pureLossesMonthKeys();
+        if (!months.length) {
+            grid.innerHTML = "<div class='empty-state'>Пусто. Красиво, если это правда.</div>";
+            return;
+        }
+        grid.innerHTML = months.map((monthKey) => {
+            const rows = pureLossesRowsForMonth(monthKey);
+            const total = rows.reduce((acc, row) => acc + (Number(row.price) || 0), 0);
+            return "<button type='button' class='review-section-card' data-pure-losses-month='" + escapeHtml(monthKey) + "'>"
+                + "<div class='review-section-name'><span>" + escapeHtml(pureLossesMonthLabel(monthKey)) + "</span><strong>" + rows.length + "</strong></div>"
+                + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
+                + "</button>";
+        }).join("");
+        grid.querySelectorAll("[data-pure-losses-month]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const clicked = button.dataset.pureLossesMonth;
+                animateSectionModeSwap("pureLossesSectionsGrid", () => {
+                    state.pureLosses.activeMonth = clicked;
+                    state.pureLosses.sectionExpanded = false;
+                    renderPureLosses();
+                });
+            });
+        });
+    }
+
+    // Back out to the month grid from anywhere inside a chosen month
+    // (LR grid or the expanded pill-strip+table).
+    function backToPureLossesMonths() {
+        animateSectionModeSwap("pureLossesSectionsGrid", () => {
+            state.pureLosses.activeMonth = "";
+            state.pureLosses.sectionExpanded = false;
+            renderPureLosses();
+        });
+    }
+
+    // Layer 2: LR picked from big cards, scoped to the chosen month.
+    function renderPureLossesSections() {
+        const grid = $("pureLossesSectionsGrid");
+        const wrap = $("pureLossesPickerRow");
+        if (!grid) return;
+        const monthKey = state.pureLosses.activeMonth;
+        const grouped = pureLossesGroupedRowsForMonth(monthKey);
         const expanded = state.pureLosses.sectionExpanded;
         grid.classList.toggle("is-collapsed", expanded);
         if (wrap) wrap.classList.toggle("is-collapsed", expanded);
@@ -11389,7 +11478,14 @@
                 return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
             })
             : PURE_LOSSES_LR_SECTIONS;
-        grid.innerHTML = orderedSections.map((lr) => {
+        const monthLabel = pureLossesMonthLabel(monthKey);
+        const backTileHtml = expanded
+            ? "<button type='button' class='review-section-pill' data-pure-losses-back='1'>‹ " + escapeHtml(monthLabel) + "</button>"
+            : "<button type='button' class='review-section-card' data-pure-losses-back='1'>"
+                + "<div class='review-section-name'><span>‹ Месяцы</span></div>"
+                + "<div class='review-section-meta'>" + escapeHtml(monthLabel) + "</div>"
+                + "</button>";
+        const sectionTilesHtml = orderedSections.map((lr) => {
             const rows = grouped.get(lr) || [];
             const label = pureLossesSectionLabel(lr);
             const total = rows.reduce((acc, row) => acc + (Number(row.price) || 0), 0);
@@ -11404,6 +11500,8 @@
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";
         }).join("");
+        grid.innerHTML = backTileHtml + sectionTilesHtml;
+        grid.querySelector("[data-pure-losses-back]").addEventListener("click", backToPureLossesMonths);
         grid.querySelectorAll("[data-pure-losses-lr]").forEach((button) => {
             button.addEventListener("click", () => {
                 const clicked = Number(button.dataset.pureLossesLr) || PURE_LOSSES_LR_SECTIONS[0];
@@ -11454,7 +11552,7 @@
             target.innerHTML = "<div class='empty-state'>Подождите загрузку из Supabase.</div>";
             return;
         }
-        const grouped = pureLossesGroupedRows();
+        const grouped = pureLossesGroupedRowsForMonth(state.pureLosses.activeMonth);
         const lr = state.pureLosses.activeSection || PURE_LOSSES_LR_SECTIONS[0];
         const rows = (grouped.get(lr) || []).slice().sort((a, b) => (Number(b.price) || 0) - (Number(a.price) || 0));
         if (!rows.length) {
