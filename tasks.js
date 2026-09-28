@@ -9189,20 +9189,51 @@
         };
     }
 
-    function noShkMatchCardHtml(match, index) {
+    // The single ШК a match modal's title can unambiguously stand for --
+    // only true for a regular (non-tare) task, which always has exactly
+    // one item. A tare can carry several, so per-card matchedItemForNoShk()
+    // is what resolves "which ШК" for those instead.
+    function soleTaskShk(row) {
+        const items = taskItems(row);
+        return normalizeIdentifier(items[0] && items[0].shk) || normalizeIdentifier(row.source_shk_ids && row.source_shk_ids[0]);
+    }
+
+    function matchedItemForNoShk(row, match) {
+        const items = taskItems(row);
+        return items.find((item) => normalizeIdentifier(item.nm) === normalizeIdentifier(match.nm)) || items[0] || null;
+    }
+
+    function noShkMatchCardHtml(match, index, row) {
         const snapshot = match.snapshot || {};
         const nm = normalizeIdentifier(match.nm);
         const hasWbPhoto = nm && Object.prototype.hasOwnProperty.call(state.noShkMatch.photoCache, nm);
         const wbPhoto = hasWbPhoto ? state.noShkMatch.photoCache[nm] : "";
-        const hasWbInfo = nm && Object.prototype.hasOwnProperty.call(state.noShkMatch.cardInfoCache, nm);
-        const wbInfo = hasWbInfo ? state.noShkMatch.cardInfoCache[nm] : null;
         const wbPhotoHtml = wbPhoto
             ? "<img src='" + escapeHtml(wbPhoto) + "' alt='Фото WB' loading='lazy'>"
             : "<div class='no-shk-match-wb-loading'>" + (hasWbPhoto ? "Фото WB не найдено" : "Ищу фото на WB...") + "</div>";
         const noShkPhotoHtml = snapshot.photo_path
             ? "<img src='" + escapeHtml(noShkPhotoUrl(snapshot.photo_path)) + "' alt='Фото без ШК' loading='lazy'>"
             : "<div class='no-shk-match-wb-loading'>Без фото</div>";
-        const nameLine = wbInfo && wbInfo.found && wbInfo.name ? wbInfo.name : (snapshot.item_text || "Без наименования");
+        const noShkMetaHtml = "<div class='no-shk-match-photo-meta'>"
+            + "<strong>" + escapeHtml(snapshot.item_text || "Без наименования") + "</strong>"
+            + "<div>Сфотографировал: " + escapeHtml(snapshot.full_name || "-") + "</div>"
+            + "<div>Участок: " + escapeHtml(snapshot.area || "-") + "</div>"
+            + "<div>" + escapeHtml(formatRuDateTime(snapshot.created_at)) + "</div>"
+            + "</div>";
+        const matchedItem = matchedItemForNoShk(row, match);
+        const statusLabel = matchedItem ? (latinStatusCode(matchedItem.status) || normalizeText(matchedItem.status) || "-") : "-";
+        const taskMetaHtml = "<div class='no-shk-match-photo-meta'>"
+            + "<strong>" + escapeHtml((matchedItem && matchedItem.name) || taskItemName(row) || "Без наименования") + "</strong>"
+            + "<div>Статус последнего движения: " + escapeHtml(statusLabel) + "</div>"
+            + "<div>Участок: " + escapeHtml((matchedItem && matchedItem.mx) || "-") + "</div>"
+            + "<div>" + escapeHtml(matchedItem ? formatRuDateTime(matchedItem.movement) : "-") + "</div>"
+            + "</div>";
+        // On a tare, several matches can point at different items inside
+        // the same task -- the modal's shared title (soleTaskShk) can't
+        // tell them apart, so each card names its own matched ШК here.
+        const shkLineHtml = isTareTask(row) && matchedItem
+            ? "<button type='button' class='no-shk-match-shk-link' data-no-shk-open-task='" + escapeHtml(row.id) + "'>ШК " + escapeHtml(matchedItem.shk) + "</button>"
+            : "";
         const stickerHtml = (snapshot.item_type === "Шредер" || snapshot.sticker_code)
             ? "<div class='no-shk-match-sticker'>Присвоенный ШК: " + escapeHtml(snapshot.sticker_code ? (decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code) : "Шредер") + "</div>"
             : "";
@@ -9216,11 +9247,19 @@
                 + "</div>";
         return "<article class='no-shk-match-card'>"
             + "<div class='no-shk-match-photos'>" + noShkPhotoHtml + wbPhotoHtml + "</div>"
-            + "<div class='no-shk-match-meta'><strong>" + escapeHtml(nameLine) + "</strong><br>"
-            + "Сфотографировал: " + escapeHtml(snapshot.full_name || "-") + " · Участок: " + escapeHtml(snapshot.area || "-") + " · " + escapeHtml(formatRuDateTime(snapshot.created_at)) + "</div>"
+            + "<div class='no-shk-match-photos'>" + noShkMetaHtml + taskMetaHtml + "</div>"
+            + shkLineHtml
             + stickerHtml
             + decisionHtml
             + "</article>";
+    }
+
+    function openTaskFromNoShkMatch(taskId) {
+        closeNoShkMatchModal();
+        if ($("reviewNoShkCheckModal") && $("reviewNoShkCheckModal").classList.contains("active")) {
+            setFlowModalOpen("reviewNoShkCheckModal", false);
+        }
+        openTaskDetail(taskId, "review");
     }
 
     async function loadNoShkMatchPhoto(nm, row) {
@@ -9243,9 +9282,13 @@
         if (!target) return;
         const matches = taskNoShkMatches(row);
         const cards = matches.length
-            ? matches.map(noShkMatchCardHtml).join("")
+            ? matches.map((match, index) => noShkMatchCardHtml(match, index, row)).join("")
             : "<div class='empty-state'>Совпадений не найдено.</div>";
-        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>Без ШК</h3><p class='work-subtitle'>Вероятные совпадения по номенклатуре и дате.</p></div><button id='closeNoShkMatch' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
+        const isTare = isTareTask(row);
+        const titleHtml = isTare
+            ? escapeHtml("Тара " + (normalizeIdentifier(row.source_tare_id) || "-"))
+            : "<button type='button' class='work-title-link' data-no-shk-open-task='" + escapeHtml(row.id) + "'>ШК " + escapeHtml(soleTaskShk(row) || "-") + "</button>";
+        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>" + titleHtml + "</h3><p class='work-subtitle'>Вероятные совпадения по номенклатуре и дате.</p></div><button id='closeNoShkMatch' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
             + "<div class='no-shk-match-list'>" + cards + "</div>";
         $("closeNoShkMatch").addEventListener("click", closeNoShkMatchModal);
         target.querySelectorAll("[data-no-shk-confirm]").forEach((button) => {
@@ -9259,6 +9302,9 @@
                 const match = matches[Number(el.dataset.noShkOpenCard)];
                 if (match && window.__openIntakeSubmissionCard) window.__openIntakeSubmissionCard(noShkSubmissionFromSnapshot(match));
             });
+        });
+        target.querySelectorAll("[data-no-shk-open-task]").forEach((el) => {
+            el.addEventListener("click", () => openTaskFromNoShkMatch(el.dataset.noShkOpenTask));
         });
         matches.forEach((match) => {
             const nm = normalizeIdentifier(match.nm);
@@ -9301,7 +9347,7 @@
         const db = supabaseDb();
         if (!db) return;
         const items = taskItems(row);
-        const matchedItem = items.find((item) => normalizeIdentifier(item.nm) === normalizeIdentifier(match.nm)) || items[0];
+        const matchedItem = matchedItemForNoShk(row, match);
         const shk = matchedItem ? normalizeIdentifier(matchedItem.shk) : "";
         const actor = flowActor();
         let markedRow;
@@ -9323,16 +9369,54 @@
             toast("Уже опознан в другой задаче.", "error");
             return;
         }
+
+        // Тара: физически найденный без ШК товар больше не "в таре" -- извлекаем
+        // его в отдельную задачу тем же механизмом, что и ручное "Отделить ШК"
+        // в редакторе тары (detachShkFromTare), и историю "Найден без ШК" пишем
+        // уже в неё, а не в исходную тару.
+        let targetRow = row;
+        if (isTareTask(row) && matchedItem && items.length > 1) {
+            try {
+                const rest = items.filter((item) => item.shk !== matchedItem.shk);
+                const tareData = await updateTareTaskItems(row, rest, { edited_at: new Date().toISOString() });
+                if (tareData) Object.assign(row, tareData);
+                const splitTask = splitTaskFromTare(row, matchedItem);
+                const { data: splitData, error: splitError } = await db.rpc(SAVE_RPC, { p_tasks: [splitTask], p_run: {} });
+                if (splitError) throw splitError;
+                const splitId = Array.isArray(splitData && splitData.task_ids) ? splitData.task_ids[0] : null;
+                if (splitId) {
+                    const { data: freshRow, error: fetchError } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("id", splitId).maybeSingle();
+                    if (fetchError) throw fetchError;
+                    if (freshRow) targetRow = freshRow;
+                }
+                renderReview();
+                refreshExpandedSections();
+            } catch (error) {
+                toast("Не удалось отделить ШК из тары: " + (error && error.message ? error.message : String(error)), "error");
+                return;
+            }
+        }
+
         const snapshot = match.snapshot || {};
         const commentParts = ["Товар обнаружен без ШК"];
         if (snapshot.sticker_code || snapshot.item_type === "Шредер") {
             const stickerLabel = snapshot.sticker_code ? (decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code) : "Шредер";
             commentParts.push("Обработан через стол старшего под ШК: " + stickerLabel);
         }
-        await writeTaskHistory(row, "task_no_shk_found", { comment: commentParts.join(". "), submission: snapshot });
-        matches[index] = { ...match, decision: "confirmed", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
-        const saved = await persistNoShkMatches(row, matches);
-        if (!saved) return;
+        await writeTaskHistory(targetRow, "task_no_shk_found", { comment: commentParts.join(". "), submission: snapshot });
+        const confirmedMatch = { ...match, decision: "confirmed", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
+
+        if (targetRow === row) {
+            matches[index] = confirmedMatch;
+            const saved = await persistNoShkMatches(row, matches);
+            if (!saved) return;
+        } else {
+            matches.splice(index, 1);
+            await persistNoShkMatches(row, matches);
+            await persistNoShkMatches(targetRow, taskNoShkMatches(targetRow).concat([confirmedMatch]));
+            toast("ШК " + (matchedItem ? matchedItem.shk : "") + " извлечён из тары в отдельную задачу.", "success");
+        }
+
         renderNoShkMatchModal(row);
         if (state.taskDetail && state.taskDetail.rowId === row.id) {
             renderTaskDetail(row);
