@@ -9128,6 +9128,7 @@
         task_system_closed: "Закрыто системой (актуализация)",
         task_prespisok_second_line: "Передано на вторую линию предсписка",
         task_prespisok_uploaded: "ШК в предсписке",
+        task_cross_module_touch: "Продолжилось в другом модуле",
         task_incoming_flow_request_received: "Получен входящий запрос",
         task_incoming_box_last_movement: "Последнее движение",
         task_incoming_box_analysis: "Разбор",
@@ -9182,9 +9183,10 @@
         const isStatusLine = item.event_type === "task_last_movement_status";
         const isCreated = item.event_type === "task_created";
         const isUploadMarker = item.event_type === "task_prespisok_uploaded";
+        const isCrossModuleTouch = item.event_type === "task_cross_module_touch";
         const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
-        const isSystem = isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker || (!rawActorName && !rawActorId);
-        const actorDisplay = (isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker) ? "Система" : (rawActorName || rawActorId || "Система");
+        const isSystem = isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker || isCrossModuleTouch || (!rawActorName && !rawActorId);
+        const actorDisplay = (isSystemClosed || isForecast || isStatusLine || isCreated || isUploadMarker || isCrossModuleTouch) ? "Система" : (rawActorName || rawActorId || "Система");
         const verdict = isForecast
             ? "Прогнозируемая дата списания"
             : isStatusLine
@@ -9193,6 +9195,8 @@
             ? "Создана задача"
             : isUploadMarker
             ? "ШК в предсписке"
+            : isCrossModuleTouch
+            ? "Продолжилось в: " + (normalizeText(payload.new_task_type) || "другом модуле")
             : isSystemClosed
             ? "Закрыто автоматически"
             : (normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран" ? payload.verdict : taskHistoryEventLabel(item.event_type));
@@ -9200,6 +9204,10 @@
         if (isSystemClosed) {
             const performer = rawActorName || rawActorId;
             if (performer) commentParts.push("Выполнил: " + performer);
+        }
+        if (isCrossModuleTouch) {
+            if (normalizeText(payload.new_verdict)) commentParts.push("Вердикт: " + payload.new_verdict);
+            if (normalizeText(payload.new_title)) commentParts.push(payload.new_title);
         }
         if (normalizeText(payload.comment)) commentParts.push(payload.comment);
         if (payload.reopen_after) commentParts.push("до " + formatRuDateTime(payload.reopen_after));
@@ -16678,15 +16686,14 @@
         });
         const { data, error } = await db.rpc(SAVE_RPC, { p_tasks: [task], p_run: {} });
         if (error) throw error;
-        const { data: savedRow } = await db
-            .from(WMS_TASKS_TABLE)
-            .select("id")
-            .eq("source_module", task.source_module)
-            .eq("source_id", task.source_id)
-            .eq("task_type", task.task_type)
-            .maybeSingle();
-        if (savedRow && savedRow.id) {
-            void writeTaskHistory({ id: savedRow.id }, "task_prespisok_second_line", {
+        // Reads the id straight from the RPC's own response rather than a
+        // follow-up select-by-(module,source_id,task_type) -- if this ШК
+        // already had a task in another module, save_wms_manual_upload()
+        // folds this one into that existing task instead of inserting a
+        // new row, so a lookup by this task's own key would find nothing.
+        const savedId = Array.isArray(data && data.task_ids) ? data.task_ids[0] : null;
+        if (savedId) {
+            void writeTaskHistory({ id: savedId }, "task_prespisok_second_line", {
                 action: actionLabel,
                 extra_value: extraValue || "",
             });
