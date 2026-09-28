@@ -9001,11 +9001,15 @@
     }
 
     function taskTagsBox(row) {
-        const tags = reviewTags(row);
+        // "Два ШК"/"Пустая упаковка" (and, separately, "Без ШК") now get
+        // their own pill row right above this box (specialTagPillsHtml) --
+        // keeping them here too just duplicated the same label twice on one
+        // card. Теги stays for whatever other tags a task carries.
+        const tags = reviewTags(row).filter((tag) => !isSpecialTagLabel(tag));
         if (!tags.length) return "";
         const specialTags = new Set(taskSpecialInfos(row).map((info) => normalizeForMatch(info.tag_name)));
         const buttons = tags.map((tag) => {
-            const isSpecial = isSpecialTagLabel(tag) || specialTags.has(normalizeForMatch(tag));
+            const isSpecial = specialTags.has(normalizeForMatch(tag));
             return isSpecial
                 ? "<button class='task-tag-pill special' type='button' data-special-tag='" + escapeHtml(tag) + "' title='Открыть детали'>" + escapeHtml(tag) + "</button>"
                 : "<button class='task-tag-pill' type='button' data-copy-value='" + escapeHtml(tag) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(tag) + "</button>";
