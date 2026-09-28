@@ -9013,6 +9013,32 @@
         return "<div class='task-tags-box'><div class='task-info-label'>Теги</div><div class='task-tags-row'>" + buttons + "</div></div>";
     }
 
+    // Duplicated from intake_search.js's decodeStickerCode (same file-level
+    // self-containment convention that file itself documents) -- the match
+    // modal needs to show an already-assigned sticker's plain value too.
+    const NO_SHK_STICKER_CHAR_LIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const NO_SHK_STICKER_CHECK_SUM_BITS = 4n + 4n;
+    const NO_SHK_STICKER_VALUE_BITS = 42n;
+    function decodeNoShkStickerCode(barcode) {
+        if (!barcode || barcode.charAt(0) !== "*") return null;
+        const body = barcode.slice(1);
+        const base = BigInt(NO_SHK_STICKER_CHAR_LIST.length);
+        let result = 0n;
+        for (let i = 0; i < body.length; i++) {
+            const idx = NO_SHK_STICKER_CHAR_LIST.indexOf(body.charAt(body.length - 1 - i));
+            if (idx < 0) return null;
+            result += BigInt(idx) * (base ** BigInt(i));
+        }
+        const shkVal = (result >> NO_SHK_STICKER_CHECK_SUM_BITS) & ((1n << NO_SHK_STICKER_VALUE_BITS) - 1n);
+        const remaining = result >> (NO_SHK_STICKER_CHECK_SUM_BITS + NO_SHK_STICKER_VALUE_BITS);
+        if (remaining !== 0n || shkVal === 0n) return null;
+        return shkVal.toString();
+    }
+
+    function noShkPhotoUrl(path) {
+        return "https://bgphllmzmlwurfnbagho.supabase.co/storage/v1/object/public/intake-photos/" + path;
+    }
+
     // "Два ШК"/"Пустая упаковка" pills are computed once, at task-creation
     // time, from whatever was already in 2shk_rep back then (loadSpecialMap,
     // called only from the upload/preview flow). A fixation submitted after
@@ -9133,6 +9159,185 @@
         renderReview();
     }
 
+    function closeNoShkMatchModal() {
+        setFlowModalOpen("noShkMatchModal", false);
+    }
+
+    function noShkSubmissionFromSnapshot(match) {
+        const snapshot = match.snapshot || {};
+        return {
+            id: match.submission_id,
+            item_text: snapshot.item_text,
+            item_type: snapshot.item_type,
+            area: snapshot.area,
+            full_name: snapshot.full_name,
+            created_at: snapshot.created_at,
+            photo_path: snapshot.photo_path,
+            sticker_code: snapshot.sticker_code,
+            wb_nm_candidates: [],
+        };
+    }
+
+    function noShkMatchCardHtml(match, index) {
+        const snapshot = match.snapshot || {};
+        const nm = normalizeIdentifier(match.nm);
+        const hasWbPhoto = nm && Object.prototype.hasOwnProperty.call(state.noShkMatch.photoCache, nm);
+        const wbPhoto = hasWbPhoto ? state.noShkMatch.photoCache[nm] : "";
+        const hasWbInfo = nm && Object.prototype.hasOwnProperty.call(state.noShkMatch.cardInfoCache, nm);
+        const wbInfo = hasWbInfo ? state.noShkMatch.cardInfoCache[nm] : null;
+        const wbPhotoHtml = wbPhoto
+            ? "<img src='" + escapeHtml(wbPhoto) + "' alt='Фото WB' loading='lazy'>"
+            : "<div class='no-shk-match-wb-loading'>" + (hasWbPhoto ? "Фото WB не найдено" : "Ищу фото на WB...") + "</div>";
+        const noShkPhotoHtml = snapshot.photo_path
+            ? "<img src='" + escapeHtml(noShkPhotoUrl(snapshot.photo_path)) + "' alt='Фото без ШК' loading='lazy'>"
+            : "<div class='no-shk-match-wb-loading'>Без фото</div>";
+        const nameLine = wbInfo && wbInfo.found && wbInfo.name ? wbInfo.name : (snapshot.item_text || "Без наименования");
+        const stickerHtml = (snapshot.item_type === "Шредер" || snapshot.sticker_code)
+            ? "<div class='no-shk-match-sticker'>Присвоенный ШК: " + escapeHtml(snapshot.sticker_code ? (decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code) : "Шредер") + "</div>"
+            : "";
+        const decisionHtml = match.decision === "confirmed"
+            ? "<div class='no-shk-match-decision is-confirmed' data-no-shk-open-card='" + index + "'>Опознано: " + escapeHtml(match.decided_by_name || match.decided_by_id || "-") + ", " + escapeHtml(formatRuDateTime(match.decided_at)) + " · открыть карточку без ШК</div>"
+            : match.decision === "rejected"
+            ? "<div class='no-shk-match-decision is-rejected'>Соответствие не подтверждено. " + escapeHtml(match.decided_by_name || match.decided_by_id || "-") + "</div>"
+            : "<div class='no-shk-match-actions'>"
+                + "<button type='button' class='btn btn-rect' data-no-shk-confirm='" + index + "'>Опознать</button>"
+                + "<button type='button' class='btn btn-outline' data-no-shk-reject='" + index + "'>Не тот товар</button>"
+                + "</div>";
+        return "<article class='no-shk-match-card'>"
+            + "<div class='no-shk-match-photos'>" + noShkPhotoHtml + wbPhotoHtml + "</div>"
+            + "<div class='no-shk-match-meta'><strong>" + escapeHtml(nameLine) + "</strong><br>"
+            + "Сфотографировал: " + escapeHtml(snapshot.full_name || "-") + " · Участок: " + escapeHtml(snapshot.area || "-") + " · " + escapeHtml(formatRuDateTime(snapshot.created_at)) + "</div>"
+            + stickerHtml
+            + decisionHtml
+            + "</article>";
+    }
+
+    async function loadNoShkMatchPhoto(nm, row) {
+        if (!nm || Object.prototype.hasOwnProperty.call(state.noShkMatch.photoCache, nm)) return;
+        const urls = buildWbImageCandidatesByNm(nm, { maxPics: 1, maxHosts: 60 });
+        const found = await findFirstLoadableImage(urls);
+        state.noShkMatch.photoCache[nm] = found || "";
+        if (state.noShkMatch.rowId === row.id && $("noShkMatchModal") && $("noShkMatchModal").classList.contains("active")) renderNoShkMatchModal(row);
+    }
+
+    async function loadNoShkMatchCardInfo(nm, row) {
+        if (!nm || Object.prototype.hasOwnProperty.call(state.noShkMatch.cardInfoCache, nm)) return;
+        const info = await fetchWbCardInfo(nm);
+        state.noShkMatch.cardInfoCache[nm] = info;
+        if (state.noShkMatch.rowId === row.id && $("noShkMatchModal") && $("noShkMatchModal").classList.contains("active")) renderNoShkMatchModal(row);
+    }
+
+    function renderNoShkMatchModal(row) {
+        const target = $("noShkMatchWrap");
+        if (!target) return;
+        const matches = taskNoShkMatches(row);
+        const cards = matches.length
+            ? matches.map(noShkMatchCardHtml).join("")
+            : "<div class='empty-state'>Совпадений не найдено.</div>";
+        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>Без ШК</h3><p class='work-subtitle'>Вероятные совпадения по номенклатуре и дате.</p></div><button id='closeNoShkMatch' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
+            + "<div class='no-shk-match-list'>" + cards + "</div>";
+        $("closeNoShkMatch").addEventListener("click", closeNoShkMatchModal);
+        target.querySelectorAll("[data-no-shk-confirm]").forEach((button) => {
+            button.addEventListener("click", () => { void confirmNoShkMatch(row, Number(button.dataset.noShkConfirm)); });
+        });
+        target.querySelectorAll("[data-no-shk-reject]").forEach((button) => {
+            button.addEventListener("click", () => { void rejectNoShkMatch(row, Number(button.dataset.noShkReject)); });
+        });
+        target.querySelectorAll("[data-no-shk-open-card]").forEach((el) => {
+            el.addEventListener("click", () => {
+                const match = matches[Number(el.dataset.noShkOpenCard)];
+                if (match && window.__openIntakeSubmissionCard) window.__openIntakeSubmissionCard(noShkSubmissionFromSnapshot(match));
+            });
+        });
+        matches.forEach((match) => {
+            const nm = normalizeIdentifier(match.nm);
+            if (!nm) return;
+            void loadNoShkMatchPhoto(nm, row);
+            void loadNoShkMatchCardInfo(nm, row);
+        });
+    }
+
+    function openNoShkMatchModal(taskId) {
+        const row = findTaskRow(taskId);
+        if (!row) return;
+        state.noShkMatch.rowId = row.id;
+        renderNoShkMatchModal(row);
+        setFlowModalOpen("noShkMatchModal", true);
+    }
+
+    async function persistNoShkMatches(row, matches) {
+        const db = supabaseDb();
+        if (!db) return false;
+        const nextPayload = { ...taskPayload(row), no_shk_matches: matches };
+        try {
+            const { error } = await db.from(WMS_TASKS_TABLE).update({ source_payload: nextPayload }).eq("id", row.id);
+            if (error) throw error;
+        } catch (error) {
+            toast("Не удалось сохранить: " + (error && error.message ? error.message : String(error)), "error");
+            return false;
+        }
+        row.source_payload = nextPayload;
+        return true;
+    }
+
+    async function confirmNoShkMatch(row, index) {
+        const matches = taskNoShkMatches(row).slice();
+        const match = matches[index];
+        if (!match || match.decision !== "pending") return;
+        const db = supabaseDb();
+        if (!db) return;
+        const items = taskItems(row);
+        const matchedItem = items.find((item) => normalizeIdentifier(item.nm) === normalizeIdentifier(match.nm)) || items[0];
+        const shk = matchedItem ? normalizeIdentifier(matchedItem.shk) : "";
+        const actor = flowActor();
+        let markedRow;
+        try {
+            const { data, error } = await db.rpc("wms_intake_mark_matched", {
+                p_submission_id: match.submission_id,
+                p_task_id: row.id,
+                p_shk: shk,
+                p_actor_id: actor.id || null,
+                p_actor_name: actor.name || null,
+            });
+            if (error) throw error;
+            markedRow = Array.isArray(data) ? data[0] : null;
+        } catch (error) {
+            toast("Не удалось опознать: " + (error && error.message ? error.message : String(error)), "error");
+            return;
+        }
+        if (!markedRow) {
+            toast("Уже опознан в другой задаче.", "error");
+            return;
+        }
+        const snapshot = match.snapshot || {};
+        const commentParts = ["Товар обнаружен без ШК"];
+        if (snapshot.sticker_code || snapshot.item_type === "Шредер") {
+            const stickerLabel = snapshot.sticker_code ? (decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code) : "Шредер";
+            commentParts.push("Обработан через стол старшего под ШК: " + stickerLabel);
+        }
+        await writeTaskHistory(row, "task_no_shk_found", { comment: commentParts.join(". "), submission: snapshot });
+        matches[index] = { ...match, decision: "confirmed", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
+        const saved = await persistNoShkMatches(row, matches);
+        if (!saved) return;
+        renderNoShkMatchModal(row);
+        if (state.taskDetail && state.taskDetail.rowId === row.id) {
+            renderTaskDetail(row);
+            void loadAndRenderTaskDetailHistory(row);
+        }
+        renderReview();
+    }
+
+    async function rejectNoShkMatch(row, index) {
+        const matches = taskNoShkMatches(row).slice();
+        const match = matches[index];
+        if (!match || match.decision !== "pending") return;
+        const actor = flowActor();
+        matches[index] = { ...match, decision: "rejected", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
+        const saved = await persistNoShkMatches(row, matches);
+        if (!saved) return;
+        renderNoShkMatchModal(row);
+    }
+
     function isTareTask(row) {
         const tare = normalizeIdentifier(row && row.source_tare_id);
         const ids = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
@@ -9250,6 +9455,7 @@
         task_incoming_flow_request_received: "Получен входящий запрос",
         task_incoming_box_last_movement: "Последнее движение",
         task_incoming_box_analysis: "Разбор",
+        task_no_shk_found: "Найден без ШК",
     };
 
     function taskHistoryEventLabel(eventType) {
@@ -9302,6 +9508,7 @@
         const isCreated = item.event_type === "task_created";
         const isUploadMarker = item.event_type === "task_prespisok_uploaded";
         const isCrossModuleTouch = item.event_type === "task_cross_module_touch";
+        const isNoShkFound = item.event_type === "task_no_shk_found";
         const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
         const isSystem = isSystemClosed || isForecast || isCreated || isUploadMarker || (!rawActorName && !rawActorId);
         const actorDisplay = (isSystemClosed || isForecast || isCreated || isUploadMarker) ? "Система" : (rawActorName || rawActorId || "Система");
@@ -9317,6 +9524,8 @@
             ? "Продолжилось в: " + (normalizeText(payload.new_task_type) || "другом модуле")
             : isSystemClosed
             ? "Закрыто автоматически"
+            : isNoShkFound
+            ? "Найден без ШК"
             : (normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран" ? payload.verdict : taskHistoryEventLabel(item.event_type));
         const commentParts = [];
         if (isSystemClosed) {
@@ -9338,12 +9547,17 @@
         const attachedLink = normalizeText(payload.extra_value);
         const isClickableLink = /^https?:\/\//i.test(attachedLink);
         if (attachedLink) commentParts.push(attachedLink);
+        const noShkSubmission = isNoShkFound && payload.submission && typeof payload.submission === "object" ? payload.submission : null;
         const historyTone = isSystem ? "" : (VERDICT_TONE[payload.verdict] || "yellow");
         const rowClass = "task-chat-row"
             + (isForecast ? " task-chat-row-forecast" : "")
             + (historyTone ? " task-chat-row-" + historyTone : "")
-            + (isClickableLink ? " task-chat-row-linked" : "");
-        const linkAttr = isClickableLink ? " data-history-link='" + escapeHtml(attachedLink) + "' title='Открыть ссылку'" : "";
+            + (isClickableLink || noShkSubmission ? " task-chat-row-linked" : "");
+        const linkAttr = isClickableLink
+            ? " data-history-link='" + escapeHtml(attachedLink) + "' title='Открыть ссылку'"
+            : noShkSubmission
+            ? " data-history-no-shk='" + escapeHtml(JSON.stringify(noShkSubmission)) + "' title='Открыть карточку без ШК'"
+            : "";
         const commentHtml = escapeHtml(commentParts.join(" · ") || "—");
         return "<div class='" + rowClass + "'" + linkAttr + ">"
             + "<div class='task-chat-time'>" + escapeHtml(formatRuDateTime(item.created_at)) + "</div>"
@@ -17990,6 +18204,7 @@
         $("cancelSplitShk").addEventListener("click", closeSplitShkConfirm);
         $("confirmSplitShk").addEventListener("click", () => { void splitShkFromConfirm(); });
         $("specialInfoModal").addEventListener("click", (event) => { if (event.target === $("specialInfoModal")) closeSpecialInfoModal(); });
+        $("noShkMatchModal").addEventListener("click", (event) => { if (event.target === $("noShkMatchModal")) closeNoShkMatchModal(); });
         $("closeAchievements").addEventListener("click", closeAchievementsModal);
         $("achievementsWrap").addEventListener("click", (event) => {
             const button = event.target.closest && event.target.closest("[data-achievement-detail]");
@@ -18008,6 +18223,10 @@
         document.addEventListener("click", (event) => {
             const row = event.target.closest && event.target.closest("[data-history-link]");
             if (row) window.open(row.dataset.historyLink, "_blank", "noopener");
+            const noShkRow = event.target.closest && event.target.closest("[data-history-no-shk]");
+            if (noShkRow && window.__openIntakeSubmissionCard) {
+                try { window.__openIntakeSubmissionCard(JSON.parse(noShkRow.dataset.historyNoShk)); } catch (_error) { return; }
+            }
         });
         $("achievementDetailModal").addEventListener("click", (event) => { if (event.target === $("achievementDetailModal")) closeAchievementDetail(); });
         $("achievementsModal").addEventListener("click", (event) => { if (event.target === $("achievementsModal")) closeAchievementsModal(); });

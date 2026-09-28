@@ -1131,6 +1131,20 @@
         .special-info-line strong { color: #242038; overflow-wrap: anywhere; }
         .special-info-link { display: inline-flex; margin-top: 12px; border-radius: 12px; background: #ea580c; color: #fff; padding: 10px 12px; font-weight: 900; text-decoration: none; }
         .special-info-muted { margin-top: 12px; color: #9a3412; font-size: 13px; font-weight: 800; }
+        #noShkMatchModal { z-index: 4460; }
+        .no-shk-match-list { display: grid; gap: 14px; margin-top: 14px; }
+        .no-shk-match-card { border: 1px solid rgba(15,23,42,.08); border-radius: 14px; padding: 12px; background: #fff; }
+        .no-shk-match-photos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .no-shk-match-photos img { width: 100%; border-radius: 10px; object-fit: cover; max-height: 160px; display: block; background: #f1f5f9; }
+        .no-shk-match-wb-loading { display: flex; align-items: center; justify-content: center; min-height: 80px; font-size: 12px; color: #94a3b8; text-align: center; padding: 8px; }
+        .no-shk-match-meta { margin-top: 8px; font-size: 12px; color: #64748b; line-height: 1.5; }
+        .no-shk-match-meta strong { color: #242038; }
+        .no-shk-match-sticker { margin-top: 6px; font-size: 12px; color: #9a3412; font-weight: 800; }
+        .no-shk-match-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .no-shk-match-actions .btn { flex: 1; }
+        .no-shk-match-decision { margin-top: 10px; font-size: 12px; font-weight: 800; color: #64748b; }
+        .no-shk-match-decision.is-confirmed { color: #15803d; cursor: pointer; }
+        .no-shk-match-decision.is-rejected { color: #dc2626; }
         .task-description-box { padding: 14px; color: #334155; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; border-top: 1px solid #e2e8f0; border-radius: 0 0 16px 16px; }
         .task-description-box.copyable { cursor: copy; }
         .task-description-box.copyable:hover { background: #fafaff; }
@@ -2745,6 +2759,10 @@
 
 <section id="specialInfoModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div id="specialInfoWrap" class="tasks-flow-card task-small-card"></div>
+</section>
+
+<section id="noShkMatchModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div id="noShkMatchWrap" class="tasks-flow-card task-small-card"></div>
 </section>
 
 <section id="allTareShkModal" class="tasks-flow-modal upload-work" aria-hidden="true">
