@@ -787,6 +787,7 @@
             movementStatuses: new Set(),
             entityTypes: new Set(),
             taskStatuses: new Set(),
+            specialTags: new Set(),
             sectionNames: new Set(),
             openKey: "",
         };
@@ -6993,6 +6994,23 @@
         return normalized === "два шк" || normalized === "пустая упаковка";
     }
 
+    const SPECIAL_TAG_ORDER = ["Без ШК", "Два ШК", "Пустая упаковка"];
+
+    function taskSpecialTagFilterValues(row) {
+        const tags = new Set(reviewTags(row));
+        if (taskNoShkMatches(row).length) tags.add("Без ШК");
+        return SPECIAL_TAG_ORDER.filter((tag) => tags.has(tag));
+    }
+
+    function specialTagPillsHtml(row, options) {
+        const interactive = Boolean(options && options.interactive);
+        const tags = taskSpecialTagFilterValues(row);
+        return tags.map((tag) => interactive
+            ? "<button type='button' class='review-pill tone-special' data-special-pill='" + escapeHtml(tag) + "'>" + escapeHtml(tag) + "</button>"
+            : "<span class='review-pill tone-special'>" + escapeHtml(tag) + "</span>"
+        ).join("");
+    }
+
     function isPrespisokTask(row) {
         const tags = reviewTags(row).map(normalizeForMatch);
         const combined = normalizeForMatch([row && row.source_module, row && row.upload_type, row && row.task_type].join(" "));
@@ -7103,7 +7121,7 @@
     function hasActiveFilters(mode) {
         const filters = sectionFilterState(mode);
         if (filters.date) return true;
-        return ["movementStatuses", "entityTypes", "taskStatuses"].some((key) => filters[key] && filters[key].size > 0);
+        return ["movementStatuses", "entityTypes", "taskStatuses", "specialTags"].some((key) => filters[key] && filters[key].size > 0);
     }
 
     function taskFilterDate(row) {
@@ -7191,6 +7209,11 @@
             if (filters.movementStatuses.size && !movementOptions.some((value) => filters.movementStatuses.has(value))) return false;
             if (!filterMatchesSet(taskEntityFilterValue(row), filters.entityTypes)) return false;
             if (!filterMatchesSet(taskStatusFilterValue(row), filters.taskStatuses)) return false;
+            if (filters.specialTags.size) {
+                const rowTags = taskSpecialTagFilterValues(row);
+                if (filters.specialTags.has(FILTER_NONE)) return false;
+                if (!rowTags.some((tag) => filters.specialTags.has(tag))) return false;
+            }
             return true;
         });
     }
@@ -7200,6 +7223,7 @@
             movementStatuses: sortedUnique((rows || []).flatMap(taskMovementStatusOptions)),
             entityTypes: ["shk", "tare"].filter((value) => (rows || []).some((row) => taskEntityFilterValue(row) === value)),
             taskStatuses: sortedUnique((rows || []).map(taskStatusFilterValue)),
+            specialTags: SPECIAL_TAG_ORDER.filter((tag) => (rows || []).some((row) => taskSpecialTagFilterValues(row).includes(tag))),
             sectionNames: REVIEW_SECTIONS.filter((section) => (rows || []).some((row) => taskSectionName(row) === section)),
         };
     }
@@ -7266,6 +7290,7 @@
             + control("movementStatuses", "Статус последнего движения", filterSummaryText(mode, "movementStatuses", options.movementStatuses), renderFilterCheckboxes(mode, "movementStatuses", options.movementStatuses))
             + control("entityTypes", "Тип задачи", filterSummaryText(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel), renderFilterCheckboxes(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel))
             + control("taskStatuses", "Статус", filterSummaryText(mode, "taskStatuses", options.taskStatuses), renderFilterCheckboxes(mode, "taskStatuses", options.taskStatuses) + "<div class='review-filter-empty-note' style='margin-top:8px'>Показано: " + escapeHtml(filteredRows.length) + " из " + escapeHtml(baseRows.length) + "</div>")
+            + control("specialTags", "Спец-теги", filterSummaryText(mode, "specialTags", options.specialTags), renderFilterCheckboxes(mode, "specialTags", options.specialTags))
             + "</div></div>";
     }
 
@@ -7963,7 +7988,7 @@
         return "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(taskSub) + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
             + "<td class='review-wrap-cell review-name-cell'><div class='review-name-clamp'>" + escapeHtml(truncateReviewName(taskItemName(row), 150) || "-") + "</div></td>"
             + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
-            + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + manualVerdictPillHtml(row) + "</td>";
+            + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + manualVerdictPillHtml(row) + specialTagPillsHtml(row) + "</td>";
     }
 
     function renderReviewTable(grouped) {
@@ -9781,12 +9806,14 @@
         const countdownHtml = predictedTs !== null
             ? "<div id='taskWriteoffCountdown' class='task-detail-countdown " + writeoffCountdownTone(predictedTs) + "'>" + escapeHtml(formatWriteoffCountdown(predictedTs)) + "</div>"
             : "";
+        const specialPillsHtml = specialTagPillsHtml(row, { interactive: true });
         target.innerHTML = "<div class='task-detail-head'><div>"
             + "<div class='task-detail-created'>Создано " + escapeHtml(formatRuDateTime(row.created_at)) + "</div>"
             + "<div class='task-detail-title-row'><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='task-detail-price' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</div>" + countdownHtml + "</div>"
             + "<div class='review-table-subtitle'>" + escapeHtml(row.task_type || "-") + "</div></div>" + taskDetailActionButtons(row, readOnly) + "</div>"
             + "<div class='task-detail-body'>"
             + "<div class='task-info-grid'>" + taskDetailInfo(row) + "</div>"
+            + (specialPillsHtml ? "<div class='task-special-pills'>" + specialPillsHtml + "</div>" : "")
             + taskTagsBox(row)
             + incomingFlowShkInfoBox(row)
             + taskTareInfoBox(row, readOnly)
@@ -9846,6 +9873,13 @@
         });
         target.querySelectorAll("[data-special-tag]").forEach((button) => {
             button.addEventListener("click", () => openSpecialInfoModal(row.id, button.dataset.specialTag || ""));
+        });
+        target.querySelectorAll("[data-special-pill]").forEach((button) => {
+            const tag = button.dataset.specialPill || "";
+            button.addEventListener("click", () => {
+                if (tag === "Без ШК") openNoShkMatchModal(row.id);
+                else openSpecialInfoModal(row.id, tag);
+            });
         });
         const showAllTareBtn = $("showAllTareShkBtn");
         if (showAllTareBtn) showAllTareBtn.addEventListener("click", () => openAllTareShkModal(row.id));
