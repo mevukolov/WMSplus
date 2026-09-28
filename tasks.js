@@ -777,6 +777,11 @@
             photoCache: {},
             cardInfoCache: {},
         },
+        noShkQueue: {
+            rows: [],
+            loading: false,
+            loaded: false,
+        },
     };
 
     const $ = (id) => document.getElementById(id);
@@ -7771,7 +7776,7 @@
         if (tab === REVIEW_TAB_PRESORT && state.review.sectionExpanded) {
             const section = state.review.activeSection;
             if (section === "Предсортировка") {
-                sectionConfig = { icon: "∅", title: "Быстрая проверка “Без ШК”", handler: () => setFlowModalOpen("reviewNoShkCheckModal", true) };
+                sectionConfig = { icon: "∅", title: "Быстрая проверка “Без ШК”", handler: () => openReviewNoShkCheckModal() };
             } else if (section === "ПМ" || section === "Почта") {
                 sectionConfig = { icon: "🧮", title: "Калькулятор буфера", handler: () => openReviewCalculatorModal() };
             }
@@ -8435,6 +8440,7 @@
         return (state.review.rows || []).find((row) => row.id === id)
             || (state.inactive.rows || []).find((row) => row.id === id)
             || (state.taskSearch.rows || []).find((row) => row.id === id)
+            || (state.noShkQueue.rows || []).find((row) => row.id === id)
             || null;
     }
 
@@ -9152,13 +9158,14 @@
         const mergedMatches = existing.concat(additions);
         const nextPayload = { ...taskPayload(row), no_shk_matches: mergedMatches };
         try {
-            const { error } = await db.from(WMS_TASKS_TABLE).update({ source_payload: nextPayload }).eq("id", row.id);
+            const { error } = await db.from(WMS_TASKS_TABLE).update({ source_payload: nextPayload, has_pending_no_shk_match: true }).eq("id", row.id);
             if (error) throw error;
         } catch (error) {
             console.warn("Без ШК live match refresh failed:", error);
             return;
         }
         row.source_payload = nextPayload;
+        row.has_pending_no_shk_match = true;
         if (state.taskDetail && state.taskDetail.rowId === row.id) renderTaskDetail(row);
         renderReview();
     }
@@ -9273,14 +9280,17 @@
         const db = supabaseDb();
         if (!db) return false;
         const nextPayload = { ...taskPayload(row), no_shk_matches: matches };
+        const hasPending = matches.some((match) => match.decision === "pending");
         try {
-            const { error } = await db.from(WMS_TASKS_TABLE).update({ source_payload: nextPayload }).eq("id", row.id);
+            const { error } = await db.from(WMS_TASKS_TABLE).update({ source_payload: nextPayload, has_pending_no_shk_match: hasPending }).eq("id", row.id);
             if (error) throw error;
         } catch (error) {
             toast("Не удалось сохранить: " + (error && error.message ? error.message : String(error)), "error");
             return false;
         }
         row.source_payload = nextPayload;
+        row.has_pending_no_shk_match = hasPending;
+        if (!hasPending) removeFromNoShkQueue(row.id);
         return true;
     }
 
@@ -9340,6 +9350,68 @@
         const saved = await persistNoShkMatches(row, matches);
         if (!saved) return;
         renderNoShkMatchModal(row);
+    }
+
+    function removeFromNoShkQueue(taskId) {
+        const before = state.noShkQueue.rows.length;
+        state.noShkQueue.rows = state.noShkQueue.rows.filter((row) => row.id !== taskId);
+        if (state.noShkQueue.rows.length !== before && $("reviewNoShkCheckModal") && $("reviewNoShkCheckModal").classList.contains("active")) {
+            renderReviewNoShkCheckModal();
+        }
+    }
+
+    function noShkQueueRowHtml(row) {
+        const pendingCount = taskNoShkMatches(row).filter((match) => match.decision === "pending").length;
+        return "<button type='button' class='no-shk-queue-row' data-no-shk-queue-open='" + escapeHtml(row.id) + "'>"
+            + "<div class='no-shk-queue-row-main'>"
+            + "<div class='no-shk-queue-row-title'>" + escapeHtml(displayTaskTitle(row)) + "</div>"
+            + "<div class='no-shk-queue-row-sub'>" + escapeHtml(taskItemName(row) || row.task_type || "-") + "</div>"
+            + "</div>"
+            + "<span class='no-shk-queue-row-count'>" + pendingCount + "</span>"
+            + "<span class='no-shk-queue-row-price'>" + escapeHtml(formatMoney(reviewPrice(row))) + "</span>"
+            + "</button>";
+    }
+
+    function renderReviewNoShkCheckModal() {
+        const target = $("reviewNoShkCheckWrap");
+        if (!target) return;
+        if (state.noShkQueue.loading) {
+            target.innerHTML = "<p class='empty-state' style='margin:0;'>Загрузка…</p>";
+            return;
+        }
+        const rows = state.noShkQueue.rows;
+        if (!rows.length) {
+            target.innerHTML = "<p class='empty-state' style='margin:0;'>Сейчас нет совпадений, которые нужно проверить.</p>";
+            return;
+        }
+        target.innerHTML = "<div class='no-shk-queue-list'>" + rows.map(noShkQueueRowHtml).join("") + "</div>";
+        target.querySelectorAll("[data-no-shk-queue-open]").forEach((button) => {
+            button.addEventListener("click", () => openNoShkMatchModal(button.dataset.noShkQueueOpen));
+        });
+    }
+
+    async function loadReviewNoShkCheckQueue() {
+        const db = supabaseDb();
+        if (!db) return;
+        state.noShkQueue.loading = true;
+        renderReviewNoShkCheckModal();
+        try {
+            const { data, error } = await db.rpc("wms_no_shk_pending_tasks", { p_limit: 100 });
+            if (error) throw error;
+            state.noShkQueue.rows = Array.isArray(data) ? data : [];
+        } catch (error) {
+            state.noShkQueue.rows = [];
+            toast("Не удалось загрузить список: " + (error && error.message ? error.message : String(error)), "error");
+        } finally {
+            state.noShkQueue.loading = false;
+            state.noShkQueue.loaded = true;
+            renderReviewNoShkCheckModal();
+        }
+    }
+
+    function openReviewNoShkCheckModal() {
+        setFlowModalOpen("reviewNoShkCheckModal", true);
+        void loadReviewNoShkCheckQueue();
     }
 
     function isTareTask(row) {

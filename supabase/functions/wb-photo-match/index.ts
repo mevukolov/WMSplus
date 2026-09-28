@@ -170,5 +170,13 @@ Deno.serve(async (req) => {
     await processRow(row);
   }
 
-  return json(200, { ok: true, processed: rows.length });
+  // Cheap now (wms_task_nm_index is indexed by nm -- see
+  // 202609280005_no_shk_bulk_matching.sql), so it's fine to run after every
+  // batch instead of waiting for the 3h pg_cron safety net.
+  const { error: matchError, data: matchedCount } = await supabase.rpc(
+    "wms_no_shk_bulk_match_and_persist",
+  );
+  if (matchError) console.error("wb-photo-match: bulk match failed", matchError);
+
+  return json(200, { ok: true, processed: rows.length, matched_tasks: matchedCount ?? 0 });
 });
