@@ -772,6 +772,11 @@
             cleaning: false,
             loadPromise: null,
         },
+        noShkMatch: {
+            rowId: "",
+            photoCache: {},
+            cardInfoCache: {},
+        },
     };
 
     const $ = (id) => document.getElementById(id);
@@ -8471,10 +8476,12 @@
             // one-line loading placeholder to the full card.
             animateTaskDetailCardResize(() => renderTaskDetail(row));
             void refreshTaskSpecialTags(row);
+            void refreshTaskNoShkMatches(row);
             return;
         }
         renderTaskDetail(row);
         void refreshTaskSpecialTags(row);
+        void refreshTaskNoShkMatches(row);
     }
 
     function closeTaskDetail() {
@@ -9016,6 +9023,86 @@
             return;
         }
         row.tags = mergedTags;
+        row.source_payload = nextPayload;
+        if (state.taskDetail && state.taskDetail.rowId === row.id) renderTaskDetail(row);
+        renderReview();
+    }
+
+    function taskNoShkMatches(row) {
+        const matches = taskPayload(row).no_shk_matches;
+        return Array.isArray(matches) ? matches : [];
+    }
+
+    // Live per-task top-up, same shape as refreshTaskSpecialTags above: runs
+    // after the card has already painted (fire-and-forget from
+    // openTaskDetail), never during list rendering. Persists what it finds
+    // onto the task itself so it "sticks" -- next open reads it straight
+    // from source_payload, no re-query needed.
+    async function refreshTaskNoShkMatches(row) {
+        if (!row || !row.id || state.flow.debugMode) return;
+        const items = taskItems(row);
+        const nms = Array.from(new Set(items.map((item) => normalizeIdentifier(item.nm)).filter(Boolean)));
+        if (!nms.length) return;
+        let latestMovementIso = "";
+        let latestMovementTs = -Infinity;
+        items.forEach((item) => {
+            const parsed = parseDateTime(item.movement);
+            if (parsed.iso && parsed.ts > latestMovementTs) {
+                latestMovementTs = parsed.ts;
+                latestMovementIso = parsed.iso;
+            }
+        });
+        const movementDate = parseDateTime(latestMovementIso).date;
+        if (!movementDate) return;
+        const dateFrom = addDays(movementDate, -1);
+        const dateTo = addDays(movementDate, 5);
+        const db = supabaseDb();
+        if (!db) return;
+        let candidates;
+        try {
+            const { data, error } = await db.rpc("wms_no_shk_task_matches", { p_nms: nms, p_date_from: dateFrom, p_date_to: dateTo });
+            if (error) throw error;
+            candidates = Array.isArray(data) ? data : [];
+        } catch (_error) {
+            return;
+        }
+        if (!candidates.length) return;
+        const existing = taskNoShkMatches(row);
+        const knownIds = new Set(existing.map((match) => match.submission_id));
+        const additions = [];
+        candidates.forEach((submission) => {
+            if (!submission || !submission.id || knownIds.has(submission.id)) return;
+            const wbCandidates = Array.isArray(submission.wb_nm_candidates) ? submission.wb_nm_candidates.map((nm) => normalizeIdentifier(nm)) : [];
+            const matchedItem = items.find((item) => wbCandidates.includes(normalizeIdentifier(item.nm))) || items[0];
+            additions.push({
+                submission_id: submission.id,
+                nm: matchedItem ? normalizeIdentifier(matchedItem.nm) : (nms[0] || ""),
+                matched_at: new Date().toISOString(),
+                decision: "pending",
+                decided_by_id: "",
+                decided_by_name: "",
+                decided_at: "",
+                snapshot: {
+                    item_text: normalizeText(submission.item_text),
+                    photo_path: normalizeText(submission.photo_path),
+                    full_name: normalizeText(submission.full_name),
+                    area: normalizeText(submission.area),
+                    created_at: normalizeText(submission.created_at),
+                    sticker_code: normalizeText(submission.sticker_code) || null,
+                    item_type: normalizeText(submission.item_type),
+                },
+            });
+        });
+        if (!additions.length) return;
+        const mergedMatches = existing.concat(additions);
+        const nextPayload = { ...taskPayload(row), no_shk_matches: mergedMatches };
+        try {
+            const { error } = await db.from(WMS_TASKS_TABLE).update({ source_payload: nextPayload }).eq("id", row.id);
+            if (error) throw error;
+        } catch (error) {
+            console.warn("Без ШК live match refresh failed:", error);
+            return;
+        }
         row.source_payload = nextPayload;
         if (state.taskDetail && state.taskDetail.rowId === row.id) renderTaskDetail(row);
         renderReview();
