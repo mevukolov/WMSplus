@@ -8727,7 +8727,13 @@
                 if (!byKey.has(key)) byKey.set(key, row);
             });
         });
-        const actions = Array.from(byKey.values());
+        // An action that created a task is fully covered by that task's own
+        // card now (история shows "ШК в предсписке" + the real verdict --
+        // see fetchPrespisokActionsForTask/fetchPrespisokUploadMarkersForTask)
+        // -- a separate "Предсписок | ..." search card for it is redundant.
+        // Only actions that never became a task (Автосписание/Движение)
+        // still need this as their sole findable trace.
+        const actions = Array.from(byKey.values()).filter((row) => !row.task_created);
         if (!actions.length) return [];
         const runIds = Array.from(new Set(actions.map((row) => normalizeText(row.run_id)).filter(Boolean)));
         const runsById = new Map();
