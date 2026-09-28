@@ -10939,7 +10939,17 @@
             const match = normalizeText(row && row.due_date).match(/^(\d{4})-(\d{2})-(\d{2})/);
             if (match) {
                 const moscowMidnightUtcMs = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) - MOSCOW_OFFSET_MS;
-                return new Date(moscowMidnightUtcMs + 3 * 60 * 60 * 1000).toISOString();
+                const candidate = new Date(moscowMidnightUtcMs + 3 * 60 * 60 * 1000).toISOString();
+                // due_date -- маркетплейсовый прогноз списания -- к моменту, когда
+                // оператор реально ставит этот вердикт, чаще всего уже наступил
+                // или прошёл (это и есть типичный повод его поставить). Если так,
+                // кандидат из due_date уже в прошлом -- auto_reopen_wms_tasks()
+                // (крутится каждые 5 мин) тут же откатывает задачу обратно в
+                // "Не начато", и она никогда не закрывается, бесконечно скача
+                // между "Отложено" и "Не начато". В этом случае используем тот же
+                // минимальный буфер, что и у остальных вердиктов (см. return ниже),
+                // а не уже прошедшую дату.
+                if (Date.parse(candidate) > Date.now()) return candidate;
             }
         }
         if (verdict === AUTO_WRITEOFF_EXCLUSION_VERDICT) {
