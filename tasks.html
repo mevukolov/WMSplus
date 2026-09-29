@@ -506,10 +506,19 @@
         .tasks-flow-modal.upload-work.side-drawer-modal.is-closing .tasks-flow-card { animation: tasksDrawerOut .28s cubic-bezier(.4,0,.7,1) both; }
         #intakeSearchModal.side-drawer-modal,
         #notificationsModal,
-        #profileModal { z-index: 4700; }
+        #profileModal,
+        #staffStatsModal.side-drawer-modal { z-index: 4700; }
         #logoutConfirmModal { z-index: 4750; }
         #intakeSearchModal.side-drawer-modal .tasks-flow-card { width: min(460px, 100%); max-width: min(460px, 100%); }
         #intakeSearchModal.side-drawer-modal #intakeSearchResultsWrap { flex: 1; min-height: 0; overflow-y: auto; }
+        /* Пульс смены came from a wide centered modal (tasks-flow-card-wide,
+           multi-column stat grids) -- in the narrow drawer those columns
+           force the panel wider than its own max-width, so collapse them
+           explicitly instead of relying on the page-width media query below
+           (irrelevant here since the drawer is narrow regardless of viewport). */
+        #staffStatsModal.side-drawer-modal .staff-stats-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        #staffStatsModal.side-drawer-modal .staff-stats-grid { grid-template-columns: 1fr; }
+        #staffStatsModal.side-drawer-modal .staff-stats-toolbar { flex-direction: column; align-items: stretch; }
         /* Point 2/3: the classic layout's filter grid and right-aligned date
            popover assume a wide (1440px) modal. In the narrow drawer the grid
            collapses to one cramped column and the popover's right-anchor
@@ -534,6 +543,7 @@
         .profile-info-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(15,23,42,.06); font-size: 14px; }
         .profile-info-row span:first-child { color: #64748b; }
         .profile-info-row span:last-child { font-weight: 700; color: #242038; text-align: right; }
+        .profile-achievements-btn { width: 100%; margin-top: 16px; }
         @media (max-width: 480px) {
             .tasks-flow-modal.upload-work.side-drawer-modal { padding: 10px; }
             .tasks-flow-modal.upload-work.side-drawer-modal .tasks-flow-card,
@@ -1830,6 +1840,9 @@
                 <button class="tasks-menu-item" id="tasksMenuFeed" type="button" role="menuitem" data-label="Лента без ШК" aria-label="Лента без ШК">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
                 </button>
+                <button class="tasks-menu-item" id="tasksMenuStaffStats" type="button" role="menuitem" data-label="Пульс смены" aria-label="Пульс смены">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                </button>
                 <button class="tasks-menu-item" id="tasksMenuProfile" type="button" role="menuitem" data-label="Профиль" aria-label="Профиль">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 </button>
@@ -1894,56 +1907,6 @@
                     <span class="tasks-action-icon">✓</span>
                     <h2 class="tasks-action-title">Разбор</h2>
                     <p class="tasks-action-text">Активные задачи по участкам: таблица, карточка задачи, комментарий, вердикт и завершение.</p>
-                </button>
-                <button id="openQuickNoShkReview" class="tasks-action-card" type="button">
-                    <span class="tasks-action-icon">∅</span>
-                    <h2 class="tasks-action-title">Быстрая проверка “Без ШК”</h2>
-                    <p class="tasks-action-text">Фото по НМ и быстрый вердикт по дешевым ШК предсортировки.</p>
-                </button>
-            </div>
-        </div>
-        <div class="tasks-home-group">
-            <div class="tasks-home-group-head">
-                <div>
-                    <h2 class="tasks-home-group-title">Чистые списания</h2>
-                    <p class="tasks-home-group-note">Отдельный экран аналитики и контроля чистых списаний.</p>
-                </div>
-            </div>
-            <div class="tasks-actions">
-                <button id="openPureLosses" class="tasks-action-card" type="button">
-                    <span class="tasks-action-icon">₽</span>
-                    <h2 class="tasks-action-title">Открыть чистые списания</h2>
-                    <p class="tasks-action-text">Переход на текущий экран pure_losses.html со статистикой, детализацией и таблицами.</p>
-                </button>
-                <button id="openNoShkReview" class="tasks-action-card" type="button">
-                    <span class="tasks-action-icon">∅</span>
-                    <h2 class="tasks-action-title">Разбор “Без ШК”</h2>
-                    <p class="tasks-action-text">Поиск товара в чистых списаниях по НМ, бренду или наименованию и ручное опознание.</p>
-                </button>
-            </div>
-        </div>
-        <div class="tasks-home-group">
-            <div class="tasks-home-group-head">
-                <div>
-                    <h2 class="tasks-home-group-title">Другое</h2>
-                    <p class="tasks-home-group-note">Дополнительные разборы и сервисные процессы ОПП.</p>
-                </div>
-            </div>
-            <div class="tasks-actions">
-                <button id="openAchievements" class="tasks-action-card" type="button">
-                    <span class="tasks-action-icon">🏆</span>
-                    <h2 class="tasks-action-title">Достижения</h2>
-                    <p class="tasks-action-text">Личные ачивки WMS+: прогресс, секретные находки и будущие испытания.</p>
-                </button>
-                <button id="openIntakeSearch" class="tasks-action-card" type="button">
-                    <span class="tasks-action-icon">🔎</span>
-                    <h2 class="tasks-action-title">Лента «Без ШК»</h2>
-                    <p class="tasks-action-text">Список всех товаров без ШК, зафиксированных администрацией.</p>
-                </button>
-                <button id="openStaffStats" class="tasks-action-card staff-stats-home-card" type="button">
-                    <span class="tasks-action-icon">▦</span>
-                    <h2 class="tasks-action-title">Пульс смены</h2>
-                    <p class="tasks-action-text">Кто сколько решил: задачи, запросы, предсписок, Без ШК, отложения и выбранные вердикты.</p>
                 </button>
             </div>
         </div>
@@ -2467,8 +2430,8 @@
     </div>
 </section>
 
-<section id="staffStatsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card tasks-flow-card-wide">
+<section id="staffStatsModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
+    <div class="tasks-flow-card">
         <div class="work-head">
             <div>
                 <h3 class="work-title">Пульс смены</h3>
@@ -2476,18 +2439,20 @@
             </div>
             <button id="closeStaffStats" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="staff-stats-toolbar">
-            <label class="staff-stats-date" for="staffStatsDate">Дата
-                <input id="staffStatsDate" type="date">
-            </label>
-            <div class="file-row" style="margin-top:0">
-                <button id="reloadStaffStats" class="btn btn-rect" type="button">Обновить статистику</button>
+        <div class="drawer-body-scroll">
+            <div class="staff-stats-toolbar">
+                <label class="staff-stats-date" for="staffStatsDate">Дата
+                    <input id="staffStatsDate" type="date">
+                </label>
+                <div class="file-row" style="margin-top:0">
+                    <button id="reloadStaffStats" class="btn btn-rect" type="button">Обновить статистику</button>
+                </div>
             </div>
+            <div id="staffStatsStatus" class="review-status"></div>
+            <div id="staffStatsSummary" class="staff-stats-summary"></div>
+            <div id="staffStatsGrid" class="staff-stats-grid"></div>
+            <div id="staffStatsDetail" class="staff-stats-detail"></div>
         </div>
-        <div id="staffStatsStatus" class="review-status"></div>
-        <div id="staffStatsSummary" class="staff-stats-summary"></div>
-        <div id="staffStatsGrid" class="staff-stats-grid"></div>
-        <div id="staffStatsDetail" class="staff-stats-detail"></div>
     </div>
 </section>
 
@@ -2640,7 +2605,10 @@
             <div><h3 class="work-title">Профиль</h3></div>
             <button id="closeProfile" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="drawer-body-scroll" id="profileDrawerBody"></div>
+        <div class="drawer-body-scroll">
+            <div id="profileDrawerBody"></div>
+            <button id="openAchievementsFromProfile" class="btn btn-rect profile-achievements-btn" type="button">🏆 Достижения</button>
+        </div>
     </div>
 </section>
 
@@ -2654,7 +2622,7 @@
     </div>
 </section>
 
-<section id="intakeSearchModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+<section id="intakeSearchModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
     <div class="tasks-flow-card intake-search-modal-card">
         <div class="work-head">
             <div>

@@ -1781,11 +1781,12 @@
         body.innerHTML = rows.map(([label, value]) => "<div class='profile-info-row'><span>" + escapeHtml(label) + "</span><span>" + escapeHtml(value) + "</span></div>").join("");
     }
 
-    // The header menu trigger/strip and the 3 right-side drawers it opens
+    // The header menu trigger/strip and the 4 right-side drawers it opens
     // are tasks.html-only (per the design: other pages keep the classic
     // hamburger). "Лента без ШК" reuses intake_search.js's own
-    // #openIntakeSearch click handler (modal-open + first-search trigger)
-    // instead of duplicating it here.
+    // window.__openIntakeSearchDrawer (modal-open + first-search trigger)
+    // instead of duplicating it here -- that file's home-screen entry point
+    // is gone, so the header menu is now its only caller.
     function initTasksHeaderMenu() {
         const trigger = $("tasksMenuBtn");
         const strip = $("tasksMenuStrip");
@@ -1822,10 +1823,11 @@
         });
         $("tasksMenuFeed")?.addEventListener("click", () => {
             closeTasksHeaderMenuStrip();
-            const feedModal = $("intakeSearchModal");
-            if (feedModal) feedModal.dataset.forceDrawer = "1";
-            const openBtn = $("openIntakeSearch");
-            if (openBtn) openBtn.click();
+            if (typeof window.__openIntakeSearchDrawer === "function") window.__openIntakeSearchDrawer();
+        });
+        $("tasksMenuStaffStats")?.addEventListener("click", () => {
+            closeTasksHeaderMenuStrip();
+            openStaffStatsModal();
         });
         $("tasksMenuProfile")?.addEventListener("click", () => {
             closeTasksHeaderMenuStrip();
@@ -1843,6 +1845,7 @@
 
         $("closeNotifications")?.addEventListener("click", () => setFlowModalOpen("notificationsModal", false));
         $("closeProfile")?.addEventListener("click", () => setFlowModalOpen("profileModal", false));
+        $("openAchievementsFromProfile")?.addEventListener("click", () => { void openAchievementsModal(); });
         $("cancelLogoutBtn")?.addEventListener("click", () => setFlowModalOpen("logoutConfirmModal", false));
         $("confirmLogoutBtn")?.addEventListener("click", () => {
             if (typeof clearAllCaches === "function") clearAllCaches();
@@ -18305,7 +18308,6 @@
 
     function initEvents() {
         $("openStatusPilotUploads").addEventListener("click", openStatusPilotModal);
-        $("openStaffStats").addEventListener("click", openStaffStatsModal);
         $("openDebugSandbox").addEventListener("click", openDebugSandboxModal);
         $("closeDebugSandbox").addEventListener("click", closeDebugSandboxModal);
         $("openQuickNoShkDebug").addEventListener("click", openQuickNoShkDebugModal);
@@ -18315,12 +18317,8 @@
         $("startFlowBanner").addEventListener("click", () => { void showFlowPage(); });
         $("openUploads").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
-        $("openQuickNoShkReview").addEventListener("click", () => { void openQuickNoShkModal(); });
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
-        $("openPureLosses").addEventListener("click", () => { window.location.href = "pure_losses.html"; });
-        $("openNoShkReview").addEventListener("click", openNoShkReviewModal);
-        $("openAchievements").addEventListener("click", () => { void openAchievementsModal(); });
         $("openWriteoffTerms").addEventListener("click", () => { void openWriteoffTermsModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
