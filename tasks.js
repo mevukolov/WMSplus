@@ -16940,16 +16940,32 @@
     // Three verdicts for every item now, price only changes whether
     // "Автосписание" needs a justifying comment -- collapsed from the old
     // 2/6-option split (release/writeoff/request folded into "Создать
-    // задачу", which already existed as its own createsTask option, so
-    // second-line task creation is unchanged).
+    // задачу"). Предсписок is a FINAL verdict on whatever task already
+    // represents this ШК/тара (in ANY module, already reviewed or not) --
+    // every one of these three now touches that task directly (see
+    // PRESPISOK_OUTCOME_BY_ACTION / applyPrespisokTaskOutcome), not just
+    // "Создать задачу".
     function prespisokActionsForItem(item) {
         const expensive = (Number(item.price) || 0) >= 1000;
         return [
-            { key: "auto_writeoff", label: "Автосписание", tone: "red", needsExtra: expensive, extraLabel: "Укажите комментарий к автосписанию", extraPlaceholder: "Что проверили и почему допускаем автосписание", createsTask: false },
-            { key: "movement", label: "Движение", tone: "green", needsExtra: false, createsTask: false },
-            { key: "task", label: "Создать задачу", tone: "yellow", needsExtra: false, createsTask: true },
+            { key: "auto_writeoff", label: "Автосписание", tone: "red", needsExtra: expensive, extraLabel: "Укажите комментарий к автосписанию", extraPlaceholder: "Что проверили и почему допускаем автосписание" },
+            { key: "movement", label: "Движение", tone: "green", needsExtra: false },
+            { key: "task", label: "Создать задачу", tone: "yellow", needsExtra: false },
         ];
     }
+
+    // Предсписок's final disposition per action key. "Автосписание" means
+    // the item was decided lost/not on hand -> same verdict a human picks
+    // in Разбор for that; "Движение" means it was actually found/moving ->
+    // resolved; "Создать задачу" sends it to "2-я линия предсписка" for a
+    // human to look at (see reviewGroupedRows/requestsGroupedRows -- tagging
+    // "Предсписок" alone moves a task there, it's excluded from every
+    // area-based section once isPrespisokTask(row) is true).
+    const PRESPISOK_OUTCOME_BY_ACTION = {
+        auto_writeoff: { task_status: "Завершено", opp_verdict: "Нет на МХ/Не найден" },
+        movement: { task_status: "Завершено", opp_verdict: "Найден/Релиз/Списан" },
+        task: { task_status: "Не начато", opp_verdict: "Не выбран" },
+    };
 
     function prespisokItemHeadingHtml(item) {
         if (!item) return "";
@@ -17359,14 +17375,63 @@
         // already had a task in another module, save_wms_manual_upload()
         // folds this one into that existing task instead of inserting a
         // new row, so a lookup by this task's own key would find nothing.
-        const savedId = Array.isArray(data && data.task_ids) ? data.task_ids[0] : null;
-        if (savedId) {
-            void writeTaskHistory({ id: savedId }, "task_prespisok_second_line", {
-                action: actionLabel,
-                extra_value: extraValue || "",
-            });
-        }
+        // History is written by the caller (applyPrespisokTaskOutcome), once
+        // it knows the actual final verdict -- this function only ensures
+        // the task row exists.
         return { response: data, task };
+    }
+
+    // Предсписок's final say on the task, whichever module it lives in.
+    // createPrespisokTask() always resolves to the ONE canonical task for
+    // this ШК/тара (creates it fresh if genuinely new, or hands back an
+    // existing task from any other module via save_wms_manual_upload's own
+    // fold lookup) -- this then unconditionally overwrites that task's
+    // status/verdict/tags per PRESPISOK_OUTCOME_BY_ACTION. "Unconditional"
+    // is deliberate: предсписок is a final verdict per the user, so it wins
+    // even over a task some other flow already marked Завершено.
+    async function applyPrespisokTaskOutcome(item, actionKey, label, extraValue) {
+        const outcome = PRESPISOK_OUTCOME_BY_ACTION[actionKey];
+        if (!outcome || state.prespisok.debugMode) return null;
+        const db = supabaseDb();
+        if (!db) throw new Error("Supabase недоступен.");
+
+        const { response } = await createPrespisokTask(item, label, extraValue);
+        const targetId = Array.isArray(response && response.task_ids) ? response.task_ids[0] : null;
+        if (!targetId) throw new Error("Не удалось найти или создать задачу для решения предсписка.");
+
+        const { data: current, error: fetchError } = await db
+            .from(WMS_TASKS_TABLE)
+            .select("id,tags,task_status")
+            .eq("id", targetId)
+            .maybeSingle();
+        if (fetchError) throw fetchError;
+
+        const isCompleting = outcome.task_status === "Завершено";
+        const now = new Date().toISOString();
+        const nextTags = Array.from(new Set(reviewTags(current || {}).concat("Предсписок")));
+        const patch = {
+            task_status: outcome.task_status,
+            opp_verdict: outcome.opp_verdict,
+            completed_at: isCompleting ? now : null,
+            reopen_after: null,
+            tags: nextTags,
+            updated_at: now,
+        };
+        if (!isCompleting && current && current.task_status === "Завершено") patch.reopened_at = now;
+        const { error } = await db.from(WMS_TASKS_TABLE).update(patch).eq("id", targetId);
+        if (error) throw error;
+        refreshTaskRow(targetId, patch);
+
+        const actor = currentWmsUser();
+        void writeTaskHistory({ id: targetId }, isCompleting ? "task_completed" : "task_prespisok_second_line", {
+            verdict: outcome.opp_verdict,
+            comment: "Решение предсписка: " + label,
+            extra_value: extraValue || "",
+            completed_by_id: actor.id || "",
+            completed_by_name: actor.name || "",
+            source: "prespisok",
+        });
+        return targetId;
     }
 
     async function applyPrespisokAction(actionKey, extraValue) {
@@ -17384,14 +17449,10 @@
         if (submit) submit.disabled = true;
         const label = prespisokActionLabel(actionKey, item);
         const itemElapsed = prespisokItemElapsedMs();
-        if (status) status.textContent = "Фиксирую: " + label + ".";
+        if (status) status.textContent = "Фиксирую решение на задаче: " + label + ".";
         let taskResponse = null;
         try {
-            const actionDef = prespisokActionsForItem(item).find((action) => action.key === actionKey);
-            if (actionDef && actionDef.createsTask) {
-                if (status) status.textContent = "Создаю задачу в Других задачах. Предсписок решил не отпускать это просто так.";
-                taskResponse = await createPrespisokTask(item, label, extraValue);
-            }
+            taskResponse = await applyPrespisokTaskOutcome(item, actionKey, label, extraValue);
             const action = {
                 run_id: state.prespisok.runId,
                 item_key: itemKey,
