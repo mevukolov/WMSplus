@@ -37,11 +37,12 @@
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
-    // A task closed with this verdict through the normal Разбор flow is
-    // already physically resolved -- Без ШК matching skips it entirely
-    // (see 202609280007_no_shk_skip_final_verdict.sql for the same filter
+    // Tasks closed with either verdict are already physically resolved --
+    // Без ШК matching skips them entirely (see
+    // 202609280007_no_shk_skip_final_verdict.sql and
+    // 202609280009_no_shk_skip_system_movement.sql for the same filter
     // server-side).
-    const NO_SHK_SKIP_VERDICT = "Найден/Релиз/Списан";
+    const NO_SHK_SKIP_VERDICTS = ["Найден/Релиз/Списан", SYSTEM_MOVEMENT_VERDICT];
     const SAVE_TASK_CHUNK_SIZE = 40;
     const SAVE_HEAVY_TASK_CHUNK_SIZE = 12;
     const SAVE_MAX_CHUNK_JSON_CHARS = 180000;
@@ -9106,7 +9107,7 @@
     // from source_payload, no re-query needed.
     async function refreshTaskNoShkMatches(row) {
         if (!row || !row.id || state.flow.debugMode) return;
-        if (normalizeText(row.opp_verdict) === NO_SHK_SKIP_VERDICT) return;
+        if (NO_SHK_SKIP_VERDICTS.includes(normalizeText(row.opp_verdict))) return;
         const items = taskItems(row);
         const nms = Array.from(new Set(items.map((item) => normalizeIdentifier(item.nm)).filter(Boolean)));
         if (!nms.length) return;
@@ -9348,7 +9349,7 @@
             toast("Не удалось загрузить задачу: " + (error && error.message ? error.message : String(error)), "error");
             return;
         }
-        if (!row || row.is_deleted || normalizeText(row.opp_verdict) === NO_SHK_SKIP_VERDICT || !taskNoShkMatches(row).some((match) => match.decision === "pending")) {
+        if (!row || row.is_deleted || NO_SHK_SKIP_VERDICTS.includes(normalizeText(row.opp_verdict)) || !taskNoShkMatches(row).some((match) => match.decision === "pending")) {
             removeFromNoShkQueue(taskId);
             toast("Уже неактуально -- убрал из списка.", "info");
             return;
