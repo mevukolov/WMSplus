@@ -31,14 +31,18 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { ok: false, error: "Method not allowed. Use POST." });
 
   const authHeader = req.headers.get("authorization") || "";
-  if (!authHeader) return json(401, { ok: false, error: "Missing Authorization header." });
+  const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!bearerToken) return json(401, { ok: false, error: "Missing Authorization header." });
 
   // Re-validate the caller's own session -- also gives us their identity.
   // Belt-and-suspenders alongside the platform's own verify_jwt gate.
-  const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { authorization: authHeader } },
-  });
-  const { data: callerData, error: callerError } = await callerClient.auth.getUser();
+  // getUser() must be called WITH the token explicitly -- a bare
+  // getUser() checks the client's own (nonexistent, for a freshly
+  // constructed client) session, not the Authorization header passed via
+  // global.headers, which only affects REST/Storage/Functions calls, not
+  // the auth module's own session handling.
+  const callerClient = createClient(SUPABASE_URL, ANON_KEY);
+  const { data: callerData, error: callerError } = await callerClient.auth.getUser(bearerToken);
   if (callerError || !callerData?.user) {
     return json(401, { ok: false, error: "Invalid session." });
   }
