@@ -1,5 +1,6 @@
 (function () {
     const EXTENDED_MENU_ACCESS_CODE = "extended_menu";
+    const EDGE_FUNCTION_URL = "https://bgphllmzmlwurfnbagho.supabase.co/functions/v1/admin-manage-employee";
 
     if (typeof supabaseClient === "undefined") {
         console.error("supabaseClient missing — ui.js must be loaded first");
@@ -103,7 +104,8 @@
             mId.value = editUser.id;
             mId.disabled = true;
             mFio.value = editUser.fio || "";
-            mPass.value = editUser.pass || "";
+            mPass.value = "";
+            mPass.placeholder = "Оставьте пустым, чтобы не менять";
         } else {
             editModeUserId = null;
             mTitle.textContent = "Новый пользователь";
@@ -111,6 +113,7 @@
             mId.disabled = false;
             mFio.value = "";
             mPass.value = "";
+            mPass.placeholder = "Пароль";
         }
 
         buildAccessCheckboxes(editUser ? editUser.accesses || [] : []);
@@ -240,6 +243,19 @@
     // SAVE USER (UPSERT)
     // ===============================================
 
+    async function callAdminEndpoint(payload) {
+        const { data: sessionData } = await supabaseClient.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        const res = await fetch(EDGE_FUNCTION_URL, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: "Bearer " + token },
+            body: JSON.stringify(payload),
+        });
+        const result = await res.json().catch(() => ({ ok: false, error: res.statusText }));
+        if (!res.ok || !result.ok) throw new Error(result.error || res.statusText);
+        return result;
+    }
+
     async function saveUser() {
         const id = mId.value.trim();
         const fio = mFio.value.trim();
@@ -255,24 +271,45 @@
             .filter(ch => ch.checked)
             .map(ch => ch.value);
 
-        const payload = {
-            id,
-            fio,
-            pass,
-            accesses
-        };
+        if (!editModeUserId) {
+            if (!pass) {
+                MiniUI.toast("Пароль обязателен для нового пользователя", { type: "warning" });
+                return;
+            }
+            try {
+                await callAdminEndpoint({ action: "create", id, fio, pass, accesses });
+            } catch (e) {
+                MiniUI.toast("Ошибка создания: " + e.message, { type: "error" });
+                return;
+            }
+            MiniUI.toast("Сохранено", { type: "success" });
+            closeModal();
+            await loadUsers();
+            return;
+        }
 
         const { error } = await supabaseClient
             .from("users")
-            .upsert(payload);
+            .update({ fio, accesses })
+            .eq("id", editModeUserId);
 
         if (error) {
             MiniUI.toast("Ошибка сохранения", { type: "error" });
             return;
         }
 
-        MiniUI.toast("Сохранено", { type: "success" });
+        if (pass) {
+            try {
+                await callAdminEndpoint({ action: "reset_password", id: editModeUserId, pass });
+            } catch (e) {
+                MiniUI.toast("Пользователь сохранён, но пароль не сброшен: " + e.message, { type: "error" });
+                closeModal();
+                await loadUsers();
+                return;
+            }
+        }
 
+        MiniUI.toast("Сохранено", { type: "success" });
         closeModal();
         await loadUsers();
     }

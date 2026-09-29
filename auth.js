@@ -29,32 +29,37 @@ if (loginBtn) {
         loginError.style.display = 'none';
 
         try {
-            // Вызов RPC-функции login_user(p_id, p_pass)
-            const { data, error } = await supabaseClient
-                .rpc('login_user', { p_id: id, p_pass: pass });
+            const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+                email: id + '@wms.internal',
+                password: pass,
+            });
 
-            if (error) {
-                console.error('Supabase RPC error', error);
-                loginError.textContent = 'Ошибка сервера';
-                loginError.style.display = 'block';
-                return;
-            }
-
-            if (!data) {
-                // нет совпадения
+            if (authError || !authData?.user) {
                 loginError.textContent = 'Неверный ID или пароль';
                 loginError.style.display = 'block';
                 return;
             }
 
-            // data — jsonb с записью пользователя (в форме объекта)
-            // сохраняем в localStorage в том же формате, который у вас использовался ранее
-            // Приведём к ожидаемому формату {id, name/fio, accesses: []}
+            const { data, error } = await supabaseClient
+                .from('users')
+                .select('*')
+                .eq('auth_uid', authData.user.id)
+                .maybeSingle();
+
+            if (error || !data) {
+                console.error('Profile lookup error', error);
+                loginError.textContent = 'Не удалось загрузить профиль';
+                loginError.style.display = 'block';
+                return;
+            }
+
+            // Приведём к ожидаемому формату {id, name/fio, accesses: []} --
+            // same shape as before, minus `pass`: it's never sent to the
+            // client anywhere in the new flow.
             const userObj = {
                 id: data.id,
                 name: data.fio || data.name || '',
                 fio: data.fio || '',
-                pass: data.pass || '',
                 accesses: Array.isArray(data.accesses) ? data.accesses : (data.accesses ? [data.accesses] : [])
             };
 

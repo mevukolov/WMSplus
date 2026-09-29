@@ -28,7 +28,6 @@
     const badgePrintBtn = document.getElementById("badge-print-btn");
 
     const passwordModal = document.getElementById("password-modal");
-    const oldPasswordInput = document.getElementById("old-password");
     const newPasswordInput = document.getElementById("new-password");
     const confirmPasswordInput = document.getElementById("confirm-password");
     const passwordCancelBtn = document.getElementById("password-cancel");
@@ -119,7 +118,6 @@
                 id: user.id,
                 fio: user.fio ?? "",
                 name: user.fio || raw.name || "",
-                pass: user.pass ?? raw.pass ?? "",
                 accesses: normalizeAccesses(user.accesses),
                 user_wh_id: user.user_wh_id,
                 wh_name: whName || ""
@@ -180,9 +178,6 @@
         }
 
         currentUser = data;
-        if ((currentUser.pass === undefined || currentUser.pass === null || currentUser.pass === "") && localUser.pass) {
-            currentUser.pass = localUser.pass;
-        }
         await loadPagesMap();
         currentWhName = await getWarehouseNameById(currentUser.user_wh_id);
 
@@ -193,12 +188,11 @@
     function openPasswordModal() {
         if (!currentUser) return;
 
-        oldPasswordInput.value = "";
         newPasswordInput.value = "";
         confirmPasswordInput.value = "";
 
         passwordModal.classList.remove("hidden");
-        setTimeout(() => oldPasswordInput.focus(), 0);
+        setTimeout(() => newPasswordInput.focus(), 0);
     }
 
     function closePasswordModal() {
@@ -208,17 +202,11 @@
     async function submitPasswordChange() {
         if (!currentUser) return;
 
-        const oldPass = oldPasswordInput.value.trim();
         const newPass = newPasswordInput.value.trim();
         const confirmPass = confirmPasswordInput.value.trim();
 
-        if (!oldPass || !newPass || !confirmPass) {
+        if (!newPass || !confirmPass) {
             MiniUI.toast("Заполните все поля", { type: "error" });
-            return;
-        }
-
-        if (String(currentUser.pass || "") !== oldPass) {
-            MiniUI.toast("Старый пароль указан неверно", { type: "error" });
             return;
         }
 
@@ -227,18 +215,12 @@
             return;
         }
 
-        const { error } = await supabaseClient
-            .from("users")
-            .update({ pass: newPass })
-            .eq("id", String(currentUser.id));
+        const { error } = await supabaseClient.auth.updateUser({ password: newPass });
 
         if (error) {
             MiniUI.toast("Не удалось сменить пароль", { type: "error" });
             return;
         }
-
-        currentUser.pass = newPass;
-        updateLocalUser(currentUser, currentWhName);
 
         closePasswordModal();
         MiniUI.toast("Пароль успешно изменен", { type: "success" });
@@ -671,7 +653,7 @@
             }
         });
 
-        [oldPasswordInput, newPasswordInput, confirmPasswordInput].forEach((input) => {
+        [newPasswordInput, confirmPasswordInput].forEach((input) => {
             input.addEventListener("keydown", (e) => {
                 if (e.key === "Enter") {
                     submitPasswordChange();

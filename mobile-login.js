@@ -1,8 +1,10 @@
 // mobile-login.js — login for the WMS+ mobile app (link-only, no nav
-// entry). Reuses the same login_user RPC / users table the desktop
-// login.html/auth.js already uses -- no new auth backend. Stores its
-// own session under a distinct localStorage key so it never collides
-// with the desktop's own 'user' key/cache assumptions.
+// entry). Uses the same Supabase Auth signInWithPassword flow the
+// desktop login.html/auth.js uses (see
+// docs/superpowers/specs/2026-09-29-rls-auth-migration-design.md), same
+// synthetic <id>@wms.internal email. Stores its own session under a
+// distinct localStorage key so it never collides with the desktop's own
+// 'user' key/cache assumptions.
 (function () {
     "use strict";
     const SUPABASE_URL = "https://bgphllmzmlwurfnbagho.supabase.co";
@@ -31,12 +33,24 @@
         btn.disabled = true;
         msg.textContent = "Вхожу...";
         try {
-            const { data, error } = await supabaseClient.rpc("login_user", { p_id: id, p_pass: pass });
-            if (error || !data) {
+            const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+                email: id + "@wms.internal",
+                password: pass,
+            });
+            if (authError || !authData?.user) {
                 msg.textContent = "Неверный ID или пароль";
                 return;
             }
-            localStorage.setItem(LS_KEY, JSON.stringify({ id: data.id, name: data.fio || data.name || "" }));
+            const { data, error } = await supabaseClient
+                .from("users")
+                .select("id, fio")
+                .eq("auth_uid", authData.user.id)
+                .maybeSingle();
+            if (error || !data) {
+                msg.textContent = "Не удалось загрузить профиль";
+                return;
+            }
+            localStorage.setItem(LS_KEY, JSON.stringify({ id: data.id, name: data.fio || "" }));
             window.location.href = "mobile-inventory.html";
         } catch (e) {
             console.error("Login exception", e);
