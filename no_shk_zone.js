@@ -340,11 +340,13 @@
 
     // Стеллажи в 3 колонки для "Задачи -> Без ШК" в tasks.js (Разбор) --
     // те же стеллажи/короба, что и в "Зона «Без ШК»" выше, просто без
-    // "Вне ОПП"/"На полу"/"Недостача" и без rackFrameWidthPx's fixed px
-    // width (that assumed a free-flow row) -- a grid cell already
-    // constrains the width, .no-shk-boxes-row's own flex-wrap reflows
-    // fine inside it. Read-only for now (no admin rack/shelf controls) --
-    // opening a box still works via the same openBoxDetailModal.
+    // "Вне ОПП"/"Недостача" (see floorZoneHtml for "На полу", added
+    // separately below the grid per the next iteration) и без
+    // rackFrameWidthPx's fixed px width (that assumed a free-flow row) --
+    // a grid cell already constrains the width, .no-shk-boxes-row's own
+    // flex-wrap reflows fine inside it. Read-only for now (no admin
+    // rack/shelf controls) -- opening a box still works via the same
+    // openBoxDetailModal.
     function racksGridHtml() {
         if (!racks.length) return "<p style='color:#64748b;'>Стеллажей пока нет.</p>";
         return "<div class='no-shk-racks-grid-3'>" + racks.map((rack) => {
@@ -359,6 +361,18 @@
         }).join("") + "</div>";
     }
 
+    // Same "На полу" block as renderZoneView, just placed at the bottom
+    // here instead of above the racks.
+    function floorZoneHtml() {
+        return "<div class='no-shk-floor'>"
+            + "<p class='no-shk-floor-title'>На полу" + (floorBoxes.length ? " (" + floorBoxes.length + ")" : "") + "</p>"
+            + "<div class='no-shk-boxes-row'>"
+            + (floorBoxes.length
+                ? floorBoxes.map(boxTileHtml).join("")
+                : "<span style='color:#94a3b8;font-size:12px;'>пусто</span>")
+            + "</div></div>";
+    }
+
     // tasks.js's Задачи tab entry point ("Без ШК" section, see
     // renderNoShkZoneReviewPanel) -- reuses this file's own data load
     // (loadZone also refreshes the classic Зона «Без ШК» modal as a side
@@ -368,7 +382,7 @@
         if (!containerEl) return;
         containerEl.innerHTML = "<div class='empty-state'>Загружаю зону «Без ШК»…</div>";
         await loadZone();
-        containerEl.innerHTML = racksGridHtml();
+        containerEl.innerHTML = racksGridHtml() + floorZoneHtml();
         containerEl.querySelectorAll("[data-box-id]").forEach((box) => {
             box.addEventListener("click", () => openBoxDetailModal(box.dataset.boxId));
         });

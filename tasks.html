@@ -633,6 +633,11 @@
         @media (max-width: 620px) {
             .no-shk-racks-grid-3 { grid-template-columns: 1fr; }
         }
+        /* "На полу" sits below the grid here (renderNoShkZoneReviewPanel),
+           unlike renderZoneView where it's above the racks and relies on
+           its own margin-bottom for spacing -- needs a margin-top instead
+           when it follows the grid. */
+        .no-shk-racks-grid-3 + .no-shk-floor { margin-top: 24px; }
         .no-shk-rack { margin-bottom: 0; }
         .no-shk-rack-title {
             font-weight: 700;
