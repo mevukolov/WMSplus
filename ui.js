@@ -327,6 +327,22 @@ async function checkUserAccess() {
         return;
     }
 
+    // localStorage.user alone isn't proof of a live login: a tab left open
+    // since before the Supabase Auth cutover (or a session that expired)
+    // still carries this cache, and every RLS-gated table then fails
+    // silently for it while the catch-block fallback below quietly keeps
+    // showing the cached name/menu. Require an actual session before
+    // trusting the cache at all.
+    if (supabaseClient) {
+        const { data: sessionData } = await supabaseClient.auth.getSession();
+        if (!sessionData?.session) {
+            localStorage.removeItem('user');
+            clearCache("user_cache");
+            window.location.href = 'login.html';
+            return;
+        }
+    }
+
     const cache = loadCache("user_cache");
     if (cache && Date.now() - cache.timestamp < USER_CACHE_TTL) {
         const u = cache.data;

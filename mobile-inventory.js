@@ -23,6 +23,22 @@
         return;
     }
 
+    // LS_KEY alone isn't proof of a live login: a phone left on this page
+    // since before the Supabase Auth cutover (or an expired session) still
+    // carries this cache, so every RLS-gated table (print_label_templates,
+    // print_jobs, ...) then fails silently while wms_no_shk_* reads/writes
+    // -- anon-open by design -- keep working, masking the problem. Confirm
+    // an actual session exists; this runs in parallel with the rest of
+    // this file's synchronous setup below, and just redirects shortly
+    // after if there's no session to find.
+    (async () => {
+        const { data: sessionData } = await supabaseClient.auth.getSession();
+        if (!sessionData?.session) {
+            localStorage.removeItem(LS_KEY);
+            window.location.href = "mobile-login.html";
+        }
+    })();
+
     // Auto-reload on a new deploy -- this page can stay open on a phone for
     // a whole inventory session (unlike display.js's kiosk analog, this one
     // has bitten us for real: a reprint queued via stale in-memory JS from
