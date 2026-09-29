@@ -450,6 +450,11 @@
         "Коробки на входе",
         "2-я линия предсписка",
     ];
+    // Не задача-секция -- физическая зона (стеллажи/короба из
+    // no_shk_zone.js, те же данные, что "Зона «Без ШК»"), а не группировка
+    // wms_tasks -- живёт в том же ряду пилюль, но не участвует в
+    // requestsGroupedRows/фильтрах и не имеет счётчика задач.
+    const REQUEST_EXTRA_SECTIONS = ["Без ШК"];
     // Участки чистых списаний -- значения колонки `lr` в pure_losses_rep,
     // отображаются как "<lr> LR".
     const PURE_LOSSES_LR_SECTIONS = [32, 26, 11, 27, 45, 47, 34];
@@ -8077,18 +8082,39 @@
         const incomingFlowCount = (grouped.get("Запросы входящего потока") || []).length;
         const secondLineCount = (grouped.get("2-я линия предсписка") || []).length;
         $("reviewTabTasks").classList.toggle("has-alert", incomingFlowCount > 0 || secondLineCount > 0);
-        if (!state.requests.activeSection || !REQUEST_SECTIONS.includes(state.requests.activeSection)) {
+        if (!state.requests.activeSection || !REQUEST_SECTIONS.concat(REQUEST_EXTRA_SECTIONS).includes(state.requests.activeSection)) {
             state.requests.activeSection = REQUEST_SECTIONS.find((section) => (grouped.get(section) || []).length) || REQUEST_SECTIONS[0];
         }
         setRequestsStatus(state.review.loaded ? "" : "Задачи еще не загружены.");
         renderRequestsSections(grouped);
-        if (!state.review.loaded) {
-            $("requestsTableWrap").innerHTML = "<div class='empty-state'>Загружаю задачи...</div>";
-        } else if (!state.requests.sectionExpanded) {
+        if (!state.requests.sectionExpanded) {
             $("requestsTableWrap").innerHTML = "";
             if ($("requestsPickerFilters")) $("requestsPickerFilters").innerHTML = "";
+        } else if (state.requests.activeSection === "Без ШК") {
+            // Doesn't read wms_tasks at all -- checked before the
+            // review-loaded gate below so a slow/failed task fetch never
+            // blocks the (unrelated) rack/box zone view.
+            renderNoShkZoneReviewPanel();
+        } else if (!state.review.loaded) {
+            $("requestsTableWrap").innerHTML = "<div class='empty-state'>Загружаю задачи...</div>";
         } else {
             renderRequestsTable(grouped);
+        }
+    }
+
+    // "Без ШК" -- физическая зона (стеллажи/короба), не задачи -- реюзает
+    // рендеринг из no_shk_zone.js (тот же self-contained модуль, что и
+    // "Зона «Без ШК»" в дев-разделе), просто рисует в это место вместо
+    // таблицы задач. См. window.__renderNoShkZoneReviewInto в no_shk_zone.js.
+    function renderNoShkZoneReviewPanel() {
+        const target = $("requestsTableWrap");
+        const filtersTarget = $("requestsPickerFilters");
+        if (filtersTarget) filtersTarget.innerHTML = "";
+        if (!target) return;
+        if (typeof window.__renderNoShkZoneReviewInto === "function") {
+            void window.__renderNoShkZoneReviewInto(target);
+        } else {
+            target.innerHTML = "<div class='empty-state'>Модуль зоны «Без ШК» не загружен.</div>";
         }
     }
 
@@ -8105,7 +8131,7 @@
                 return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
             })
             : REQUEST_SECTIONS;
-        grid.innerHTML = orderedSections.map((section) => {
+        const sectionsHtml = orderedSections.map((section) => {
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
             const active = section === state.requests.activeSection ? " active" : "";
@@ -8120,6 +8146,16 @@
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";
         }).join("");
+        // "Без ШК" -- не задача-секция, без счётчика/суммы (см.
+        // REQUEST_EXTRA_SECTIONS), всегда последней пилюлей в ряду.
+        const noShkActive = state.requests.activeSection === "Без ШК" ? " active" : "";
+        const noShkHtml = expanded
+            ? "<button type='button' class='review-section-pill" + noShkActive + "' data-request-section='Без ШК'>Без ШК</button>"
+            : "<button type='button' class='review-section-card" + noShkActive + "' data-request-section='Без ШК'>"
+                + "<div class='review-section-name'><span>Без ШК</span></div>"
+                + "<div class='review-section-meta'>Стеллажи и короба</div>"
+                + "</button>";
+        grid.innerHTML = sectionsHtml + noShkHtml;
         grid.querySelectorAll("[data-request-section]").forEach((button) => {
             button.addEventListener("click", () => {
                 const clicked = button.dataset.requestSection || REQUEST_SECTIONS[0];

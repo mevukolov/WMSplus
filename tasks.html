@@ -617,6 +617,22 @@
             gap: 24px;
             align-items: flex-start;
         }
+        /* "Задачи -> Без ШК" (renderNoShkZoneReviewPanel/racksGridHtml) --
+           same racks/boxes as "Зона «Без ШК»" above, fixed 3-per-row grid
+           instead of the free-flow row (the rack frame has no explicit
+           width here, so it just fills its grid cell). */
+        .no-shk-racks-grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 20px;
+            align-items: start;
+        }
+        @media (max-width: 920px) {
+            .no-shk-racks-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 620px) {
+            .no-shk-racks-grid-3 { grid-template-columns: 1fr; }
+        }
         .no-shk-rack { margin-bottom: 0; }
         .no-shk-rack-title {
             font-weight: 700;
