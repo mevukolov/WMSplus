@@ -180,9 +180,25 @@
             + "\nОтветственный: " + box.responsible_name;
     }
 
+    // Age since shift_date -- drives the rack matrix's gray/yellow/red
+    // tinting (7-14 days warns, 14+ flags red), independent of the area
+    // stripe. Same 7-day threshold "Получить коробку" uses for eligibility.
+    function daysSinceShift(box) {
+        const shiftDate = new Date(box.shift_date + "T00:00:00Z");
+        const today = new Date();
+        const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+        return Math.floor((todayUtc - shiftDate.getTime()) / 86400000);
+    }
+    function boxAgeClass(box) {
+        const days = daysSinceShift(box);
+        if (days > 14) return " no-shk-box-age-danger";
+        if (days >= 7) return " no-shk-box-age-warn";
+        return "";
+    }
+
     function boxTileHtml(box, index) {
         const isNew = !seenBoxIds.has(box.id);
-        const cls = "no-shk-box " + areaClass(box.area) + (isNew ? " is-new" : "");
+        const cls = "no-shk-box " + areaClass(box.area) + boxAgeClass(box) + (isNew ? " is-new" : "");
         const delay = Math.min(index, 10) * 30;
         return "<div class='" + cls + "' style='animation-delay:" + delay + "ms;' data-box-id='" + box.id + "'>"
             + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
@@ -1041,6 +1057,267 @@
         flashMoveError("Неизвестный код: " + code);
     }
 
+    // ---- "Получить коробку" (Разбор -> Задачи -> Без ШК context button) ----
+    // Claim the single oldest eligible box (on a shelf or "на полу", 7+
+    // days old, not yet disassembled), scan its label to confirm it's
+    // physically in hand, then work through its contents one item at a
+    // time via the existing intake-submission card ("Присвоить ШК"). Once
+    // every item in the box has a sticker, the box is marked disassembled
+    // and a cheer modal fires. See window.__noShkStartGetBox, wired to the
+    // context button in tasks.js's renderReviewContextTools().
+
+    const DISASSEMBLE_ELIGIBLE_DAYS = 7; // matches the rack matrix's own gray->yellow threshold
+    const DISASSEMBLE_STALE_CLAIM_MS = 4 * 60 * 60 * 1000; // safety net if an operator abandons mid-flow without closing the drawer
+
+    let disassembleBox = null; // box currently claimed by THIS browser tab, or null
+    let disassembleItems = [];
+
+    function currentZoneActor() {
+        try {
+            const user = JSON.parse(localStorage.getItem("user") || "{}");
+            return user.fio || user.name || (user.id != null ? String(user.id) : "Неизвестный");
+        } catch (e) {
+            return "Неизвестный";
+        }
+    }
+
+    // Boxes on a shelf OR "на полу" -- same shape as the floorBoxes query
+    // above (outside_opp/shortage both false), just without the shelf_id
+    // filter so shelved boxes are included too, and ordered oldest-first
+    // for the claim loop below to walk in order.
+    async function fetchDisassembleCandidates() {
+        const client = db();
+        if (!client) return [];
+        const cutoffDate = addDays(new Date().toISOString().slice(0, 10), -DISASSEMBLE_ELIGIBLE_DAYS);
+        const { data, error } = await client
+            .from("wms_no_shk_boxes")
+            .select(BOX_FIELDS + ",disassembly_started_at,disassembled_at")
+            .is("disassembled_at", null)
+            .eq("outside_opp", false)
+            .eq("shortage", false)
+            .lte("shift_date", cutoffDate)
+            .order("shift_date", { ascending: true })
+            .order("created_at", { ascending: true })
+            .limit(25);
+        if (error) { console.error("[no_shk_zone] candidates failed:", error.message); return []; }
+        return data || [];
+    }
+
+    // Conditional UPDATE, not SELECT-then-UPDATE: Postgres re-checks a row's
+    // WHERE clause after acquiring its lock, so two operators racing for
+    // the same box is safe without SELECT ... FOR UPDATE SKIP LOCKED --
+    // only the first UPDATE still matches once the loser's lock is granted.
+    async function claimDisassembleBox(box, actorName) {
+        const client = db();
+        if (!client) return null;
+        const staleCutoff = new Date(Date.now() - DISASSEMBLE_STALE_CLAIM_MS).toISOString();
+        const { data, error } = await client
+            .from("wms_no_shk_boxes")
+            .update({ disassembly_started_at: new Date().toISOString(), disassembly_started_by: actorName })
+            .eq("id", box.id)
+            .is("disassembled_at", null)
+            .or("disassembly_started_at.is.null,disassembly_started_at.lt." + staleCutoff)
+            .select(BOX_FIELDS)
+            .maybeSingle();
+        if (error) { console.error("[no_shk_zone] claim failed:", error.message); return null; }
+        return data || null;
+    }
+
+    // Walks the oldest-first candidate list, skipping any another operator
+    // already claimed (or that got disassembled between the fetch and now)
+    // -- so a second "Получить коробку" click lands on the next-oldest box
+    // instead of the one already in someone else's hands.
+    async function claimNextDisassembleBox() {
+        const actorName = currentZoneActor();
+        const candidates = await fetchDisassembleCandidates();
+        for (const candidate of candidates) {
+            const claimed = await claimDisassembleBox(candidate, actorName);
+            if (claimed) return claimed;
+        }
+        return null;
+    }
+
+    async function releaseDisassembleClaim(boxId) {
+        const client = db();
+        if (!client || !boxId) return;
+        await client
+            .from("wms_no_shk_boxes")
+            .update({ disassembly_started_at: null, disassembly_started_by: null })
+            .eq("id", boxId)
+            .is("disassembled_at", null);
+    }
+
+    async function completeDisassembleBox(boxId, actorName) {
+        const client = db();
+        if (!client) return;
+        const { error } = await client
+            .from("wms_no_shk_boxes")
+            .update({ disassembled_at: new Date().toISOString(), disassembled_by: actorName })
+            .eq("id", boxId);
+        if (error) console.error("[no_shk_zone] complete failed:", error.message);
+    }
+
+    async function fetchBoxKgtCount(boxId) {
+        const client = db();
+        if (!client) return 0;
+        const { data, error } = await client.rpc("wms_no_shk_box_kgt_count", { p_box_id: boxId });
+        return error ? 0 : (Number(data) || 0);
+    }
+
+    async function fetchBoxDisassembleItems(boxId) {
+        const client = db();
+        if (!client) return [];
+        const { data, error } = await client.rpc("wms_no_shk_box_contents", { p_box_id: boxId });
+        return error ? [] : (data || []);
+    }
+
+    async function startGetBox() {
+        disassembleBox = null;
+        $("noShkGetBoxWrap").innerHTML = "<p style='text-align:center;color:#64748b;padding:40px 0;'>Ищу короб…</p>";
+        setZoneModalOpen("noShkGetBoxModal", true);
+        const claimed = await claimNextDisassembleBox();
+        if (!claimed) {
+            $("noShkGetBoxWrap").innerHTML = "<p style='text-align:center;color:#64748b;font-weight:700;padding:40px 0;'>Нет коробов для разбора</p>";
+            return;
+        }
+        disassembleBox = claimed;
+        const kgtCount = await fetchBoxKgtCount(claimed.id);
+        renderGetBoxPrompt(kgtCount);
+        const scanInput = $("noShkGetBoxScanInput");
+        if (scanInput) { scanInput.value = ""; setTimeout(() => scanInput.focus({ preventScroll: true }), 50); }
+    }
+
+    function renderGetBoxPrompt(kgtCount) {
+        const box = disassembleBox;
+        if (!box) return;
+        $("noShkGetBoxWrap").innerHTML = "<div class='no-shk-getbox-prompt'>"
+            + "<p class='no-shk-getbox-main'>Возьмите короб " + escapeHtmlLocal(computeDateLabel(box)) + " и отсканируйте этикетку</p>"
+            + "<div class='no-shk-getbox-details'>"
+            + "<div>Номер короба: <strong>" + box.box_number + "</strong></div>"
+            + "<div>Ответственный: <strong>" + escapeHtmlLocal(box.responsible_name) + "</strong></div>"
+            + "<div>КГТ: <strong>" + kgtCount + "</strong></div>"
+            + "</div>"
+            + "<div id='noShkGetBoxError' class='no-shk-getbox-error'></div>"
+            + "</div>";
+    }
+
+    function showGetBoxError(message) {
+        const el = $("noShkGetBoxError");
+        if (!el) return;
+        el.textContent = message;
+        el.classList.add("is-visible");
+        clearTimeout(el._hideTimer);
+        el._hideTimer = setTimeout(() => el.classList.remove("is-visible"), 2200);
+    }
+
+    async function handleGetBoxScan(rawCode) {
+        const code = rawCode.trim();
+        if (!code || !disassembleBox) return;
+        if (code !== boxCode(disassembleBox)) {
+            showGetBoxError("Это не тот короб. Нужен короб №" + disassembleBox.box_number + ".");
+            return;
+        }
+        setZoneModalOpen("noShkGetBoxModal", false);
+        await openDisassembleFullscreen();
+    }
+
+    async function openDisassembleFullscreen() {
+        if (!disassembleBox) return;
+        const box = disassembleBox;
+        $("noShkDisassembleHead").textContent = "Короб " + computeDateLabel(box) + " · №" + box.box_number;
+        $("noShkDisassembleWrap").innerHTML = "<p style='text-align:center;color:#64748b;padding:40px 0;'>Загрузка…</p>";
+        setZoneModalOpen("noShkDisassembleModal", true);
+        await refreshDisassembleItems();
+    }
+
+    async function refreshDisassembleItems() {
+        if (!disassembleBox) return;
+        disassembleItems = await fetchBoxDisassembleItems(disassembleBox.id);
+        // An empty box (nothing was ever logged into it) or one where every
+        // item already carries a sticker completes immediately -- [].every()
+        // is true, so this also covers the empty case with no extra check.
+        if (disassembleItems.every((item) => Boolean(item.sticker_code))) {
+            void finishDisassemble();
+            return;
+        }
+        renderDisassembleGrid();
+    }
+
+    function disassembleTileHtml(item) {
+        const done = Boolean(item.sticker_code);
+        const photo = item.photo_path
+            ? "<img src='" + escapeHtmlLocal(buildIntakePhotoUrl(item.photo_path)) + "' loading='lazy' alt=''>"
+            : "<div class='no-shk-disassemble-tile-noimg'>?</div>";
+        return "<div class='no-shk-disassemble-tile" + (done ? " is-done" : "") + "' data-item-id='" + escapeHtmlLocal(item.id) + "'>"
+            + photo
+            + "<div class='no-shk-disassemble-tile-name'>" + escapeHtmlLocal(item.item_text || item.item_type || "Без наименования") + "</div>"
+            + (done ? "<span class='no-shk-disassemble-tile-check'>✓</span>" : "")
+            + "</div>";
+    }
+
+    function renderDisassembleGrid() {
+        const wrap = $("noShkDisassembleWrap");
+        if (!wrap) return;
+        wrap.innerHTML = "<div class='no-shk-disassemble-grid'>" + disassembleItems.map(disassembleTileHtml).join("") + "</div>";
+        wrap.querySelectorAll("[data-item-id]").forEach((tile) => {
+            tile.addEventListener("click", () => {
+                const item = disassembleItems.find((row) => row.id === tile.dataset.itemId);
+                if (item && window.__openIntakeSubmissionCard) window.__openIntakeSubmissionCard(item);
+            });
+        });
+    }
+
+    async function finishDisassemble() {
+        const box = disassembleBox;
+        if (!box) return;
+        await completeDisassembleBox(box.id, currentZoneActor());
+        setZoneModalOpen("noShkDisassembleModal", false);
+        disassembleBox = null;
+        disassembleItems = [];
+        showDisassembleCheer(box);
+        await loadZone();
+    }
+
+    function showDisassembleCheer(box) {
+        $("noShkCheerText").textContent = "Короб " + computeDateLabel(box) + " разобран";
+        setZoneModalOpen("noShkCheerModal", true);
+        fireZoneConfetti();
+    }
+
+    // Same confetti technique as tasks.js's fireQuickNoShkConfetti, just
+    // duplicated here rather than reached into tasks.js's private closure
+    // -- reuses the global CSS classes .quick-no-shk-confetti-layer/-bit
+    // already defined in tasks.html for that feature.
+    function fireZoneConfetti() {
+        const layer = document.createElement("div");
+        layer.className = "quick-no-shk-confetti-layer";
+        const colors = ["#86efac", "#22c55e", "#facc15", "#38bdf8", "#f87171", "#c084fc"];
+        layer.innerHTML = Array.from({ length: 60 }, () => {
+            const left = Math.random() * 100;
+            const size = 6 + Math.random() * 8;
+            const delay = Math.random() * .5;
+            const duration = 1.6 + Math.random() * 1.1;
+            const rotate = Math.round(Math.random() * 720 - 360);
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            return "<i class='quick-no-shk-confetti-bit' style='--left:" + left.toFixed(1) + "%;--size:" + size.toFixed(1) + "px;--delay:" + delay.toFixed(2) + "s;--duration:" + duration.toFixed(2) + "s;--rotate:" + rotate + "deg;--c:" + color + "'></i>";
+        }).join("");
+        document.body.appendChild(layer);
+        window.setTimeout(() => layer.remove(), 3200);
+    }
+
+    // Item card assign-sticker success calls this (see intake_search.js's
+    // confirmAssignSticker) so the fullscreen grid updates and completion
+    // gets re-checked -- the item object itself is already the same
+    // reference held in disassembleItems (window.__openIntakeSubmissionCard
+    // was handed it directly), so no data to merge here, just a re-render.
+    window.__onNoShkItemAssigned = function () {
+        if (!disassembleBox) return;
+        renderDisassembleGrid();
+        if (disassembleItems.every((item) => Boolean(item.sticker_code))) void finishDisassemble();
+    };
+
+    window.__noShkStartGetBox = function () { void startGetBox(); };
+
     document.addEventListener("DOMContentLoaded", () => {
         const openBtn = $("openNoShkZone");
         if (openBtn) {
@@ -1147,5 +1424,52 @@
         if (confirmYesBtn) confirmYesBtn.addEventListener("click", () => resolveConfirm(true));
         const confirmNoBtn = $("noShkConfirmNo");
         if (confirmNoBtn) confirmNoBtn.addEventListener("click", () => resolveConfirm(false));
+
+        const closeGetBoxBtn = $("closeNoShkGetBox");
+        if (closeGetBoxBtn) {
+            closeGetBoxBtn.addEventListener("click", () => {
+                setZoneModalOpen("noShkGetBoxModal", false);
+                // Closing before a successful scan abandons the claim --
+                // the next "Получить коробку" click (by anyone) should be
+                // able to pick this same box right back up.
+                if (disassembleBox) { void releaseDisassembleClaim(disassembleBox.id); disassembleBox = null; }
+            });
+        }
+        const getBoxInput = $("noShkGetBoxScanInput");
+        if (getBoxInput) {
+            let getBoxScanBuffer = "";
+            getBoxInput.addEventListener("keydown", (event) => {
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    const code = ruToEnLayout(getBoxScanBuffer || getBoxInput.value).trim();
+                    getBoxScanBuffer = "";
+                    getBoxInput.value = "";
+                    void handleGetBoxScan(code);
+                    return;
+                }
+                if (event.key.length === 1) getBoxScanBuffer += event.key;
+            });
+            // Same refocus-on-blur technique as noShkMoveScanInput above.
+            document.addEventListener("focusout", () => {
+                const modal = $("noShkGetBoxModal");
+                if (modal && modal.classList.contains("active") && !modal.classList.contains("is-closing")) {
+                    setTimeout(() => getBoxInput.focus({ preventScroll: true }), 0);
+                }
+            });
+        }
+
+        const closeDisassembleBtn = $("closeNoShkDisassemble");
+        if (closeDisassembleBtn) {
+            closeDisassembleBtn.addEventListener("click", () => {
+                setZoneModalOpen("noShkDisassembleModal", false);
+                // Same abandon-the-claim logic as the get-box drawer's close
+                // button -- leaving mid-way through shouldn't block the box
+                // for everyone else.
+                if (disassembleBox) { void releaseDisassembleClaim(disassembleBox.id); disassembleBox = null; disassembleItems = []; }
+            });
+        }
+
+        const closeCheerBtn = $("closeNoShkCheer");
+        if (closeCheerBtn) closeCheerBtn.addEventListener("click", () => setZoneModalOpen("noShkCheerModal", false));
     });
 })();

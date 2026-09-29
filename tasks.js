@@ -7795,14 +7795,52 @@
                 sectionConfig = { icon: "🧮", title: "Калькулятор буфера", handler: () => openReviewCalculatorModal() };
             }
         }
+        if (tab === REVIEW_TAB_TASKS && state.requests.activeSection === "Без ШК") {
+            sectionConfig = {
+                icon: "📦",
+                title: "Получить коробку",
+                handler: () => {
+                    if (typeof window.__noShkStartGetBox === "function") void window.__noShkStartGetBox();
+                },
+            };
+        }
         let modeConfig = null;
         if (tab === REVIEW_TAB_PRESORT) {
             modeConfig = { icon: "⛔", title: "Добавить ШК в исключения", handler: openShkExclusionModal };
         } else if (tab === REVIEW_TAB_PRESPISOK) {
             modeConfig = { icon: "🗂", title: "Журнал предсписка", handler: () => { void openPrespisokJournalModal(); } };
+        } else if (tab === REVIEW_TAB_TASKS && state.requests.activeSection === "Без ШК") {
+            // Scope not decided yet -- reserving the slot/handler so the
+            // toolbar's shape is already right when it does get built.
+            modeConfig = { icon: "📋", title: "Инвентаризация", handler: () => flashContextMessage("Скоро") };
         }
         setContextButton($("reviewSectionContextBtn"), sectionConfig);
         setContextButton($("reviewModeContextBtn"), modeConfig);
+    }
+
+    // Small anchored, self-dismissing message for context-tool buttons that
+    // have nothing richer to show (e.g. a stubbed-out handler) -- avoids
+    // reaching for a native alert() or inventing a full toast system for
+    // one line of text.
+    let contextFlashTimer = null;
+    function flashContextMessage(text) {
+        let el = $("reviewContextFlash");
+        if (!el) {
+            el = document.createElement("div");
+            el.id = "reviewContextFlash";
+            el.className = "review-context-flash";
+            document.body.appendChild(el);
+        }
+        el.textContent = text;
+        const anchor = $("reviewContextTools");
+        if (anchor) {
+            const rect = anchor.getBoundingClientRect();
+            el.style.top = (rect.bottom + 8) + "px";
+            el.style.right = (window.innerWidth - rect.right) + "px";
+        }
+        el.classList.add("is-visible");
+        clearTimeout(contextFlashTimer);
+        contextFlashTimer = setTimeout(() => el.classList.remove("is-visible"), 2200);
     }
 
     // Pill widths vary (unlike the equal-width top-level view tabs), so the
@@ -8087,6 +8125,7 @@
         }
         setRequestsStatus(state.review.loaded ? "" : "Задачи еще не загружены.");
         renderRequestsSections(grouped);
+        $("requestsTableWrap").classList.toggle("is-no-shk-zone", state.requests.activeSection === "Без ШК");
         if (!state.requests.sectionExpanded) {
             $("requestsTableWrap").innerHTML = "";
             if ($("requestsPickerFilters")) $("requestsPickerFilters").innerHTML = "";
@@ -8100,6 +8139,7 @@
         } else {
             renderRequestsTable(grouped);
         }
+        renderReviewContextTools();
     }
 
     // "Без ШК" -- физическая зона (стеллажи/короба), не задачи -- реюзает

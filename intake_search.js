@@ -572,6 +572,7 @@
             return;
         }
         item.sticker_code = data[0].sticker_code;
+        if (window.__onNoShkItemAssigned) { try { window.__onNoShkItemAssigned(item); } catch (_e) { /* no_shk_zone.js's own concern */ } }
         const actor = currentAdminActor();
         await client.from("wms_no_shk_sticker_events").insert({
             intake_submission_id: item.id,

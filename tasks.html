@@ -732,6 +732,12 @@
         .no-shk-box.area-repack::before { background: #a78bfa; }
         .no-shk-box.is-new { animation: no-shk-box-pop .55s cubic-bezier(.34,1.56,.64,1) both; }
         .no-shk-box:hover { background: #e2e5ec; border-color: #94a3b8; transform: translateY(-2px); }
+        /* Age since shift_date, independent of the area stripe (::before)
+           above -- 7-14 days warns, 14+ flags for urgent disassembly. */
+        .no-shk-box.no-shk-box-age-warn { background: rgba(250,204,21,.35); border-color: #eab308; }
+        .no-shk-box.no-shk-box-age-warn:hover { background: rgba(250,204,21,.5); }
+        .no-shk-box.no-shk-box-age-danger { background: rgba(239,68,68,.28); border-color: #ef4444; }
+        .no-shk-box.no-shk-box-age-danger:hover { background: rgba(239,68,68,.42); }
         .no-shk-floor {
             border: 2px dashed #cbd5e1;
             border-radius: 8px;
@@ -963,6 +969,32 @@
             flex-direction: column;
             overflow: auto;
         }
+        /* "Получить коробку" drawer + its full-screen contents grid + the
+           finish cheer modal -- same full-screen-card pattern as
+           .no-shk-move-card / .quick-no-shk-card above. */
+        #noShkDisassembleModal.full-screen-modal { padding: 0; align-items: stretch; justify-content: stretch; }
+        .no-shk-disassemble-card { width: 100vw; height: 100dvh; max-height: none; border: 0; border-radius: 0; padding: clamp(16px, 3vw, 32px); box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+        .no-shk-disassemble-wrap { flex: 1; min-height: 0; overflow-y: auto; }
+        .no-shk-disassemble-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
+        .no-shk-disassemble-tile { position: relative; border: 1.5px solid #dbe3ec; border-radius: 12px; overflow: hidden; cursor: pointer; background: #f8fafc; transition: border-color .15s ease, transform .15s ease; }
+        .no-shk-disassemble-tile:hover { border-color: #94a3b8; transform: translateY(-2px); }
+        .no-shk-disassemble-tile img { width: 100%; height: 120px; object-fit: cover; display: block; }
+        .no-shk-disassemble-tile-noimg { width: 100%; height: 120px; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 28px; background: #eef1f5; }
+        .no-shk-disassemble-tile-name { padding: 8px 10px; font-size: 12px; font-weight: 600; color: #334155; }
+        .no-shk-disassemble-tile.is-done { border-color: #16a34a; }
+        .no-shk-disassemble-tile-check { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; background: #16a34a; color: #fff; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+
+        .no-shk-getbox-prompt { display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; padding: 24px 4px; }
+        .no-shk-getbox-main { font-size: clamp(20px, 2.6vw, 26px); font-weight: 800; color: #0f172a; margin: 0; }
+        .no-shk-getbox-details { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #475569; }
+        .no-shk-getbox-error { font-size: 14px; font-weight: 600; color: #b91c1c; min-height: 20px; opacity: 0; transition: opacity .2s ease; }
+        .no-shk-getbox-error.is-visible { opacity: 1; }
+
+        .no-shk-cheer-card { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 32px 24px; }
+        .no-shk-cheer-check { width: 72px; height: 72px; border-radius: 50%; background: #16a34a; color: #fff; font-size: 40px; display: flex; align-items: center; justify-content: center; animation: no-shk-cheer-pop .5s cubic-bezier(.34,1.56,.64,1) both; }
+        .no-shk-cheer-text { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0; }
+        @keyframes no-shk-cheer-pop { from { opacity: 0; transform: scale(.3); } to { opacity: 1; transform: scale(1); } }
+
         .tasks-flow-card .module-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .tasks-flow-card .preview-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
         .backfill-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
@@ -979,6 +1011,22 @@
         .review-tool-square.is-away { opacity: 0; transform: scale(.5); pointer-events: none; transition: opacity .16s ease, transform .22s cubic-bezier(.5,-.3,.7,.4); }
         .review-tool-square.active { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); }
         .review-tool-square.active:hover { color: #fff; }
+        .review-context-flash {
+            position: fixed;
+            z-index: 5000;
+            background: #0f172a;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            box-shadow: var(--shadow-md);
+            opacity: 0;
+            transform: translateY(-6px);
+            pointer-events: none;
+            transition: opacity .18s ease, transform .18s ease;
+        }
+        .review-context-flash.is-visible { opacity: 1; transform: translateY(0); }
         .review-view-tabs { display: inline-flex; gap: 8px; padding: 4px; border-radius: 14px; background: #f1f5f9; }
         .review-view-tabs-5 { position: relative; display: grid; grid-template-columns: 44px repeat(4, minmax(0, 1fr)); gap: 0; }
         .review-view-thumb { position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: 11px; background: rgba(255,255,255,.78); backdrop-filter: blur(8px) saturate(160%); -webkit-backdrop-filter: blur(8px) saturate(160%); box-shadow: var(--shadow-sm), 0 1px 0 rgba(255,255,255,.7) inset; transition: transform .48s cubic-bezier(.32,1.2,.4,1), width .48s cubic-bezier(.32,1.2,.4,1); z-index: 0; }
@@ -1051,6 +1099,10 @@
         .inactive-card-note { margin-top: 10px; color: #64748b; font-size: 13px; line-height: 1.4; }
         .review-table-card { border: 1px solid #dbe3ec; border-radius: 16px; overflow: hidden; background: #fff; }
         .review-table-card:empty { display: none; border: 0; }
+        /* "Без ШК" panel (renderNoShkZoneReviewPanel) draws its own rack
+           grid/floor zone, which already has its own visual boundaries --
+           the generic table-card frame around it just doubled up. */
+        .review-table-card.is-no-shk-zone { border: none; border-radius: 0; }
         .review-table-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
         .review-table-title { margin: 0; color: #242038; font-size: 18px; }
         .review-table-subtitle { color: #64748b; font-size: 12px; }
@@ -2732,6 +2784,35 @@
             <div id="noShkMoveWave" class="no-shk-move-wave"></div>
         </div>
         <input id="noShkMoveScanInput" type="text" autocomplete="off" class="no-shk-move-hidden-input" aria-hidden="true" tabindex="-1">
+    </div>
+</section>
+
+<section id="noShkGetBoxModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
+    <div class="tasks-flow-card">
+        <div class="work-head">
+            <div><h3 class="work-title">Получить короб</h3></div>
+            <button id="closeNoShkGetBox" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="noShkGetBoxWrap"></div>
+        <input id="noShkGetBoxScanInput" type="text" autocomplete="off" class="no-shk-move-hidden-input" aria-hidden="true" tabindex="-1">
+    </div>
+</section>
+
+<section id="noShkDisassembleModal" class="tasks-flow-modal upload-work full-screen-modal" aria-hidden="true">
+    <div class="tasks-flow-card no-shk-disassemble-card">
+        <div class="work-head">
+            <div><h3 id="noShkDisassembleHead" class="work-title">Короб</h3></div>
+            <button id="closeNoShkDisassemble" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="noShkDisassembleWrap" class="no-shk-disassemble-wrap"></div>
+    </div>
+</section>
+
+<section id="noShkCheerModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card no-shk-cheer-card">
+        <div class="no-shk-cheer-check">✓</div>
+        <p id="noShkCheerText" class="no-shk-cheer-text"></p>
+        <button id="closeNoShkCheer" class="btn btn-rect" type="button">Отлично</button>
     </div>
 </section>
 
