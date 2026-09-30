@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>WMS+ — Поиск</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon" />
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="ui.js" defer></script>
+    <script src="search.js" defer></script>
+    <style>
+        /* Not in any menu (no row in `pages`), no sidebar/menu of its own --
+           ui.js is still included so checkUserAccess() gives this the same
+           real-Supabase-Auth gate every other page has (redirect to
+           login.html with no session), but the header/sidebar it expects to
+           find and populate are kept in the DOM (so it never null-refs) and
+           just visually reduced to a single corner control. */
+        body { background: linear-gradient(180deg, #f7f8fb 0%, #eef0f6 100%); }
+        .header { background: transparent; box-shadow: none; backdrop-filter: none; }
+        #menu-btn, #header-wh, #user-name-small { display: none; }
+        .sidebar { display: none !important; }
+
+        .search-page {
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 14vh 20px 60px;
+            box-sizing: border-box;
+            transition: padding-top .5s cubic-bezier(.22,1,.36,1);
+        }
+        .search-page.has-results { padding-top: 6vh; }
+
+        .search-hero {
+            width: 100%;
+            max-width: 640px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+        }
+        .search-title {
+            margin: 0 0 6px;
+            font-size: clamp(28px, 4vw, 40px);
+            font-weight: 800;
+            letter-spacing: -.02em;
+            color: var(--accent-dark, #242038);
+            opacity: 0;
+            animation: searchFadeDown .5s ease-out .05s both;
+        }
+        .search-input-row {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #fff;
+            border-radius: 999px;
+            padding: 6px 6px 6px 22px;
+            box-shadow: 0 10px 30px rgba(36,32,56,.10), 0 1px 2px rgba(36,32,56,.06);
+            border: 1px solid rgba(15,23,42,.06);
+            opacity: 0;
+            animation: searchFadeDown .5s ease-out .12s both;
+            transition: box-shadow .2s ease, transform .2s ease;
+        }
+        .search-input-row:focus-within { box-shadow: 0 14px 34px rgba(98,60,234,.18), 0 1px 2px rgba(36,32,56,.06); transform: translateY(-1px); }
+        #searchInput {
+            flex: 1;
+            min-width: 0;
+            border: 0;
+            outline: none;
+            font-size: 16px;
+            padding: 12px 4px;
+            background: transparent;
+            color: #1f2937;
+        }
+        #searchInput::placeholder { color: #a0a6b4; }
+        #searchBtn {
+            border: 0;
+            border-radius: 999px;
+            padding: 12px 26px;
+            background: var(--accent, #623CEA);
+            color: #fff;
+            font-weight: 700;
+            font-size: 15px;
+            cursor: pointer;
+            transition: background .15s ease, transform .1s ease;
+            white-space: nowrap;
+        }
+        #searchBtn:hover { background: var(--accent-dark, #4c2f8f); }
+        #searchBtn:active { transform: scale(.97); }
+        #searchBtn:disabled { opacity: .6; cursor: default; }
+
+        .search-toolbar {
+            display: flex;
+            justify-content: center;
+            opacity: 0;
+            animation: searchFadeDown .5s ease-out .18s both;
+        }
+        .search-filter-toggle {
+            border: 0;
+            background: transparent;
+            color: #6b7280;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: 8px;
+            transition: background .15s ease, color .15s ease;
+        }
+        .search-filter-toggle:hover, .search-filter-toggle.is-open { background: rgba(98,60,234,.08); color: var(--accent, #623CEA); }
+
+        .search-filter-panel {
+            width: 100%;
+            max-width: 640px;
+            display: grid;
+            grid-template-rows: 0fr;
+            opacity: 0;
+            transition: grid-template-rows .32s cubic-bezier(.22,1,.36,1), opacity .24s ease, margin-top .32s ease;
+        }
+        .search-filter-panel.is-open { grid-template-rows: 1fr; opacity: 1; margin-top: 2px; }
+        .search-filter-panel-inner { overflow: hidden; min-height: 0; }
+        .search-filter-card {
+            background: #fff;
+            border: 1px solid rgba(15,23,42,.06);
+            border-radius: 16px;
+            padding: 16px 18px;
+            box-shadow: 0 8px 24px rgba(36,32,56,.06);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .search-filter-date-row { display: flex; align-items: center; gap: 8px; }
+        .search-filter-date-row label { font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; }
+        .search-filter-date-row input[type="date"] {
+            border: 1px solid rgba(15,23,42,.12);
+            border-radius: 10px;
+            padding: 7px 10px;
+            font-size: 14px;
+            color: #1f2937;
+        }
+        .search-chip-clear {
+            border: 0;
+            background: rgba(15,23,42,.06);
+            color: #6b7280;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            display: none;
+        }
+        .search-chip-clear.is-visible { display: inline-flex; align-items: center; justify-content: center; }
+        .search-incident-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .search-chip {
+            border: 1.5px solid rgba(15,23,42,.12);
+            background: #fff;
+            color: #374151;
+            border-radius: 999px;
+            padding: 7px 14px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .15s ease, border-color .15s ease, color .15s ease, transform .1s ease;
+        }
+        .search-chip:hover { border-color: var(--accent, #623CEA); }
+        .search-chip.is-active { background: var(--accent, #623CEA); border-color: var(--accent, #623CEA); color: #fff; }
+        .search-chip:active { transform: scale(.96); }
+
+        .search-status {
+            width: 100%;
+            max-width: 640px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+            min-height: 20px;
+            margin-top: 18px;
+        }
+        .search-status.is-error { color: #b91c1c; }
+
+        .search-results {
+            width: 100%;
+            max-width: 860px;
+            display: flex;
+            flex-direction: column;
+            gap: 26px;
+            margin-top: 8px;
+        }
+        .search-results-group { display: flex; flex-direction: column; gap: 10px; }
+        .search-results-group-title {
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: #9095a3;
+            margin: 0 0 2px 4px;
+        }
+        .search-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+
+        .search-card {
+            background: #fff;
+            border: 1px solid rgba(15,23,42,.06);
+            border-radius: 14px;
+            padding: 13px 15px;
+            box-shadow: 0 4px 14px rgba(36,32,56,.05);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            opacity: 0;
+            transform: translateY(8px);
+            animation: searchCardIn .38s cubic-bezier(.22,1,.36,1) both;
+        }
+        .search-card-photo { width: 100%; height: 120px; object-fit: cover; border-radius: 10px; background: #eef1f5; }
+        .search-card-title { font-size: 14px; font-weight: 700; color: #1f2937; }
+        .search-card-sub { font-size: 12px; color: #6b7280; }
+        .search-card-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: #6b7280; }
+        .search-card-row strong { color: #374151; font-weight: 600; }
+        .search-card-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+        .search-card-pill {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 999px;
+            background: rgba(98,60,234,.1);
+            color: var(--accent, #623CEA);
+        }
+        .search-card-pill.tone-red { background: rgba(239,68,68,.12); color: #b91c1c; }
+        .search-card-pill.tone-green { background: rgba(34,197,94,.14); color: #15803d; }
+        .search-card-pill.tone-yellow { background: rgba(250,204,21,.2); color: #92700c; }
+        .search-empty-state { text-align: center; color: #9095a3; font-size: 14px; padding: 20px 0; }
+
+        @keyframes searchFadeDown {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes searchCardIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .search-title, .search-input-row, .search-toolbar, .search-card { animation: none; opacity: 1; transform: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="menu-overlay" class="menu-overlay"></div>
+
+<header class="header">
+    <button class="btn btn-round header-btn" id="menu-btn">☰</button>
+    <span class="header-title" id="header-wh"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="user-name-small" class="user-name" aria-hidden="true"></span>
+        <button class="btn btn-round header-btn" id="logout-btn" title="Выйти">⎋</button>
+    </div>
+</header>
+
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-content"></div>
+</div>
+
+<main class="search-page" id="searchPage">
+    <div class="search-hero">
+        <h1 class="search-title">Поиск</h1>
+        <div class="search-input-row">
+            <input id="searchInput" type="text" autocomplete="off" placeholder="ШК, номер тары, название, номенклатура…">
+            <button id="searchBtn" type="button">Найти</button>
+        </div>
+        <div class="search-toolbar">
+            <button id="filterToggleBtn" type="button" class="search-filter-toggle">Фильтр</button>
+        </div>
+        <div id="filterPanel" class="search-filter-panel">
+            <div class="search-filter-panel-inner">
+                <div class="search-filter-card">
+                    <div class="search-filter-date-row">
+                        <label for="filterDate">Дата</label>
+                        <input id="filterDate" type="date">
+                        <button id="filterDateClear" type="button" class="search-chip-clear" aria-label="Сбросить дату">×</button>
+                    </div>
+                    <div class="search-incident-chips" id="incidentChips">
+                        <button type="button" class="search-chip" data-incident="Без ШК">Товар «Без ШК»</button>
+                        <button type="button" class="search-chip" data-incident="Два ШК">Два ШК</button>
+                        <button type="button" class="search-chip" data-incident="Пустая упаковка">Пустая упаковка</button>
+                        <button type="button" class="search-chip" data-incident="Разбор ОПП">Разбор ОПП</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="searchStatus" class="search-status"></div>
+    <div id="searchResults" class="search-results"></div>
+</main>
+
+</body>
+</html>
