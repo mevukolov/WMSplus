@@ -271,13 +271,36 @@
         return escapeHtmlLocal(row.task_type || "");
     }
 
+    // Co-equal ШК pill, used both for a 2shk_rep card's own shk1/shk2 and
+    // for a "Два ШК"-tagged task card's embedded pair (special_infos) --
+    // same visual language either place this shows up.
+    function shkPillHtml(value, ident) {
+        const isMatch = ident && value === ident;
+        return "<span class='search-card-pill-shk" + (isMatch ? " search-hl" : "") + "'>" + escapeHtmlLocal(value) + "</span>";
+    }
+
+    // A task tagged "Два ШК" carries the actual pair in
+    // source_payload.special_infos (set once at task creation from
+    // 2shk_rep -- see the wms_search_tasks migration's own note). The tag
+    // pill alone doesn't say what the second ШК even is.
+    function taskTwoShkInfo(row) {
+        const infos = Array.isArray(row.special_infos) ? row.special_infos : [];
+        return infos.find((info) => info && info.tag_name === "Два ШК") || null;
+    }
+
     let taskRowsById = new Map();
 
     function taskCardHtml(row, query) {
         taskRowsById.set(row.id, row);
+        const twoShkInfo = taskTwoShkInfo(row);
+        const ident = normalizeText(query).replace(/\s+/g, "");
+        const twoShkRowHtml = twoShkInfo
+            ? "<div class='search-card-shk-row'>" + [twoShkInfo.matched_shk, twoShkInfo.second_shk].filter(Boolean).map((value) => shkPillHtml(value, ident)).join("") + "</div>"
+            : "";
         return "<div class='search-card search-card-task' data-task-history-id='" + escapeHtmlLocal(row.id) + "'>"
             + "<div class='search-card-title'>" + highlightHtml(row.title || "Задача", query) + "</div>"
             + "<div class='search-card-sub'>" + taskMatchLineHtml(row, query) + "</div>"
+            + twoShkRowHtml
             + "<div class='search-card-pills'>" + taskStatusPillHtml(row) + taskVerdictPillHtml(row) + taskTagPillsHtml(row) + "</div>"
             + "</div>";
     }
@@ -287,13 +310,9 @@
         const tone = tag === "Два ШК" ? "tone-red" : "tone-yellow";
         const shk2 = normalizeText(row.shk2);
         const ident = normalizeText(query).replace(/\s+/g, "");
-        const shkPill = (value) => {
-            const isMatch = ident && value === ident;
-            return "<span class='search-card-pill-shk" + (isMatch ? " search-hl" : "") + "'>" + escapeHtmlLocal(value) + "</span>";
-        };
         // Пустая упаковка never has a real second ШК (shk2 comes back as a
         // lone space from 2shk_rep for that event type) -- one pill.
-        const shkRowHtml = shk2 ? shkPill(row.shk1) + shkPill(shk2) : shkPill(row.shk1);
+        const shkRowHtml = shk2 ? shkPillHtml(row.shk1, ident) + shkPillHtml(shk2, ident) : shkPillHtml(row.shk1, ident);
         const links = [row.media, row.media2].map(normalizeText).filter(Boolean);
         const linkButtonsHtml = links.length
             ? "<div class='search-card-link-row'>" + links.map((url, i) =>
@@ -428,6 +447,10 @@
         const row = taskRowsById.get(taskId);
         $("searchHistoryTitle").textContent = (row && row.title) || "Задача";
         $("searchHistorySub").textContent = row ? [row.task_type, row.task_status, row.opp_verdict].filter((v) => v && v !== "Не выбран").join(" · ") : "";
+        const twoShkInfo = row ? taskTwoShkInfo(row) : null;
+        $("searchHistoryTwoShk").innerHTML = twoShkInfo
+            ? [twoShkInfo.matched_shk, twoShkInfo.second_shk].filter(Boolean).map((value) => shkPillHtml(value, null)).join("")
+            : "";
         $("searchHistoryList").innerHTML = "<p class='search-history-empty'>Загрузка…</p>";
         $("searchHistoryModal").classList.add("active");
         $("searchHistoryModal").setAttribute("aria-hidden", "false");
