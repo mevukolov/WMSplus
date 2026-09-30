@@ -453,8 +453,8 @@
             ? "<div class='intake-nm-block'>"
                 + "<span class='intake-nm-title'>Вероятные номенклатуры</span>"
                 + "<div class='intake-nm-chips'>" + nmInfoList.map((info) => {
-                    const label = [info.name, info.brand].filter(Boolean).join(" · ") || String(info.nm);
-                    return "<a class='intake-nm-chip' href='https://www.wildberries.ru/catalog/" + escapeHtmlLocal(info.nm) + "/detail.aspx' target='_blank' rel='noopener' title='" + escapeHtmlLocal(label) + "'>" + escapeHtmlLocal(label) + "</a>";
+                    const hint = [info.name, info.brand].filter(Boolean).join(" · ");
+                    return "<a class='intake-nm-chip' href='https://www.wildberries.ru/catalog/" + escapeHtmlLocal(info.nm) + "/detail.aspx' target='_blank' rel='noopener'" + (hint ? " title='" + escapeHtmlLocal(hint) + "'" : "") + ">" + escapeHtmlLocal(String(info.nm)) + "</a>";
                 }).join("") + "</div>"
                 + "</div>"
             : (item.wb_nm_checked_at ? "" : "<div class='intake-nm-pending'>Вероятные номенклатуры: проверяется…</div>");
@@ -478,7 +478,7 @@
             });
             return ordered.map((value) => "<span class='intake-nm-chip is-static'>" + escapeHtmlLocal(value) + "</span>").join("");
         }
-        const brandsHtml = dedupChipsHtml(nmInfoList.map((info) => info.brand));
+        const brandsHtml = dedupChipsHtml(nmInfoList.map((info) => info.brand).filter((brand) => String(brand || "").trim().toLowerCase() !== "нет бренда"));
         const brandsLine = brandsHtml
             ? "<div class='intake-nm-block'><span class='intake-nm-title'>Бренды</span><div class='intake-nm-chips'>" + brandsHtml + "</div></div>"
             : "";
@@ -488,7 +488,7 @@
             .filter(Boolean);
         const nameWordsHtml = dedupChipsHtml(nameWords);
         const nameWordsLine = nameWordsHtml
-            ? "<div class='intake-nm-block'><span class='intake-nm-title'>Наименования</span><div class='intake-nm-chips'>" + nameWordsHtml + "</div></div>"
+            ? "<div class='intake-nm-block'><span class='intake-nm-title'>Вероятные наименования</span><div class='intake-nm-chips'>" + nameWordsHtml + "</div></div>"
             : "";
         const employeeLine = "<div class='row'><b>Сотрудник:</b> " + escapeHtmlLocal(item.full_name || "-")
             + (item.employee_id ? " (№" + escapeHtmlLocal(String(item.employee_id)) + ")" : "") + "</div>";
