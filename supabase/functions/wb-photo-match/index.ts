@@ -138,6 +138,96 @@ async function processRow(row: { id: string; photo_path: string }): Promise<void
   }
 }
 
+// ---------------------------------------------------------------------
+// wms_nm_directory top-up: a global nm -> name/brand cache (see
+// 202609300005_nm_directory.sql), used by the "Без ШК" search
+// (wms_search_no_shk_items) to match on WB's guessed name/brand, not just
+// the operator's own item_text. Superset actualization (tasks.js) already
+// fills this for free for any nm that ends up on a real task -- this covers
+// the rest: candidate nm's from photo search that never make it onto a
+// task (rejected matches, or nothing matched yet). Same card.wb.ru lookup
+// as wb-card-lookup/index.ts, duplicated rather than imported -- every
+// function in this project is self-contained, no shared module folder.
+// ---------------------------------------------------------------------
+
+type WbCardProduct = { name?: string; brand?: string };
+
+function wbCardDetailUrls(nm: string): string[] {
+  return [
+    `https://card.wb.ru/cards/v4/detail?appType=1&curr=rub&dest=-1257786&spp=30&ab_testing=false&lang=ru&nm=${nm}`,
+    `https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=-1257786&spp=30&hide_dtype=13&ab_testing=false&lang=ru&nm=${nm}`,
+  ];
+}
+
+async function fetchWbCardNameBrand(nm: string): Promise<{ name: string; brand: string } | null> {
+  for (const url of wbCardDetailUrls(nm)) {
+    try {
+      const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const product: WbCardProduct | undefined = data?.data?.products?.[0] ?? data?.products?.[0];
+      if (product && (product.name || product.brand)) {
+        return { name: String(product.name ?? "").trim(), brand: String(product.brand ?? "").trim() };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+const NM_DIRECTORY_BATCH_SIZE = Math.max(Number(Deno.env.get("WB_NM_DIRECTORY_BATCH_SIZE") ?? "15") || 15, 1);
+
+async function topUpNmDirectory(): Promise<number> {
+  // Recent submissions only -- candidates recur heavily across photos of
+  // the same product, so this stays small in practice even though each
+  // row can carry up to 20 candidate nm's. neq '[]' excludes both null
+  // and empty-array rows in one filter (SQL's null <> anything evaluates
+  // to null, which WHERE treats as false) -- most recently-checked rows
+  // are actually [] (nothing found), so a plain "is not null" filter here
+  // was mostly returning those instead of rows that ever had candidates.
+  const { data: subRows, error: subErr } = await supabase
+    .from("intake_submissions")
+    .select("wb_nm_candidates")
+    .neq("wb_nm_candidates", "[]")
+    .order("created_at", { ascending: false })
+    .limit(60);
+  if (subErr || !subRows) return 0;
+
+  const candidateNms = new Set<string>();
+  for (const row of subRows as { wb_nm_candidates: unknown }[]) {
+    const list = Array.isArray(row.wb_nm_candidates) ? row.wb_nm_candidates : [];
+    for (const nm of list) {
+      const s = String(nm ?? "").trim();
+      if (s) candidateNms.add(s);
+    }
+  }
+  if (!candidateNms.size) return 0;
+
+  // Capped before the "already known" check -- keeps the IN clause small
+  // regardless of how many distinct candidates a busy batch turns up.
+  const allNms = Array.from(candidateNms).slice(0, 200);
+  const { data: known, error: knownErr } = await supabase
+    .from("wms_nm_directory")
+    .select("nm")
+    .in("nm", allNms);
+  if (knownErr) return 0;
+  const knownSet = new Set((known || []).map((r: { nm: string }) => r.nm));
+  const missing = allNms.filter((nm) => !knownSet.has(nm)).slice(0, NM_DIRECTORY_BATCH_SIZE);
+  if (!missing.length) return 0;
+
+  let filled = 0;
+  for (const nm of missing) {
+    const card = await fetchWbCardNameBrand(nm);
+    if (!card || (!card.name && !card.brand)) continue;
+    const { error: upErr } = await supabase
+      .from("wms_nm_directory")
+      .upsert({ nm, name: card.name || null, brand: card.brand || null, source: "wb", updated_at: new Date().toISOString() });
+    if (!upErr) filled += 1;
+  }
+  return filled;
+}
+
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
@@ -164,19 +254,35 @@ Deno.serve(async (req) => {
     .limit(BATCH_SIZE);
 
   if (error) return json(500, { ok: false, error: error.message });
-  if (!rows || !rows.length) return json(200, { ok: true, processed: 0 });
 
-  for (const row of rows as { id: string; photo_path: string }[]) {
+  const processedRows = (rows || []) as { id: string; photo_path: string }[];
+  for (const row of processedRows) {
     await processRow(row);
   }
 
-  // Cheap now (wms_task_nm_index is indexed by nm -- see
-  // 202609280005_no_shk_bulk_matching.sql), so it's fine to run after every
-  // batch instead of waiting for the 3h pg_cron safety net.
-  const { error: matchError, data: matchedCount } = await supabase.rpc(
-    "wms_no_shk_bulk_match_and_persist",
-  );
-  if (matchError) console.error("wb-photo-match: bulk match failed", matchError);
+  let matchedCount = 0;
+  // Only worth a bulk-match pass when this batch actually produced new
+  // candidates -- an empty batch has nothing new for it to find.
+  if (processedRows.length) {
+    const { error: matchError, data } = await supabase.rpc("wms_no_shk_bulk_match_and_persist");
+    if (matchError) console.error("wb-photo-match: bulk match failed", matchError);
+    else matchedCount = data ?? 0;
+  }
 
-  return json(200, { ok: true, processed: rows.length, matched_tasks: matchedCount ?? 0 });
+  // Runs every invocation regardless of whether this batch found new
+  // photos -- missing directory entries can still be sitting on
+  // candidates from earlier batches that this same run didn't touch.
+  let nmDirectoryFilled = 0;
+  try {
+    nmDirectoryFilled = await topUpNmDirectory();
+  } catch (err) {
+    console.error("wb-photo-match: nm directory top-up failed", err);
+  }
+
+  return json(200, {
+    ok: true,
+    processed: processedRows.length,
+    matched_tasks: matchedCount,
+    nm_directory_filled: nmDirectoryFilled,
+  });
 });

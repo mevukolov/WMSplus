@@ -234,11 +234,19 @@
             : "<span class='search-card-pill'>В ревизии</span>";
         const titleHtml = highlightHtml(row.item_text || row.item_type || "Без наименования", query);
         const categoryHtml = row.category ? " · " + highlightHtml(row.category, query) : "";
+        // WB's guess for this photo (wb_nm_candidates -> wms_nm_directory)
+        // -- only present when the RPC actually joined a directory row, so
+        // this is never shown as clutter on a card that matched some other
+        // way (own item_text/category/item_type).
+        const nmGuessHtml = (row.matched_nm_name || row.matched_nm_brand)
+            ? "<div class='search-card-row'>Похоже: " + [row.matched_nm_name, row.matched_nm_brand].filter(Boolean).map((value) => highlightHtml(value, query)).join(" · ") + "</div>"
+            : "";
         return "<div class='search-card'>"
             + photo
             + "<div class='search-card-title'>" + titleHtml + categoryHtml + "</div>"
             + "<div class='search-card-sub'>" + escapeHtmlLocal(row.area || "-") + " · " + escapeHtmlLocal(row.full_name || "-") + "</div>"
             + "<div class='search-card-row'><span>" + escapeHtmlLocal(formatDateTime(row.created_at)) + "</span></div>"
+            + nmGuessHtml
             + "<div class='search-card-pills'>" + sticker + "</div>"
             + "</div>";
     }
@@ -393,7 +401,8 @@
             + detailRowHtml("Участок", row.area)
             + detailRowHtml("Ответственный", row.full_name)
             + detailRowHtml("Дата/время", formatDateTime(row.created_at))
-            + detailRowHtml("Стикер", sticker);
+            + detailRowHtml("Стикер", sticker)
+            + (row.matched_nm_name || row.matched_nm_brand ? detailRowHtml("Похоже (WB)", [row.matched_nm_name, row.matched_nm_brand].filter(Boolean).join(" · ")) : "");
         $("searchDetailModal").classList.add("active");
         $("searchDetailModal").setAttribute("aria-hidden", "false");
     }

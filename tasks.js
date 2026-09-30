@@ -3258,6 +3258,7 @@
             state.actualize.tareActions = {};
             renderActualizeResults();
             void enrichTaskNomenclatureFromSuperset(rows).catch((error) => console.warn("superset nomenclature enrich skipped:", error));
+            void syncNmDirectoryFromSuperset(rows).catch((error) => console.warn("nm directory sync skipped:", error));
         } catch (error) {
             console.error("actualize superset failed:", error);
             setActualizeStatus("Не удалось разобрать Superset: " + (error && error.message ? error.message : String(error)), "error");
@@ -3586,6 +3587,38 @@
                 raw,
             },
         };
+    }
+
+    // nm/name/brand уже приходят готовыми в каждой строке Superset (см.
+    // normalizeSupersetRow) -- этим кормим глобальный справочник
+    // wms_nm_directory (не привязан к конкретной задаче, в отличие от
+    // nm_by_shk/name_by_shk выше), который читает поиск "Без ШК"
+    // (wms_search_no_shk_items). Гоняем по ВСЕЙ выгрузке, а не только по
+    // строкам, попавшим в активные задачи -- весь склад в Superset куда
+    // богаче источник, чем "только то, что сейчас в открытой задаче".
+    async function syncNmDirectoryFromSuperset(rows) {
+        const db = supabaseDb();
+        if (!db) return;
+        const byNm = new Map();
+        (rows || []).forEach((row) => {
+            const nm = normalizeIdentifier(row && row.nm);
+            if (!nm || byNm.has(nm)) return;
+            const name = normalizeText(row.name);
+            const brand = normalizeText(row.brand);
+            if (!name && !brand) return;
+            byNm.set(nm, { nm, name, brand, source: "superset" });
+        });
+        if (!byNm.size) return;
+        const chunks = chunkArray(Array.from(byNm.values()), 500);
+        for (const chunk of chunks) {
+            try {
+                const { error } = await db.rpc("wms_nm_directory_upsert_batch", { p_rows: chunk });
+                if (error) throw error;
+            } catch (error) {
+                console.warn("nm directory sync failed:", error);
+                return;
+            }
+        }
     }
 
     async function enrichTaskNomenclatureFromSuperset(supersetRows, options) {
