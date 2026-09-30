@@ -1287,10 +1287,15 @@
         el._hideTimer = setTimeout(() => el.classList.remove("is-visible"), 2200);
     }
 
+    // DEBUG: типнуть этот код с клавиатуры и нажать Enter засчитывается
+    // как реальный скан этикетки любого клаймленного короба -- временный
+    // обход для отладки без физической этикетки под рукой.
+    const DEBUG_GET_BOX_SCAN_CODE = "24052004";
+
     async function handleGetBoxScan(rawCode) {
         const code = rawCode.trim();
         if (!code || !disassembleBox) return;
-        if (code !== boxCode(disassembleBox)) {
+        if (code !== boxCode(disassembleBox) && code !== DEBUG_GET_BOX_SCAN_CODE) {
             showGetBoxError("Это не тот короб. Нужен короб №" + disassembleBox.box_number + ".");
             return;
         }
