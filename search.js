@@ -1,17 +1,39 @@
-// search.js — standalone "Поиск" page. Self-contained like no_shk_zone.js /
-// intake_search.js / shk_info.js: own $()/escape/date helpers, no shared
-// state with tasks.js. Login-gated by ui.js (included in search.html) the
-// same way every other page is, but not listed in `pages` -- so
-// checkUserAccess() never restricts it further, reachable only by direct
-// link.
+// search.js — standalone "Поиск" page. Fully independent of the main
+// WMS+ app: its own Supabase client, its own real-session guard, its own
+// login page (search_login.html) and its own logout target -- never
+// touches ui.js/login.html/index.html. Self-contained like no_shk_zone.js
+// / intake_search.js: own $()/escape/date helpers, no shared state.
 (function () {
     "use strict";
 
-    const $ = (id) => document.getElementById(id);
+    const SUPABASE_URL = "https://bgphllmzmlwurfnbagho.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJncGhsbG16bWx3dXJmbmJhZ2hvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTQwNzIsImV4cCI6MjA3ODUzMDA3Mn0.a1_Wbtpbs9P-_UDqwjGqAIjvwK5WbT_M3B7g5BHtR2Q";
+    const supabaseClient = (typeof supabase !== "undefined") ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
     function db() {
-        return window.supabaseClient || null;
+        return supabaseClient;
     }
+
+    // No cached localStorage.user is trusted on its own -- same reasoning
+    // as the main app's ui.js::checkUserAccess: a real Supabase Auth
+    // session is the only thing that actually proves a live login. Runs
+    // immediately (not on DOMContentLoaded) so a logged-out visitor never
+    // sees the page flash before bouncing to search_login.html.
+    (function guardAuth() {
+        if (!localStorage.getItem("user")) {
+            window.location.href = "search_login.html";
+            return;
+        }
+        if (!supabaseClient) return;
+        supabaseClient.auth.getSession().then(({ data }) => {
+            if (!data || !data.session) {
+                localStorage.removeItem("user");
+                window.location.href = "search_login.html";
+            }
+        });
+    })();
+
+    const $ = (id) => document.getElementById(id);
 
     function escapeHtmlLocal(value) {
         const div = document.createElement("div");
@@ -21,6 +43,22 @@
 
     function normalizeText(value) {
         return value == null ? "" : String(value).trim();
+    }
+
+    // Wraps the first case-insensitive occurrence of `query` inside `text`
+    // in a <mark> -- the "why did this match" highlight asked for across
+    // every card type. Escapes the untouched portions too, so this is
+    // always safe to drop straight into innerHTML.
+    function highlightHtml(text, query) {
+        const raw = normalizeText(text);
+        if (!raw) return "";
+        const q = normalizeText(query);
+        if (!q) return escapeHtmlLocal(raw);
+        const idx = raw.toLowerCase().indexOf(q.toLowerCase());
+        if (idx < 0) return escapeHtmlLocal(raw);
+        return escapeHtmlLocal(raw.slice(0, idx))
+            + "<mark class='search-hl'>" + escapeHtmlLocal(raw.slice(idx, idx + q.length)) + "</mark>"
+            + escapeHtmlLocal(raw.slice(idx + q.length));
     }
 
     // Same decode as no_shk_zone.js/intake_search.js's own copy -- shows a
@@ -93,10 +131,13 @@
         return (data || []).map((row) => ({ __kind: "task", row }));
     }
 
-    async function searchTwoShkBare(query, date, tags) {
+    async function searchTwoShk(query, date, tags) {
         const client = db();
         if (!client) return [];
-        const { data, error } = await client.rpc("wms_search_two_shk_unmatched", {
+        // 2shk_rep records take priority over tasks now -- this no longer
+        // excludes rows that already have a matching task (see
+        // 202609300002); the fixation itself is the source of truth.
+        const { data, error } = await client.rpc("wms_search_two_shk", {
             p_query: query || null,
             p_date: date || null,
             p_tags: tags && tags.length ? tags : null,
@@ -125,7 +166,7 @@
         const noFilter = state.incidents.size === 0;
         const wantNoShk = noFilter || state.incidents.has("Без ШК");
         const wantTasks = noFilter || state.incidents.has("Два ШК") || state.incidents.has("Пустая упаковка") || state.incidents.has("Разбор ОПП");
-        const wantTwoShkBare = noFilter || state.incidents.has("Два ШК") || state.incidents.has("Пустая упаковка");
+        const wantTwoShk = noFilter || state.incidents.has("Два ШК") || state.incidents.has("Пустая упаковка");
         // "Разбор ОПП" (or no filter at all) means "any task, no tag
         // requirement" -- only pass a real tag constraint when neither of
         // those broadening cases applies.
@@ -139,10 +180,13 @@
         $("searchBtn").textContent = "Ищу…";
         setStatus("");
 
+        // 2shk_rep is queried first and rendered first (its own group
+        // comes before "Задачи" in renderResults) -- it's the priority
+        // source for "Два ШК"/"Пустая упаковка" now, tasks are secondary.
         const jobs = [];
+        if (wantTwoShk) jobs.push(searchTwoShk(query, date, twoShkTags).catch((error) => { console.error("[search] два шк:", error); return []; }));
         if (wantNoShk) jobs.push(searchNoShk(query, date).catch((error) => { console.error("[search] без ШК:", error); return []; }));
         if (wantTasks) jobs.push(searchTasks(query, date, taskTags).catch((error) => { console.error("[search] задачи:", error); return []; }));
-        if (wantTwoShkBare) jobs.push(searchTwoShkBare(query, date, twoShkTags).catch((error) => { console.error("[search] два шк:", error); return []; }));
 
         try {
             const results = (await Promise.all(jobs)).flat();
@@ -172,7 +216,7 @@
 
     let noShkRowsById = new Map();
 
-    function noShkCardHtml(row) {
+    function noShkCardHtml(row, query) {
         noShkRowsById.set(row.id, row);
         const photo = row.photo_path
             ? "<img class='search-card-photo' data-detail-id='" + escapeHtmlLocal(row.id) + "' src='" + escapeHtmlLocal(buildIntakePhotoUrl(row.photo_path)) + "' loading='lazy' alt=''>"
@@ -180,9 +224,11 @@
         const sticker = row.sticker_code
             ? "<span class='search-card-pill tone-green'>ШК: " + escapeHtmlLocal(decodeStickerCode(row.sticker_code) || row.sticker_code) + "</span>"
             : "<span class='search-card-pill'>Без стикера</span>";
+        const titleHtml = highlightHtml(row.item_text || row.item_type || "Без наименования", query);
+        const categoryHtml = row.category ? " · " + highlightHtml(row.category, query) : "";
         return "<div class='search-card'>"
             + photo
-            + "<div class='search-card-title'>" + escapeHtmlLocal(row.item_text || row.item_type || "Без наименования") + (row.category ? " · " + escapeHtmlLocal(row.category) : "") + "</div>"
+            + "<div class='search-card-title'>" + titleHtml + categoryHtml + "</div>"
             + "<div class='search-card-sub'>" + escapeHtmlLocal(row.area || "-") + " · " + escapeHtmlLocal(row.full_name || "-") + "</div>"
             + "<div class='search-card-row'><span>" + escapeHtmlLocal(formatDateTime(row.created_at)) + "</span></div>"
             + "<div class='search-card-pills'>" + sticker + "</div>"
@@ -203,46 +249,61 @@
         return (start > 0 ? "…" : "") + t.slice(start, end).trim() + (end < t.length ? "…" : "");
     }
 
-    function taskMatchLine(row, query) {
+    function taskMatchLineHtml(row, query) {
         const q = normalizeText(query);
-        if (!q) return row.task_type || "";
+        if (!q) return escapeHtmlLocal(row.task_type || "");
         const ident = q.replace(/\s+/g, "");
-        if (Array.isArray(row.source_shk_ids) && row.source_shk_ids.includes(ident)) return "ШК " + ident;
-        if (row.source_tare_id && row.source_tare_id === ident) return "Тара " + ident;
-        if (row.source_id && row.source_id.toLowerCase().includes(ident.toLowerCase())) return "ID " + row.source_id;
+        if (Array.isArray(row.source_shk_ids) && row.source_shk_ids.includes(ident)) return "ШК <mark class='search-hl'>" + escapeHtmlLocal(ident) + "</mark>";
+        if (row.source_tare_id && row.source_tare_id === ident) return "Тара <mark class='search-hl'>" + escapeHtmlLocal(ident) + "</mark>";
+        if (row.source_id && row.source_id.toLowerCase().includes(ident.toLowerCase())) return "ID " + highlightHtml(row.source_id, ident);
         if (!normalizeText(row.title).toLowerCase().includes(q.toLowerCase())) {
             const snippet = extractSnippet(row.search_text, q, 18);
-            if (snippet) return snippet;
+            if (snippet) return highlightHtml(snippet, q);
         }
-        return row.task_type || "";
+        return escapeHtmlLocal(row.task_type || "");
     }
 
     function taskCardHtml(row, query) {
         return "<div class='search-card search-card-task'>"
-            + "<div class='search-card-title'>" + escapeHtmlLocal(row.title || "Задача") + "</div>"
-            + "<div class='search-card-sub'>" + escapeHtmlLocal(taskMatchLine(row, query)) + "</div>"
+            + "<div class='search-card-title'>" + highlightHtml(row.title || "Задача", query) + "</div>"
+            + "<div class='search-card-sub'>" + taskMatchLineHtml(row, query) + "</div>"
             + "<div class='search-card-pills'>" + taskStatusPillHtml(row) + taskTagPillsHtml(row) + "</div>"
             + "</div>";
     }
 
-    function twoShkCardHtml(row) {
+    function twoShkCardHtml(row, query) {
         const tag = normalizeText(row.event_type).toLowerCase().includes("пуст") ? "Пустая упаковка" : "Два ШК";
         const tone = tag === "Два ШК" ? "tone-red" : "tone-yellow";
         const shk2 = normalizeText(row.shk2);
-        return "<div class='search-card'>"
-            + "<div class='search-card-title'>ШК " + escapeHtmlLocal(row.shk1) + "</div>"
-            + (shk2 ? "<div class='search-card-sub'>Второй ШК: " + escapeHtmlLocal(shk2) + "</div>" : "<div class='search-card-sub'>Без задачи</div>")
+        const ident = normalizeText(query).replace(/\s+/g, "");
+        const shkPill = (value) => {
+            const isMatch = ident && value === ident;
+            return "<span class='search-card-pill-shk" + (isMatch ? " search-hl" : "") + "'>" + escapeHtmlLocal(value) + "</span>";
+        };
+        // Пустая упаковка never has a real second ШК (shk2 comes back as a
+        // lone space from 2shk_rep for that event type) -- one pill.
+        const shkRowHtml = shk2 ? shkPill(row.shk1) + shkPill(shk2) : shkPill(row.shk1);
+        const links = [row.media, row.media2].map(normalizeText).filter(Boolean);
+        const linkButtonsHtml = links.length
+            ? "<div class='search-card-link-row'>" + links.map((url, i) =>
+                "<a class='search-card-link-btn' href='" + escapeHtmlLocal(url) + "' target='_blank' rel='noopener'>" + (links.length > 1 ? "Ссылка " + (i + 1) : "Ссылка") + "</a>"
+            ).join("") + "</div>"
+            : "";
+        return "<div class='search-card search-card-two-shk'>"
+            + "<div class='search-card-shk-row'>" + shkRowHtml + "</div>"
             + "<div class='search-card-row'><span>" + escapeHtmlLocal(formatDateTime(row.created_at)) + "</span></div>"
-            + (row.media ? "<div class='search-card-row'><a href='" + escapeHtmlLocal(row.media) + "' target='_blank' rel='noopener'>Ссылка</a></div>" : "")
+            + linkButtonsHtml
             + "<div class='search-card-pills'><span class='search-card-pill " + tone + "'>" + escapeHtmlLocal(tag) + "</span></div>"
             + "</div>";
     }
 
     const GROUP_META = {
+        two_shk: { title: "Два ШК и Пустая упаковка", render: twoShkCardHtml },
         no_shk: { title: "Товар «Без ШК»", render: noShkCardHtml },
         task: { title: "Разбор ОПП / Задачи", render: taskCardHtml },
-        two_shk: { title: "Два ШК и Пустая упаковка (без задачи)", render: twoShkCardHtml },
     };
+    // Priority order: 2shk_rep first, then без ШК, tasks last.
+    const GROUP_ORDER = ["two_shk", "no_shk", "task"];
 
     function renderResults(hits, query) {
         const wrap = $("searchResults");
@@ -260,7 +321,7 @@
             groups.get(hit.__kind).push(hit.row);
         });
         let cardIndex = 0;
-        wrap.innerHTML = ["no_shk", "task", "two_shk"].filter((kind) => groups.has(kind)).map((kind) => {
+        wrap.innerHTML = GROUP_ORDER.filter((kind) => groups.has(kind)).map((kind) => {
             const meta = GROUP_META[kind];
             const rows = groups.get(kind);
             const cardsHtml = rows.map((row) => {
@@ -362,5 +423,14 @@
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape" && $("searchDetailModal").classList.contains("active")) closeDetail();
         });
+
+        const logoutBtn = $("searchLogoutBtn");
+        if (logoutBtn) {
+            logoutBtn.addEventListener("click", async () => {
+                try { if (supabaseClient) await supabaseClient.auth.signOut(); } catch (_error) { /* redirect regardless */ }
+                localStorage.removeItem("user");
+                window.location.href = "search_login.html";
+            });
+        }
     });
 })();
