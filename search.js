@@ -206,6 +206,14 @@
         return "<span class='search-card-pill" + (tone ? " " + tone : "") + "'>" + escapeHtmlLocal(status) + "</span>";
     }
 
+    // "Завершено" alone doesn't say why -- show the actual verdict
+    // (Найден/Релиз/Списан, Нет на МХ/Не найден, etc.) alongside it.
+    function taskVerdictPillHtml(row) {
+        const verdict = normalizeText(row.opp_verdict);
+        if (!verdict || verdict === "Не выбран") return "";
+        return "<span class='search-card-pill'>" + escapeHtmlLocal(verdict) + "</span>";
+    }
+
     function taskTagPillsHtml(row) {
         const tags = Array.isArray(row.tags) ? row.tags : [];
         return tags.filter(Boolean).map((tag) => {
@@ -223,7 +231,7 @@
             : "";
         const sticker = row.sticker_code
             ? "<span class='search-card-pill tone-green'>ШК: " + escapeHtmlLocal(decodeStickerCode(row.sticker_code) || row.sticker_code) + "</span>"
-            : "<span class='search-card-pill'>Без стикера</span>";
+            : "<span class='search-card-pill'>В ревизии</span>";
         const titleHtml = highlightHtml(row.item_text || row.item_type || "Без наименования", query);
         const categoryHtml = row.category ? " · " + highlightHtml(row.category, query) : "";
         return "<div class='search-card'>"
@@ -263,11 +271,14 @@
         return escapeHtmlLocal(row.task_type || "");
     }
 
+    let taskRowsById = new Map();
+
     function taskCardHtml(row, query) {
-        return "<div class='search-card search-card-task'>"
+        taskRowsById.set(row.id, row);
+        return "<div class='search-card search-card-task' data-task-history-id='" + escapeHtmlLocal(row.id) + "'>"
             + "<div class='search-card-title'>" + highlightHtml(row.title || "Задача", query) + "</div>"
             + "<div class='search-card-sub'>" + taskMatchLineHtml(row, query) + "</div>"
-            + "<div class='search-card-pills'>" + taskStatusPillHtml(row) + taskTagPillsHtml(row) + "</div>"
+            + "<div class='search-card-pills'>" + taskStatusPillHtml(row) + taskVerdictPillHtml(row) + taskTagPillsHtml(row) + "</div>"
             + "</div>";
     }
 
@@ -309,6 +320,7 @@
         const wrap = $("searchResults");
         if (!wrap) return;
         noShkRowsById = new Map();
+        taskRowsById = new Map();
         if (!hits.length) {
             wrap.innerHTML = "";
             setStatus("Ничего не нашлось.");
@@ -337,6 +349,9 @@
         }).join("");
         wrap.querySelectorAll("[data-detail-id]").forEach((el) => {
             el.addEventListener("click", () => openDetail(el.dataset.detailId));
+        });
+        wrap.querySelectorAll("[data-task-history-id]").forEach((el) => {
+            el.addEventListener("click", () => void openTaskHistory(el.dataset.taskHistoryId));
         });
     }
 
@@ -367,6 +382,76 @@
     function closeDetail() {
         $("searchDetailModal").classList.remove("active");
         $("searchDetailModal").setAttribute("aria-hidden", "true");
+    }
+
+    // ---- read-only task history (opened from a task card) ----
+
+    // Humanized labels for the event types a search hit is realistically
+    // going to have -- not the full set tasks.js's own feed handles (no
+    // avatars, no clickable sub-links, no forecast styling): this is a
+    // read-only lookup, not the review UI, so a plain chronological list
+    // is enough.
+    const HISTORY_EVENT_LABELS = {
+        task_created: "Создана задача",
+        task_completed: "Завершена",
+        task_deferred: "Отложена",
+        task_reopened: "Переоткрыта",
+        task_auto_reopened: "Переоткрыта автоматически",
+        task_system_closed: "Закрыто автоматически",
+        task_cross_module_touch: "Продолжилось в другом модуле",
+        task_no_shk_found: "Найден без ШК",
+        task_predicted_writeoff: "Прогнозируемая дата списания",
+        task_prespisok_uploaded: "ШК в предсписке",
+        task_prespisok_second_line: "Решение предсписка",
+        task_last_movement_status: "Статус ШК",
+    };
+
+    function historyRowHtml(item) {
+        const payload = item.payload && typeof item.payload === "object" ? item.payload : {};
+        const actor = normalizeText(item.actor_name) || normalizeText(item.actor_employee_id) || "Система";
+        const verdict = normalizeText(payload.verdict) && payload.verdict !== "Не выбран"
+            ? payload.verdict
+            : (HISTORY_EVENT_LABELS[item.event_type] || item.event_type || "-");
+        const commentParts = [];
+        if (normalizeText(payload.comment)) commentParts.push(payload.comment);
+        if (payload.reopen_after) commentParts.push("до " + formatDateTime(payload.reopen_after));
+        if (normalizeText(payload.extra_value)) commentParts.push(payload.extra_value);
+        return "<div class='search-history-row'>"
+            + "<div class='search-history-row-time'>" + escapeHtmlLocal(formatDateTime(item.created_at)) + "</div>"
+            + "<div class='search-history-row-actor'>" + escapeHtmlLocal(actor) + "</div>"
+            + "<div class='search-history-row-verdict'>" + escapeHtmlLocal(verdict) + "</div>"
+            + (commentParts.length ? "<div class='search-history-row-comment'>" + escapeHtmlLocal(commentParts.join(" · ")) + "</div>" : "")
+            + "</div>";
+    }
+
+    async function openTaskHistory(taskId) {
+        const row = taskRowsById.get(taskId);
+        $("searchHistoryTitle").textContent = (row && row.title) || "Задача";
+        $("searchHistorySub").textContent = row ? [row.task_type, row.task_status, row.opp_verdict].filter((v) => v && v !== "Не выбран").join(" · ") : "";
+        $("searchHistoryList").innerHTML = "<p class='search-history-empty'>Загрузка…</p>";
+        $("searchHistoryModal").classList.add("active");
+        $("searchHistoryModal").setAttribute("aria-hidden", "false");
+        const client = db();
+        if (!client) return;
+        const { data, error } = await client
+            .from("wms_task_history")
+            .select("event_type,actor_name,actor_employee_id,payload,created_at")
+            .eq("task_id", taskId)
+            .order("created_at", { ascending: true });
+        if (error) {
+            $("searchHistoryList").innerHTML = "<p class='search-history-empty'>Не удалось загрузить: " + escapeHtmlLocal(error.message) + "</p>";
+            return;
+        }
+        if (!data || !data.length) {
+            $("searchHistoryList").innerHTML = "<p class='search-history-empty'>История пуста.</p>";
+            return;
+        }
+        $("searchHistoryList").innerHTML = data.map(historyRowHtml).join("");
+    }
+
+    function closeTaskHistory() {
+        $("searchHistoryModal").classList.remove("active");
+        $("searchHistoryModal").setAttribute("aria-hidden", "true");
     }
 
     // ---- filter panel + chips ----
@@ -420,8 +505,16 @@
         if (closeDetailBtn) closeDetailBtn.addEventListener("click", closeDetail);
         const detailModal = $("searchDetailModal");
         if (detailModal) detailModal.addEventListener("click", (event) => { if (event.target === detailModal) closeDetail(); });
+
+        const closeHistoryBtn = $("closeSearchHistory");
+        if (closeHistoryBtn) closeHistoryBtn.addEventListener("click", closeTaskHistory);
+        const historyModal = $("searchHistoryModal");
+        if (historyModal) historyModal.addEventListener("click", (event) => { if (event.target === historyModal) closeTaskHistory(); });
+
         document.addEventListener("keydown", (event) => {
-            if (event.key === "Escape" && $("searchDetailModal").classList.contains("active")) closeDetail();
+            if (event.key !== "Escape") return;
+            if ($("searchDetailModal").classList.contains("active")) closeDetail();
+            else if ($("searchHistoryModal").classList.contains("active")) closeTaskHistory();
         });
 
         const logoutBtn = $("searchLogoutBtn");

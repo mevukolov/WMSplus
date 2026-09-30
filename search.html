@@ -271,9 +271,60 @@
         .search-hl { background: #fde047; color: #1f2937; padding: 0 2px; border-radius: 3px; font-weight: 700; }
 
         /* Small blocks for the tasks group -- just title + what matched. */
-        .search-card-task { padding: 10px 12px; gap: 3px; }
+        .search-card-task { padding: 10px 12px; gap: 3px; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+        .search-card-task:hover { border-color: rgba(98,60,234,.35); transform: translateY(-1px); }
         .search-card-task .search-card-title { font-size: 13px; line-height: 1.3; }
         .search-card-task .search-card-sub { font-size: 11.5px; line-height: 1.35; }
+
+        /* ---- read-only task history (opened from a task card) ---- */
+        .search-history-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 6000;
+            background: rgba(15,12,26,.78);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            box-sizing: border-box;
+            animation: searchDetailOverlayIn .18s ease-out both;
+        }
+        .search-history-modal.active { display: flex; }
+        .search-history-card {
+            position: relative;
+            width: min(640px, 100%);
+            max-height: 85vh;
+            background: #fff;
+            border-radius: 20px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 30px 80px rgba(0,0,0,.4);
+            animation: searchDetailCardIn .22s cubic-bezier(.22,1,.36,1) both;
+        }
+        .search-history-head { padding: 22px 54px 16px 24px; border-bottom: 1px solid rgba(15,23,42,.06); }
+        .search-history-title { margin: 0 0 4px; font-size: 18px; font-weight: 800; color: #111827; }
+        .search-history-sub { font-size: 13px; color: #6b7280; }
+        .search-history-list { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 24px 24px; display: flex; flex-direction: column; gap: 12px; }
+        .search-history-row { border-left: 3px solid rgba(98,60,234,.35); padding: 2px 0 2px 14px; }
+        .search-history-row-time { font-size: 11px; color: #9095a3; }
+        .search-history-row-actor { font-size: 12px; font-weight: 700; color: #374151; margin-top: 2px; }
+        .search-history-row-verdict { font-size: 13px; font-weight: 700; color: var(--accent, #623CEA); margin-top: 2px; }
+        .search-history-row-comment { font-size: 12px; color: #6b7280; margin-top: 2px; }
+        .search-history-empty { text-align: center; color: #9095a3; padding: 30px 0; }
+        .search-history-close {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            border: 0;
+            background: rgba(15,23,42,.08);
+            color: #374151;
+            font-size: 18px;
+            cursor: pointer;
+        }
 
         /* Два ШК / Пустая упаковка cards -- co-equal ШК pills (1 or 2) +
            link buttons, no title/sub hierarchy. */
@@ -412,6 +463,17 @@
         <button id="closeSearchDetail" class="search-detail-close" type="button" aria-label="Закрыть">×</button>
         <div class="search-detail-photo-wrap"><img id="searchDetailPhoto" alt=""></div>
         <div id="searchDetailInfo" class="search-detail-info"></div>
+    </div>
+</section>
+
+<section id="searchHistoryModal" class="search-history-modal" aria-hidden="true">
+    <div class="search-history-card">
+        <button id="closeSearchHistory" class="search-history-close" type="button" aria-label="Закрыть">×</button>
+        <div class="search-history-head">
+            <h2 id="searchHistoryTitle" class="search-history-title">Задача</h2>
+            <p id="searchHistorySub" class="search-history-sub"></p>
+        </div>
+        <div id="searchHistoryList" class="search-history-list"></div>
     </div>
 </section>
 
