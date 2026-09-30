@@ -162,35 +162,74 @@ async function processRow(row: { id: string; photo_path: string; wb_nm_check_att
 // the operator's own item_text. Superset actualization (tasks.js) already
 // fills this for free for any nm that ends up on a real task -- this covers
 // the rest: candidate nm's from photo search that never make it onto a
-// task (rejected matches, or nothing matched yet). Same card.wb.ru lookup
-// as wb-card-lookup/index.ts, duplicated rather than imported -- every
-// function in this project is self-contained, no shared module folder.
+// task (rejected matches, or nothing matched yet).
+//
+// card.wb.ru/u-card.wb.ru are behind WB's own anti-bot (wbaas): confirmed
+// by hand that even a spoofed Referer/Origin still gets a 403 -- it needs
+// an IP-bound session cookie only a real, challenge-solving browser can
+// mint. But every card is ALSO published as a plain static JSON file on
+// WB's basket CDN, with no auth, no rate limit, no anti-bot at all:
+//   https://basket-{NN}.wbbasket.ru/vol{VOL}/part{PART}/{nm}/info/ru/card.json
+// See 202609300009_wb_basket_cache.sql for VOL/PART math and why NN has
+// to be discovered by probing rather than computed.
 // ---------------------------------------------------------------------
 
-type WbCardProduct = { name?: string; brand?: string };
+const BASKET_PROBE_MAX = 60; // highest basket seen in manual testing was 47 -- some headroom as WB adds more over time
 
-function wbCardDetailUrls(nm: string): string[] {
-  return [
-    `https://card.wb.ru/cards/v4/detail?appType=1&curr=rub&dest=-1257786&spp=30&ab_testing=false&lang=ru&nm=${nm}`,
-    `https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=-1257786&spp=30&hide_dtype=13&ab_testing=false&lang=ru&nm=${nm}`,
-  ];
+function basketCardUrl(nm: number, basketNo: number): string {
+  const vol = Math.floor(nm / 100000);
+  const part = Math.floor(nm / 1000);
+  const n = String(basketNo).padStart(2, "0");
+  return `https://basket-${n}.wbbasket.ru/vol${vol}/part${part}/${nm}/info/ru/card.json`;
 }
 
-async function fetchWbCardNameBrand(nm: string): Promise<{ name: string; brand: string } | null> {
-  for (const url of wbCardDetailUrls(nm)) {
-    try {
-      const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const product: WbCardProduct | undefined = data?.data?.products?.[0] ?? data?.products?.[0];
-      if (product && (product.name || product.brand)) {
-        return { name: String(product.name ?? "").trim(), brand: String(product.brand ?? "").trim() };
-      }
-    } catch {
-      continue;
-    }
+type WbBasketCard = { imt_name?: string; selling?: { brand_name?: string } };
+
+async function probeBasket(nm: number, basketNo: number): Promise<{ basketNo: number; data: WbBasketCard } | null> {
+  try {
+    const res = await fetch(basketCardUrl(nm, basketNo));
+    if (!res.ok) return null;
+    const data = await res.json();
+    return { basketNo, data };
+  } catch {
+    return null;
   }
-  return null;
+}
+
+async function getCachedBasketNo(vol: number): Promise<number | null> {
+  const { data } = await supabase.from("wms_wb_basket_cache").select("basket_no").eq("vol", vol).maybeSingle();
+  return data ? data.basket_no : null;
+}
+
+async function setCachedBasketNo(vol: number, basketNo: number): Promise<void> {
+  await supabase.from("wms_wb_basket_cache").upsert({ vol, basket_no: basketNo, updated_at: new Date().toISOString() });
+}
+
+function extractNameBrand(data: WbBasketCard): { name: string; brand: string } {
+  return { name: String(data.imt_name ?? "").trim(), brand: String(data.selling?.brand_name ?? "").trim() };
+}
+
+async function fetchWbCardNameBrand(nmStr: string): Promise<{ name: string; brand: string } | null> {
+  const nm = Number(nmStr);
+  if (!Number.isFinite(nm) || nm <= 0) return null;
+  const vol = Math.floor(nm / 100000);
+
+  const cached = await getCachedBasketNo(vol);
+  if (cached != null) {
+    const hit = await probeBasket(nm, cached);
+    if (hit) return extractNameBrand(hit.data);
+    // Cached basket no longer has this vol (rare -- WB rarely moves data
+    // once written) -- fall through to a full reprobe below.
+  }
+
+  const attempts = Array.from({ length: BASKET_PROBE_MAX }, (_, i) => i + 1)
+    .filter((n) => n !== cached)
+    .map((n) => probeBasket(nm, n));
+  const results = await Promise.all(attempts);
+  const hit = results.find((r): r is { basketNo: number; data: WbBasketCard } => r !== null);
+  if (!hit) return null;
+  await setCachedBasketNo(vol, hit.basketNo);
+  return extractNameBrand(hit.data);
 }
 
 const NM_DIRECTORY_BATCH_SIZE = Math.max(Number(Deno.env.get("WB_NM_DIRECTORY_BATCH_SIZE") ?? "15") || 15, 1);
