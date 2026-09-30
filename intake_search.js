@@ -439,13 +439,23 @@
         const bucketLine = item.no_shk_bucket && item.no_shk_bucket !== "Короб смены"
             ? "<div class='row'><b>Учёт:</b> " + escapeHtmlLocal(item.no_shk_bucket) + "</div>"
             : "";
+        // wb_nm_info (wms_intake_submissions_search, see 202609300010)
+        // pairs each candidate nm with its name/brand from wms_nm_directory
+        // when already resolved -- falls back to a bare nm chip (as
+        // before) for candidates the directory hasn't caught up to yet, or
+        // when item came from a snapshot that never carried wb_nm_info
+        // (e.g. noShkSubmissionFromSnapshot in tasks.js).
         const nmList = Array.isArray(item.wb_nm_candidates) ? item.wb_nm_candidates : [];
-        const nmLine = nmList.length
+        const nmInfoList = Array.isArray(item.wb_nm_info) && item.wb_nm_info.length
+            ? item.wb_nm_info
+            : nmList.map((nm) => ({ nm, name: null, brand: null }));
+        const nmLine = nmInfoList.length
             ? "<div class='intake-nm-block'>"
                 + "<span class='intake-nm-title'>Вероятные номенклатуры</span>"
-                + "<div class='intake-nm-chips'>" + nmList.map((nm) =>
-                    "<a class='intake-nm-chip' href='https://www.wildberries.ru/catalog/" + escapeHtmlLocal(nm) + "/detail.aspx' target='_blank' rel='noopener'>" + escapeHtmlLocal(nm) + "</a>"
-                ).join("") + "</div>"
+                + "<div class='intake-nm-chips'>" + nmInfoList.map((info) => {
+                    const label = [info.name, info.brand].filter(Boolean).join(" · ") || String(info.nm);
+                    return "<a class='intake-nm-chip' href='https://www.wildberries.ru/catalog/" + escapeHtmlLocal(info.nm) + "/detail.aspx' target='_blank' rel='noopener' title='" + escapeHtmlLocal(label) + "'>" + escapeHtmlLocal(label) + "</a>";
+                }).join("") + "</div>"
                 + "</div>"
             : (item.wb_nm_checked_at ? "" : "<div class='intake-nm-pending'>Вероятные номенклатуры: проверяется…</div>");
         const employeeLine = "<div class='row'><b>Сотрудник:</b> " + escapeHtmlLocal(item.full_name || "-")
