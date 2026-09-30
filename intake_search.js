@@ -458,6 +458,38 @@
                 }).join("") + "</div>"
                 + "</div>"
             : (item.wb_nm_checked_at ? "" : "<div class='intake-nm-pending'>Вероятные номенклатуры: проверяется…</div>");
+        // Candidates repeat heavily (many nm's of the same/near-identical
+        // product) -- a raw list of their names/brands is mostly noise.
+        // Brands: dedup whole values. Names: dedup at word level instead
+        // of whole-string -- near-duplicate names ("Оливковое масло extra
+        // virgin 500мл" x10 with different nm's) collapse into one set of
+        // words, giving an at-a-glance sense of what the candidates are
+        // about without repeating the same phrase ten times.
+        function dedupChipsHtml(values) {
+            const seen = new Set();
+            const ordered = [];
+            values.forEach((raw) => {
+                const value = String(raw || "").trim();
+                if (!value) return;
+                const key = value.toLowerCase();
+                if (seen.has(key)) return;
+                seen.add(key);
+                ordered.push(value);
+            });
+            return ordered.map((value) => "<span class='intake-nm-chip is-static'>" + escapeHtmlLocal(value) + "</span>").join("");
+        }
+        const brandsHtml = dedupChipsHtml(nmInfoList.map((info) => info.brand));
+        const brandsLine = brandsHtml
+            ? "<div class='intake-nm-block'><span class='intake-nm-title'>Бренды</span><div class='intake-nm-chips'>" + brandsHtml + "</div></div>"
+            : "";
+        const nameWords = nmInfoList
+            .flatMap((info) => String(info.name || "").split(/\s+/))
+            .map((word) => word.replace(/^[^\wа-яёЁ]+|[^\wа-яёЁ]+$/giu, ""))
+            .filter(Boolean);
+        const nameWordsHtml = dedupChipsHtml(nameWords);
+        const nameWordsLine = nameWordsHtml
+            ? "<div class='intake-nm-block'><span class='intake-nm-title'>Наименования</span><div class='intake-nm-chips'>" + nameWordsHtml + "</div></div>"
+            : "";
         const employeeLine = "<div class='row'><b>Сотрудник:</b> " + escapeHtmlLocal(item.full_name || "-")
             + (item.employee_id ? " (№" + escapeHtmlLocal(String(item.employee_id)) + ")" : "") + "</div>";
         img.src = buildIntakePhotoUrl(item.photo_path);
@@ -466,6 +498,8 @@
             + (item.category ? "<div class='category'>" + escapeHtmlLocal(item.category) + "</div>" : "")
             + bucketLine
             + nmLine
+            + brandsLine
+            + nameWordsLine
             + employeeLine
             + "<div class='row'><b>Тип:</b> " + escapeHtmlLocal(item.item_type || "-") + "</div>"
             + "<div class='row'><b>Когда:</b> " + when + "</div>"
