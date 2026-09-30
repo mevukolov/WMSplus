@@ -937,7 +937,7 @@
         .no-shk-tooltip.is-visible { opacity: 1; }
 
         @media (prefers-reduced-motion: reduce) {
-            .no-shk-box, .no-shk-box.is-new, .no-shk-move-log-row { animation: none; }
+            .no-shk-box, .no-shk-box.is-new, .no-shk-box.no-shk-box-target, .no-shk-move-log-row { animation: none; }
             .no-shk-box:hover { transform: none; }
             .no-shk-move-overview .no-shk-rack.is-leaving,
             .no-shk-move-check { transition: none; }
@@ -989,6 +989,17 @@
         .no-shk-getbox-details { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #475569; }
         .no-shk-getbox-error { font-size: 14px; font-weight: 600; color: #b91c1c; min-height: 20px; opacity: 0; transition: opacity .2s ease; }
         .no-shk-getbox-error.is-visible { opacity: 1; }
+        .no-shk-getbox-rack-scroll { width: 100%; overflow-x: auto; padding: 2px; }
+        .no-shk-getbox-rack-scroll .no-shk-rack { margin: 0 auto; }
+        .no-shk-box.no-shk-box-target {
+            border-color: #ef4444; background: rgba(239,68,68,.3);
+            animation: no-shk-box-target-pulse 1.15s ease-in-out infinite;
+            position: relative; z-index: 1;
+        }
+        @keyframes no-shk-box-target-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.55); transform: translateY(0) scale(1); }
+            50% { box-shadow: 0 0 0 7px rgba(239,68,68,0); transform: translateY(-2px) scale(1.04); }
+        }
 
         .no-shk-cheer-card { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 32px 24px; }
         .no-shk-cheer-check { width: 72px; height: 72px; border-radius: 50%; background: #16a34a; color: #fff; font-size: 40px; display: flex; align-items: center; justify-content: center; animation: no-shk-cheer-pop .5s cubic-bezier(.34,1.56,.64,1) both; }

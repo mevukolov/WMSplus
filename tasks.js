@@ -619,6 +619,8 @@
             filtersJustOpened: false,
             sort: { key: "price", dir: "desc" },
             filters: createReviewFilterState(),
+            noShkReadyCount: null,
+            noShkReadyCountFetchedAt: 0,
         },
         pureLosses: {
             rows: [],
@@ -8158,6 +8160,24 @@
         }
     }
 
+    // Throttled fetch: renderRequestsSections runs on every requests
+    // render (sort/filter changes included, see the 8 renderRequests()
+    // call sites), but the ready-box count only needs to be fresh to
+    // within a few seconds, and only one fetch should ever be in flight.
+    let noShkReadyCountFetching = false;
+    function refreshNoShkReadyCount() {
+        if (noShkReadyCountFetching) return;
+        if (Date.now() - state.requests.noShkReadyCountFetchedAt < 15000) return;
+        if (typeof window.__noShkGetReadyCount !== "function") return;
+        noShkReadyCountFetching = true;
+        window.__noShkGetReadyCount().then((count) => {
+            state.requests.noShkReadyCountFetchedAt = Date.now();
+            if (state.requests.noShkReadyCount === count) return;
+            state.requests.noShkReadyCount = count;
+            if ($("requestsSectionsGrid")) renderRequestsSections(requestsGroupedRows());
+        }).catch(() => {}).finally(() => { noShkReadyCountFetching = false; });
+    }
+
     function renderRequestsSections(grouped) {
         const grid = $("requestsSectionsGrid");
         const wrap = $("requestsPickerRow");
@@ -8186,15 +8206,21 @@
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";
         }).join("");
-        // "Без ШК" -- не задача-секция, без счётчика/суммы (см.
-        // REQUEST_EXTRA_SECTIONS), всегда последней пилюлей в ряду.
+        // "Без ШК" -- не задача-секция (см. REQUEST_EXTRA_SECTIONS), всегда
+        // последней пилюлей в ряду. Счётчик -- короба, готовые к разбору
+        // (жёлтые + красные в рэк-матрице, см. window.__noShkGetReadyCount),
+        // подгружается отдельно от wms_tasks и держится в state.requests.
         const noShkActive = state.requests.activeSection === "Без ШК" ? " active" : "";
+        const noShkCount = state.requests.noShkReadyCount;
+        const noShkCountHtml = noShkCount == null ? "" : "<strong>" + noShkCount + "</strong>";
         const noShkHtml = expanded
-            ? "<button type='button' class='review-section-pill" + noShkActive + "' data-request-section='Без ШК'>Без ШК</button>"
+            ? "<button type='button' class='review-section-pill" + noShkActive + "' data-request-section='Без ШК'>Без ШК"
+                + (noShkCount ? "<span class='review-section-pill-count'>" + noShkCount + "</span>" : "") + "</button>"
             : "<button type='button' class='review-section-card" + noShkActive + "' data-request-section='Без ШК'>"
-                + "<div class='review-section-name'><span>Без ШК</span></div>"
+                + "<div class='review-section-name'><span>Без ШК</span>" + noShkCountHtml + "</div>"
                 + "<div class='review-section-meta'>Стеллажи и короба</div>"
                 + "</button>";
+        refreshNoShkReadyCount();
         grid.innerHTML = sectionsHtml + noShkHtml;
         grid.querySelectorAll("[data-request-section]").forEach((button) => {
             button.addEventListener("click", () => {

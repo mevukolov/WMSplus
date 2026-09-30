@@ -1103,6 +1103,27 @@
         return data || [];
     }
 
+    // Same eligibility as fetchDisassembleCandidates (7+ days old, not yet
+    // disassembled) but a plain head-count query, no row limit -- this is
+    // exactly the set of yellow+red boxes in the rack matrix (boxAgeClass
+    // turns yellow/red at the same 7-day mark). Surfaced on the "Без ШК"
+    // section card in tasks.js, see window.__noShkGetReadyCount.
+    async function fetchReadyBoxCount() {
+        const client = db();
+        if (!client) return 0;
+        const cutoffDate = addDays(new Date().toISOString().slice(0, 10), -DISASSEMBLE_ELIGIBLE_DAYS);
+        const { count, error } = await client
+            .from("wms_no_shk_boxes")
+            .select("id", { count: "exact", head: true })
+            .is("disassembled_at", null)
+            .eq("outside_opp", false)
+            .eq("shortage", false)
+            .lte("shift_date", cutoffDate);
+        if (error) { console.error("[no_shk_zone] ready count failed:", error.message); return 0; }
+        return count || 0;
+    }
+    window.__noShkGetReadyCount = fetchReadyBoxCount;
+
     // Conditional UPDATE, not SELECT-then-UPDATE: Postgres re-checks a row's
     // WHERE clause after acquiring its lock, so two operators racing for
     // the same box is safe without SELECT ... FOR UPDATE SKIP LOCKED --
@@ -1175,7 +1196,11 @@
         disassembleBox = null;
         $("noShkGetBoxWrap").innerHTML = "<p style='text-align:center;color:#64748b;padding:40px 0;'>Ищу короб…</p>";
         setZoneModalOpen("noShkGetBoxModal", true);
-        const claimed = await claimNextDisassembleBox();
+        // loadZone() alongside the claim so racks/floorBoxes are fresh
+        // enough to draw the box's actual shelf below the prompt -- same
+        // "harmless side effect" loadZone already has if some other view
+        // happens to be open (see its own comment above).
+        const [claimed] = await Promise.all([claimNextDisassembleBox(), loadZone()]);
         if (!claimed) {
             $("noShkGetBoxWrap").innerHTML = "<p style='text-align:center;color:#64748b;font-weight:700;padding:40px 0;'>Нет коробов для разбора</p>";
             return;
@@ -1187,11 +1212,62 @@
         if (scanInput) { scanInput.value = ""; setTimeout(() => scanInput.focus({ preventScroll: true }), 50); }
     }
 
+    // Same tile markup as boxTileHtml, minus the is-new pop-in (irrelevant
+    // here) plus the pulsing .no-shk-box-target class for the claimed box,
+    // so the operator can spot it at a glance among its shelf-mates.
+    function getBoxTileHtml(box, isTarget) {
+        const cls = "no-shk-box " + areaClass(box.area) + boxAgeClass(box) + (isTarget ? " no-shk-box-target" : "");
+        return "<div class='" + cls + "' data-box-id='" + box.id + "'>"
+            + "<span class='no-shk-box-number'>№" + box.box_number + "</span>"
+            + "<span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span>"
+            + "</div>";
+    }
+
+    function getBoxShelfHtml(shelf, targetBoxId) {
+        const boxes = (shelf.wms_no_shk_boxes || []).slice().sort((a, b) => a.box_number - b.box_number);
+        const isFull = boxes.length >= shelf.capacity;
+        const isTargetShelf = boxes.some((b) => b.id === targetBoxId);
+        const boxesHtml = boxes.map((box) => getBoxTileHtml(box, box.id === targetBoxId)).join("");
+        return "<div class='no-shk-shelf" + (isTargetShelf ? " no-shk-move-shelf is-target" : "") + "'>"
+            + "<div class='no-shk-shelf-head'><span>" + escapeHtmlLocal(shelf.name) + "</span>"
+            + "<span class='no-shk-shelf-fill" + (isFull ? " is-full" : "") + "'>" + boxes.length + " / " + shelf.capacity + "</span></div>"
+            + "<div class='no-shk-boxes-row'>" + (boxesHtml || "<span style='color:#94a3b8;font-size:12px;'>пусто</span>") + "</div>"
+            + "</div>";
+    }
+
+    function findRackForBox(box) {
+        if (!box || !box.shelf_id) return null;
+        return racks.find((rack) => (rack.wms_no_shk_shelves || []).some((s) => s.id === box.shelf_id)) || null;
+    }
+
+    // Whole rack the claimed box lives on (all its shelves, all their
+    // boxes) so the operator sees exactly where to look, not just a number.
+    // A box "на полу" has no shelf_id/rack -- shows the floor row instead,
+    // same pulsing highlight.
+    function getBoxLocationHtml(box) {
+        const rack = findRackForBox(box);
+        if (rack) {
+            const shelvesHtml = shelvesTopToBottom(rack).map((shelf) => getBoxShelfHtml(shelf, box.id)).join("");
+            return "<div class='no-shk-getbox-rack-scroll'><div class='no-shk-rack'>"
+                + "<h3 class='no-shk-rack-title'>" + escapeHtmlLocal(rack.name) + "</h3>"
+                + "<div class='no-shk-rack-frame' style='width:" + rackFrameWidthPx(rack) + "px;'>" + shelvesHtml + "</div>"
+                + "</div></div>";
+        }
+        const boxesHtml = floorBoxes.length
+            ? floorBoxes.map((b) => getBoxTileHtml(b, b.id === box.id)).join("")
+            : getBoxTileHtml(box, true);
+        return "<div class='no-shk-floor'>"
+            + "<p class='no-shk-floor-title'>На полу</p>"
+            + "<div class='no-shk-boxes-row'>" + boxesHtml + "</div>"
+            + "</div>";
+    }
+
     function renderGetBoxPrompt(kgtCount) {
         const box = disassembleBox;
         if (!box) return;
         $("noShkGetBoxWrap").innerHTML = "<div class='no-shk-getbox-prompt'>"
             + "<p class='no-shk-getbox-main'>Возьмите короб " + escapeHtmlLocal(computeDateLabel(box)) + " и отсканируйте этикетку</p>"
+            + getBoxLocationHtml(box)
             + "<div class='no-shk-getbox-details'>"
             + "<div>Номер короба: <strong>" + box.box_number + "</strong></div>"
             + "<div>Ответственный: <strong>" + escapeHtmlLocal(box.responsible_name) + "</strong></div>"
@@ -1199,6 +1275,7 @@
             + "</div>"
             + "<div id='noShkGetBoxError' class='no-shk-getbox-error'></div>"
             + "</div>";
+        attachBoxTooltips($("noShkGetBoxWrap"));
     }
 
     function showGetBoxError(message) {
