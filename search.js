@@ -55,32 +55,27 @@
         return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
     }
 
-    function formatMoney(value) {
-        const n = Number(value);
-        if (!Number.isFinite(n) || !n) return "";
-        return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-    }
-
     // ---- state ----
 
     const state = {
-        incidents: new Set(), // subset of ALL_INCIDENTS; empty = no filter (search everywhere)
+        incidents: new Set(), // subset of the 4 data-incident chip values; empty = no filter (search everywhere)
         filterOpen: false,
         searching: false,
     };
-
-    const ALL_INCIDENTS = ["Без ШК", "Два ШК", "Пустая упаковка", "Разбор ОПП"];
 
     // ---- RPC calls, one per domain ----
 
     async function searchNoShk(query, date) {
         const client = db();
         if (!client) return [];
-        const { data, error } = await client.rpc("wms_intake_submissions_search", {
+        // Dedicated strict-substring RPC, not the shared
+        // wms_intake_submissions_search -- that one now does pg_trgm fuzzy
+        // matching (word_similarity >= 0.3, tuned for the existing "Лента
+        // без ШК" feature's typo tolerance), which was pulling in
+        // unrelated items like "Корм для куриц" for a "куртка" query.
+        const { data, error } = await client.rpc("wms_search_no_shk_items", {
             p_query: query || null,
-            p_date_from: date || null,
-            p_date_to: date || null,
-            p_limit: 30,
+            p_date: date || null,
         });
         if (error) throw error;
         return (data || []).map((row) => ({ __kind: "no_shk", row }));
@@ -151,7 +146,7 @@
 
         try {
             const results = (await Promise.all(jobs)).flat();
-            renderResults(results);
+            renderResults(results, query);
         } finally {
             state.searching = false;
             $("searchBtn").disabled = false;
@@ -175,9 +170,12 @@
         }).join("");
     }
 
+    let noShkRowsById = new Map();
+
     function noShkCardHtml(row) {
+        noShkRowsById.set(row.id, row);
         const photo = row.photo_path
-            ? "<img class='search-card-photo' src='" + escapeHtmlLocal(buildIntakePhotoUrl(row.photo_path)) + "' loading='lazy' alt=''>"
+            ? "<img class='search-card-photo' data-detail-id='" + escapeHtmlLocal(row.id) + "' src='" + escapeHtmlLocal(buildIntakePhotoUrl(row.photo_path)) + "' loading='lazy' alt=''>"
             : "";
         const sticker = row.sticker_code
             ? "<span class='search-card-pill tone-green'>ШК: " + escapeHtmlLocal(decodeStickerCode(row.sticker_code) || row.sticker_code) + "</span>"
@@ -191,16 +189,38 @@
             + "</div>";
     }
 
-    function taskCardHtml(row) {
-        const shk = Array.isArray(row.source_shk_ids) && row.source_shk_ids.length ? row.source_shk_ids.join(", ") : (row.source_tare_id || "-");
-        const price = formatMoney(row.source_price_sum);
-        return "<div class='search-card'>"
+    // Short excerpt of search_text around the query, for a task that
+    // matched via joined item names rather than its own title -- shows
+    // WHAT matched instead of repeating info already visible elsewhere.
+    function extractSnippet(text, query, radius) {
+        const t = normalizeText(text);
+        const q = normalizeText(query).toLowerCase();
+        if (!t || !q) return "";
+        const idx = t.toLowerCase().indexOf(q);
+        if (idx < 0) return "";
+        const start = Math.max(0, idx - radius);
+        const end = Math.min(t.length, idx + q.length + radius);
+        return (start > 0 ? "…" : "") + t.slice(start, end).trim() + (end < t.length ? "…" : "");
+    }
+
+    function taskMatchLine(row, query) {
+        const q = normalizeText(query);
+        if (!q) return row.task_type || "";
+        const ident = q.replace(/\s+/g, "");
+        if (Array.isArray(row.source_shk_ids) && row.source_shk_ids.includes(ident)) return "ШК " + ident;
+        if (row.source_tare_id && row.source_tare_id === ident) return "Тара " + ident;
+        if (row.source_id && row.source_id.toLowerCase().includes(ident.toLowerCase())) return "ID " + row.source_id;
+        if (!normalizeText(row.title).toLowerCase().includes(q.toLowerCase())) {
+            const snippet = extractSnippet(row.search_text, q, 18);
+            if (snippet) return snippet;
+        }
+        return row.task_type || "";
+    }
+
+    function taskCardHtml(row, query) {
+        return "<div class='search-card search-card-task'>"
             + "<div class='search-card-title'>" + escapeHtmlLocal(row.title || "Задача") + "</div>"
-            + "<div class='search-card-sub'>" + escapeHtmlLocal(row.task_type || "-") + "</div>"
-            + "<div class='search-card-row'><span>ШК/тара</span><strong>" + escapeHtmlLocal(shk) + "</strong></div>"
-            + (price ? "<div class='search-card-row'><span>Стоимость</span><strong>" + escapeHtmlLocal(price) + "</strong></div>" : "")
-            + (row.opp_verdict && row.opp_verdict !== "Не выбран" ? "<div class='search-card-row'><span>Вердикт</span><strong>" + escapeHtmlLocal(row.opp_verdict) + "</strong></div>" : "")
-            + "<div class='search-card-row'><span>" + escapeHtmlLocal(formatDateTime(row.created_at)) + "</span></div>"
+            + "<div class='search-card-sub'>" + escapeHtmlLocal(taskMatchLine(row, query)) + "</div>"
             + "<div class='search-card-pills'>" + taskStatusPillHtml(row) + taskTagPillsHtml(row) + "</div>"
             + "</div>";
     }
@@ -224,11 +244,10 @@
         two_shk: { title: "Два ШК и Пустая упаковка (без задачи)", render: twoShkCardHtml },
     };
 
-    function renderResults(hits) {
+    function renderResults(hits, query) {
         const wrap = $("searchResults");
-        const page = $("searchPage");
-        if (!wrap || !page) return;
-        page.classList.add("has-results");
+        if (!wrap) return;
+        noShkRowsById = new Map();
         if (!hits.length) {
             wrap.innerHTML = "";
             setStatus("Ничего не нашлось.");
@@ -245,16 +264,48 @@
             const meta = GROUP_META[kind];
             const rows = groups.get(kind);
             const cardsHtml = rows.map((row) => {
-                const html = meta.render(row);
-                const delay = Math.min(cardIndex, 12) * 25;
+                const html = meta.render(row, query);
+                const delay = Math.min(cardIndex, 14) * 20;
                 cardIndex++;
-                return html.replace("<div class='search-card'>", "<div class='search-card' style='animation-delay:" + delay + "ms;'>");
+                return html.replace("<div class='search-card", "<div style='animation-delay:" + delay + "ms;' class='search-card");
             }).join("");
             return "<div class='search-results-group'>"
                 + "<p class='search-results-group-title'>" + escapeHtmlLocal(meta.title) + " (" + rows.length + ")</p>"
                 + "<div class='search-results-grid'>" + cardsHtml + "</div>"
                 + "</div>";
         }).join("");
+        wrap.querySelectorAll("[data-detail-id]").forEach((el) => {
+            el.addEventListener("click", () => openDetail(el.dataset.detailId));
+        });
+    }
+
+    // ---- full-screen "без ШК" item detail ----
+
+    function detailRowHtml(label, value) {
+        const text = normalizeText(value) || "-";
+        return "<div class='search-detail-row'><span>" + escapeHtmlLocal(label) + "</span><strong>" + escapeHtmlLocal(text) + "</strong></div>";
+    }
+
+    function openDetail(itemId) {
+        const row = noShkRowsById.get(itemId);
+        if (!row) return;
+        const photo = $("searchDetailPhoto");
+        photo.src = row.photo_path ? buildIntakePhotoUrl(row.photo_path) : "";
+        const sticker = row.sticker_code ? (decodeStickerCode(row.sticker_code) || row.sticker_code) : "Не присвоен";
+        $("searchDetailInfo").innerHTML = "<h2 class='search-detail-title'>" + escapeHtmlLocal(row.item_text || row.item_type || "Без наименования") + "</h2>"
+            + detailRowHtml("Категория", row.category)
+            + detailRowHtml("Тип", row.item_type)
+            + detailRowHtml("Участок", row.area)
+            + detailRowHtml("Ответственный", row.full_name)
+            + detailRowHtml("Дата/время", formatDateTime(row.created_at))
+            + detailRowHtml("Стикер", sticker);
+        $("searchDetailModal").classList.add("active");
+        $("searchDetailModal").setAttribute("aria-hidden", "false");
+    }
+
+    function closeDetail() {
+        $("searchDetailModal").classList.remove("active");
+        $("searchDetailModal").setAttribute("aria-hidden", "true");
     }
 
     // ---- filter panel + chips ----
@@ -302,6 +353,14 @@
                 if (state.incidents.has(value)) state.incidents.delete(value); else state.incidents.add(value);
                 updateFilterUi();
             });
+        });
+
+        const closeDetailBtn = $("closeSearchDetail");
+        if (closeDetailBtn) closeDetailBtn.addEventListener("click", closeDetail);
+        const detailModal = $("searchDetailModal");
+        if (detailModal) detailModal.addEventListener("click", (event) => { if (event.target === detailModal) closeDetail(); });
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && $("searchDetailModal").classList.contains("active")) closeDetail();
         });
     });
 })();

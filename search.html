@@ -18,23 +18,25 @@
            login.html with no session), but the header/sidebar it expects to
            find and populate are kept in the DOM (so it never null-refs) and
            just visually reduced to a single corner control. */
-        body { background: linear-gradient(180deg, #f7f8fb 0%, #eef0f6 100%); }
+        body { background: linear-gradient(180deg, #f7f8fb 0%, #eef0f6 100%); overflow: hidden; }
         .header { background: transparent; box-shadow: none; backdrop-filter: none; }
         #menu-btn, #header-wh, #user-name-small { display: none; }
         .sidebar { display: none !important; }
 
+        /* Fixed-height shell: only .search-scroll scrolls, the hero
+           (title/input/filter) stays put -- the page itself never scrolls. */
         .search-page {
-            min-height: 100dvh;
+            height: 100dvh;
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 14vh 20px 60px;
+            padding: 6vh 20px 0;
             box-sizing: border-box;
-            transition: padding-top .5s cubic-bezier(.22,1,.36,1);
+            overflow: hidden;
         }
-        .search-page.has-results { padding-top: 6vh; }
 
         .search-hero {
+            flex: none;
             width: 100%;
             max-width: 640px;
             display: flex;
@@ -170,6 +172,20 @@
         .search-chip.is-active { background: var(--accent, #623CEA); border-color: var(--accent, #623CEA); color: #fff; }
         .search-chip:active { transform: scale(.96); }
 
+        /* Everything below the hero lives in this one scroll container --
+           the page/body itself never scrolls (overflow:hidden above). */
+        .search-scroll {
+            flex: 1;
+            min-height: 0;
+            width: 100%;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px 20px 60px;
+            box-sizing: border-box;
+        }
+
         .search-status {
             width: 100%;
             max-width: 640px;
@@ -177,13 +193,12 @@
             color: #6b7280;
             font-size: 14px;
             min-height: 20px;
-            margin-top: 18px;
         }
         .search-status.is-error { color: #b91c1c; }
 
         .search-results {
             width: 100%;
-            max-width: 860px;
+            max-width: 1400px;
             display: flex;
             flex-direction: column;
             gap: 26px;
@@ -198,7 +213,11 @@
             color: #9095a3;
             margin: 0 0 2px 4px;
         }
-        .search-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+        .search-results-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+        @media (max-width: 1180px) { .search-results-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        @media (max-width: 940px) { .search-results-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 700px) { .search-results-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 460px) { .search-results-grid { grid-template-columns: 1fr; } }
 
         .search-card {
             background: #fff;
@@ -213,7 +232,10 @@
             transform: translateY(8px);
             animation: searchCardIn .38s cubic-bezier(.22,1,.36,1) both;
         }
-        .search-card-photo { width: 100%; height: 120px; object-fit: cover; border-radius: 10px; background: #eef1f5; }
+        /* "Вытянуто вертикально" -- taller than wide, not the usual
+           landscape thumbnail. */
+        .search-card-photo { width: 100%; aspect-ratio: 3 / 4; height: auto; object-fit: cover; border-radius: 10px; background: #eef1f5; cursor: pointer; transition: opacity .15s ease; }
+        .search-card-photo:hover { opacity: .85; }
         .search-card-title { font-size: 14px; font-weight: 700; color: #1f2937; }
         .search-card-sub { font-size: 12px; color: #6b7280; }
         .search-card-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: #6b7280; }
@@ -232,6 +254,61 @@
         .search-card-pill.tone-yellow { background: rgba(250,204,21,.2); color: #92700c; }
         .search-empty-state { text-align: center; color: #9095a3; font-size: 14px; padding: 20px 0; }
 
+        /* Small blocks for the tasks group -- just title + what matched. */
+        .search-card-task { padding: 10px 12px; gap: 3px; }
+        .search-card-task .search-card-title { font-size: 13px; line-height: 1.3; }
+        .search-card-task .search-card-sub { font-size: 11.5px; line-height: 1.35; }
+
+        /* ---- full-screen item detail (opened from a "без ШК" photo) ---- */
+        .search-detail-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 6000;
+            background: rgba(15,12,26,.78);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            box-sizing: border-box;
+            animation: searchDetailOverlayIn .18s ease-out both;
+        }
+        .search-detail-modal.active { display: flex; }
+        .search-detail-card {
+            position: relative;
+            width: min(980px, 100%);
+            max-height: 92vh;
+            background: #fff;
+            border-radius: 20px;
+            overflow: hidden;
+            display: flex;
+            box-shadow: 0 30px 80px rgba(0,0,0,.4);
+            animation: searchDetailCardIn .22s cubic-bezier(.22,1,.36,1) both;
+        }
+        .search-detail-photo-wrap { flex: 1 1 55%; background: #0f172a; display: flex; align-items: center; justify-content: center; min-width: 0; }
+        .search-detail-photo-wrap img { width: 100%; height: 100%; max-height: 92vh; object-fit: contain; }
+        .search-detail-info { flex: 1 1 45%; min-width: 280px; padding: 26px 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .search-detail-close {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            z-index: 2;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            border: 0;
+            background: rgba(15,23,42,.55);
+            color: #fff;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        .search-detail-title { font-size: 20px; font-weight: 800; color: #111827; margin: 0 0 6px; }
+        .search-detail-row { font-size: 13px; color: #475569; display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid rgba(15,23,42,.06); padding-bottom: 8px; }
+        .search-detail-row strong { color: #1f2937; font-weight: 700; text-align: right; }
+        @media (max-width: 720px) {
+            .search-detail-card { flex-direction: column; max-height: 94vh; }
+            .search-detail-photo-wrap img { max-height: 36vh; }
+        }
+
         @keyframes searchFadeDown {
             from { opacity: 0; transform: translateY(-8px); }
             to { opacity: 1; transform: translateY(0); }
@@ -240,8 +317,10 @@
             from { opacity: 0; transform: translateY(8px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        @keyframes searchDetailOverlayIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes searchDetailCardIn { from { opacity: 0; transform: scale(.94) translateY(10px); } to { opacity: 1; transform: none; } }
         @media (prefers-reduced-motion: reduce) {
-            .search-title, .search-input-row, .search-toolbar, .search-card { animation: none; opacity: 1; transform: none; }
+            .search-title, .search-input-row, .search-toolbar, .search-card, .search-detail-modal, .search-detail-card { animation: none; opacity: 1; transform: none; }
         }
     </style>
 </head>
@@ -290,9 +369,19 @@
             </div>
         </div>
     </div>
-    <div id="searchStatus" class="search-status"></div>
-    <div id="searchResults" class="search-results"></div>
+    <div class="search-scroll" id="searchScroll">
+        <div id="searchStatus" class="search-status"></div>
+        <div id="searchResults" class="search-results"></div>
+    </div>
 </main>
+
+<section id="searchDetailModal" class="search-detail-modal" aria-hidden="true">
+    <div class="search-detail-card">
+        <button id="closeSearchDetail" class="search-detail-close" type="button" aria-label="Закрыть">×</button>
+        <div class="search-detail-photo-wrap"><img id="searchDetailPhoto" alt=""></div>
+        <div id="searchDetailInfo" class="search-detail-info"></div>
+    </div>
+</section>
 
 </body>
 </html>
