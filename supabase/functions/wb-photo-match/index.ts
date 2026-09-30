@@ -1,8 +1,10 @@
 // "Вероятные номенклатуры" для ленты «Без ШК»: раз в минуту (см.
 // 202609250002_wb_photo_match_cron.sql) забирает пачку строк
-// intake_submissions без wb_nm_checked_at, для каждой прогоняет фото
-// через (неофициальный, реверс-инжиниренный) поиск по фото Wildberries
-// и сохраняет список найденных артикулов (nm) обратно на строку.
+// intake_submissions без wb_nm_checked_at (и ещё не исчерпавших
+// MAX_CHECK_ATTEMPTS попыток), для каждой прогоняет фото через
+// (неофициальный, реверс-инжиниренный) поиск по фото Wildberries и
+// сохраняет список найденных артикулов (nm) обратно на строку. Неудачная
+// попытка не сдаётся сразу -- см. processRow.
 //
 // Алгоритм подписи взят из публичного Chrome-расширения
 // "wbcon-item-finder-by-picture" (его background.js): search-by-photo.wb.ru
@@ -17,6 +19,12 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const FUNCTION_SECRET = Deno.env.get("WB_PHOTO_MATCH_SECRET") || "";
 const BATCH_SIZE = Math.max(Number(Deno.env.get("WB_PHOTO_MATCH_BATCH_SIZE") ?? "15") || 15, 1);
 const MAX_CANDIDATES = 20;
+// A row that fails (bad photo, WB down, network blip) gets retried on
+// later runs instead of being given up on after one shot -- but still
+// gives up eventually, so one permanently-broken photo can't camp at the
+// front of the oldest-first queue forever and starve everything behind
+// it. See 202609300008_intake_wb_nm_retry.sql for the attempts column.
+const MAX_CHECK_ATTEMPTS = Math.max(Number(Deno.env.get("WB_PHOTO_MATCH_MAX_ATTEMPTS") ?? "5") || 5, 1);
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -113,7 +121,7 @@ async function searchByPhoto(photoBytes: Uint8Array, filename: string, contentTy
   return Array.from(nmSet).slice(0, MAX_CANDIDATES);
 }
 
-async function processRow(row: { id: string; photo_path: string }): Promise<void> {
+async function processRow(row: { id: string; photo_path: string; wb_nm_check_attempts: number | null }): Promise<void> {
   const nowIso = new Date().toISOString();
   try {
     const photoRes = await fetch(INTAKE_PHOTO_BASE + row.photo_path);
@@ -127,13 +135,22 @@ async function processRow(row: { id: string; photo_path: string }): Promise<void
       .update({ wb_nm_candidates: nmList, wb_nm_checked_at: nowIso })
       .eq("id", row.id);
   } catch (err) {
-    // Помечаем строку проверенной (пустым списком) даже при ошибке --
-    // иначе один битый файл/сетевой сбой будет вечно переигрываться
-    // каждую минуту и съедать бюджет пачки у остальных строк.
+    // A failed attempt (bad photo, WB down, network blip) no longer gives
+    // up immediately -- bump the attempt counter and leave
+    // wb_nm_checked_at null so the next run's query (which excludes rows
+    // past MAX_CHECK_ATTEMPTS) picks this row back up. Only once attempts
+    // actually reach the cap do we give up for good, same as the old
+    // one-shot behavior -- still needed so one permanently-broken photo
+    // can't sit at the front of the oldest-first queue forever.
     console.error("wb-photo-match: row failed", row.id, err);
+    const attempts = (row.wb_nm_check_attempts ?? 0) + 1;
+    const giveUp = attempts >= MAX_CHECK_ATTEMPTS;
     await supabase
       .from("intake_submissions")
-      .update({ wb_nm_candidates: [], wb_nm_checked_at: nowIso })
+      .update({
+        wb_nm_check_attempts: attempts,
+        ...(giveUp ? { wb_nm_candidates: [], wb_nm_checked_at: nowIso } : {}),
+      })
       .eq("id", row.id);
   }
 }
@@ -247,15 +264,16 @@ Deno.serve(async (req) => {
 
   const { data: rows, error } = await supabase
     .from("intake_submissions")
-    .select("id, photo_path")
+    .select("id, photo_path, wb_nm_check_attempts")
     .is("wb_nm_checked_at", null)
     .not("photo_path", "is", null)
+    .lt("wb_nm_check_attempts", MAX_CHECK_ATTEMPTS)
     .order("created_at", { ascending: true })
     .limit(BATCH_SIZE);
 
   if (error) return json(500, { ok: false, error: error.message });
 
-  const processedRows = (rows || []) as { id: string; photo_path: string }[];
+  const processedRows = (rows || []) as { id: string; photo_path: string; wb_nm_check_attempts: number | null }[];
   for (const row of processedRows) {
     await processRow(row);
   }
