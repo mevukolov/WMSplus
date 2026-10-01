@@ -529,10 +529,25 @@
             + "</article>";
     }
 
+    // Оператор уже сам подписал товар при приёмке (item.item_text) -- это
+    // куда надёжнее для автоподбора, чем надеяться, что хотя бы один из
+    // WB-фотокандидатов (wb_nm_candidates) окажется тем самым нужным и
+    // будет иметь нормальную запись в справочнике: если никто из них не
+    // про этот конкретный товар, автоподбор находил пусто даже когда
+    // искомое слово буквально написано в названии. Подставляем ту же
+    // подпись в строку поиска и ищем по ней сразу, как если бы оператор
+    // сам её ввёл.
+    function formatShortDate(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "-";
+        return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+    }
+
     async function openNoShkMatchPanel(item) {
         const input = $("intakeMatchQueryInput");
         const btn = $("intakeMatchQueryBtn");
-        if (input) input.value = "";
+        if (input) input.value = item.item_text || "";
         if (btn) {
             const fresh = btn.cloneNode(true);
             btn.replaceWith(fresh);
@@ -568,12 +583,12 @@
         if (status) status.textContent = "";
         const taskRows = taskResult && !taskResult.error && Array.isArray(taskResult.data) ? taskResult.data : [];
         tasksList.innerHTML = taskRows.length
-            ? taskRows.map((row) => noShkMatchCardHtml("task", row.task_id, "", row.title || row.match_name || "Без наименования", [row.match_brand, row.is_tare ? "Тара" : ""].filter(Boolean).join(" · "))).join("")
+            ? taskRows.map((row) => noShkMatchCardHtml("task", row.task_id, "", row.match_name || row.title || "Без наименования", "ШК " + (row.shk || "-") + " · " + formatShortDate(row.movement))).join("")
             : "<div class='intake-match-empty'>Совпадений не найдено.</div>";
         tasksList.dataset.rows = JSON.stringify(taskRows);
         const pureRows = (pureResult && pureResult.rows) || [];
         pureList.innerHTML = pureRows.length
-            ? pureRows.map((row, index) => noShkMatchCardHtml("pure", index, "", row.__name || "Без наименования", row.__brand || "-")).join("")
+            ? pureRows.map((row, index) => noShkMatchCardHtml("pure", index, "", row.__name || "Без наименования", "ШК " + (row.__shk || "-") + " · " + formatShortDate(row.__date))).join("")
             : "<div class='intake-match-empty'>Совпадений не найдено.</div>";
         pureList.dataset.rows = JSON.stringify(pureRows);
         bindNoShkMatchFoundButtons(item, taskRows, pureRows);
