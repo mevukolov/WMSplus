@@ -1316,21 +1316,30 @@
         if (!disassembleBox) return;
         disassembleItems = await fetchBoxDisassembleItems(disassembleBox.id);
         // An empty box (nothing was ever logged into it) or one where every
-        // item already carries a sticker completes immediately -- [].every()
-        // is true, so this also covers the empty case with no extra check.
-        if (disassembleItems.every((item) => Boolean(item.sticker_code))) {
+        // item is already resolved (sticker, task match, or pure-loss
+        // match) completes immediately -- [].every() is true, so this also
+        // covers the empty case with no extra check.
+        if (disassembleItems.every(isDisassembleItemResolved)) {
             void finishDisassemble();
             return;
         }
         renderDisassembleGrid();
     }
 
+    // "Решено" теперь три равноправных пути: физический стикер, опознание
+    // по задаче, опознание по строке "чистых списаний" -- любой из них
+    // закрывает товар без требования остальных двух.
+    function isDisassembleItemResolved(item) {
+        return Boolean(item.sticker_code || item.matched_task_id || item.matched_pure_loss_id);
+    }
+
     function disassembleTileHtml(item) {
-        const done = Boolean(item.sticker_code);
+        const done = isDisassembleItemResolved(item);
+        const cls = "no-shk-disassemble-tile" + (done ? " is-done" : "");
         const photo = item.photo_path
             ? "<img src='" + escapeHtmlLocal(buildIntakePhotoUrl(item.photo_path)) + "' loading='lazy' alt=''>"
             : "<div class='no-shk-disassemble-tile-noimg'>?</div>";
-        return "<div class='no-shk-disassemble-tile" + (done ? " is-done" : "") + "' data-item-id='" + escapeHtmlLocal(item.id) + "'>"
+        return "<div class='" + cls + "' data-item-id='" + escapeHtmlLocal(item.id) + "'>"
             + photo
             + "<div class='no-shk-disassemble-tile-name'>" + escapeHtmlLocal(item.item_text || item.item_type || "Без наименования") + "</div>"
             + (done ? "<span class='no-shk-disassemble-tile-check'>✓</span>" : "")
@@ -1340,11 +1349,19 @@
     function renderDisassembleGrid() {
         const wrap = $("noShkDisassembleWrap");
         if (!wrap) return;
-        wrap.innerHTML = "<div class='no-shk-disassemble-grid'>" + disassembleItems.map(disassembleTileHtml).join("") + "</div>";
+        // Нерешённые сначала, решённые в конце в порядке решения -- не
+        // трогаем порядок внутри каждой группы (stable sort), чтобы
+        // "в конце в порядке решения" буквально работало по мере того, как
+        // элементы переходят из "нерешён" в "решён".
+        const ordered = disassembleItems
+            .map((item, index) => ({ item, index, done: isDisassembleItemResolved(item) }))
+            .sort((a, b) => (a.done === b.done ? a.index - b.index : (a.done ? 1 : -1)))
+            .map((entry) => entry.item);
+        wrap.innerHTML = "<div class='no-shk-disassemble-grid'>" + ordered.map(disassembleTileHtml).join("") + "</div>";
         wrap.querySelectorAll("[data-item-id]").forEach((tile) => {
             tile.addEventListener("click", () => {
                 const item = disassembleItems.find((row) => row.id === tile.dataset.itemId);
-                if (item && window.__openIntakeSubmissionCard) window.__openIntakeSubmissionCard(item);
+                if (item && window.__openIntakeSubmissionCard) window.__openIntakeSubmissionCard(item, true);
             });
         });
     }
@@ -1395,7 +1412,7 @@
     window.__onNoShkItemAssigned = function () {
         if (!disassembleBox) return;
         renderDisassembleGrid();
-        if (disassembleItems.every((item) => Boolean(item.sticker_code))) void finishDisassemble();
+        if (disassembleItems.every(isDisassembleItemResolved)) void finishDisassemble();
     };
 
     window.__noShkStartGetBox = function () { void startGetBox(); };
