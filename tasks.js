@@ -787,6 +787,7 @@
         },
         noShkMatch: {
             rowId: "",
+            taskNm: null,
             photoCache: {},
             cardInfoCache: {},
             pendingReject: null,
@@ -9368,6 +9369,14 @@
         return items.find((item) => normalizeIdentifier(item.nm) === taskNm) || items[0] || null;
     }
 
+    // Same fallback chain as matchedItemForNoShk, as a plain key for
+    // grouping -- a tare task can carry matches for several different
+    // items, and the queue list splits those into separate rows instead
+    // of bundling them under one "Тара ..." entry.
+    function noShkMatchGroupNm(match) {
+        return normalizeIdentifier(match.task_nm) || normalizeIdentifier(match.nm);
+    }
+
     function noShkMatchCardHtml(match, index, row) {
         const snapshot = match.snapshot || {};
         const nm = normalizeIdentifier(match.nm);
@@ -9445,9 +9454,17 @@
     function renderNoShkMatchModal(row) {
         const target = $("noShkMatchWrap");
         if (!target) return;
-        const matches = taskNoShkMatches(row);
-        const cards = matches.length
-            ? matches.map((match, index) => noShkMatchCardHtml(match, index, row)).join("")
+        // state.noShkMatch.taskNm scopes the modal to one item-group within
+        // the task (set by the queue list, which now splits a multi-item
+        // tare into one row per item) -- null shows every match on the
+        // task, as before (used when opened via the "Без ШК" tag on an
+        // already-open task card, where seeing everything is the point).
+        const allMatches = taskNoShkMatches(row);
+        const taskNm = state.noShkMatch.taskNm;
+        const indexed = allMatches.map((match, index) => ({ match, index }));
+        const visible = taskNm ? indexed.filter((entry) => noShkMatchGroupNm(entry.match) === taskNm) : indexed;
+        const cards = visible.length
+            ? visible.map((entry) => noShkMatchCardHtml(entry.match, entry.index, row)).join("")
             : "<div class='empty-state'>Совпадений не найдено.</div>";
         target.innerHTML = "<div class='work-head no-shk-match-modal-head'><button id='closeNoShkMatch' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
             + "<div class='no-shk-match-list'>" + cards + "</div>";
@@ -9460,25 +9477,29 @@
         });
         target.querySelectorAll("[data-no-shk-open-card]").forEach((el) => {
             el.addEventListener("click", () => {
-                const match = matches[Number(el.dataset.noShkOpenCard)];
+                const match = allMatches[Number(el.dataset.noShkOpenCard)];
                 if (match && window.__openIntakeSubmissionCard) window.__openIntakeSubmissionCard(noShkSubmissionFromSnapshot(match));
             });
         });
         target.querySelectorAll("[data-no-shk-open-task]").forEach((el) => {
             el.addEventListener("click", () => openTaskFromNoShkMatch(el.dataset.noShkOpenTask));
         });
-        matches.forEach((match) => {
-            const nm = normalizeIdentifier(match.nm);
+        visible.forEach((entry) => {
+            const nm = normalizeIdentifier(entry.match.nm);
             if (!nm) return;
             void loadNoShkMatchPhoto(nm, row);
             void loadNoShkMatchCardInfo(nm, row);
         });
     }
 
-    function openNoShkMatchModal(taskId) {
+    // taskNm (optional): scope the modal to one item-group within the task
+    // (see renderNoShkMatchModal). Omitted by the "Без ШК" tag entry point,
+    // which wants to see every match on the task at once.
+    function openNoShkMatchModal(taskId, taskNm) {
         const row = findTaskRow(taskId);
         if (!row) return;
         state.noShkMatch.rowId = row.id;
+        state.noShkMatch.taskNm = taskNm || null;
         renderNoShkMatchModal(row);
         setFlowModalOpen("noShkMatchModal", true);
     }
@@ -9491,7 +9512,7 @@
     // another tab) since the queue was loaded. A fresh fetch fixes both --
     // this is the queue's own click path, not the pill inside an already-
     // open (already-full) task card, which doesn't need it.
-    async function openNoShkMatchModalFresh(taskId) {
+    async function openNoShkMatchModalFresh(taskId, taskNm) {
         const db = supabaseDb();
         if (!db) return;
         let row;
@@ -9503,8 +9524,16 @@
             toast("Не удалось загрузить задачу: " + (error && error.message ? error.message : String(error)), "error");
             return;
         }
-        if (!row || row.is_deleted || NO_SHK_SKIP_VERDICTS.includes(normalizeText(row.opp_verdict)) || !taskNoShkMatches(row).some((match) => match.decision === "pending")) {
-            removeFromNoShkQueue(taskId);
+        const relevant = row ? taskNoShkMatches(row).filter((match) => !taskNm || noShkMatchGroupNm(match) === taskNm) : [];
+        if (!row || row.is_deleted || NO_SHK_SKIP_VERDICTS.includes(normalizeText(row.opp_verdict)) || !relevant.some((match) => match.decision === "pending")) {
+            const queueIndex = state.noShkQueue.rows.findIndex((queued) => queued.id === taskId);
+            if (queueIndex >= 0 && row) state.noShkQueue.rows[queueIndex] = row;
+            // Only this item-group is stale -- a tare's other items can
+            // still have real pending work, so only drop the whole task
+            // from the queue once nothing on it is pending at all.
+            const taskStillPending = row && !row.is_deleted && taskNoShkMatches(row).some((match) => match.decision === "pending");
+            if (!taskStillPending) removeFromNoShkQueue(taskId);
+            else renderReviewNoShkCheckModal();
             toast("Уже неактуально -- убрал из списка.", "info");
             return;
         }
@@ -9512,6 +9541,7 @@
         const queueIndex = state.noShkQueue.rows.findIndex((queued) => queued.id === taskId);
         if (queueIndex >= 0) state.noShkQueue.rows[queueIndex] = row;
         state.noShkMatch.rowId = row.id;
+        state.noShkMatch.taskNm = taskNm || null;
         renderNoShkMatchModal(row);
         setFlowModalOpen("noShkMatchModal", true);
     }
@@ -9530,7 +9560,15 @@
         }
         row.source_payload = nextPayload;
         row.has_pending_no_shk_match = hasPending;
-        if (!hasPending) removeFromNoShkQueue(row.id);
+        if (!hasPending) {
+            removeFromNoShkQueue(row.id);
+        } else if ($("reviewNoShkCheckModal") && $("reviewNoShkCheckModal").classList.contains("active")) {
+            // The task still has other pending item-groups (a tare with
+            // several items) -- removeFromNoShkQueue only drops a task once
+            // it has nothing left at all, so the just-resolved group's own
+            // queue row needs its own refresh here instead.
+            renderReviewNoShkCheckModal();
+        }
         return true;
     }
 
@@ -9806,15 +9844,48 @@
         }
     }
 
-    function noShkQueueRowHtml(row) {
-        const pendingCount = taskNoShkMatches(row).filter((match) => match.decision === "pending").length;
-        return "<button type='button' class='no-shk-queue-row' data-no-shk-queue-open='" + escapeHtml(row.id) + "'>"
+    // A tare task can bundle several different items, each independently
+    // matched -- splits those into one queue row per item instead of one
+    // row per task, so the operator isn't dropped into a modal mixing
+    // unrelated products under a generic "Тара ..." label. The task itself
+    // (displayTaskTitle) demotes to the subtitle; the row's main title is
+    // now the matched item's own name.
+    function noShkQueueGroups(rows) {
+        const groups = [];
+        (rows || []).forEach((row) => {
+            const pending = taskNoShkMatches(row).filter((match) => match.decision === "pending");
+            if (!pending.length) return;
+            const byNm = new Map();
+            pending.forEach((match) => {
+                const taskNm = noShkMatchGroupNm(match);
+                if (!byNm.has(taskNm)) byNm.set(taskNm, []);
+                byNm.get(taskNm).push(match);
+            });
+            const items = taskItems(row);
+            byNm.forEach((groupMatches, taskNm) => {
+                const item = items.find((it) => normalizeIdentifier(it.nm) === taskNm);
+                const price = item ? (Number(item.price) || (items.length === 1 ? reviewPrice(row) : 0)) : reviewPrice(row);
+                groups.push({
+                    taskId: row.id,
+                    taskNm,
+                    title: (item && item.name) || taskItemName(row) || "Без наименования",
+                    subtitle: displayTaskTitle(row),
+                    count: groupMatches.length,
+                    price,
+                });
+            });
+        });
+        return groups;
+    }
+
+    function noShkQueueRowHtml(group) {
+        return "<button type='button' class='no-shk-queue-row' data-no-shk-queue-open-task='" + escapeHtml(group.taskId) + "' data-no-shk-queue-open-nm='" + escapeHtml(group.taskNm) + "'>"
             + "<div class='no-shk-queue-row-main'>"
-            + "<div class='no-shk-queue-row-title'>" + escapeHtml(displayTaskTitle(row)) + "</div>"
-            + "<div class='no-shk-queue-row-sub'>" + escapeHtml(taskItemName(row) || row.task_type || "-") + "</div>"
+            + "<div class='no-shk-queue-row-title'>" + escapeHtml(group.title) + "</div>"
+            + "<div class='no-shk-queue-row-sub'>" + escapeHtml(group.subtitle || "-") + "</div>"
             + "</div>"
-            + "<span class='no-shk-queue-row-count'>" + pendingCount + "</span>"
-            + "<span class='no-shk-queue-row-price'>" + escapeHtml(formatMoney(reviewPrice(row))) + "</span>"
+            + "<span class='no-shk-queue-row-count'>" + group.count + "</span>"
+            + "<span class='no-shk-queue-row-price'>" + escapeHtml(formatMoney(group.price)) + "</span>"
             + "</button>";
     }
 
@@ -9825,14 +9896,14 @@
             target.innerHTML = "<p class='empty-state' style='margin:0;'>Загрузка…</p>";
             return;
         }
-        const rows = state.noShkQueue.rows;
-        if (!rows.length) {
+        const groups = noShkQueueGroups(state.noShkQueue.rows);
+        if (!groups.length) {
             target.innerHTML = "<p class='empty-state' style='margin:0;'>Сейчас нет совпадений, которые нужно проверить.</p>";
             return;
         }
-        target.innerHTML = "<div class='no-shk-queue-list'>" + rows.map(noShkQueueRowHtml).join("") + "</div>";
-        target.querySelectorAll("[data-no-shk-queue-open]").forEach((button) => {
-            button.addEventListener("click", () => { void openNoShkMatchModalFresh(button.dataset.noShkQueueOpen); });
+        target.innerHTML = "<div class='no-shk-queue-list'>" + groups.map(noShkQueueRowHtml).join("") + "</div>";
+        target.querySelectorAll("[data-no-shk-queue-open-task]").forEach((button) => {
+            button.addEventListener("click", () => { void openNoShkMatchModalFresh(button.dataset.noShkQueueOpenTask, button.dataset.noShkQueueOpenNm); });
         });
     }
 
