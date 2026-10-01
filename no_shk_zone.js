@@ -97,6 +97,7 @@
     let floorBoxes = [];
     let outsideBoxes = [];
     let shortageBoxes = [];
+    let disassembledBoxes = [];
     // Boxes already rendered once get a calm fade on re-render; a box seen
     // for the first time (just created, or freshly moved into view) gets
     // the bouncier pop-in -- see .no-shk-box.is-new in tasks.html.
@@ -106,12 +107,12 @@
     let activeBoxId = "";
     let moveActiveShelf = null; // { id, rack, shelf }
 
-    const BOX_FIELDS = "id,box_number,shift_date,shift_type,box_type,area,responsible_name,shelf_id,outside_opp,total_items,created_at";
+    const BOX_FIELDS = "id,box_number,shift_date,shift_type,box_type,area,responsible_name,shelf_id,outside_opp,total_items,created_at,disassembled_at,disassembled_by";
 
     async function loadZone() {
         const client = db();
         if (!client) return;
-        const [racksRes, floorRes, outsideRes, shortageRes] = await Promise.all([
+        const [racksRes, floorRes, outsideRes, shortageRes, disassembledRes] = await Promise.all([
             client
                 .from("wms_no_shk_racks")
                 .select("id,name,rack_number,position,created_at,wms_no_shk_shelves(id,name,shelf_number,capacity,created_at,wms_no_shk_boxes(" + BOX_FIELDS + "))")
@@ -136,6 +137,12 @@
                 .select(BOX_FIELDS)
                 .eq("shortage", true)
                 .order("box_number", { ascending: true }),
+            client
+                .from("wms_no_shk_boxes")
+                .select(BOX_FIELDS)
+                .not("disassembled_at", "is", null)
+                .order("disassembled_at", { ascending: false })
+                .limit(100),
         ]);
         if (racksRes.error) {
             racks = [];
@@ -143,10 +150,24 @@
             renderAdminView();
             return;
         }
-        racks = racksRes.data || [];
-        floorBoxes = floorRes.error ? [] : (floorRes.data || []);
+        // Разобранные короба больше не занимают визуальное место на
+        // стеллаже/на полу -- отфильтровываем на клиенте, а не через
+        // embedded-фильтр PostgREST на вложенном wms_no_shk_boxes
+        // (двухуровневая вложенность racks->shelves->boxes делает точечный
+        // фильтр через .eq()/.is() на embed ненадёжным без лишнего
+        // !inner-тестирования; простой клиентский filter() даёт тот же
+        // результат гарантированно).
+        racks = (racksRes.data || []).map((rack) => ({
+            ...rack,
+            wms_no_shk_shelves: (rack.wms_no_shk_shelves || []).map((shelf) => ({
+                ...shelf,
+                wms_no_shk_boxes: (shelf.wms_no_shk_boxes || []).filter((box) => !box.disassembled_at),
+            })),
+        }));
+        floorBoxes = (floorRes.error ? [] : (floorRes.data || [])).filter((box) => !box.disassembled_at);
         outsideBoxes = outsideRes.error ? [] : (outsideRes.data || []);
         shortageBoxes = shortageRes.error ? [] : (shortageRes.data || []);
+        disassembledBoxes = disassembledRes.error ? [] : (disassembledRes.data || []);
         renderZoneView();
         renderAdminView();
         if (!boxLabelTemplate) void loadTemplate("Короб «Без ШК»", (tpl) => { boxLabelTemplate = tpl; });
@@ -339,10 +360,21 @@
             }).join("") + "</div>"
             : "<p style='color:#64748b;'>Стеллажей пока нет. Нажми ✎, чтобы добавить.</p>";
 
-        wrap.innerHTML = outsideHtml + floorHtml + shortageHtml + racksHtml;
+        const disassembledHtml = "<div class='no-shk-floor no-shk-floor-disassembled'>"
+            + "<p class='no-shk-floor-title'>Разобранные короба" + (disassembledBoxes.length ? " (" + disassembledBoxes.length + ")" : "") + "</p>"
+            + "<div class='no-shk-boxes-row'>"
+            + (disassembledBoxes.length
+                ? disassembledBoxes.map((box) => "<div class='no-shk-box' data-disassembled-box-id='" + box.id + "'><span class='no-shk-box-number'>№" + box.box_number + "</span><span class='no-shk-box-date'>" + escapeHtmlLocal(formatDateShort(box.shift_date)) + "</span></div>").join("")
+                : "<span style='color:#94a3b8;font-size:12px;'>пусто</span>")
+            + "</div></div>";
+
+        wrap.innerHTML = outsideHtml + floorHtml + shortageHtml + disassembledHtml + racksHtml;
 
         wrap.querySelectorAll("[data-box-id]").forEach((box) => {
             box.addEventListener("click", () => openBoxDetailModal(box.dataset.boxId));
+        });
+        wrap.querySelectorAll("[data-disassembled-box-id]").forEach((el) => {
+            el.addEventListener("click", () => void openBoxContentsModal(el.dataset.disassembledBoxId));
         });
         attachBoxTooltips(wrap);
 
@@ -730,11 +762,17 @@
         const stickerLine = item.sticker_code
             ? "<div style='font-size:12px;color:#64748b;margin-top:2px;'>Присвоенный ШК: " + escapeHtmlLocal(decodeStickerCode(item.sticker_code) || item.sticker_code) + "</div>"
             : "";
+        const resolutionLine = item.matched_task_id
+            ? "<div style='font-size:12px;color:#15803d;margin-top:2px;font-weight:700;'>Опознан по задаче" + (item.matched_shk ? " (ШК " + escapeHtmlLocal(item.matched_shk) + ")" : "") + "</div>"
+            : item.matched_pure_loss_id
+            ? "<div style='font-size:12px;color:#15803d;margin-top:2px;font-weight:700;'>Опознан по списанию" + (item.matched_shk ? " (ШК " + escapeHtmlLocal(item.matched_shk) + ")" : "") + "</div>"
+            : "";
         return "<div style='border:1px solid rgba(15,23,42,.08);border-radius:10px;padding:10px;margin-bottom:10px;'>"
             + photo
             + "<div style='margin-top:8px;font-weight:700;font-size:14px;'>" + nameLine + categoryLine + "</div>"
             + "<div style='font-size:12px;color:#64748b;margin-top:2px;'>" + escapeHtmlLocal(item.full_name) + " · " + when + "</div>"
             + stickerLine
+            + resolutionLine
             + "</div>";
     }
 
@@ -1173,7 +1211,7 @@
         if (!client) return;
         const { error } = await client
             .from("wms_no_shk_boxes")
-            .update({ disassembled_at: new Date().toISOString(), disassembled_by: actorName })
+            .update({ disassembled_at: new Date().toISOString(), disassembled_by: actorName, shelf_id: null })
             .eq("id", boxId);
         if (error) console.error("[no_shk_zone] complete failed:", error.message);
     }
