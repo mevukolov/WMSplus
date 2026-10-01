@@ -9844,6 +9844,12 @@
         }
     }
 
+    function truncateText(value, maxLength) {
+        const text = normalizeText(value);
+        if (text.length <= maxLength) return text;
+        return text.slice(0, maxLength).trimEnd() + "…";
+    }
+
     // A tare task can bundle several different items, each independently
     // matched -- splits those into one queue row per item instead of one
     // row per task, so the operator isn't dropped into a modal mixing
@@ -9865,10 +9871,11 @@
             byNm.forEach((groupMatches, taskNm) => {
                 const item = items.find((it) => normalizeIdentifier(it.nm) === taskNm);
                 const price = item ? (Number(item.price) || (items.length === 1 ? reviewPrice(row) : 0)) : reviewPrice(row);
+                const title = (item && item.name) || taskItemName(row) || "Без наименования";
                 groups.push({
                     taskId: row.id,
                     taskNm,
-                    title: (item && item.name) || taskItemName(row) || "Без наименования",
+                    title: truncateText(title, 30),
                     subtitle: displayTaskTitle(row),
                     count: groupMatches.length,
                     price,
@@ -9884,7 +9891,6 @@
             + "<div class='no-shk-queue-row-title'>" + escapeHtml(group.title) + "</div>"
             + "<div class='no-shk-queue-row-sub'>" + escapeHtml(group.subtitle || "-") + "</div>"
             + "</div>"
-            + "<span class='no-shk-queue-row-count'>" + group.count + "</span>"
             + "<span class='no-shk-queue-row-price'>" + escapeHtml(formatMoney(group.price)) + "</span>"
             + "</button>";
     }
