@@ -18821,9 +18821,15 @@
         $("closeReopenConfirm").addEventListener("click", closeReopenConfirm);
         $("cancelReopenTask").addEventListener("click", closeReopenConfirm);
         $("confirmReopenTask").addEventListener("click", () => { void reopenTaskFromConfirm(); });
-        $("closeNoShkRejectConfirm").addEventListener("click", closeNoShkRejectConfirm);
-        $("cancelNoShkReject").addEventListener("click", closeNoShkRejectConfirm);
-        $("confirmNoShkReject").addEventListener("click", confirmNoShkRejectFromModal);
+        // Null-guarded: these elements are brand new in tasks.html, and a
+        // stale-cached HTML page briefly served alongside a freshly
+        // deployed tasks.js (CDN/browser cache skew right after a push)
+        // would otherwise throw here and abort the rest of this init
+        // block -- including bindings further down that unrelated features
+        // (like the "Без ШК" queue list) depend on.
+        if ($("closeNoShkRejectConfirm")) $("closeNoShkRejectConfirm").addEventListener("click", closeNoShkRejectConfirm);
+        if ($("cancelNoShkReject")) $("cancelNoShkReject").addEventListener("click", closeNoShkRejectConfirm);
+        if ($("confirmNoShkReject")) $("confirmNoShkReject").addEventListener("click", confirmNoShkRejectFromModal);
         $("expensiveWriteoffBack").addEventListener("click", closeExpensiveWriteoffConfirm);
         $("expensiveWriteoffConfirm").addEventListener("click", confirmExpensiveWriteoff);
         $("closeSplitShkConfirm").addEventListener("click", closeSplitShkConfirm);
