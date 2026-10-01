@@ -8682,8 +8682,8 @@
 
     const TASK_CELEBRATION_ICONS = { green: "✓", yellow: "◴", red: "✕" };
 
-    function playTaskCompletionCelebration(tone) {
-        const card = document.querySelector("#taskDetailModal .task-detail-card");
+    function playTaskCompletionCelebration(tone, targetEl) {
+        const card = targetEl || document.querySelector("#taskDetailModal .task-detail-card");
         const icon = TASK_CELEBRATION_ICONS[tone];
         if (!card || !icon) return Promise.resolve();
         return new Promise((resolve) => {
@@ -9453,10 +9453,10 @@
             + "<div class='no-shk-match-list'>" + cards + "</div>";
         $("closeNoShkMatch").addEventListener("click", closeNoShkMatchModal);
         target.querySelectorAll("[data-no-shk-confirm]").forEach((button) => {
-            button.addEventListener("click", () => { void confirmNoShkMatch(row, Number(button.dataset.noShkConfirm), button.closest(".no-shk-match-card")); });
+            button.addEventListener("click", () => { void confirmNoShkMatch(row, Number(button.dataset.noShkConfirm)); });
         });
         target.querySelectorAll("[data-no-shk-reject]").forEach((button) => {
-            button.addEventListener("click", () => { openNoShkRejectConfirm(row, Number(button.dataset.noShkReject), button.closest(".no-shk-match-card")); });
+            button.addEventListener("click", () => { openNoShkRejectConfirm(row, Number(button.dataset.noShkReject)); });
         });
         target.querySelectorAll("[data-no-shk-open-card]").forEach((el) => {
             el.addEventListener("click", () => {
@@ -9601,7 +9601,7 @@
         }
     }
 
-    async function confirmNoShkMatch(row, index, cardEl) {
+    async function confirmNoShkMatch(row, index) {
         const matches = taskNoShkMatches(row).slice();
         const match = matches[index];
         if (!match || match.decision !== "pending") return;
@@ -9683,71 +9683,36 @@
             toast("ШК " + (matchedItem ? matchedItem.shk : "") + " извлечён из тары в отдельную задачу.", "success");
         }
 
-        if (hasSticker) {
-            if (cardEl) await playNoShkCardExit(cardEl, "yellow");
-        } else {
-            void openNoShkStickerPrompt({ shk, snapshot: match.snapshot || {} });
-        }
-
         renderNoShkMatchModal(row);
         if (state.taskDetail && state.taskDetail.rowId === row.id) {
             renderTaskDetail(row);
             void loadAndRenderTaskDetailHistory(row);
         }
         renderReview();
+
+        if (hasSticker) {
+            await playTaskCompletionCelebration("yellow", $("noShkMatchWrap"));
+            closeNoShkMatchModal();
+        } else {
+            void openNoShkStickerPrompt({ shk, snapshot: match.snapshot || {} });
+        }
     }
 
-    async function rejectNoShkMatch(row, index, cardEl) {
+    async function rejectNoShkMatch(row, index) {
         const matches = taskNoShkMatches(row).slice();
         const match = matches[index];
         if (!match || match.decision !== "pending") return;
         const actor = flowActor();
         matches[index] = { ...match, decision: "rejected", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
-        if (cardEl) await playNoShkCardExit(cardEl, "red");
         const saved = await persistNoShkMatches(row, matches);
         if (!saved) return;
         renderNoShkMatchModal(row);
+        await playTaskCompletionCelebration("red", $("noShkMatchWrap"));
+        closeNoShkMatchModal();
     }
 
-    // Generalized version of playPrespisokExitAnimation (tasks.js, "Предсписок"
-    // play screen) for an arbitrary card element rather than the fixed
-    // #prespisokCard -- reuses the same CSS (prespisok-bg-flash-*,
-    // prespisok-card-exit-*) so the review modal's verdict animations read
-    // the same as the rest of the app: green/sparkle = опознан, yellow/slide
-    // = отложено (sticker already applied), red/burn = не тот товар.
-    function playNoShkCardExit(cardEl, tone) {
-        if (!cardEl) return Promise.resolve();
-        const exitClassByTone = { green: "prespisok-card-exit-sparkle", red: "prespisok-card-exit-burn", yellow: "prespisok-card-exit-slide" };
-        const durationByTone = { green: 680, red: 900, yellow: 640 };
-        const particleColorByTone = { green: "#facc15", red: "#f97316", yellow: "#facc15" };
-        const particleCountByTone = { green: 30, red: 22, yellow: 16 };
-        const exitClass = exitClassByTone[tone] || exitClassByTone.yellow;
-        const duration = durationByTone[tone] || durationByTone.yellow;
-        const rect = cardEl.getBoundingClientRect();
-        const flash = document.createElement("div");
-        flash.className = "prespisok-bg-flash prespisok-bg-flash-" + tone;
-        document.body.appendChild(flash);
-        window.setTimeout(() => flash.remove(), 760);
-        const burst = document.createElement("div");
-        burst.className = "quick-no-shk-burst";
-        burst.innerHTML = tone === "red"
-            ? prespisokEmberParticlesHtml(particleCountByTone[tone], particleColorByTone[tone])
-            : quickNoShkBurstParticlesHtml(particleCountByTone[tone] || 20, particleColorByTone[tone] || "#facc15");
-        burst.style.left = (rect.left + rect.width / 2) + "px";
-        burst.style.top = (tone === "red" ? rect.bottom : rect.top + rect.height / 2) + "px";
-        document.body.appendChild(burst);
-        window.setTimeout(() => burst.remove(), 900);
-        if (tone === "red") {
-            const overlay = document.createElement("div");
-            overlay.className = "prespisok-burn-overlay";
-            cardEl.appendChild(overlay);
-        }
-        cardEl.classList.add(exitClass);
-        return new Promise((resolve) => window.setTimeout(resolve, duration));
-    }
-
-    function openNoShkRejectConfirm(row, index, cardEl) {
-        state.noShkMatch.pendingReject = { rowId: row.id, index, cardEl };
+    function openNoShkRejectConfirm(row, index) {
+        state.noShkMatch.pendingReject = { rowId: row.id, index };
         setFlowModalOpen("noShkRejectConfirmModal", true);
     }
 
@@ -9762,7 +9727,7 @@
         if (!pending) return;
         const row = findTaskRow(pending.rowId);
         if (!row) return;
-        void rejectNoShkMatch(row, pending.index, pending.cardEl);
+        void rejectNoShkMatch(row, pending.index);
     }
 
     // Box/stack location for one specific "без ШК" submission -- self-
@@ -9821,10 +9786,10 @@
             + "<button id='noShkStickerPromptDone' class='btn btn-rect' type='button'>Товар оклеен</button>";
         $("closeNoShkStickerPrompt").addEventListener("click", closeNoShkStickerPrompt);
         $("noShkStickerPromptDone").addEventListener("click", () => {
-            const card = target.querySelector(".no-shk-sticker-prompt-photo");
             void (async () => {
-                await playNoShkCardExit(card, "green");
+                await playTaskCompletionCelebration("green", target);
                 closeNoShkStickerPrompt();
+                closeNoShkMatchModal();
             })();
         });
         setFlowModalOpen("noShkStickerPromptModal", true);
