@@ -3603,7 +3603,15 @@
         (rows || []).forEach((row) => {
             const nm = normalizeIdentifier(row && row.nm);
             if (!nm || byNm.has(nm)) return;
-            const name = normalizeText(row.name);
+            // Superset's own "Наименование" isn't a product title -- it's a
+            // composite per-SKU label this warehouse's own export builds as
+            // "<description> <brand> арт <article> р <size> код <nm>", with
+            // the nm itself baked into the tail. Left whole, two different
+            // nm's (size/color variants of the same product) could never
+            // match by name even when they genuinely are the same product --
+            // each one's own nm is embedded in its own string. Strip the
+            // tail so what's stored is the shared base description.
+            const name = normalizeText(row.name).replace(/\s+арт\s+.*$/i, "");
             const brand = normalizeText(row.brand);
             if (!name && !brand) return;
             byNm.set(nm, { nm, name, brand, source: "superset" });
