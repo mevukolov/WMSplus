@@ -425,7 +425,7 @@
 
     let currentLightboxId = null;
 
-    function openPhotoLightbox(item, id) {
+    function openPhotoLightbox(item, id, isBoxMode) {
         const img = $("intakeSearchPhotoImg");
         const infoContent = $("intakeSearchPhotoInfoContent");
         if (!img || !infoContent || !item.photo_path) return;
@@ -505,7 +505,124 @@
             + "<div class='row'><b>Когда:</b> " + when + "</div>"
             + stickerLine;
         renderAssignRow(item);
+        const card = document.querySelector("#intakeSearchPhotoModal .intake-photo-modal-card");
+        const panel = $("intakeMatchPanel");
+        if (card) card.classList.toggle("has-match-panel", Boolean(isBoxMode));
+        if (panel) panel.style.display = isBoxMode ? "" : "none";
+        if (isBoxMode) void openNoShkMatchPanel(item);
         setModalOpen("intakeSearchPhotoModal", true);
+    }
+
+    let noShkMatchPanelToken = 0;
+
+    function noShkMatchCardHtml(kind, id, photoUrl, title, sub) {
+        const photo = photoUrl
+            ? "<img class='intake-match-card-photo' src='" + escapeHtmlLocal(photoUrl) + "' loading='lazy' alt=''>"
+            : "<div class='intake-match-card-photo'></div>";
+        return "<article class='intake-match-card' data-match-kind='" + kind + "' data-match-id='" + escapeHtmlLocal(String(id)) + "'>"
+            + photo
+            + "<div class='intake-match-card-main'>"
+            + "<div class='intake-match-card-title'>" + escapeHtmlLocal(title || "Без наименования") + "</div>"
+            + "<div class='intake-match-card-sub'>" + escapeHtmlLocal(sub || "-") + "</div>"
+            + "</div>"
+            + "<button type='button' class='btn btn-rect intake-match-card-found-btn' data-match-found='" + kind + ":" + escapeHtmlLocal(String(id)) + "'>Опознать</button>"
+            + "</article>";
+    }
+
+    async function openNoShkMatchPanel(item) {
+        const input = $("intakeMatchQueryInput");
+        const btn = $("intakeMatchQueryBtn");
+        if (input) input.value = "";
+        if (btn) {
+            const fresh = btn.cloneNode(true);
+            btn.replaceWith(fresh);
+        }
+        $("intakeMatchQueryBtn").addEventListener("click", () => { void runNoShkMatchSearch(item); });
+        if (input) {
+            const freshInput = input.cloneNode(true);
+            input.replaceWith(freshInput);
+            freshInput.addEventListener("keydown", (event) => {
+                if (event.key === "Enter") { event.preventDefault(); void runNoShkMatchSearch(item); }
+            });
+        }
+        await runNoShkMatchSearch(item);
+    }
+
+    async function runNoShkMatchSearch(item) {
+        const token = ++noShkMatchPanelToken;
+        const status = $("intakeMatchStatus");
+        const tasksList = $("intakeMatchTasksList");
+        const pureList = $("intakeMatchPureList");
+        if (!tasksList || !pureList) return;
+        const query = ($("intakeMatchQueryInput") && $("intakeMatchQueryInput").value || "").trim();
+        if (status) status.textContent = "Ищу...";
+        tasksList.innerHTML = "<div class='intake-match-empty'>Ищу...</div>";
+        pureList.innerHTML = "<div class='intake-match-empty'>Ищу...</div>";
+        const client = db();
+        if (!client) return;
+        const [taskResult, pureResult] = await Promise.all([
+            client.rpc("wms_no_shk_item_task_matches", { p_submission_id: item.id, p_query: query || null }),
+            window.__searchNoShkPureRows ? window.__searchNoShkPureRows(query || null, item) : Promise.resolve({ rows: [] }),
+        ]);
+        if (token !== noShkMatchPanelToken) return;
+        if (status) status.textContent = "";
+        const taskRows = taskResult && !taskResult.error && Array.isArray(taskResult.data) ? taskResult.data : [];
+        tasksList.innerHTML = taskRows.length
+            ? taskRows.map((row) => noShkMatchCardHtml("task", row.task_id, "", row.title || row.match_name || "Без наименования", [row.match_brand, row.is_tare ? "Тара" : ""].filter(Boolean).join(" · "))).join("")
+            : "<div class='intake-match-empty'>Совпадений не найдено.</div>";
+        tasksList.dataset.rows = JSON.stringify(taskRows);
+        const pureRows = (pureResult && pureResult.rows) || [];
+        pureList.innerHTML = pureRows.length
+            ? pureRows.map((row, index) => noShkMatchCardHtml("pure", index, "", row.__name || "Без наименования", row.__brand || "-")).join("")
+            : "<div class='intake-match-empty'>Совпадений не найдено.</div>";
+        pureList.dataset.rows = JSON.stringify(pureRows);
+        bindNoShkMatchFoundButtons(item, taskRows, pureRows);
+    }
+
+    function bindNoShkMatchFoundButtons(item, taskRows, pureRows) {
+        document.querySelectorAll("[data-match-found]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const [kind, idRaw] = button.dataset.matchFound.split(":");
+                if (kind === "task") {
+                    const row = taskRows.find((candidate) => String(candidate.task_id) === idRaw);
+                    if (row) void confirmNoShkTaskMatch(item, row);
+                } else {
+                    const row = pureRows[Number(idRaw)];
+                    if (row) void confirmNoShkPureMatch(item, row);
+                }
+            });
+        });
+    }
+
+    async function confirmNoShkTaskMatch(item, taskRow) {
+        if (!window.__resolveNoShkBoxItemTaskMatch) return;
+        const result = await window.__resolveNoShkBoxItemTaskMatch(item, taskRow.task_id, taskRow.task_nm);
+        if (!result || !result.ok) return;
+        item.matched_task_id = taskRow.task_id;
+        item.matched_shk = result.shk || "";
+        if (window.__onNoShkItemAssigned) window.__onNoShkItemAssigned(item);
+        setModalOpen("intakeSearchPhotoModal", false);
+    }
+
+    async function confirmNoShkPureMatch(item, pureRow) {
+        if (!window.__resolveNoShkBoxItemPureMatch) return;
+        const result = await window.__resolveNoShkBoxItemPureMatch(item, pureRow);
+        if (!result || !result.ok) return;
+        const actor = currentAdminActor();
+        const client = db();
+        if (client) {
+            await client.rpc("wms_intake_mark_matched_pure_loss", {
+                p_submission_id: item.id,
+                p_pure_loss_id: result.pureLossId || "",
+                p_shk: result.shk || "",
+                p_actor_id: actor.id || null,
+                p_actor_name: actor.name || null,
+            });
+        }
+        item.matched_pure_loss_id = result.pureLossId || "";
+        item.matched_shk = result.shk || "";
+        if (window.__onNoShkItemAssigned) window.__onNoShkItemAssigned(item);
+        setModalOpen("intakeSearchPhotoModal", false);
     }
 
     // The one deliberate crack in this file's self-containment: tasks.js's
@@ -514,11 +631,11 @@
     // needed -- see refreshTaskNoShkMatches's `snapshot` field). Mirrors the
     // existing #openIntakeSearch DOM-click convention already used for
     // cross-file wiring in this app, just as a plain function instead.
-    window.__openIntakeSubmissionCard = function (item) {
+    window.__openIntakeSubmissionCard = function (item, isBoxMode) {
         if (!item || !item.photo_path) return;
         const id = "ext" + (++itemAutoId);
         itemsById.set(id, item);
-        openPhotoLightbox(item, id);
+        openPhotoLightbox(item, id, Boolean(isBoxMode));
     };
 
     // ---- retroactive sticker assignment: equivalent to scanning a
