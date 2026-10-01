@@ -9639,21 +9639,24 @@
         }
     }
 
-    async function confirmNoShkMatch(row, index) {
-        const matches = taskNoShkMatches(row).slice();
-        const match = matches[index];
-        if (!match || match.decision !== "pending") return;
+    // Общее ядро "опознать товар как найденный по задаче" -- клейм,
+    // разделение тары, история, вердикт по стикеру стола старшего.
+    // Не знает про очередь no_shk_matches -- это забота вызывающей
+    // стороны (confirmNoShkMatch для очереди, window.__resolveNoShkBoxItemTaskMatch
+    // для сплит-панели разбора короба). snapshot нужен только за
+    // .sticker_code/.item_type для текста истории -- подходит как
+    // match.snapshot (очередь), так и сырой item из wms_no_shk_box_contents
+    // (разбор короба), формы совместимы.
+    async function resolveNoShkTaskMatch(row, matchedItem, submissionId, snapshot) {
         const db = supabaseDb();
-        if (!db) return;
+        if (!db) return { ok: false };
         const items = taskItems(row);
-        const matchedItem = matchedItemForNoShk(row, match);
         const shk = matchedItem ? normalizeIdentifier(matchedItem.shk) : "";
         const actor = flowActor();
-        const hasSticker = Boolean(match.snapshot && (match.snapshot.sticker_code || match.snapshot.item_type === "Шредер"));
         let markedRow;
         try {
             const { data, error } = await db.rpc("wms_intake_mark_matched", {
-                p_submission_id: match.submission_id,
+                p_submission_id: submissionId,
                 p_task_id: row.id,
                 p_shk: shk,
                 p_actor_id: actor.id || null,
@@ -9663,11 +9666,11 @@
             markedRow = Array.isArray(data) ? data[0] : null;
         } catch (error) {
             toast("Не удалось опознать: " + (error && error.message ? error.message : String(error)), "error");
-            return;
+            return { ok: false };
         }
         if (!markedRow) {
             toast("Уже опознан в другой задаче.", "error");
-            return;
+            return { ok: false };
         }
 
         // Тара: физически найденный без ШК товар больше не "в таре" -- извлекаем
@@ -9693,21 +9696,37 @@
                 refreshExpandedSections();
             } catch (error) {
                 toast("Не удалось отделить ШК из тары: " + (error && error.message ? error.message : String(error)), "error");
-                return;
+                return { ok: false };
             }
         }
 
-        const snapshot = match.snapshot || {};
+        const snap = snapshot || {};
         const commentParts = ["Товар обнаружен без ШК"];
-        if (snapshot.sticker_code || snapshot.item_type === "Шредер") {
-            const stickerLabel = snapshot.sticker_code ? (decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code) : "Шредер";
+        if (snap.sticker_code || snap.item_type === "Шредер") {
+            const stickerLabel = snap.sticker_code ? (decodeNoShkStickerCode(snap.sticker_code) || snap.sticker_code) : "Шредер";
             commentParts.push("Обработан через стол старшего под ШК: " + stickerLabel);
         }
-        await writeTaskHistory(targetRow, "task_no_shk_found", { comment: commentParts.join(". "), submission: snapshot });
-        if (snapshot.sticker_code) {
-            const stickerLabel = decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code;
+        await writeTaskHistory(targetRow, "task_no_shk_found", { comment: commentParts.join(". "), submission: snap });
+        const hasSticker = Boolean(snap.sticker_code || snap.item_type === "Шредер");
+        if (snap.sticker_code) {
+            const stickerLabel = decodeNoShkStickerCode(snap.sticker_code) || snap.sticker_code;
             await applyNoShkStickerVerdict(targetRow, stickerLabel);
         }
+        if (targetRow !== row) {
+            toast("ШК " + (matchedItem ? matchedItem.shk : "") + " извлечён из тары в отдельную задачу.", "success");
+        }
+        return { ok: true, targetRow, matchedItem, hasSticker };
+    }
+
+    async function confirmNoShkMatch(row, index) {
+        const matches = taskNoShkMatches(row).slice();
+        const match = matches[index];
+        if (!match || match.decision !== "pending") return;
+        const matchedItem = matchedItemForNoShk(row, match);
+        const result = await resolveNoShkTaskMatch(row, matchedItem, match.submission_id, match.snapshot || {});
+        if (!result.ok) return;
+        const { targetRow, hasSticker } = result;
+        const actor = flowActor();
         const confirmedMatch = { ...match, decision: "confirmed", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
 
         if (targetRow === row) {
@@ -9718,7 +9737,6 @@
             matches.splice(index, 1);
             await persistNoShkMatches(row, matches);
             await persistNoShkMatches(targetRow, taskNoShkMatches(targetRow).concat([confirmedMatch]));
-            toast("ШК " + (matchedItem ? matchedItem.shk : "") + " извлечён из тары в отдельную задачу.", "success");
         }
 
         renderNoShkMatchModal(row);
@@ -9732,7 +9750,7 @@
             await playTaskCompletionCelebration("yellow", $("noShkMatchWrap"));
             closeNoShkMatchModal();
         } else {
-            void openNoShkStickerPrompt({ shk, snapshot: match.snapshot || {} });
+            void openNoShkStickerPrompt({ shk: matchedItem ? normalizeIdentifier(matchedItem.shk) : "", snapshot: match.snapshot || {} });
         }
     }
 
