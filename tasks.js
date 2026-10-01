@@ -5628,6 +5628,86 @@
         }
     }
 
+    // Поиск по "чистым списаниям" для сплит-панели разбора короба -- мост
+    // для intake_search.js (другой файл/замыкание). Пустой query --
+    // автоподбор: берём собственные wb_nm_candidates товара, резолвим
+    // имя/бренд через wms_nm_directory, и используем это как затравку для
+    // того же fetchNoShkPureRows (точный механизм visual-variant фуззи,
+    // что и у неподключённого "Разбор «Без ШК»" -- тут просто вызывается
+    // напрямую, без обвязки state.noShkReview, которая тому экрану не
+    // нужна в этом контексте).
+    async function seedQueryFromSubmission(item) {
+        const db = supabaseDb();
+        if (!db) return "";
+        const candidates = Array.isArray(item.wb_nm_candidates) ? item.wb_nm_candidates.map(normalizeIdentifier).filter(Boolean) : [];
+        if (!candidates.length) return "";
+        try {
+            const { data, error } = await db.from("wms_nm_directory").select("nm,name,brand").in("nm", candidates.slice(0, 20)).limit(5);
+            if (error || !Array.isArray(data) || !data.length) return "";
+            const best = data.find((row) => row.name || row.brand);
+            return best ? [best.brand, best.name].filter(Boolean).join(" ") : "";
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    window.__searchNoShkPureRows = async function (query, seedItem) {
+        let effectiveQuery = normalizeText(query);
+        if (!effectiveQuery && seedItem) effectiveQuery = await seedQueryFromSubmission(seedItem);
+        if (!effectiveQuery) return { rows: [] };
+        const result = await fetchNoShkPureRows(effectiveQuery);
+        const rows = (result.rows || []).map((row) => ({ ...row, __name: noShkPureName(row), __brand: noShkPureBrand(row), __shk: noShkPureShk(row), __nm: noShkPureNm(row) }));
+        return { rows, error: result.error };
+    };
+
+    window.__resolveNoShkBoxItemTaskMatch = async function (submission, taskId, taskNm) {
+        const db = supabaseDb();
+        if (!db || !submission || !submission.id) return { ok: false };
+        let row;
+        try {
+            const { data, error } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("id", taskId).maybeSingle();
+            if (error) throw error;
+            row = data;
+        } catch (error) {
+            toast("Не удалось загрузить задачу: " + (error && error.message ? error.message : String(error)), "error");
+            return { ok: false };
+        }
+        if (!row) {
+            toast("Задача не найдена.", "error");
+            return { ok: false };
+        }
+        const items = taskItems(row);
+        const matchedItem = items.find((candidate) => normalizeIdentifier(candidate.nm) === normalizeIdentifier(taskNm)) || items[0] || null;
+        const result = await resolveNoShkTaskMatch(row, matchedItem, submission.id, submission);
+        if (!result.ok) return { ok: false };
+        renderReview();
+        return { ok: true, shk: matchedItem ? normalizeIdentifier(matchedItem.shk) : "" };
+    };
+
+    window.__resolveNoShkBoxItemPureMatch = async function (_submission, pureRow) {
+        try {
+            for (const patch of noShkPurePatchVariants(pureRow)) {
+                try {
+                    await updateNoShkPureRow(pureRow, patch);
+                    // pure_losses_rep's own PK column name varies by
+                    // environment (see buildNoShkPureUpdateFilters, which
+                    // already tries id/pure_id/uuid/pure_losses_id/row_id in
+                    // order) -- noShkRowSignature resolves the same way,
+                    // falling back to a shk+date+wh_id composite when none
+                    // of those columns exist, so matched_pure_loss_id always
+                    // gets a real, non-empty value.
+                    return { ok: true, shk: noShkPureShk(pureRow), nm: noShkPureNm(pureRow), pureLossId: noShkRowSignature(pureRow) };
+                } catch (error) {
+                    if (!isUnknownColumnError(error)) throw error;
+                }
+            }
+            throw new Error("Не удалось записать вердикт.");
+        } catch (error) {
+            toast("Не удалось опознать: " + (error && error.message ? error.message : String(error)), "error");
+            return { ok: false };
+        }
+    };
+
     function openNoShkReviewModal() {
         closeFlowModals();
         resetNoShkReviewState(true);
