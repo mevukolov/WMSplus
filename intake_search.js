@@ -515,15 +515,25 @@
 
     let noShkMatchPanelToken = 0;
 
-    function noShkMatchCardHtml(kind, id, photoUrl, title, sub) {
+    // Длинный статус ("SGR – Сортировка переупакованного на ПВЗ товара")
+    // не влезает в тайл -- тот же приём, что latinStatusCode в tasks.js
+    // (другой файл/замыкание, поэтому своя маленькая копия): берём первый
+    // 3-буквенный латинский код в начале строки.
+    function shortStatusCode(value) {
+        const match = String(value || "").toUpperCase().match(/[A-Z]{3}/);
+        return match ? match[0] : (value ? String(value) : "-");
+    }
+
+    function noShkMatchCardHtml(kind, id, photoUrl, title, subLines, highlight) {
         const photo = photoUrl
             ? "<img class='intake-match-card-photo' src='" + escapeHtmlLocal(photoUrl) + "' loading='lazy' alt=''>"
             : "<div class='intake-match-card-photo'></div>";
-        return "<article class='intake-match-card' data-match-kind='" + kind + "' data-match-id='" + escapeHtmlLocal(String(id)) + "'>"
+        const subHtml = (subLines || []).filter(Boolean).map((line) => "<div class='intake-match-card-sub'>" + escapeHtmlLocal(line) + "</div>").join("");
+        return "<article class='intake-match-card" + (highlight ? " is-nm-match" : "") + "' data-match-kind='" + kind + "' data-match-id='" + escapeHtmlLocal(String(id)) + "'>"
             + photo
             + "<div class='intake-match-card-main'>"
             + "<div class='intake-match-card-title'>" + escapeHtmlLocal(title || "Без наименования") + "</div>"
-            + "<div class='intake-match-card-sub'>" + escapeHtmlLocal(sub || "-") + "</div>"
+            + (subHtml || "<div class='intake-match-card-sub'>-</div>")
             + "</div>"
             + "<button type='button' class='btn btn-rect intake-match-card-found-btn' data-match-found='" + kind + ":" + escapeHtmlLocal(String(id)) + "'>Опознать</button>"
             + "</article>";
@@ -581,14 +591,35 @@
         ]);
         if (token !== noShkMatchPanelToken) return;
         if (status) status.textContent = "";
-        const taskRows = taskResult && !taskResult.error && Array.isArray(taskResult.data) ? taskResult.data : [];
+        // Кандидаты WB по фото (wb_nm_candidates) -- если результат поиска
+        // попадает именно в этот набор, это не просто текстовое сходство, а
+        // прямое совпадение по номенклатуре. Такие строки поднимаются
+        // наверх и подсвечиваются жёлтым.
+        const candidateNmSet = new Set((Array.isArray(item.wb_nm_candidates) ? item.wb_nm_candidates : []).map((nm) => String(nm || "").trim()).filter(Boolean));
+        const taskRowsRaw = taskResult && !taskResult.error && Array.isArray(taskResult.data) ? taskResult.data : [];
+        const taskRows = taskRowsRaw
+            .map((row, index) => ({ row, index, isNmMatch: candidateNmSet.has(String(row.task_nm || "").trim()) }))
+            .sort((a, b) => (a.isNmMatch === b.isNmMatch ? a.index - b.index : (a.isNmMatch ? -1 : 1)))
+            .map((entry) => entry.row);
         tasksList.innerHTML = taskRows.length
-            ? taskRows.map((row) => noShkMatchCardHtml("task", row.task_id, "", row.match_name || row.title || "Без наименования", "ШК " + (row.shk || "-") + " · " + formatShortDate(row.movement))).join("")
+            ? taskRows.map((row) => noShkMatchCardHtml(
+                "task", row.task_id, "", row.match_name || row.title || "Без наименования",
+                ["ШК " + (row.shk || "-") + " · " + formatShortDate(row.movement), "Статус: " + shortStatusCode(row.status)],
+                candidateNmSet.has(String(row.task_nm || "").trim())
+            )).join("")
             : "<div class='intake-match-empty'>Совпадений не найдено.</div>";
         tasksList.dataset.rows = JSON.stringify(taskRows);
-        const pureRows = (pureResult && pureResult.rows) || [];
+        const pureRowsRaw = (pureResult && pureResult.rows) || [];
+        const pureRows = pureRowsRaw
+            .map((row, index) => ({ row, index, isNmMatch: candidateNmSet.has(String(row.__nm || "").trim()) }))
+            .sort((a, b) => (a.isNmMatch === b.isNmMatch ? a.index - b.index : (a.isNmMatch ? -1 : 1)))
+            .map((entry) => entry.row);
         pureList.innerHTML = pureRows.length
-            ? pureRows.map((row, index) => noShkMatchCardHtml("pure", index, "", row.__name || "Без наименования", "ШК " + (row.__shk || "-") + " · " + formatShortDate(row.__date))).join("")
+            ? pureRows.map((row, index) => noShkMatchCardHtml(
+                "pure", index, "", row.__name || "Без наименования",
+                ["ШК " + (row.__shk || "-") + " · " + formatShortDate(row.__date), "Статус до списания: " + shortStatusCode(row.__status)],
+                candidateNmSet.has(String(row.__nm || "").trim())
+            )).join("")
             : "<div class='intake-match-empty'>Совпадений не найдено.</div>";
         pureList.dataset.rows = JSON.stringify(pureRows);
         bindNoShkMatchFoundButtons(item, taskRows, pureRows);

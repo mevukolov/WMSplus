@@ -5656,7 +5656,7 @@
         if (!effectiveQuery && seedItem) effectiveQuery = await seedQueryFromSubmission(seedItem);
         if (!effectiveQuery) return { rows: [] };
         const result = await fetchNoShkPureRows(effectiveQuery);
-        const rows = (result.rows || []).map((row) => ({ ...row, __name: noShkPureName(row), __brand: noShkPureBrand(row), __shk: noShkPureShk(row), __nm: noShkPureNm(row), __date: noShkPureDate(row) }));
+        const rows = (result.rows || []).map((row) => ({ ...row, __name: noShkPureName(row), __brand: noShkPureBrand(row), __shk: noShkPureShk(row), __nm: noShkPureNm(row), __date: noShkPureDate(row), __status: normalizeText(row.shk_state_before_lost || row.shk_state) }));
         return { rows, error: result.error };
     };
 
