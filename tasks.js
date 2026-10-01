@@ -789,6 +789,7 @@
             rowId: "",
             photoCache: {},
             cardInfoCache: {},
+            pendingReject: null,
         },
         noShkQueue: {
             rows: [],
@@ -9288,9 +9289,11 @@
             if (!submission || !submission.id || knownIds.has(submission.id)) return;
             const wbCandidates = Array.isArray(submission.wb_nm_candidates) ? submission.wb_nm_candidates.map((nm) => normalizeIdentifier(nm)) : [];
             const matchedItem = items.find((item) => wbCandidates.includes(normalizeIdentifier(item.nm))) || items[0];
+            const matchedNm = matchedItem ? normalizeIdentifier(matchedItem.nm) : (nms[0] || "");
             additions.push({
                 submission_id: submission.id,
-                nm: matchedItem ? normalizeIdentifier(matchedItem.nm) : (nms[0] || ""),
+                nm: matchedNm,
+                task_nm: matchedNm,
                 matched_at: new Date().toISOString(),
                 decision: "pending",
                 decided_by_id: "",
@@ -9304,6 +9307,7 @@
                     created_at: normalizeText(submission.created_at),
                     sticker_code: normalizeText(submission.sticker_code) || null,
                     item_type: normalizeText(submission.item_type),
+                    box_id: submission.box_id || null,
                 },
             });
         });
@@ -9353,7 +9357,15 @@
 
     function matchedItemForNoShk(row, match) {
         const items = taskItems(row);
-        return items.find((item) => normalizeIdentifier(item.nm) === normalizeIdentifier(match.nm)) || items[0] || null;
+        // match.nm is the CANDIDATE's own (photo-guessed) nm -- for a fuzzy
+        // brand+name match it's expected to differ from every task item's
+        // nm, so it can't be used to find "which item is this". task_nm is
+        // the task's own item nm that was actually matched against; older
+        // entries written before it existed fall back to match.nm (where it
+        // usually does equal a task item, since only the exact-nm path ran
+        // historically).
+        const taskNm = normalizeIdentifier(match.task_nm) || normalizeIdentifier(match.nm);
+        return items.find((item) => normalizeIdentifier(item.nm) === taskNm) || items[0] || null;
     }
 
     function noShkMatchCardHtml(match, index, row) {
@@ -9369,39 +9381,39 @@
             : "<div class='no-shk-match-wb-loading'>Без фото</div>";
         const noShkMetaHtml = "<div class='no-shk-match-photo-meta'>"
             + "<strong>" + escapeHtml(snapshot.item_text || "Без наименования") + "</strong>"
-            + "<div>Сфотографировал: " + escapeHtml(snapshot.full_name || "-") + "</div>"
-            + "<div>Участок: " + escapeHtml(snapshot.area || "-") + "</div>"
-            + "<div>" + escapeHtml(formatRuDateTime(snapshot.created_at)) + "</div>"
+            + "<span class='no-shk-match-pill'>" + escapeHtml(snapshot.full_name || "-") + "</span>"
+            + "<span class='no-shk-match-pill'>" + escapeHtml(snapshot.area || "-") + "</span>"
+            + "<div class='no-shk-match-date'>" + escapeHtml(formatRuDateTime(snapshot.created_at)) + "</div>"
             + "</div>";
         const matchedItem = matchedItemForNoShk(row, match);
         const statusLabel = matchedItem ? (latinStatusCode(matchedItem.status) || normalizeText(matchedItem.status) || "-") : "-";
         const taskMetaHtml = "<div class='no-shk-match-photo-meta'>"
             + "<strong>" + escapeHtml((matchedItem && matchedItem.name) || taskItemName(row) || "Без наименования") + "</strong>"
-            + "<div>Статус последнего движения: " + escapeHtml(statusLabel) + "</div>"
-            + "<div>Участок: " + escapeHtml((matchedItem && matchedItem.mx) || "-") + "</div>"
-            + "<div>" + escapeHtml(matchedItem ? formatRuDateTime(matchedItem.movement) : "-") + "</div>"
+            + "<span class='no-shk-match-pill'>" + escapeHtml(statusLabel) + "</span>"
+            + "<span class='no-shk-match-pill'>" + escapeHtml((matchedItem && matchedItem.mx) || "-") + "</span>"
+            + "<div class='no-shk-match-date'>" + escapeHtml(matchedItem ? formatRuDateTime(matchedItem.movement) : "-") + "</div>"
             + "</div>";
-        // On a tare, several matches can point at different items inside
-        // the same task -- the modal's shared title (soleTaskShk) can't
-        // tell them apart, so each card names its own matched ШК here.
-        const shkLineHtml = isTareTask(row) && matchedItem
-            ? "<button type='button' class='no-shk-match-shk-link' data-no-shk-open-task='" + escapeHtml(row.id) + "'>ШК " + escapeHtml(matchedItem.shk) + "</button>"
-            : "";
-        const stickerHtml = (snapshot.item_type === "Шредер" || snapshot.sticker_code)
-            ? "<div class='no-shk-match-sticker'>Присвоенный ШК: " + escapeHtml(snapshot.sticker_code ? (decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code) : "Шредер") + "</div>"
+        const headShk = (matchedItem && matchedItem.shk) || soleTaskShk(row) || "-";
+        const headHtml = "<div class='no-shk-match-card-head'>"
+            + "<span class='no-shk-match-card-shk'>ШК " + escapeHtml(headShk) + "</span>"
+            + "<button type='button' class='no-shk-match-pill-link' data-no-shk-open-task='" + escapeHtml(row.id) + "'>К задаче</button>"
+            + "</div>";
+        const hasSticker = snapshot.item_type === "Шредер" || snapshot.sticker_code;
+        const stickerHtml = hasSticker
+            ? "<div class='no-shk-match-sticker-pill'><span>ШК присвоен</span><strong>" + escapeHtml(snapshot.sticker_code ? (decodeNoShkStickerCode(snapshot.sticker_code) || snapshot.sticker_code) : "Шредер") + "</strong></div>"
             : "";
         const decisionHtml = match.decision === "confirmed"
             ? "<div class='no-shk-match-decision is-confirmed' data-no-shk-open-card='" + index + "'>Опознано: " + escapeHtml(match.decided_by_name || match.decided_by_id || "-") + ", " + escapeHtml(formatRuDateTime(match.decided_at)) + " · открыть карточку без ШК</div>"
             : match.decision === "rejected"
             ? "<div class='no-shk-match-decision is-rejected'>Соответствие не подтверждено. " + escapeHtml(match.decided_by_name || match.decided_by_id || "-") + "</div>"
             : "<div class='no-shk-match-actions'>"
-                + "<button type='button' class='btn btn-rect' data-no-shk-confirm='" + index + "'>Опознать</button>"
+                + "<button type='button' class='btn btn-rect' data-no-shk-confirm='" + index + "'>" + (hasSticker ? "Создать задачу" : "Опознать") + "</button>"
                 + "<button type='button' class='btn btn-outline' data-no-shk-reject='" + index + "'>Не тот товар</button>"
                 + "</div>";
         return "<article class='no-shk-match-card'>"
-            + "<div class='no-shk-match-photos'>" + noShkPhotoHtml + wbPhotoHtml + "</div>"
-            + "<div class='no-shk-match-photos'>" + noShkMetaHtml + taskMetaHtml + "</div>"
-            + shkLineHtml
+            + headHtml
+            + "<div class='no-shk-match-photos'>" + "<div class='no-shk-match-photo'>" + noShkPhotoHtml + "</div><div class='no-shk-match-photo'>" + wbPhotoHtml + "</div>" + "</div>"
+            + "<div class='no-shk-match-metas'>" + noShkMetaHtml + taskMetaHtml + "</div>"
             + stickerHtml
             + decisionHtml
             + "</article>";
@@ -9437,18 +9449,14 @@
         const cards = matches.length
             ? matches.map((match, index) => noShkMatchCardHtml(match, index, row)).join("")
             : "<div class='empty-state'>Совпадений не найдено.</div>";
-        const isTare = isTareTask(row);
-        const titleHtml = isTare
-            ? escapeHtml("Тара " + (normalizeIdentifier(row.source_tare_id) || "-"))
-            : "<button type='button' class='work-title-link' data-no-shk-open-task='" + escapeHtml(row.id) + "'>ШК " + escapeHtml(soleTaskShk(row) || "-") + "</button>";
-        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>" + titleHtml + "</h3><p class='work-subtitle'>Вероятные совпадения по номенклатуре и дате.</p></div><button id='closeNoShkMatch' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
+        target.innerHTML = "<div class='work-head no-shk-match-modal-head'><button id='closeNoShkMatch' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
             + "<div class='no-shk-match-list'>" + cards + "</div>";
         $("closeNoShkMatch").addEventListener("click", closeNoShkMatchModal);
         target.querySelectorAll("[data-no-shk-confirm]").forEach((button) => {
-            button.addEventListener("click", () => { void confirmNoShkMatch(row, Number(button.dataset.noShkConfirm)); });
+            button.addEventListener("click", () => { void confirmNoShkMatch(row, Number(button.dataset.noShkConfirm), button.closest(".no-shk-match-card")); });
         });
         target.querySelectorAll("[data-no-shk-reject]").forEach((button) => {
-            button.addEventListener("click", () => { void rejectNoShkMatch(row, Number(button.dataset.noShkReject)); });
+            button.addEventListener("click", () => { openNoShkRejectConfirm(row, Number(button.dataset.noShkReject), button.closest(".no-shk-match-card")); });
         });
         target.querySelectorAll("[data-no-shk-open-card]").forEach((el) => {
             el.addEventListener("click", () => {
@@ -9593,7 +9601,7 @@
         }
     }
 
-    async function confirmNoShkMatch(row, index) {
+    async function confirmNoShkMatch(row, index, cardEl) {
         const matches = taskNoShkMatches(row).slice();
         const match = matches[index];
         if (!match || match.decision !== "pending") return;
@@ -9603,6 +9611,7 @@
         const matchedItem = matchedItemForNoShk(row, match);
         const shk = matchedItem ? normalizeIdentifier(matchedItem.shk) : "";
         const actor = flowActor();
+        const hasSticker = Boolean(match.snapshot && (match.snapshot.sticker_code || match.snapshot.item_type === "Шредер"));
         let markedRow;
         try {
             const { data, error } = await db.rpc("wms_intake_mark_matched", {
@@ -9674,6 +9683,12 @@
             toast("ШК " + (matchedItem ? matchedItem.shk : "") + " извлечён из тары в отдельную задачу.", "success");
         }
 
+        if (hasSticker) {
+            if (cardEl) await playNoShkCardExit(cardEl, "yellow");
+        } else {
+            void openNoShkStickerPrompt({ shk, snapshot: match.snapshot || {} });
+        }
+
         renderNoShkMatchModal(row);
         if (state.taskDetail && state.taskDetail.rowId === row.id) {
             renderTaskDetail(row);
@@ -9682,15 +9697,140 @@
         renderReview();
     }
 
-    async function rejectNoShkMatch(row, index) {
+    async function rejectNoShkMatch(row, index, cardEl) {
         const matches = taskNoShkMatches(row).slice();
         const match = matches[index];
         if (!match || match.decision !== "pending") return;
         const actor = flowActor();
         matches[index] = { ...match, decision: "rejected", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
+        if (cardEl) await playNoShkCardExit(cardEl, "red");
         const saved = await persistNoShkMatches(row, matches);
         if (!saved) return;
         renderNoShkMatchModal(row);
+    }
+
+    // Generalized version of playPrespisokExitAnimation (tasks.js, "Предсписок"
+    // play screen) for an arbitrary card element rather than the fixed
+    // #prespisokCard -- reuses the same CSS (prespisok-bg-flash-*,
+    // prespisok-card-exit-*) so the review modal's verdict animations read
+    // the same as the rest of the app: green/sparkle = опознан, yellow/slide
+    // = отложено (sticker already applied), red/burn = не тот товар.
+    function playNoShkCardExit(cardEl, tone) {
+        if (!cardEl) return Promise.resolve();
+        const exitClassByTone = { green: "prespisok-card-exit-sparkle", red: "prespisok-card-exit-burn", yellow: "prespisok-card-exit-slide" };
+        const durationByTone = { green: 680, red: 900, yellow: 640 };
+        const particleColorByTone = { green: "#facc15", red: "#f97316", yellow: "#facc15" };
+        const particleCountByTone = { green: 30, red: 22, yellow: 16 };
+        const exitClass = exitClassByTone[tone] || exitClassByTone.yellow;
+        const duration = durationByTone[tone] || durationByTone.yellow;
+        const rect = cardEl.getBoundingClientRect();
+        const flash = document.createElement("div");
+        flash.className = "prespisok-bg-flash prespisok-bg-flash-" + tone;
+        document.body.appendChild(flash);
+        window.setTimeout(() => flash.remove(), 760);
+        const burst = document.createElement("div");
+        burst.className = "quick-no-shk-burst";
+        burst.innerHTML = tone === "red"
+            ? prespisokEmberParticlesHtml(particleCountByTone[tone], particleColorByTone[tone])
+            : quickNoShkBurstParticlesHtml(particleCountByTone[tone] || 20, particleColorByTone[tone] || "#facc15");
+        burst.style.left = (rect.left + rect.width / 2) + "px";
+        burst.style.top = (tone === "red" ? rect.bottom : rect.top + rect.height / 2) + "px";
+        document.body.appendChild(burst);
+        window.setTimeout(() => burst.remove(), 900);
+        if (tone === "red") {
+            const overlay = document.createElement("div");
+            overlay.className = "prespisok-burn-overlay";
+            cardEl.appendChild(overlay);
+        }
+        cardEl.classList.add(exitClass);
+        return new Promise((resolve) => window.setTimeout(resolve, duration));
+    }
+
+    function openNoShkRejectConfirm(row, index, cardEl) {
+        state.noShkMatch.pendingReject = { rowId: row.id, index, cardEl };
+        setFlowModalOpen("noShkRejectConfirmModal", true);
+    }
+
+    function closeNoShkRejectConfirm() {
+        state.noShkMatch.pendingReject = null;
+        setFlowModalOpen("noShkRejectConfirmModal", false);
+    }
+
+    function confirmNoShkRejectFromModal() {
+        const pending = state.noShkMatch.pendingReject;
+        closeNoShkRejectConfirm();
+        if (!pending) return;
+        const row = findTaskRow(pending.rowId);
+        if (!row) return;
+        void rejectNoShkMatch(row, pending.index, pending.cardEl);
+    }
+
+    // Box/stack location for one specific "без ШК" submission -- self-
+    // contained (own queries, no dependency on no_shk_zone.js's module
+    // state), same convention as decodeNoShkStickerCode's own duplication:
+    // this flow needs to work from the task review modal regardless of
+    // whether the "Зона без ШК" screen has ever loaded in this session.
+    // Reuses the existing .no-shk-box/.no-shk-shelf/.no-shk-floor CSS
+    // (already shared app-wide, see no_shk_zone.js's own renderers).
+    async function noShkBoxLocationHtml(boxId) {
+        if (!boxId) return "<p class='no-shk-getbox-note'>Короб ещё не определён.</p>";
+        const db = supabaseDb();
+        if (!db) return "";
+        try {
+            const { data: box } = await db.from("wms_no_shk_boxes").select("id,box_number,shelf_id").eq("id", boxId).maybeSingle();
+            if (!box) return "<p class='no-shk-getbox-note'>Короб не найден.</p>";
+            if (!box.shelf_id) {
+                return "<div class='no-shk-floor'><p class='no-shk-floor-title'>На полу</p>"
+                    + "<div class='no-shk-boxes-row'><div class='no-shk-box no-shk-box-target'><span class='no-shk-box-number'>№" + escapeHtml(String(box.box_number)) + "</span></div></div></div>";
+            }
+            const { data: shelf } = await db.from("wms_no_shk_shelves").select("id,rack_id,name,shelf_number,capacity").eq("id", box.shelf_id).maybeSingle();
+            let rackName = "";
+            if (shelf && shelf.rack_id) {
+                const { data: rack } = await db.from("wms_no_shk_racks").select("id,name").eq("id", shelf.rack_id).maybeSingle();
+                rackName = (rack && rack.name) || "";
+            }
+            const { data: siblings } = await db.from("wms_no_shk_boxes").select("id,box_number").eq("shelf_id", box.shelf_id).order("box_number");
+            const boxesHtml = (siblings || []).map((b) => {
+                const isTarget = b.id === box.id;
+                return "<div class='no-shk-box" + (isTarget ? " no-shk-box-target" : "") + "'><span class='no-shk-box-number'>№" + escapeHtml(String(b.box_number)) + "</span></div>";
+            }).join("");
+            const shelfLabel = [rackName, (shelf && shelf.name) || ""].filter(Boolean).join(" · ");
+            return "<div class='no-shk-shelf'>"
+                + "<div class='no-shk-shelf-head'><span>" + escapeHtml(shelfLabel || "Стеллаж") + "</span></div>"
+                + "<div class='no-shk-boxes-row'>" + boxesHtml + "</div>"
+                + "</div>";
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    function closeNoShkStickerPrompt() {
+        setFlowModalOpen("noShkStickerPromptModal", false);
+    }
+
+    async function openNoShkStickerPrompt({ shk, snapshot }) {
+        const target = $("noShkStickerPromptWrap");
+        if (!target) return;
+        const photoHtml = snapshot.photo_path
+            ? "<img src='" + escapeHtml(noShkPhotoUrl(snapshot.photo_path)) + "' alt='Фото без ШК' loading='lazy'>"
+            : "<div class='no-shk-match-wb-loading'>Без фото</div>";
+        target.innerHTML = "<div class='work-head'><div><h3 class='work-title'>Оклейте товар под ШК " + escapeHtml(shk || "-") + "</h3></div>"
+            + "<button id='closeNoShkStickerPrompt' class='btn btn-square' type='button' aria-label='Закрыть'>×</button></div>"
+            + "<div class='no-shk-sticker-prompt-photo'>" + photoHtml + "</div>"
+            + "<div id='noShkStickerPromptLocation' class='no-shk-sticker-prompt-location'>Ищу короб...</div>"
+            + "<button id='noShkStickerPromptDone' class='btn btn-rect' type='button'>Товар оклеен</button>";
+        $("closeNoShkStickerPrompt").addEventListener("click", closeNoShkStickerPrompt);
+        $("noShkStickerPromptDone").addEventListener("click", () => {
+            const card = target.querySelector(".no-shk-sticker-prompt-photo");
+            void (async () => {
+                await playNoShkCardExit(card, "green");
+                closeNoShkStickerPrompt();
+            })();
+        });
+        setFlowModalOpen("noShkStickerPromptModal", true);
+        const locationHtml = await noShkBoxLocationHtml(snapshot.box_id);
+        const locationEl = $("noShkStickerPromptLocation");
+        if (locationEl) locationEl.innerHTML = locationHtml;
     }
 
     function removeFromNoShkQueue(taskId) {
@@ -18681,6 +18821,9 @@
         $("closeReopenConfirm").addEventListener("click", closeReopenConfirm);
         $("cancelReopenTask").addEventListener("click", closeReopenConfirm);
         $("confirmReopenTask").addEventListener("click", () => { void reopenTaskFromConfirm(); });
+        $("closeNoShkRejectConfirm").addEventListener("click", closeNoShkRejectConfirm);
+        $("cancelNoShkReject").addEventListener("click", closeNoShkRejectConfirm);
+        $("confirmNoShkReject").addEventListener("click", confirmNoShkRejectFromModal);
         $("expensiveWriteoffBack").addEventListener("click", closeExpensiveWriteoffConfirm);
         $("expensiveWriteoffConfirm").addEventListener("click", confirmExpensiveWriteoff);
         $("closeSplitShkConfirm").addEventListener("click", closeSplitShkConfirm);
