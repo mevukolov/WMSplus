@@ -5,7 +5,7 @@
     const RUNS_TABLE = "wms_manual_upload_runs";
     const SETTINGS_TABLE = "wms_manual_upload_settings";
     const WMS_TASKS_TABLE = "wms_tasks";
-    const WMS_TASK_SELECT_COLUMNS = "id,source_module,source_id,source_row_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at";
+    const WMS_TASK_SELECT_COLUMNS = "id,source_module,source_id,source_row_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,has_pending_no_shk_match";
     // Same as WMS_TASK_SELECT_COLUMNS but source_payload replaced with just
     // the small precomputed fields Review/Requests table rendering and
     // filtering actually read (see taskItemName/taskStatusCodeLabel/
@@ -14,7 +14,7 @@
     // Task detail, actualization, quick-no-shk eligibility, and Flow
     // scoring all need the real task_items and fetch it separately (see
     // ensureFullActiveTasksLoaded / openTaskDetail).
-    const WMS_TASK_LIST_COLUMNS = "id,source_module,source_id,source_row_id,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,item_name:source_payload->>item_name,entity_type:source_payload->>entity_type,status_code_label:source_payload->>status_code_label,movement_status_options:source_payload->movement_status_options,route_label:source_payload->>route_label,route_label_camel:source_payload->>routeLabel,parking:source_payload->>parking,place:source_payload->>place";
+    const WMS_TASK_LIST_COLUMNS = "id,source_module,source_id,source_row_id,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,has_pending_no_shk_match,item_name:source_payload->>item_name,entity_type:source_payload->>entity_type,status_code_label:source_payload->>status_code_label,movement_status_options:source_payload->movement_status_options,route_label:source_payload->>route_label,route_label_camel:source_payload->>routeLabel,parking:source_payload->>parking,place:source_payload->>place";
     // Achievement counting only ever reads a handful of flat fields plus the
     // actor's id/name (buried in source_payload.wms_review). The full
     // WMS_TASK_SELECT_COLUMNS row -- source_payload especially, which carries
@@ -34,6 +34,7 @@
     const SUPABASE_FUNCTIONS_BASE_URL = ((typeof window !== "undefined" && window.SUPABASE_URL) || "https://bgphllmzmlwurfnbagho.supabase.co").replace(/\/$/, "") + "/functions/v1";
     const SUPABASE_PUBLIC_ANON_KEY = (typeof window !== "undefined" && window.SUPABASE_ANON_KEY) || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJncGhsbG16bWx3dXJmbmJhZ2hvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTQwNzIsImV4cCI6MjA3ODUzMDA3Mn0.a1_Wbtpbs9P-_UDqwjGqAIjvwK5WbT_M3B7g5BHtR2Q";
     const WMS_TASK_WRITEBACK_FUNCTION = "wms-task-writeback";
+    const WMS_MATCH_SUGGESTIONS_TABLE = "wms_match_suggestions";
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
@@ -7142,7 +7143,7 @@
 
     function taskSpecialTagFilterValues(row) {
         const tags = new Set(reviewTags(row));
-        if (taskNoShkMatches(row).length) tags.add("Без ШК");
+        if (row && row.has_pending_no_shk_match) tags.add("Без ШК");
         return SPECIAL_TAG_ORDER.filter((tag) => tags.has(tag));
     }
 
@@ -9323,9 +9324,98 @@
         renderReview();
     }
 
+    // no_shk_matches used to live inline in source_payload -- now it's the
+    // wms_match_suggestions table ("Предложение соответствия" in the entity
+    // glossary). row.__no_shk_matches is an in-memory attachment (never
+    // persisted on the task itself), populated by attachNoShkMatchesToRows
+    // wherever a row is freshly fetched -- see its call sites.
     function taskNoShkMatches(row) {
-        const matches = taskPayload(row).no_shk_matches;
-        return Array.isArray(matches) ? matches : [];
+        return Array.isArray(row && row.__no_shk_matches) ? row.__no_shk_matches : [];
+    }
+
+    function mapMatchSuggestionRow(dbRow) {
+        return {
+            __suggestion_id: dbRow.id,
+            __task_id: dbRow.task_id,
+            submission_id: dbRow.submission_id,
+            nm: dbRow.nm,
+            task_nm: dbRow.task_nm,
+            match_score: dbRow.match_score,
+            matched_at: dbRow.created_at,
+            decision: dbRow.status,
+            decided_by_id: dbRow.decided_by_id || "",
+            decided_by_name: dbRow.decided_by_name || "",
+            decided_at: dbRow.decided_at || "",
+            snapshot: dbRow.snapshot || {},
+        };
+    }
+
+    // Batch-loads wms_match_suggestions for every id in taskIds (one round
+    // trip, not N+1) and attaches the mapped array onto each matching row
+    // in `rows` as row.__no_shk_matches. Rows with no suggestions get [].
+    async function attachNoShkMatchesToRows(rows) {
+        const list = (rows || []).filter(Boolean);
+        list.forEach((row) => { row.__no_shk_matches = []; });
+        const taskIds = Array.from(new Set(list.map((row) => row.id).filter(Boolean)));
+        if (!taskIds.length) return;
+        const db = supabaseDb();
+        if (!db) return;
+        try {
+            const { data, error } = await db.from(WMS_MATCH_SUGGESTIONS_TABLE).select("*").in("task_id", taskIds);
+            if (error) throw error;
+            const byTaskId = new Map();
+            (data || []).forEach((dbRow) => {
+                const mapped = mapMatchSuggestionRow(dbRow);
+                if (!byTaskId.has(dbRow.task_id)) byTaskId.set(dbRow.task_id, []);
+                byTaskId.get(dbRow.task_id).push(mapped);
+            });
+            list.forEach((row) => { row.__no_shk_matches = byTaskId.get(row.id) || []; });
+        } catch (error) {
+            console.warn("no-shk match suggestions load skipped:", error);
+        }
+    }
+
+    // Targeted update of a single suggestion row (by its own id, not by
+    // re-deriving task_id/submission_id -- avoids any ambiguity if a match
+    // object carries stale task_id after a re-parent). newTaskId re-parents
+    // the suggestion to a different task (the tare-split case in
+    // confirmNoShkMatch, where the matched item moves to its own new task).
+    async function updateNoShkMatchSuggestion(match, patch, newTaskId) {
+        const db = supabaseDb();
+        if (!db || !match || !match.__suggestion_id) return false;
+        const updatePayload = { ...patch };
+        if (newTaskId) updatePayload.task_id = newTaskId;
+        try {
+            const { error } = await db.from(WMS_MATCH_SUGGESTIONS_TABLE).update(updatePayload).eq("id", match.__suggestion_id);
+            if (error) throw error;
+        } catch (error) {
+            toast("Не удалось сохранить: " + (error && error.message ? error.message : String(error)), "error");
+            return false;
+        }
+        return true;
+    }
+
+    // Writes the denormalized "has pending" cache on the task itself --
+    // same contract has_pending_no_shk_match always had, just now computed
+    // from row.__no_shk_matches (fed by the new table) instead of the old
+    // JSON array. Keeps the queue-removal/queue-refresh side effects that
+    // persistNoShkMatches used to own.
+    async function setTaskHasPendingNoShkMatch(row, hasPending) {
+        const db = supabaseDb();
+        if (db) {
+            try {
+                const { error } = await db.from(WMS_TASKS_TABLE).update({ has_pending_no_shk_match: hasPending }).eq("id", row.id);
+                if (error) throw error;
+            } catch (error) {
+                console.warn("has_pending_no_shk_match update skipped:", error);
+            }
+        }
+        row.has_pending_no_shk_match = hasPending;
+        if (!hasPending) {
+            removeFromNoShkQueue(row.id);
+        } else if ($("reviewNoShkCheckModal") && $("reviewNoShkCheckModal").classList.contains("active")) {
+            renderReviewNoShkCheckModal();
+        }
     }
 
     // Live per-task top-up, same shape as refreshTaskSpecialTags above: runs
@@ -9365,21 +9455,17 @@
         if (!candidates.length) return;
         const existing = taskNoShkMatches(row);
         const knownIds = new Set(existing.map((match) => match.submission_id));
-        const additions = [];
+        const inserts = [];
         candidates.forEach((submission) => {
             if (!submission || !submission.id || knownIds.has(submission.id)) return;
             const wbCandidates = Array.isArray(submission.wb_nm_candidates) ? submission.wb_nm_candidates.map((nm) => normalizeIdentifier(nm)) : [];
             const matchedItem = items.find((item) => wbCandidates.includes(normalizeIdentifier(item.nm))) || items[0];
             const matchedNm = matchedItem ? normalizeIdentifier(matchedItem.nm) : (nms[0] || "");
-            additions.push({
+            inserts.push({
+                task_id: row.id,
                 submission_id: submission.id,
                 nm: matchedNm,
                 task_nm: matchedNm,
-                matched_at: new Date().toISOString(),
-                decision: "pending",
-                decided_by_id: "",
-                decided_by_name: "",
-                decided_at: "",
                 snapshot: {
                     item_text: normalizeText(submission.item_text),
                     photo_path: normalizeText(submission.photo_path),
@@ -9392,18 +9478,21 @@
                 },
             });
         });
-        if (!additions.length) return;
-        const mergedMatches = existing.concat(additions);
-        const nextPayload = { ...taskPayload(row), no_shk_matches: mergedMatches };
+        if (!inserts.length) return;
+        let insertedRows;
         try {
-            const { error } = await db.from(WMS_TASKS_TABLE).update({ source_payload: nextPayload, has_pending_no_shk_match: true }).eq("id", row.id);
+            const { data, error } = await db.from(WMS_MATCH_SUGGESTIONS_TABLE)
+                .upsert(inserts, { onConflict: "task_id,submission_id", ignoreDuplicates: true })
+                .select("*");
             if (error) throw error;
+            insertedRows = data || [];
         } catch (error) {
             console.warn("Без ШК live match refresh failed:", error);
             return;
         }
-        row.source_payload = nextPayload;
-        row.has_pending_no_shk_match = true;
+        if (!insertedRows.length) return;
+        row.__no_shk_matches = existing.concat(insertedRows.map(mapMatchSuggestionRow));
+        await setTaskHasPendingNoShkMatch(row, true);
         if (state.taskDetail && state.taskDetail.rowId === row.id) renderTaskDetail(row);
         renderReview();
     }
@@ -9575,9 +9664,10 @@
     // taskNm (optional): scope the modal to one item-group within the task
     // (see renderNoShkMatchModal). Omitted by the "Без ШК" tag entry point,
     // which wants to see every match on the task at once.
-    function openNoShkMatchModal(taskId, taskNm) {
+    async function openNoShkMatchModal(taskId, taskNm) {
         const row = findTaskRow(taskId);
         if (!row) return;
+        await attachNoShkMatchesToRows([row]);
         state.noShkMatch.rowId = row.id;
         state.noShkMatch.taskNm = taskNm || null;
         renderNoShkMatchModal(row);
@@ -9604,6 +9694,7 @@
             toast("Не удалось загрузить задачу: " + (error && error.message ? error.message : String(error)), "error");
             return;
         }
+        if (row) await attachNoShkMatchesToRows([row]);
         const relevant = row ? taskNoShkMatches(row).filter((match) => !taskNm || noShkMatchGroupNm(match) === taskNm) : [];
         if (!row || row.is_deleted || NO_SHK_SKIP_VERDICTS.includes(normalizeText(row.opp_verdict)) || !relevant.some((match) => match.decision === "pending")) {
             const queueIndex = state.noShkQueue.rows.findIndex((queued) => queued.id === taskId);
@@ -9624,32 +9715,6 @@
         state.noShkMatch.taskNm = taskNm || null;
         renderNoShkMatchModal(row);
         setFlowModalOpen("noShkMatchModal", true);
-    }
-
-    async function persistNoShkMatches(row, matches) {
-        const db = supabaseDb();
-        if (!db) return false;
-        const nextPayload = { ...taskPayload(row), no_shk_matches: matches };
-        const hasPending = matches.some((match) => match.decision === "pending");
-        try {
-            const { error } = await db.from(WMS_TASKS_TABLE).update({ source_payload: nextPayload, has_pending_no_shk_match: hasPending }).eq("id", row.id);
-            if (error) throw error;
-        } catch (error) {
-            toast("Не удалось сохранить: " + (error && error.message ? error.message : String(error)), "error");
-            return false;
-        }
-        row.source_payload = nextPayload;
-        row.has_pending_no_shk_match = hasPending;
-        if (!hasPending) {
-            removeFromNoShkQueue(row.id);
-        } else if ($("reviewNoShkCheckModal") && $("reviewNoShkCheckModal").classList.contains("active")) {
-            // The task still has other pending item-groups (a tare with
-            // several items) -- removeFromNoShkQueue only drops a task once
-            // it has nothing left at all, so the just-resolved group's own
-            // queue row needs its own refresh here instead.
-            renderReviewNoShkCheckModal();
-        }
-        return true;
     }
 
     // Стол старшего уже приклеил свой ШК на товар (snapshot.sticker_code) --
@@ -9799,7 +9864,7 @@
     }
 
     async function confirmNoShkMatch(row, index) {
-        const matches = taskNoShkMatches(row).slice();
+        const matches = taskNoShkMatches(row);
         const match = matches[index];
         if (!match || match.decision !== "pending") return;
         const matchedItem = matchedItemForNoShk(row, match);
@@ -9807,16 +9872,20 @@
         if (!result.ok) return;
         const { targetRow, hasSticker } = result;
         const actor = flowActor();
-        const confirmedMatch = { ...match, decision: "confirmed", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
+        const decidedAt = new Date().toISOString();
+        const patch = { status: "confirmed", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: decidedAt };
+        const saved = await updateNoShkMatchSuggestion(match, patch, targetRow !== row ? targetRow.id : null);
+        if (!saved) return;
+        const confirmedMatch = { ...match, decision: "confirmed", decided_by_id: patch.decided_by_id, decided_by_name: patch.decided_by_name, decided_at: patch.decided_at, __task_id: targetRow.id };
 
         if (targetRow === row) {
-            matches[index] = confirmedMatch;
-            const saved = await persistNoShkMatches(row, matches);
-            if (!saved) return;
+            row.__no_shk_matches = matches.map((m, i) => (i === index ? confirmedMatch : m));
+            await setTaskHasPendingNoShkMatch(row, row.__no_shk_matches.some((m) => m.decision === "pending"));
         } else {
-            matches.splice(index, 1);
-            await persistNoShkMatches(row, matches);
-            await persistNoShkMatches(targetRow, taskNoShkMatches(targetRow).concat([confirmedMatch]));
+            row.__no_shk_matches = matches.filter((_, i) => i !== index);
+            targetRow.__no_shk_matches = taskNoShkMatches(targetRow).concat([confirmedMatch]);
+            await setTaskHasPendingNoShkMatch(row, row.__no_shk_matches.some((m) => m.decision === "pending"));
+            await setTaskHasPendingNoShkMatch(targetRow, true);
         }
 
         renderNoShkMatchModal(row);
@@ -9835,13 +9904,15 @@
     }
 
     async function rejectNoShkMatch(row, index) {
-        const matches = taskNoShkMatches(row).slice();
+        const matches = taskNoShkMatches(row);
         const match = matches[index];
         if (!match || match.decision !== "pending") return;
         const actor = flowActor();
-        matches[index] = { ...match, decision: "rejected", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
-        const saved = await persistNoShkMatches(row, matches);
+        const patch = { status: "rejected", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: new Date().toISOString() };
+        const saved = await updateNoShkMatchSuggestion(match, patch);
         if (!saved) return;
+        row.__no_shk_matches = matches.map((m, i) => (i === index ? { ...match, decision: "rejected", decided_by_id: patch.decided_by_id, decided_by_name: patch.decided_by_name, decided_at: patch.decided_at } : m));
+        await setTaskHasPendingNoShkMatch(row, row.__no_shk_matches.some((m) => m.decision === "pending"));
         renderNoShkMatchModal(row);
         await playTaskCompletionCelebration("red", $("noShkMatchWrap"));
         closeNoShkMatchModal();
@@ -10020,6 +10091,7 @@
             const { data, error } = await db.rpc("wms_no_shk_pending_tasks", { p_limit: 100 });
             if (error) throw error;
             state.noShkQueue.rows = Array.isArray(data) ? data : [];
+            await attachNoShkMatchesToRows(state.noShkQueue.rows);
         } catch (error) {
             state.noShkQueue.rows = [];
             toast("Не удалось загрузить список: " + (error && error.message ? error.message : String(error)), "error");
@@ -10788,7 +10860,7 @@
         target.querySelectorAll("[data-special-pill]").forEach((button) => {
             const tag = button.dataset.specialPill || "";
             button.addEventListener("click", () => {
-                if (tag === "Без ШК") openNoShkMatchModal(row.id);
+                if (tag === "Без ШК") void openNoShkMatchModal(row.id);
                 else openSpecialInfoModal(row.id, tag);
             });
         });
