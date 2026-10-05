@@ -62,6 +62,7 @@ const VERDICT_TONE = {
     [CANCELLATION_AFTER_WRITEOFF_VERDICT]: "yellow",
     [AUTO_WRITEOFF_EXCLUSION_VERDICT]: "yellow",
     // "Некорректный запрос" -- намеренно без тона, остаётся серым.
+    "Система - Автосписание": "red",
 };
 
 // Системные вердикты — выставляются только кодом (актуализация, авто-проверка Без ШК),
@@ -70,3 +71,9 @@ const SYSTEM_MOVEMENT_VERDICT = "Система - Движение";
 const SYSTEM_NO_SHK_NOT_FOUND_VERDICT = "Система - Не найден Без ШК";
 const SYSTEM_NO_SHK_FOUND_VERDICT = "Система - Обнаружен Без ШК";
 const SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT = "Система - Дубль";
+// Задача закрыта автоматически -- её ШК обнаружился в новой выгрузке
+// чистых списаний (wms_reconcile_shks_written_off), пока задача ещё
+// висела незавершённой. Значение продублировано как литерал в самой RPC
+// (SQL не может импортировать эту константу) -- держать строки в синхроне
+// при будущих правках.
+const SYSTEM_AUTO_WRITEOFF_VERDICT = "Система - Автосписание";

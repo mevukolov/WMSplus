@@ -62,6 +62,7 @@
         SYSTEM_MOVEMENT_VERDICT,
         SYSTEM_NO_SHK_NOT_FOUND_VERDICT,
         SYSTEM_NO_SHK_FOUND_VERDICT,
+        SYSTEM_AUTO_WRITEOFF_VERDICT,
     ].map((item) => normalizeForMatch(item)));
     const SUPERSET_CACHE_TABLE = "wms_superset_cache";
     const SUPERSET_CACHE_CHUNK_SIZE = 500;
@@ -7001,6 +7002,7 @@
         SYSTEM_NO_SHK_NOT_FOUND_VERDICT,
         SYSTEM_NO_SHK_FOUND_VERDICT,
         SYSTEM_INCOMING_FLOW_DUPLICATE_VERDICT,
+        SYSTEM_AUTO_WRITEOFF_VERDICT,
     ]);
 
     function truncateReviewName(text, maxLen) {
