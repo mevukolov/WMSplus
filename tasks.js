@@ -2800,6 +2800,7 @@
         setShiftOpeningStatus("Сохраняю чистые списания и открываю смену...");
         try {
             const pureImport = await applyPureLossesImport(state.shift.purePrepared, WH_ID, shiftTargetPureDate());
+            const absorbed = await absorbShksIntoPureLossesZone(state.shift.purePrepared);
             const user = currentWmsUser();
             const payload = {
                 wh_id: WH_ID,
@@ -2832,7 +2833,8 @@
             };
             renderShiftGate();
             closeShiftOpeningModal();
-            toast("Смена открыта. Чистые списания обработаны: +" + pureImport.inserted_new + ", движение: " + pureImport.auto_marked_found + ".", "success");
+            const absorbedNote = absorbed.length ? " Перенесено в зону «Чистые списания»: " + absorbed.length + "." : "";
+            toast("Смена открыта. Чистые списания обработаны: +" + pureImport.inserted_new + ", движение: " + pureImport.auto_marked_found + "." + absorbedNote, "success");
             void evaluateShiftAchievements();
         } catch (error) {
             console.error("shift opening save failed:", error);
@@ -14085,6 +14087,54 @@
             return applyPureAutoFoundUpdate(target, unsupportedColumns);
         }
         throw new Error("Не удалось обновить строку с движением товара: " + error.message);
+    }
+
+    // Тот же мост в зону "Чистые списания" (wms_pure_losses_absorb_shks),
+    // что и у pure_losses.js -- это отдельный, параллельный путь загрузки
+    // того же самого файла (при открытии смены), со своей копией
+    // prepareIncomingRows (preparePureLossesRows) той же формы строк
+    // {shk, nm, decription, price, date_lost}. Вызывается после
+    // applyPureLossesImport, тем же принципом.
+    function buildPureLossesAbsorbRows(prepared) {
+        const rows = [];
+        const seen = new Set();
+        const addFrom = (map) => {
+            (map instanceof Map ? map : new Map()).forEach((row) => {
+                const shk = normalizeIdentifier(row && row.shk);
+                if (!shk || seen.has(shk)) return;
+                seen.add(shk);
+                rows.push({
+                    shk,
+                    nm: row.nm != null ? String(row.nm) : "",
+                    name: row.decription || "",
+                    price: Number(row.price) || 0,
+                    date_lost: row.date_lost || "",
+                });
+            });
+        };
+        addFrom(prepared && prepared.rowsByKey);
+        addFrom(prepared && prepared.postedRowsByKey);
+        return rows;
+    }
+
+    async function absorbShksIntoPureLossesZone(prepared) {
+        const rows = buildPureLossesAbsorbRows(prepared);
+        if (!rows.length) return [];
+        const db = supabaseDb();
+        if (!db) return [];
+        const actor = currentWmsUser();
+        try {
+            const { data, error } = await db.rpc("wms_pure_losses_absorb_shks", {
+                p_rows: rows,
+                p_actor_id: actor.id || null,
+                p_actor_name: actor.name || null,
+            });
+            if (error) throw error;
+            return Array.isArray(data) ? data : [];
+        } catch (error) {
+            console.warn("absorb shks into pure losses zone (shift opening) skipped:", error);
+            return [];
+        }
     }
 
     async function applyPureLossesImport(prepared, whId, targetDate) {
