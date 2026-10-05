@@ -285,6 +285,7 @@
             const syncPlan = buildSyncPlan(prepared.rowsByKey, prepared.postedRowsByKey, existingByShk, currentUserWhId);
 
             await applySyncPlan(syncPlan);
+            const reconciled = await reconcileShksWrittenOffInTasks(incomingShks, currentUserWhId);
 
             renderSummary(syncPlan.stats);
             await refreshLastUploadedDate(currentUserWhId);
@@ -294,7 +295,8 @@
             }
 
             const updated = syncPlan.stats.insertedNew + syncPlan.stats.autoMarkedFound;
-            window.MiniUI?.toast?.(`Обновление завершено. Изменено строк: ${updated}`, { type: "success" });
+            const reconciledNote = reconciled.length ? ` Закрыто/извлечено из задач: ${reconciled.length}.` : "";
+            window.MiniUI?.toast?.(`Обновление завершено. Изменено строк: ${updated}.${reconciledNote}`, { type: "success" });
         } catch (error) {
             const message = String(error?.message || error || "Неизвестная ошибка");
             console.error("pure_losses import failed:", error);
@@ -5141,6 +5143,33 @@
 
     function buildShkDateKey(shkValue, dateLostValue) {
         return `${normalizeShk(shkValue)}|${normalizeToken(dateLostValue)}`;
+    }
+
+    // Жизненный цикл ШК: выгрузка -> (возможно) предсписок -> чистые
+    // списания. С момента попадания в чистые списания эта таблица
+    // авторитетна -- если ШК ещё висит в незавершённой задаче (активной
+    // или отложенной), эту задачу нужно схлопнуть, а не оставлять висеть
+    // параллельно. Общая RPC в проде (не копия логики здесь) -- см.
+    // wms_reconcile_shks_written_off, tasks.html и pure_losses.html это
+    // разные страницы без общего JS.
+    async function reconcileShksWrittenOffInTasks(shks, currentUserWhId) {
+        if (!Array.isArray(shks) || !shks.length) return [];
+        const user = getCurrentUser() || {};
+        const actorId = user.id || user.employee_id || user.employeeId || user.user_id || user.userId || null;
+        const actorName = user.name || user.fio || user.full_name || user.fullName || null;
+        try {
+            const { data, error } = await supabaseClient.rpc("wms_reconcile_shks_written_off", {
+                p_shks: shks,
+                p_actor_id: actorId ? String(actorId) : null,
+                p_actor_name: actorName || null,
+                p_comment: "Найден в выгрузке чистых списаний (wh_id " + currentUserWhId + ")",
+            });
+            if (error) throw error;
+            return Array.isArray(data) ? data : [];
+        } catch (error) {
+            console.warn("reconcile shks written off skipped:", error);
+            return [];
+        }
     }
 
     function collectIncomingShks(prepared) {
