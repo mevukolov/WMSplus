@@ -435,7 +435,6 @@
         "WMI (МП + ПЦ)",
         "Без заказа",
         "Движение после продажи",
-        "Чистые списания",
         "Другие задачи",
     ];
     const REQUEST_SECTIONS = [
@@ -5952,10 +5951,14 @@
         }
     }
 
+    function isPureLossesZoneTask(row) {
+        return normalizeText(row && row.task_type) === "Чистые списания";
+    }
+
     function reviewGroupedRows() {
         const grouped = new Map(REVIEW_SECTIONS.map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
-            if (isPrespisokTask(row) || requestSectionName(row)) return;
+            if (isPrespisokTask(row) || requestSectionName(row) || isPureLossesZoneTask(row)) return;
             const section = grouped.has(taskSectionName(row)) ? taskSectionName(row) : "Другие задачи";
             grouped.get(section).push(row);
         });
