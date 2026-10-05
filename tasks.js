@@ -4713,6 +4713,7 @@
         if (combined.includes("пм") || combined.includes("pm")) return "ПМ";
         if (combined.includes("rwp")) return "RWP";
         if (combined.includes("упаковка") || combined.includes("переупаковка")) return "Упаковка";
+        if (taskType === "чистые списания") return "Чистые списания";
         if (combined.includes("предсорт")) return "Предсортировка";
         if (combined.includes("маркетплейс")) return "Маркетплейс";
         if (combined.includes("пц")) return "ПЦ";
@@ -9642,7 +9643,9 @@
         const verdict = normalizeText(row.opp_verdict) && normalizeText(row.opp_verdict) !== "Не выбран"
             ? normalizeText(row.opp_verdict)
             : normalizeText(savedReview.verdict || savedReview.attachment) || "Не выбран";
-        const verdictOptions = incomingFlow ? INCOMING_FLOW_ATTACHMENT_OPTIONS : REVIEW_VERDICTS;
+        const verdictOptions = incomingFlow
+            ? INCOMING_FLOW_ATTACHMENT_OPTIONS
+            : (ZONE_VERDICTS[normalizeText(row.task_type)] || REVIEW_VERDICTS);
         const formVerdict = verdictOptions.includes(verdict) ? verdict : "Не выбран";
         const readOnlyReviewLines = [
             "Комментарий: " + (savedReview.comment || "-"),
