@@ -8719,6 +8719,58 @@
         return { ok: true, targetRow, matchedItem, hasSticker };
     }
 
+    // The same "без ШК" photo (submission) can get suggested to several
+    // candidate tasks at once when the nm match is ambiguous -- confirming
+    // it against one task answers the question for all of them, since the
+    // physical item can only belong to one. Without this, the sibling
+    // suggestion rows for the same submission_id stayed "pending" under
+    // their own tasks forever, so an already-identified item kept
+    // resurfacing in "Быстрая проверка «Без ШК»". Fire-and-forget: the
+    // confirm the operator is waiting on has already succeeded by the time
+    // this runs.
+    async function rejectSiblingNoShkSuggestions(submissionId, excludeSuggestionId, actor) {
+        const db = supabaseDb();
+        if (!db || !submissionId) return;
+        try {
+            const { data: siblings, error: fetchError } = await db
+                .from(WMS_MATCH_SUGGESTIONS_TABLE)
+                .select("id,task_id")
+                .eq("submission_id", submissionId)
+                .eq("status", "pending")
+                .neq("id", excludeSuggestionId);
+            if (fetchError) throw fetchError;
+            if (!siblings || !siblings.length) return;
+
+            const patch = {
+                status: "rejected",
+                decided_by_id: actor.id || "",
+                decided_by_name: (actor.name || "-") + " (авто: опознано по другой задаче)",
+                decided_at: new Date().toISOString(),
+            };
+            const { error: updateError } = await db
+                .from(WMS_MATCH_SUGGESTIONS_TABLE)
+                .update(patch)
+                .in("id", siblings.map((s) => s.id));
+            if (updateError) throw updateError;
+
+            const taskIds = Array.from(new Set(siblings.map((s) => s.task_id).filter(Boolean)));
+            for (const taskId of taskIds) {
+                const { count, error: countError } = await db
+                    .from(WMS_MATCH_SUGGESTIONS_TABLE)
+                    .select("id", { count: "exact", head: true })
+                    .eq("task_id", taskId)
+                    .eq("status", "pending");
+                if (countError) { console.warn("sibling pending recount skipped:", countError); continue; }
+                if (!count) {
+                    await db.from(WMS_TASKS_TABLE).update({ has_pending_no_shk_match: false }).eq("id", taskId);
+                    removeFromNoShkQueue(taskId);
+                }
+            }
+        } catch (error) {
+            console.warn("sibling no-shk suggestion cleanup skipped:", error);
+        }
+    }
+
     async function confirmNoShkMatch(row, index) {
         const matches = taskNoShkMatches(row);
         const match = matches[index];
@@ -8732,6 +8784,7 @@
         const patch = { status: "confirmed", decided_by_id: actor.id || "", decided_by_name: actor.name || "", decided_at: decidedAt };
         const saved = await updateNoShkMatchSuggestion(match, patch, targetRow !== row ? targetRow.id : null);
         if (!saved) return;
+        void rejectSiblingNoShkSuggestions(match.submission_id, match.__suggestion_id, actor);
         const confirmedMatch = { ...match, decision: "confirmed", decided_by_id: patch.decided_by_id, decided_by_name: patch.decided_by_name, decided_at: patch.decided_at, __task_id: targetRow.id };
 
         if (targetRow === row) {
