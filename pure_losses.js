@@ -285,7 +285,7 @@
             const syncPlan = buildSyncPlan(prepared.rowsByKey, prepared.postedRowsByKey, existingByShk, currentUserWhId);
 
             await applySyncPlan(syncPlan);
-            const reconciled = await reconcileShksWrittenOffInTasks(incomingShks, currentUserWhId);
+            const absorbed = await absorbShksIntoPureLossesZone(prepared);
 
             renderSummary(syncPlan.stats);
             await refreshLastUploadedDate(currentUserWhId);
@@ -295,8 +295,8 @@
             }
 
             const updated = syncPlan.stats.insertedNew + syncPlan.stats.autoMarkedFound;
-            const reconciledNote = reconciled.length ? ` Закрыто/извлечено из задач: ${reconciled.length}.` : "";
-            window.MiniUI?.toast?.(`Обновление завершено. Изменено строк: ${updated}.${reconciledNote}`, { type: "success" });
+            const absorbedNote = absorbed.length ? ` Перенесено в зону «Чистые списания»: ${absorbed.length}.` : "";
+            window.MiniUI?.toast?.(`Обновление завершено. Изменено строк: ${updated}.${absorbedNote}`, { type: "success" });
         } catch (error) {
             const message = String(error?.message || error || "Неизвестная ошибка");
             console.error("pure_losses import failed:", error);
@@ -5146,28 +5146,49 @@
     }
 
     // Жизненный цикл ШК: выгрузка -> (возможно) предсписок -> чистые
-    // списания. С момента попадания в чистые списания эта таблица
-    // авторитетна -- если ШК ещё висит в незавершённой задаче (активной
-    // или отложенной), эту задачу нужно схлопнуть, а не оставлять висеть
-    // параллельно. Общая RPC в проде (не копия логики здесь) -- см.
-    // wms_reconcile_shks_written_off, tasks.html и pure_losses.html это
-    // разные страницы без общего JS.
-    async function reconcileShksWrittenOffInTasks(shks, currentUserWhId) {
-        if (!Array.isArray(shks) || !shks.length) return [];
+    // списания. С момента попадания в чистые списания зона
+    // task_type='Чистые списания' внутри wms_tasks авторитетна -- см.
+    // wms_pure_losses_absorb_shks. tasks.html и pure_losses.html это
+    // разные страницы без общего JS, поэтому вызываем общую RPC, а не
+    // копируем её логику сюда.
+    function buildPureLossesAbsorbRows(prepared) {
+        const rows = [];
+        const seen = new Set();
+        const addFrom = (map) => {
+            (map instanceof Map ? map : new Map()).forEach((row) => {
+                const shk = normalizeShk(row?.shk);
+                if (!shk || seen.has(shk)) return;
+                seen.add(shk);
+                rows.push({
+                    shk,
+                    nm: row.nm != null ? String(row.nm) : "",
+                    name: row.decription || "",
+                    price: Number(row.price) || 0,
+                    date_lost: row.date_lost || "",
+                });
+            });
+        };
+        addFrom(prepared?.rowsByKey);
+        addFrom(prepared?.postedRowsByKey);
+        return rows;
+    }
+
+    async function absorbShksIntoPureLossesZone(prepared) {
+        const rows = buildPureLossesAbsorbRows(prepared);
+        if (!rows.length) return [];
         const user = getCurrentUser() || {};
         const actorId = user.id || user.employee_id || user.employeeId || user.user_id || user.userId || null;
         const actorName = user.name || user.fio || user.full_name || user.fullName || null;
         try {
-            const { data, error } = await supabaseClient.rpc("wms_reconcile_shks_written_off", {
-                p_shks: shks,
+            const { data, error } = await supabaseClient.rpc("wms_pure_losses_absorb_shks", {
+                p_rows: rows,
                 p_actor_id: actorId ? String(actorId) : null,
                 p_actor_name: actorName || null,
-                p_comment: "Найден в выгрузке чистых списаний (wh_id " + currentUserWhId + ")",
             });
             if (error) throw error;
             return Array.isArray(data) ? data : [];
         } catch (error) {
-            console.warn("reconcile shks written off skipped:", error);
+            console.warn("absorb shks into pure losses zone skipped:", error);
             return [];
         }
     }
