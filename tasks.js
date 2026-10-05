@@ -11384,8 +11384,11 @@
     // (по date_lost), затем внутри месяца -- участок по колонке `lr`. Пока
     // без вердиктов/детальной карточки -- просто список, тот же визуальный
     // паттерн (плитки/таблица/анимации), что и у "Неактивные".
+    // Задача зоны "Чистые списания" несёт lr/date_lost в source_payload
+    // (wms_pure_losses_absorb_shks) -- не читаем их как сырые колонки
+    // pure_losses_rep, эта вкладка теперь смотрит на wms_tasks.
     function pureLossesRowLr(row) {
-        const value = Number(row && row.lr);
+        const value = Number(row && taskPayload(row).pure_losses_lr);
         return Number.isFinite(value) ? value : null;
     }
 
@@ -11394,7 +11397,7 @@
     }
 
     function pureLossesRowMonthKey(row) {
-        const date = parseDateTime(row && row.date_lost).date;
+        const date = normalizeText(row && taskPayload(row).pure_losses_date_lost);
         return date ? date.slice(0, 7) : "";
     }
 
@@ -11431,32 +11434,24 @@
         return grouped;
     }
 
+    // Вкладка "Чистые списания" теперь смотрит на зону внутри wms_tasks
+    // (task_type='Чистые списания'), а не на сырой pure_losses_rep --
+    // те же задачи, что уже загружены для "Предразбора" (fetchReviewTaskRows
+    // грузит все активные task_type разом, reviewGroupedRows их только
+    // фильтрует из своей группировки, см. isPureLossesZoneTask). Поэтому
+    // здесь просто дожидаемся общей загрузки, если она ещё не случилась,
+    // вместо отдельного запроса -- и строка остаётся той же, что в
+    // findTaskRow/openTaskDetail, клик по строке открывает обычную
+    // карточку задачи.
     async function loadPureLossesRows() {
         if (state.pureLosses.loadPromise) return state.pureLosses.loadPromise;
-        const db = supabaseDb();
-        if (!db) {
-            toast("Supabase SDK не загрузился.", "error");
-            return;
-        }
         state.pureLosses.loadPromise = (async () => {
             state.pureLosses.loading = true;
             renderPureLosses();
             try {
-                const rows = [];
-                const pageSize = 1000;
-                for (let from = 0; from < 20000; from += pageSize) {
-                    const { data, error } = await db
-                        .from(PURE_LOSSES_TABLE)
-                        .select("*")
-                        .eq("wh_id", WH_ID)
-                        .in("lr", PURE_LOSSES_LR_SECTIONS)
-                        .range(from, from + pageSize - 1);
-                    if (error) throw error;
-                    const batch = Array.isArray(data) ? data : [];
-                    rows.push(...batch);
-                    if (batch.length < pageSize) break;
-                }
-                state.pureLosses.rows = rows.filter(isPureRowPendingForAutoFound);
+                if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
+                else if (state.review.loadPromise) await state.review.loadPromise;
+                state.pureLosses.rows = (state.review.rows || []).filter((row) => isPureLossesZoneTask(row) && taskStatus(row) !== "Завершено");
                 state.pureLosses.loaded = true;
             } catch (error) {
                 console.error("pure losses load failed:", error);
@@ -11629,18 +11624,23 @@
             return;
         }
         const body = rows.map((row) => {
-            const name = normalizeText(row.decription || row.description) || "Наименование не найдено";
-            const nm = normalizeIdentifier(row.nm);
-            const shk = normalizeIdentifier(row.shk);
-            const dateLabel = formatRuDate(parseDateTime(row.date_lost).date);
-            return "<tr>"
+            const payload = taskPayload(row);
+            const items = taskItems(row);
+            const name = normalizeText(payload.item_name || (items[0] && items[0].name)) || "Наименование не найдено";
+            const nm = normalizeIdentifier(items[0] && items[0].nm);
+            const shk = normalizeIdentifier(row.source_shk_ids && row.source_shk_ids[0]);
+            const dateLabel = formatRuDate(normalizeText(payload.pure_losses_date_lost));
+            return "<tr class='review-data-row' data-pure-losses-task='" + escapeHtml(row.id) + "'>"
                 + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(name) + "</div>" + (nm ? "<div class='review-task-sub'>НМ: " + escapeHtml(nm) + "</div>" : "") + "</td>"
                 + "<td>" + escapeHtml(shk || "-") + "</td>"
                 + "<td>" + escapeHtml(dateLabel) + "</td>"
-                + "<td class='review-price-cell' style='" + priceStyle(row.price) + "'>" + escapeHtml(formatMoney(row.price)) + "</td>"
+                + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
                 + "</tr>";
         }).join("");
         target.innerHTML = "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>Наименование</th><th>ШК</th><th>Дата списания</th><th>Стоимость</th></tr></thead><tbody>" + body + "</tbody></table></div>";
+        target.querySelectorAll("[data-pure-losses-task]").forEach((tr) => {
+            tr.addEventListener("click", () => openTaskDetail(tr.dataset.pureLossesTask, "review"));
+        });
     }
 
     async function loadPrespisokSecondLineTasks() {
