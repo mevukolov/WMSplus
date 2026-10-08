@@ -551,6 +551,13 @@
         preview: null,
         specialMap: new Map(),
         specialCheck: null,
+        // Живой статус движения по ШК (wms_superset_cache), ключ -- shk.
+        // Наполняется после каждой актуализации Superset и подтягивается
+        // при загрузке списка задач -- см. "словарь понятий", раздел
+        // "Как ШК на самом деле становится «Списан»": это общий кусок
+        // внешней половины атрибутов ШК, один на все задачи, а не
+        // копия-снэпшот в каждой отдельной задаче.
+        supersetCache: new Map(),
         review: {
             rows: [],
             loading: false,
@@ -2868,6 +2875,7 @@
                 }
                 setReviewStatus("Загружено активных задач: " + state.review.rows.length + ".");
                 void refreshWritebackFailuresBanner();
+                void hydrateSupersetCache(allTaskShkList(state.review.rows)).then(() => renderReview());
             } catch (error) {
                 console.error("wms review load failed:", error);
                 state.review.rows = [];
@@ -3237,6 +3245,7 @@
             renderActualizeResults();
             void enrichTaskNomenclatureFromSuperset(rows).catch((error) => console.warn("superset nomenclature enrich skipped:", error));
             void syncNmDirectoryFromSuperset(rows).catch((error) => console.warn("nm directory sync skipped:", error));
+            void pushSupersetRowsToCache(rows).then(() => hydrateSupersetCache(rows.map((row) => row.shk))).then(() => renderReview()).catch((error) => console.warn("superset cache push skipped:", error));
         } catch (error) {
             console.error("actualize superset failed:", error);
             setActualizeStatus("Не удалось разобрать Superset: " + (error && error.message ? error.message : String(error)), "error");
@@ -3565,6 +3574,79 @@
                 raw,
             },
         };
+    }
+
+    // Общий кэш "внешней половины" ШК (статус движения + последний склад),
+    // один на весь склад -- не копия внутри каждой задачи. Раньше эта же
+    // пара push/fetch жила только ради свайп-игры "Быстрая проверка Без
+    // ШК" (снесена вместе с игрой в dc65a11) и была обвешана её
+    // состоянием; здесь -- тот же принцип, без привязки к конкретной
+    // фиче, как общий источник для отображения статуса где угодно.
+    async function pushSupersetRowsToCache(rows) {
+        const db = supabaseDb();
+        if (!db) return;
+        const latest = Array.from(latestSupersetByShk(rows || []).values());
+        if (!latest.length) return;
+        const now = new Date().toISOString();
+        const payloads = latest.map((row) => ({
+            wh_id: WH_ID,
+            shk: row.shk,
+            nm: row.nm || null,
+            name: row.name || null,
+            last_office: row.last_office || null,
+            last_status: row.last_status || null,
+            last_status_at: row.last_status_at || null,
+            last_status_ts: row.last_status_ts || null,
+            price: row.price || null,
+            updated_at: now,
+        }));
+        for (const chunk of chunkArray(payloads, SUPERSET_CACHE_CHUNK_SIZE)) {
+            try {
+                const { error } = await db.from(SUPERSET_CACHE_TABLE).upsert(chunk, { onConflict: "wh_id,shk" });
+                if (error) throw error;
+            } catch (error) {
+                console.warn("superset cache push skipped:", error);
+                return;
+            }
+        }
+    }
+
+    // Подтягивает то, что уже знает склад (с любого устройства) про нужные
+    // сейчас ШК, и складывает в state.supersetCache -- читающие места
+    // (taskStatusCodeLabel/taskMovementStatusOptions) берут оттуда поверх
+    // устаревающего снэпшота внутри задачи.
+    async function hydrateSupersetCache(shks) {
+        const db = supabaseDb();
+        const ids = Array.from(new Set((shks || []).map(normalizeIdentifier).filter(Boolean)));
+        if (!db || !ids.length) return;
+        for (const chunk of chunkArray(ids, 200)) {
+            try {
+                const { data, error } = await db
+                    .from(SUPERSET_CACHE_TABLE)
+                    .select("shk,nm,name,last_office,last_status,last_status_at,last_status_ts,price")
+                    .eq("wh_id", WH_ID)
+                    .in("shk", chunk);
+                if (error) throw error;
+                (data || []).forEach((row) => state.supersetCache.set(row.shk, row));
+            } catch (error) {
+                console.warn("superset cache fetch skipped:", error);
+            }
+        }
+    }
+
+    function allTaskShkList(rows) {
+        const shks = new Set();
+        (rows || []).forEach((row) => {
+            taskItems(row).forEach((item) => {
+                const shk = normalizeIdentifier(item.shk);
+                if (shk) shks.add(shk);
+            });
+            (row.source_shk_ids || []).forEach((shk) => {
+                const normalized = normalizeIdentifier(shk);
+                if (normalized) shks.add(normalized);
+            });
+        });
+        return Array.from(shks);
     }
 
     // nm/name/brand уже приходят готовыми в каждой строке Superset (см.
@@ -6140,6 +6222,8 @@
     }
 
     function taskMovementStatusOptions(row) {
+        const liveCodes = liveStatusCodesForRow(row);
+        if (liveCodes.length) return liveCodes;
         const precomputed = taskPayload(row).movement_status_options;
         if (Array.isArray(precomputed)) return precomputed;
         const result = new Set();
@@ -14235,7 +14319,25 @@
         return names.length === 1 ? names[0] : names.slice(0, 3).join(", ") + (names.length > 3 ? " +" + (names.length - 3) : "");
     }
 
+    // Живой кэш (wms_superset_cache) приоритетнее precomputed/снэпшота --
+    // тот застывает в source_payload на момент создания задачи и дальше не
+    // обновляется сам, а кэш обновляется при КАЖДОЙ актуализации Superset
+    // по любой задаче сразу. Если по ШК задачи в кэше пока ничего нет
+    // (ещё не актуализировали с момента возврата этой таблицы), тихо
+    // откатываемся на старое поведение.
+    function liveStatusCodesForRow(row) {
+        return Array.from(new Set((row && row.source_shk_ids || [])
+            .map((shk) => state.supersetCache.get(normalizeIdentifier(shk)))
+            .filter(Boolean)
+            .map((cacheRow) => latinStatusCode(cacheRow.last_status))
+            .filter(Boolean)));
+    }
+
     function taskStatusCodeLabel(row) {
+        const liveCodes = liveStatusCodesForRow(row);
+        if (liveCodes.length) {
+            return liveCodes.length <= 3 ? liveCodes.join("/") : liveCodes.slice(0, 3).join("/") + "+" + (liveCodes.length - 3);
+        }
         const precomputed = taskPayload(row).status_code_label;
         if (typeof precomputed === "string") return precomputed;
         const codes = Array.from(new Set(taskItems(row).map((item) => latinStatusCode(item.status)).filter(Boolean)));
