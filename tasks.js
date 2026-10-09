@@ -3598,6 +3598,7 @@
             last_status: row.last_status || null,
             last_status_at: row.last_status_at || null,
             last_status_ts: row.last_status_ts || null,
+            last_tare: row.last_tare || null,
             price: row.price || null,
             updated_at: now,
         }));
