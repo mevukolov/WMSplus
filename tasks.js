@@ -530,6 +530,13 @@
                 generatedAt: "",
             },
         },
+        routingRules: {
+            rows: [],
+            loading: false,
+            saving: false,
+            loaded: false,
+            error: "",
+        },
         staffStats: {
             date: todayIsoInMoscow(),
             loading: false,
@@ -12176,6 +12183,184 @@
         }
     }
 
+    async function loadRoutingRules(force) {
+        if (state.routingRules.loaded && !force) return true;
+        const db = supabaseDb();
+        state.routingRules.loading = true;
+        state.routingRules.error = "";
+        renderRoutingRulesModal();
+        if (!db) {
+            state.routingRules.loading = false;
+            state.routingRules.error = "Supabase SDK недоступен.";
+            renderRoutingRulesModal();
+            return false;
+        }
+        try {
+            const { data, error } = await db
+                .from("wms_routing_rules")
+                .select("*")
+                .order("priority", { ascending: true });
+            if (error) throw error;
+            state.routingRules.rows = data || [];
+            state.routingRules.loaded = true;
+            return true;
+        } catch (error) {
+            state.routingRules.rows = [];
+            state.routingRules.error = "Не удалось загрузить правила: " + (error && error.message ? error.message : String(error));
+            console.warn("routing rules load skipped:", error);
+            return false;
+        } finally {
+            state.routingRules.loading = false;
+            renderRoutingRulesModal();
+        }
+    }
+
+    function routingRuleRowHtml(row) {
+        const condition = (row.conditions && row.conditions[0]) || {};
+        const attribute = condition.attribute || "status";
+        const operator = condition.operator || "in";
+        const valueText = Array.isArray(condition.value) ? condition.value.join(", ") : normalizeText(condition.value);
+        const targetOptions = REVIEW_SECTIONS.map((section) =>
+            "<option value='" + escapeHtml(section) + "'" + (row.target_task_type === section ? " selected" : "") + ">" + escapeHtml(section) + "</option>"
+        ).join("");
+        return "<div class='writeoff-term-row' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
+            + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет'>"
+            + "<input data-rule-name type='text' value='" + escapeHtml(row.name || "") + "' placeholder='Название'>"
+            + "<select data-rule-attribute>"
+            + "<option value='status'" + (attribute === "status" ? " selected" : "") + ">Статус</option>"
+            + "<option value='tare_id'" + (attribute === "tare_id" ? " selected" : "") + ">Тара</option>"
+            + "</select>"
+            + "<select data-rule-operator>"
+            + "<option value='in'" + (operator === "in" ? " selected" : "") + ">один из (через запятую)</option>"
+            + "<option value='eq'" + (operator === "eq" ? " selected" : "") + ">равно</option>"
+            + "</select>"
+            + "<input data-rule-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение(я)'>"
+            + "<select data-rule-target>" + targetOptions + "</select>"
+            + "<select data-rule-grouping>"
+            + "<option value=''" + (!row.grouping_attribute ? " selected" : "") + ">Каждый ШК отдельно</option>"
+            + "<option value='tare_id'" + (row.grouping_attribute === "tare_id" ? " selected" : "") + ">По таре</option>"
+            + "</select>"
+            + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
+            + "<button type='button' class='btn btn-square' data-rule-remove aria-label='Удалить'>×</button>"
+            + "</div>";
+    }
+
+    function renderRoutingRulesModal() {
+        const target = $("routingRulesWrap");
+        if (!target) return;
+        const rows = state.routingRules.rows || [];
+        target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
+            + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
+            + "<div class='writeoff-term-head'><span>Приоритет</span><span>Название</span><span>Атрибут</span><span>Оператор</span><span>Значение</span><span>Зона</span><span>Группировка</span><span>Вкл.</span></div>"
+            + "<div class='writeoff-term-list'>" + rows.map(routingRuleRowHtml).join("") + "</div>";
+        target.querySelectorAll("[data-rule-remove]").forEach((button) => {
+            button.addEventListener("click", () => removeRoutingRuleRow(button.closest("[data-routing-rule-row]")));
+        });
+    }
+
+    async function removeRoutingRuleRow(rowEl) {
+        if (!rowEl) return;
+        const ruleId = rowEl.getAttribute("data-rule-id");
+        if (ruleId) {
+            const db = supabaseDb();
+            if (db) {
+                try {
+                    const { error } = await db.from("wms_routing_rules").delete().eq("id", ruleId);
+                    if (error) throw error;
+                } catch (error) {
+                    toast("Не удалось удалить правило: " + (error && error.message ? error.message : String(error)), "error");
+                    return;
+                }
+            }
+        }
+        rowEl.remove();
+    }
+
+    function addRoutingRuleDraft() {
+        const rows = state.routingRules.rows || [];
+        const nextPriority = rows.reduce((max, row) => Math.max(max, Number(row.priority) || 0), 0) + 1;
+        state.routingRules.rows = rows.concat({
+            priority: nextPriority,
+            name: "",
+            is_active: true,
+            conditions: [{ attribute: "status", operator: "in", value: [] }],
+            target_task_type: REVIEW_SECTIONS[0],
+            grouping_attribute: null,
+        });
+        renderRoutingRulesModal();
+    }
+
+    function routingRuleInputRows() {
+        return Array.from(document.querySelectorAll("[data-routing-rule-row]")).map((row) => {
+            const id = row.getAttribute("data-rule-id") || undefined;
+            const priority = Math.max(1, Math.trunc(settingNumber(row.querySelector("[data-rule-priority]") && row.querySelector("[data-rule-priority]").value, 0)));
+            const name = normalizeText(row.querySelector("[data-rule-name]") && row.querySelector("[data-rule-name]").value);
+            const attribute = row.querySelector("[data-rule-attribute]").value;
+            const operator = row.querySelector("[data-rule-operator]").value;
+            const rawValue = normalizeText(row.querySelector("[data-rule-value]") && row.querySelector("[data-rule-value]").value);
+            const value = operator === "in" ? rawValue.split(",").map((part) => part.trim()).filter(Boolean) : rawValue;
+            const targetTaskType = row.querySelector("[data-rule-target]").value;
+            const groupingAttribute = row.querySelector("[data-rule-grouping]").value || null;
+            const isActive = row.querySelector("[data-rule-active]").checked;
+            if (!name || !rawValue) return null;
+            return {
+                ...(id ? { id } : {}),
+                priority,
+                name,
+                is_active: isActive,
+                conditions: [{ attribute, operator, value }],
+                target_task_type: targetTaskType,
+                grouping_attribute: groupingAttribute,
+                updated_at: new Date().toISOString(),
+            };
+        }).filter(Boolean);
+    }
+
+    async function openRoutingRulesModal() {
+        if (!ensureDevelopmentAccess("Правила маршрутизации")) return;
+        closeFlowModals();
+        setFlowModalOpen("routingRulesModal", true);
+        renderRoutingRulesModal();
+        await loadRoutingRules(true);
+    }
+
+    function closeRoutingRulesModal() {
+        setFlowModalOpen("routingRulesModal", false);
+    }
+
+    async function saveRoutingRulesFromModal() {
+        const db = supabaseDb();
+        const status = $("routingRulesStatus");
+        const button = $("saveRoutingRules");
+        const rows = routingRuleInputRows();
+        if (!rows.length) {
+            if (status) status.textContent = "Нет строк для сохранения.";
+            return;
+        }
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен.";
+            return;
+        }
+        if (button) button.disabled = true;
+        state.routingRules.saving = true;
+        if (status) status.textContent = "Сохраняю правила...";
+        try {
+            const { error } = await db.from("wms_routing_rules").upsert(rows, { onConflict: "priority" });
+            if (error) throw error;
+            state.routingRules.loaded = false;
+            await loadRoutingRules(true);
+            if (status) status.textContent = "Правила сохранены.";
+            toast("Правила маршрутизации сохранены.", "success");
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            state.routingRules.error = "Не удалось сохранить правила: " + message;
+            if (status) status.textContent = state.routingRules.error;
+        } finally {
+            state.routingRules.saving = false;
+            if (button) button.disabled = false;
+        }
+    }
+
     async function loadWriteoffTerms(force) {
         if (state.writeoffTerms.loaded && !force) return true;
         const db = supabaseDb();
@@ -18081,6 +18266,7 @@
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
         $("openWriteoffTerms").addEventListener("click", () => { void openWriteoffTermsModal(); });
+        $("openRoutingRules").addEventListener("click", () => { void openRoutingRulesModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
             if ((state.taskSearch.rows || []).length) setTaskSearchResultsVisible(true);
@@ -18129,6 +18315,10 @@
             void loadStaffStats();
         });
         $("closeWriteoffTerms").addEventListener("click", closeWriteoffTermsModal);
+        $("closeRoutingRules").addEventListener("click", closeRoutingRulesModal);
+        $("addRoutingRule").addEventListener("click", addRoutingRuleDraft);
+        $("saveRoutingRules").addEventListener("click", () => { void saveRoutingRulesFromModal(); });
+        $("reloadRoutingRules").addEventListener("click", () => { void loadRoutingRules(true); });
         $("saveWriteoffTerms").addEventListener("click", () => { void saveWriteoffTermsFromModal(); });
         $("reloadWriteoffTerms").addEventListener("click", () => { void loadWriteoffTerms(true); });
         $("recalculateWriteoffDates").addEventListener("click", () => { void recalculateWriteoffDatesFromModal(); });
@@ -18290,6 +18480,7 @@
         $("statusPilotModal").addEventListener("click", (event) => { if (event.target === $("statusPilotModal")) closeStatusPilotModal(); });
         $("staffStatsModal").addEventListener("click", (event) => { if (event.target === $("staffStatsModal")) closeStaffStatsModal(); });
         $("writeoffTermsModal").addEventListener("click", (event) => { if (event.target === $("writeoffTermsModal")) closeWriteoffTermsModal(); });
+        $("routingRulesModal").addEventListener("click", (event) => { if (event.target === $("routingRulesModal")) closeRoutingRulesModal(); });
         $("moduleChooser").addEventListener("click", (event) => { if (event.target === $("moduleChooser")) setFlowModalOpen("moduleChooser", false); });
         $("uploadWork").addEventListener("click", (event) => { if (event.target === $("uploadWork")) openChooser(state.manualDate); });
         $("masterWork").addEventListener("click", (event) => { if (event.target === $("masterWork")) setFlowModalOpen("masterWork", false); });

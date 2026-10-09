@@ -1968,6 +1968,11 @@
                     <h2 class="tasks-action-title">Сроки списания</h2>
                     <p class="tasks-action-text">Статусы WMS, дни без движения до списания и отдельная настройка 26LR.</p>
                 </button>
+                <button id="openRoutingRules" class="tasks-action-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">🧭</span>
+                    <h2 class="tasks-action-title">Правила маршрутизации</h2>
+                    <p class="tasks-action-text">Куда класть осиротевшие ШК по статусу/таре после актуализации Superset -- без правки кода.</p>
+                </button>
                 <button id="openDebugSandbox" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">🛠</span>
                     <h2 class="tasks-action-title">Отладка</h2>
@@ -2802,6 +2807,25 @@
             <button id="applyWriteoffRecommendations" class="btn btn-rect" type="button">Применить рекомендации</button>
         </div>
         <div id="writeoffTermsStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="routingRulesModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Правила маршрутизации</h3>
+                <p class="work-subtitle">Осиротевшие ШК (без активной задачи) после актуализации Superset раскладываются по этим правилам -- по порядку приоритета, первое подходящее побеждает.</p>
+            </div>
+            <button id="closeRoutingRules" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="routingRulesWrap" class="writeoff-terms-wrap"></div>
+        <div class="file-row">
+            <button id="addRoutingRule" class="btn btn-outline" type="button">Добавить правило</button>
+            <button id="saveRoutingRules" class="btn btn-rect" type="button">Сохранить правила</button>
+            <button id="reloadRoutingRules" class="btn btn-outline" type="button">Обновить из Supabase</button>
+        </div>
+        <div id="routingRulesStatus" class="review-status"></div>
     </div>
 </section>
 
