@@ -35,6 +35,7 @@
     const SUPABASE_PUBLIC_ANON_KEY = (typeof window !== "undefined" && window.SUPABASE_ANON_KEY) || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJncGhsbG16bWx3dXJmbmJhZ2hvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTQwNzIsImV4cCI6MjA3ODUzMDA3Mn0.a1_Wbtpbs9P-_UDqwjGqAIjvwK5WbT_M3B7g5BHtR2Q";
     const WMS_TASK_WRITEBACK_FUNCTION = "wms-task-writeback";
     const WMS_MATCH_SUGGESTIONS_TABLE = "wms_match_suggestions";
+    const WMS_TASK_ITEMS_TABLE = "wms_task_items";
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
@@ -11472,7 +11473,7 @@
     // (wms_pure_losses_absorb_shks) -- не читаем их как сырые колонки
     // pure_losses_rep, эта вкладка теперь смотрит на wms_tasks.
     function pureLossesRowLr(row) {
-        const value = Number(row && taskPayload(row).pure_losses_lr);
+        const value = Number(row && row.zone_payload && row.zone_payload.pure_losses_lr);
         return Number.isFinite(value) ? value : null;
     }
 
@@ -11481,7 +11482,7 @@
     }
 
     function pureLossesRowMonthKey(row) {
-        const date = normalizeText(row && taskPayload(row).pure_losses_date_lost);
+        const date = normalizeText(row && row.zone_payload && row.zone_payload.pure_losses_date_lost);
         return date ? date.slice(0, 7) : "";
     }
 
@@ -11518,24 +11519,24 @@
         return grouped;
     }
 
-    // Вкладка "Чистые списания" теперь смотрит на зону внутри wms_tasks
-    // (task_type='Чистые списания'), а не на сырой pure_losses_rep --
-    // те же задачи, что уже загружены для "Предразбора" (fetchReviewTaskRows
-    // грузит все активные task_type разом, reviewGroupedRows их только
-    // фильтрует из своей группировки, см. isPureLossesZoneTask). Поэтому
-    // здесь просто дожидаемся общей загрузки, если она ещё не случилась,
-    // вместо отдельного запроса -- и строка остаётся той же, что в
-    // findTaskRow/openTaskDetail, клик по строке открывает обычную
-    // карточку задачи.
+    // Фаза 2 (docs/superpowers/specs/2026-10-09-wms-task-items-phase2-zone-design.md):
+    // гранулярность задачи была неверна для разошедшейся тары -- строка
+    // wms_tasks может содержать и зонированные, и обычные ШК одновременно.
+    // Запрашиваем wms_task_items напрямую, гранулярность -- отдельный ШК.
     async function loadPureLossesRows() {
         if (state.pureLosses.loadPromise) return state.pureLosses.loadPromise;
         state.pureLosses.loadPromise = (async () => {
             state.pureLosses.loading = true;
             renderPureLosses();
             try {
-                if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
-                else if (state.review.loadPromise) await state.review.loadPromise;
-                state.pureLosses.rows = (state.review.rows || []).filter((row) => isPureLossesZoneTask(row) && taskStatus(row) !== "Завершено");
+                const db = supabaseDb();
+                const { data, error } = await db
+                    .from(WMS_TASK_ITEMS_TABLE)
+                    .select("id,task_id,shk,nm,name,price,task_type,opp_verdict,task_status,zone_payload")
+                    .eq("task_type", "Чистые списания")
+                    .neq("task_status", "Завершено");
+                if (error) throw error;
+                state.pureLosses.rows = data || [];
                 state.pureLosses.loaded = true;
             } catch (error) {
                 console.error("pure losses load failed:", error);
@@ -11708,17 +11709,15 @@
             return;
         }
         const body = rows.map((row) => {
-            const payload = taskPayload(row);
-            const items = taskItems(row);
-            const name = normalizeText(payload.item_name || (items[0] && items[0].name)) || "Наименование не найдено";
-            const nm = normalizeIdentifier(items[0] && items[0].nm);
-            const shk = normalizeIdentifier(row.source_shk_ids && row.source_shk_ids[0]);
-            const dateLabel = formatRuDate(normalizeText(payload.pure_losses_date_lost));
-            return "<tr class='review-data-row' data-pure-losses-task='" + escapeHtml(row.id) + "'>"
+            const name = normalizeText(row.name) || "Наименование не найдено";
+            const nm = normalizeIdentifier(row.nm);
+            const dateLabel = formatRuDate(normalizeText(row.zone_payload && row.zone_payload.pure_losses_date_lost));
+            const compositeId = row.task_id + "::" + row.shk;
+            return "<tr class='review-data-row' data-pure-losses-task='" + escapeHtml(compositeId) + "'>"
                 + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(name) + "</div>" + (nm ? "<div class='review-task-sub'>НМ: " + escapeHtml(nm) + "</div>" : "") + "</td>"
-                + "<td>" + escapeHtml(shk || "-") + "</td>"
+                + "<td>" + escapeHtml(row.shk || "-") + "</td>"
                 + "<td>" + escapeHtml(dateLabel) + "</td>"
-                + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
+                + "<td class='review-price-cell' style='" + priceStyle(row.price) + "'>" + escapeHtml(formatMoney(row.price)) + "</td>"
                 + "</tr>";
         }).join("");
         target.innerHTML = "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>Наименование</th><th>ШК</th><th>Дата списания</th><th>Стоимость</th></tr></thead><tbody>" + body + "</tbody></table></div>";
