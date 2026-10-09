@@ -3246,7 +3246,12 @@
             renderActualizeResults();
             void enrichTaskNomenclatureFromSuperset(rows).catch((error) => console.warn("superset nomenclature enrich skipped:", error));
             void syncNmDirectoryFromSuperset(rows).catch((error) => console.warn("nm directory sync skipped:", error));
-            void pushSupersetRowsToCache(rows).then(() => hydrateSupersetCache(rows.map((row) => row.shk))).then(() => renderReview()).catch((error) => console.warn("superset cache push skipped:", error));
+            void pushSupersetRowsToCache(rows)
+                .then(() => hydrateSupersetCache(rows.map((row) => row.shk)))
+                .then(() => supabaseDb().rpc("wms_apply_routing_rules", { p_shks: rows.map((row) => row.shk) }))
+                .then(() => loadReviewTasks())
+                .then(() => renderReview())
+                .catch((error) => console.warn("superset cache push skipped:", error));
         } catch (error) {
             console.error("actualize superset failed:", error);
             setActualizeStatus("Не удалось разобрать Superset: " + (error && error.message ? error.message : String(error)), "error");
