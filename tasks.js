@@ -11248,6 +11248,10 @@
     function openDeferTaskModal(id) {
         const row = findTaskRow(id);
         if (!row) return;
+        if (state.taskDetail && state.taskDetail.syntheticRow) {
+            toast("Для товара из «Чистых списаний» откладывание -- через вердикт «Отправлен на аннулирование».", "info");
+            return;
+        }
         state.taskDetail.deferRowId = id;
         const savedReview = taskReviewPayload(row);
         const reason = $("deferReasonInput");
@@ -11352,6 +11356,10 @@
     function openReopenConfirm(id) {
         const row = findTaskRow(id);
         if (!row) return;
+        if (state.taskDetail && state.taskDetail.syntheticRow) {
+            toast("Переоткрытие недоступно для товара из «Чистых списаний».", "info");
+            return;
+        }
         state.taskDetail.reopenRowId = id;
         const status = $("reopenConfirmStatus");
         if (status) status.textContent = "";
