@@ -7619,7 +7619,62 @@
         return !isTareTask(row) && taskItems(row).length <= 1 && (Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.length : 0) <= 1;
     }
 
+    // Фаза 2 (docs/superpowers/specs/2026-10-09-wms-task-items-phase2-zone-design.md,
+    // раздел 6): разошедшийся ШК внутри общей тары открывается составным
+    // id "<task_id>::<shk>" -- карточка/вердикт пишутся на его собственную
+    // строку wms_task_items, а не на всю строку задачи.
+    function parseCompositeTaskItemId(id) {
+        const raw = normalizeText(id);
+        const sep = raw.indexOf("::");
+        if (sep < 0) return null;
+        return { taskId: raw.slice(0, sep), shk: raw.slice(sep + 2) };
+    }
+
+    async function openPureLossesItemDetail(taskId, shk, compositeId) {
+        const db = supabaseDb();
+        if (!db) return;
+        let parentRow = findTaskRow(taskId);
+        if (!parentRow) {
+            const { data } = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("id", taskId).maybeSingle();
+            parentRow = data;
+        }
+        const { data: item, error } = await db
+            .from(WMS_TASK_ITEMS_TABLE)
+            .select("task_id,shk,nm,name,price,task_type,opp_verdict,task_status,zone_payload,completed_at,reopen_after")
+            .eq("task_id", taskId).eq("shk", shk).maybeSingle();
+        if (error || !item || !parentRow) return;
+        const syntheticRow = {
+            ...parentRow,
+            id: compositeId,
+            task_type: item.task_type,
+            opp_verdict: item.opp_verdict,
+            task_status: item.task_status,
+            completed_at: item.completed_at,
+            reopen_after: item.reopen_after,
+            source_shk_ids: [item.shk],
+            source_tare_id: null,
+            source_price_sum: item.price,
+            title: "ШК " + item.shk,
+            source_payload: {
+                ...taskPayload(parentRow),
+                item_name: item.name,
+                task_items: [{ shk: item.shk, nm: item.nm, name: item.name, price: item.price, status: "", movement: "", mx: "" }],
+                pure_losses_lr: item.zone_payload && item.zone_payload.pure_losses_lr,
+                pure_losses_date_lost: item.zone_payload && item.zone_payload.pure_losses_date_lost,
+            },
+            __syntheticParentId: taskId,
+            __syntheticShk: item.shk,
+        };
+        if (state.taskDetail && state.taskDetail.countdownTimer) clearInterval(state.taskDetail.countdownTimer);
+        state.taskDetail = { rowId: compositeId, source: "review", syntheticRow, editRowId: "", deferRowId: "", reopenRowId: "", splitRowId: "", splitShk: "", expensiveConfirmRowId: "", countdownTimer: null };
+        setFlowModalOpen("taskDetailModal", true);
+        renderTaskDetail(syntheticRow);
+    }
+
     function findTaskRow(id) {
+        if (state.taskDetail && state.taskDetail.rowId === id && state.taskDetail.syntheticRow) {
+            return state.taskDetail.syntheticRow;
+        }
         return (state.review.rows || []).find((row) => row.id === id)
             || (state.inactive.rows || []).find((row) => row.id === id)
             || (state.taskSearch.rows || []).find((row) => row.id === id)
@@ -7654,6 +7709,8 @@
     }
 
     async function openTaskDetail(id, source) {
+        const composite = parseCompositeTaskItemId(id);
+        if (composite) return openPureLossesItemDetail(composite.taskId, composite.shk, id);
         let row = findTaskRow(id);
         if (!row) return;
         if (source !== "inactive" && state.flow.allowConflictOpenId !== id && flowRowIsLockedForOther(row, currentFlowEmployee())) {
@@ -10965,7 +11022,78 @@
         await refreshWritebackFailuresBanner();
     }
 
+    // Фаза 2: вердикт разошедшемуся ШК внутри общей тары пишется в его
+    // собственную строку wms_task_items, не в wms_tasks -- не задевает
+    // соседей по таре. Сознательно пропускает writeback/ачивки/
+    // Флоу-очередь/празднование -- всё это специфично для обычного потока
+    // разбора, не для системной зоны списаний.
+    async function completePureLossesItemFromDetail(id, options) {
+        const synthetic = state.taskDetail.syntheticRow;
+        const db = supabaseDb();
+        if (!db) return;
+        const user = currentWmsUser();
+        const verdict = normalizeText($("taskVerdictInput") && $("taskVerdictInput").value) || "Не выбран";
+        const rawComment = normalizeText($("taskCommentInput") && $("taskCommentInput").value);
+        const extraLabel = DEFERRED_VERDICT_FIELDS[verdict] || "";
+        const extraValue = normalizeText($("taskExtraInput") && $("taskExtraInput").value);
+        const tone = VERDICT_TONE[verdict] || "";
+        if ((tone === "red" && !rawComment) || verdict === "Не выбран" || (extraLabel && !extraValue)) {
+            const status = $("taskDetailStatus");
+            if (status) status.textContent = "Заполни вердикт и обязательное поле по выбранному вердикту.";
+            return;
+        }
+        const now = new Date().toISOString();
+        const isDeferred = Object.prototype.hasOwnProperty.call(DEFERRED_VERDICT_FIELDS, verdict);
+        const reopenAfter = isDeferred ? reopenAfterForVerdict(verdict, synthetic, null) : null;
+        const button = $("completeTaskBtn");
+        if (button) button.disabled = true;
+        try {
+            const { error } = await db
+                .from(WMS_TASK_ITEMS_TABLE)
+                .update({
+                    opp_verdict: verdict,
+                    task_status: isDeferred ? "Отложено" : "Завершено",
+                    completed_at: now,
+                    reopen_after: reopenAfter,
+                    updated_at: now,
+                })
+                .eq("task_id", synthetic.__syntheticParentId)
+                .eq("shk", synthetic.__syntheticShk);
+            if (error) throw error;
+            void writeTaskHistory(
+                { id: synthetic.__syntheticParentId },
+                isDeferred ? "task_deferred" : "task_completed",
+                {
+                    title: displayTaskTitle(synthetic),
+                    verdict,
+                    comment: rawComment,
+                    extra_label: extraLabel,
+                    extra_value: extraValue,
+                    completed_by_id: user.id || null,
+                    completed_by_name: user.name || null,
+                    reopen_after: reopenAfter,
+                    shk: synthetic.__syntheticShk,
+                }
+            );
+            state.pureLosses.rows = (state.pureLosses.rows || []).filter(
+                (row) => !(row.task_id === synthetic.__syntheticParentId && row.shk === synthetic.__syntheticShk)
+            );
+            setReviewStatus(isDeferred ? "ШК отложен до " + formatRuDateTime(reopenAfter) + "." : "ШК завершён.", "good");
+            renderPureLosses();
+            closeTaskDetail();
+        } catch (error) {
+            console.error("pure losses item complete failed:", error);
+            const status = $("taskDetailStatus");
+            if (status) status.textContent = "Не удалось сохранить: " + (error && error.message ? error.message : String(error));
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
     async function completeTaskFromDetail(id, options) {
+        if (state.taskDetail && state.taskDetail.rowId === id && state.taskDetail.syntheticRow) {
+            return completePureLossesItemFromDetail(id, options);
+        }
         const opts = options || {};
         const db = supabaseDb();
         if (!db || !id) return;
