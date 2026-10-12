@@ -12223,26 +12223,43 @@
         const attribute = condition.attribute || "status";
         const operator = condition.operator || "in";
         const valueText = Array.isArray(condition.value) ? condition.value.join(", ") : normalizeText(condition.value);
+        const outputKey = row.output_key || "zone";
+        const isZone = outputKey === "zone";
         const targetOptions = REVIEW_SECTIONS.map((section) =>
             "<option value='" + escapeHtml(section) + "'" + (row.target_task_type === section ? " selected" : "") + ">" + escapeHtml(section) + "</option>"
         ).join("");
+        const outputValueText = isZone ? "" : JSON.stringify(row.output_value !== undefined ? row.output_value : {});
         return "<div class='writeoff-term-row' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
             + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет'>"
             + "<input data-rule-name type='text' value='" + escapeHtml(row.name || "") + "' placeholder='Название'>"
+            + "<select data-rule-output-key>"
+            + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона</option>"
+            + "<option value='priority_tier'" + (outputKey === "priority_tier" ? " selected" : "") + ">Приоритет по цене</option>"
+            + "</select>"
             + "<select data-rule-attribute>"
             + "<option value='status'" + (attribute === "status" ? " selected" : "") + ">Статус</option>"
             + "<option value='tare_id'" + (attribute === "tare_id" ? " selected" : "") + ">Тара</option>"
+            + "<option value='price'" + (attribute === "price" ? " selected" : "") + ">Цена</option>"
+            + "<option value='mx'" + (attribute === "mx" ? " selected" : "") + ">МХ</option>"
+            + "<option value='route_number'" + (attribute === "route_number" ? " selected" : "") + ">Номер маршрута</option>"
             + "</select>"
             + "<select data-rule-operator>"
             + "<option value='in'" + (operator === "in" ? " selected" : "") + ">один из (через запятую)</option>"
             + "<option value='eq'" + (operator === "eq" ? " selected" : "") + ">равно</option>"
+            + "<option value='contains'" + (operator === "contains" ? " selected" : "") + ">содержит</option>"
+            + "<option value='gt'" + (operator === "gt" ? " selected" : "") + ">больше</option>"
+            + "<option value='gte'" + (operator === "gte" ? " selected" : "") + ">больше или равно</option>"
+            + "<option value='lt'" + (operator === "lt" ? " selected" : "") + ">меньше</option>"
+            + "<option value='lte'" + (operator === "lte" ? " selected" : "") + ">меньше или равно</option>"
+            + "<option value='between'" + (operator === "between" ? " selected" : "") + ">между (через запятую)</option>"
             + "</select>"
             + "<input data-rule-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение(я)'>"
-            + "<select data-rule-target>" + targetOptions + "</select>"
-            + "<select data-rule-grouping>"
+            + "<select data-rule-target" + (isZone ? "" : " style='display:none'") + ">" + targetOptions + "</select>"
+            + "<select data-rule-grouping" + (isZone ? "" : " style='display:none'") + ">"
             + "<option value=''" + (!row.grouping_attribute ? " selected" : "") + ">Каждый ШК отдельно</option>"
             + "<option value='tare_id'" + (row.grouping_attribute === "tare_id" ? " selected" : "") + ">По таре</option>"
             + "</select>"
+            + "<input data-rule-output-value type='text' value='" + escapeHtml(outputValueText) + "' placeholder='output_value (JSON)'" + (isZone ? " style='display:none'" : "") + ">"
             + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
             + "<button type='button' class='btn btn-square' data-rule-remove aria-label='Удалить'>×</button>"
             + "</div>";
@@ -12254,7 +12271,7 @@
         const rows = state.routingRules.rows || [];
         target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
             + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
-            + "<div class='writeoff-term-head'><span>Приоритет</span><span>Название</span><span>Атрибут</span><span>Оператор</span><span>Значение</span><span>Зона</span><span>Группировка</span><span>Вкл.</span></div>"
+            + "<div class='writeoff-term-head'><span>Приоритет</span><span>Название</span><span>Тип</span><span>Атрибут</span><span>Оператор</span><span>Значение</span><span>Зона</span><span>Группировка</span><span>Результат (JSON)</span><span>Вкл.</span></div>"
             + "<div class='writeoff-term-list'>" + rows.map(routingRuleRowHtml).join("") + "</div>";
         target.querySelectorAll("[data-rule-remove]").forEach((button) => {
             button.addEventListener("click", () => removeRoutingRuleRow(button.closest("[data-routing-rule-row]")));
@@ -12287,8 +12304,10 @@
             name: "",
             is_active: true,
             conditions: [{ attribute: "status", operator: "in", value: [] }],
+            output_key: "zone",
             target_task_type: REVIEW_SECTIONS[0],
             grouping_attribute: null,
+            output_value: null,
         });
         renderRoutingRulesModal();
     }
@@ -12298,23 +12317,46 @@
             const id = row.getAttribute("data-rule-id") || undefined;
             const priority = Math.max(1, Math.trunc(settingNumber(row.querySelector("[data-rule-priority]") && row.querySelector("[data-rule-priority]").value, 0)));
             const name = normalizeText(row.querySelector("[data-rule-name]") && row.querySelector("[data-rule-name]").value);
+            const outputKey = (row.querySelector("[data-rule-output-key]") && row.querySelector("[data-rule-output-key]").value) || "zone";
             const attribute = row.querySelector("[data-rule-attribute]").value;
             const operator = row.querySelector("[data-rule-operator]").value;
             const rawValue = normalizeText(row.querySelector("[data-rule-value]") && row.querySelector("[data-rule-value]").value);
-            const value = operator === "in" ? rawValue.split(",").map((part) => part.trim()).filter(Boolean) : rawValue;
-            const targetTaskType = row.querySelector("[data-rule-target]").value;
-            const groupingAttribute = row.querySelector("[data-rule-grouping]").value || null;
+            const value = (operator === "in" || operator === "between")
+                ? rawValue.split(",").map((part) => part.trim()).filter(Boolean)
+                : rawValue;
             const isActive = row.querySelector("[data-rule-active]").checked;
             if (!name || !rawValue) return null;
-            return {
+            const base = {
                 ...(id ? { id } : {}),
                 priority,
                 name,
                 is_active: isActive,
                 conditions: [{ attribute, operator, value }],
-                target_task_type: targetTaskType,
-                grouping_attribute: groupingAttribute,
+                output_key: outputKey,
                 updated_at: new Date().toISOString(),
+            };
+            if (outputKey === "zone") {
+                const targetTaskType = row.querySelector("[data-rule-target]").value;
+                const groupingAttribute = row.querySelector("[data-rule-grouping]").value || null;
+                return {
+                    ...base,
+                    target_task_type: targetTaskType,
+                    grouping_attribute: groupingAttribute,
+                    output_value: { target_task_type: targetTaskType, grouping_attribute: groupingAttribute },
+                };
+            }
+            const rawOutputValue = normalizeText(row.querySelector("[data-rule-output-value]") && row.querySelector("[data-rule-output-value]").value);
+            let outputValue;
+            try {
+                outputValue = rawOutputValue ? JSON.parse(rawOutputValue) : {};
+            } catch (error) {
+                outputValue = {};
+            }
+            return {
+                ...base,
+                target_task_type: null,
+                grouping_attribute: null,
+                output_value: outputValue,
             };
         }).filter(Boolean);
     }
@@ -12348,7 +12390,7 @@
         state.routingRules.saving = true;
         if (status) status.textContent = "Сохраняю правила...";
         try {
-            const { error } = await db.from("wms_routing_rules").upsert(rows, { onConflict: "priority" });
+            const { error } = await db.from("wms_routing_rules").upsert(rows, { onConflict: "output_key,priority" });
             if (error) throw error;
             state.routingRules.loaded = false;
             await loadRoutingRules(true);
