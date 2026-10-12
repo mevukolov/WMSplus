@@ -223,6 +223,21 @@
         .writeoff-term-row input[type="text"], .writeoff-term-row input[type="number"], .writeoff-term-add input { width: 100%; border: 1px solid #e2e8f0; border-radius: 11px; padding: 9px 10px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #fff; }
         .writeoff-term-active { display: inline-flex; align-items: center; gap: 6px; color: #64748b; font-size: 12px; font-weight: 900; }
         .writeoff-term-add { display: grid; grid-template-columns: minmax(140px, 1fr) 120px auto; gap: 8px; align-items: center; }
+        .routing-rule-list { display: grid; gap: 12px; }
+        .routing-rule-card { border-radius: 16px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; display: grid; gap: 10px; }
+        .routing-rule-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .routing-rule-head input[type="text"], .routing-rule-head input[type="number"], .routing-rule-head select { border: 1px solid #e2e8f0; border-radius: 11px; padding: 9px 10px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #fff; }
+        .routing-rule-head input[data-rule-priority] { width: 90px; }
+        .routing-rule-head input[data-rule-name] { flex: 1 1 180px; min-width: 140px; }
+        .routing-rule-section { border-top: 1px dashed #e2e8f0; padding-top: 10px; }
+        .routing-rule-section-label { color: #64748b; font-size: 11px; font-weight: 1000; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+        .routing-rule-conditions { display: grid; gap: 8px; }
+        .routing-rule-condition { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px; }
+        .routing-rule-condition select, .routing-rule-condition input[type="text"] { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 9px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #f8fafc; }
+        .routing-rule-condition input[data-condition-value] { flex: 1 1 160px; min-width: 120px; }
+        .routing-rule-result { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .routing-rule-result select, .routing-rule-result input { border: 1px solid #e2e8f0; border-radius: 11px; padding: 9px 10px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #fff; }
+        .routing-rule-result input[data-rule-output-value] { flex: 1 1 260px; }
         .writeoff-reco-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
         .writeoff-reco-card { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; }
         .writeoff-reco-card strong { display: block; color: #242038; font-size: 20px; line-height: 1.05; }

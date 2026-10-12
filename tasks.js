@@ -12244,32 +12244,20 @@
         }
     }
 
-    function routingRuleRowHtml(row) {
-        const condition = (row.conditions && row.conditions[0]) || {};
-        const attribute = condition.attribute || "status";
-        const operator = condition.operator || "in";
-        const valueText = Array.isArray(condition.value) ? condition.value.join(", ") : normalizeText(condition.value);
-        const outputKey = row.output_key || "zone";
-        const isZone = outputKey === "zone";
-        const targetOptions = REVIEW_SECTIONS.map((section) =>
-            "<option value='" + escapeHtml(section) + "'" + (row.target_task_type === section ? " selected" : "") + ">" + escapeHtml(section) + "</option>"
-        ).join("");
-        const outputValueText = isZone ? "" : JSON.stringify(row.output_value !== undefined ? row.output_value : {});
-        return "<div class='writeoff-term-row' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
-            + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет'>"
-            + "<input data-rule-name type='text' value='" + escapeHtml(row.name || "") + "' placeholder='Название'>"
-            + "<select data-rule-output-key>"
-            + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона (рабочее)</option>"
-            + "<option value='priority_tier'" + (outputKey === "priority_tier" ? " selected" : "") + ">Приоритет по цене (пока не используется)</option>"
-            + "</select>"
-            + "<select data-rule-attribute>"
+    function routingRuleConditionHtml(condition) {
+        const attribute = (condition && condition.attribute) || "status";
+        const operator = (condition && condition.operator) || "in";
+        const rawValue = condition && condition.value;
+        const valueText = Array.isArray(rawValue) ? rawValue.join(", ") : normalizeText(rawValue);
+        return "<div class='routing-rule-condition' data-rule-condition>"
+            + "<select data-condition-attribute>"
             + "<option value='status'" + (attribute === "status" ? " selected" : "") + ">Статус</option>"
             + "<option value='tare_id'" + (attribute === "tare_id" ? " selected" : "") + ">Тара</option>"
             + "<option value='price'" + (attribute === "price" ? " selected" : "") + ">Цена</option>"
             + "<option value='mx'" + (attribute === "mx" ? " selected" : "") + ">МХ</option>"
             + "<option value='route_number'" + (attribute === "route_number" ? " selected" : "") + ">Номер маршрута</option>"
             + "</select>"
-            + "<select data-rule-operator>"
+            + "<select data-condition-operator>"
             + "<option value='in'" + (operator === "in" ? " selected" : "") + ">один из (через запятую)</option>"
             + "<option value='eq'" + (operator === "eq" ? " selected" : "") + ">равно</option>"
             + "<option value='contains'" + (operator === "contains" ? " selected" : "") + ">содержит</option>"
@@ -12279,15 +12267,51 @@
             + "<option value='lte'" + (operator === "lte" ? " selected" : "") + ">меньше или равно</option>"
             + "<option value='between'" + (operator === "between" ? " selected" : "") + ">между (через запятую)</option>"
             + "</select>"
-            + "<input data-rule-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение(я) -- через запятую для \"один из\"/\"между\"'>"
-            + "<select data-rule-target" + (isZone ? "" : " style='display:none'") + ">" + targetOptions + "</select>"
-            + "<select data-rule-grouping" + (isZone ? "" : " style='display:none'") + ">"
+            + "<input data-condition-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение(я) -- через запятую для \"один из\"/\"между\"'>"
+            + "<button type='button' class='btn btn-square' data-condition-remove aria-label='Удалить условие'>×</button>"
+            + "</div>";
+    }
+
+    function routingRuleRowHtml(row) {
+        const conditions = Array.isArray(row.conditions) && row.conditions.length ? row.conditions : [{ attribute: "status", operator: "in", value: [] }];
+        const outputKey = row.output_key || "zone";
+        const isZone = outputKey === "zone";
+        const targetOptions = REVIEW_SECTIONS.map((section) =>
+            "<option value='" + escapeHtml(section) + "'" + (row.target_task_type === section ? " selected" : "") + ">" + escapeHtml(section) + "</option>"
+        ).join("");
+        const outputValueText = isZone ? "" : JSON.stringify(row.output_value !== undefined ? row.output_value : {});
+        return "<div class='routing-rule-card' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
+            + "<div class='routing-rule-head'>"
+            + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет'>"
+            + "<input data-rule-name type='text' value='" + escapeHtml(row.name || "") + "' placeholder='Название правила'>"
+            + "<select data-rule-output-key>"
+            + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона (рабочее)</option>"
+            + "<option value='priority_tier'" + (outputKey === "priority_tier" ? " selected" : "") + ">Приоритет по цене (пока не используется)</option>"
+            + "</select>"
+            + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
+            + "<button type='button' class='btn btn-square' data-rule-remove aria-label='Удалить правило'>×</button>"
+            + "</div>"
+            + "<div class='routing-rule-section'>"
+            + "<div class='routing-rule-section-label'>Условия (все должны совпасть)</div>"
+            + "<div class='routing-rule-conditions' data-rule-conditions>" + conditions.map(routingRuleConditionHtml).join("") + "</div>"
+            + "<button type='button' class='btn btn-outline' data-add-condition style='margin-top:8px'>+ Добавить условие</button>"
+            + "</div>"
+            + "<div class='routing-rule-section' data-rule-result-zone" + (isZone ? "" : " style='display:none'") + ">"
+            + "<div class='routing-rule-section-label'>Результат -- куда класть</div>"
+            + "<div class='routing-rule-result'>"
+            + "<select data-rule-target>" + targetOptions + "</select>"
+            + "<select data-rule-grouping>"
             + "<option value=''" + (!row.grouping_attribute ? " selected" : "") + ">Каждый ШК отдельно</option>"
             + "<option value='tare_id'" + (row.grouping_attribute === "tare_id" ? " selected" : "") + ">По таре</option>"
             + "</select>"
-            + "<input data-rule-output-value type='text' value='" + escapeHtml(outputValueText) + "' placeholder='Результат в формате JSON, например {\"priority\":2,\"label\":\"Высокий\"} -- пока нигде не используется'" + (isZone ? " style='display:none'" : "") + ">"
-            + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
-            + "<button type='button' class='btn btn-square' data-rule-remove aria-label='Удалить'>×</button>"
+            + "</div>"
+            + "</div>"
+            + "<div class='routing-rule-section' data-rule-result-other" + (isZone ? " style='display:none'" : "") + ">"
+            + "<div class='routing-rule-section-label'>Результат (JSON, пока нигде не используется)</div>"
+            + "<div class='routing-rule-result'>"
+            + "<input data-rule-output-value type='text' value='" + escapeHtml(outputValueText) + "' placeholder='Например {\"priority\":2,\"label\":\"Высокий\"}'>"
+            + "</div>"
+            + "</div>"
             + "</div>";
     }
 
@@ -12297,11 +12321,49 @@
         const rows = state.routingRules.rows || [];
         target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
             + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
-            + "<div class='writeoff-term-head'><span>Приоритет (меньше -- важнее)</span><span>Название</span><span>Тип правила</span><span>Условие: атрибут</span><span>Условие: оператор</span><span>Условие: значение</span><span>Куда класть (зона)</span><span>Группировать по таре?</span><span>Результат (для нерабочих типов)</span><span>Включено</span></div>"
-            + "<div class='writeoff-term-list'>" + rows.map(routingRuleRowHtml).join("") + "</div>";
+            + "<div class='routing-rule-list'>" + rows.map(routingRuleRowHtml).join("") + "</div>";
         target.querySelectorAll("[data-rule-remove]").forEach((button) => {
             button.addEventListener("click", () => removeRoutingRuleRow(button.closest("[data-routing-rule-row]")));
         });
+        target.querySelectorAll("[data-add-condition]").forEach((button) => {
+            button.addEventListener("click", () => addRoutingRuleCondition(button.closest("[data-routing-rule-row]")));
+        });
+        target.querySelectorAll("[data-condition-remove]").forEach((button) => {
+            button.addEventListener("click", () => removeRoutingRuleCondition(button.closest("[data-rule-condition]")));
+        });
+        target.querySelectorAll("[data-rule-output-key]").forEach((select) => {
+            select.addEventListener("change", () => toggleRoutingRuleResultSections(select.closest("[data-routing-rule-row]")));
+        });
+    }
+
+    function addRoutingRuleCondition(cardEl) {
+        if (!cardEl) return;
+        const container = cardEl.querySelector("[data-rule-conditions]");
+        if (!container) return;
+        container.insertAdjacentHTML("beforeend", routingRuleConditionHtml({ attribute: "status", operator: "in", value: [] }));
+        const newCondition = container.lastElementChild;
+        const removeButton = newCondition && newCondition.querySelector("[data-condition-remove]");
+        if (removeButton) removeButton.addEventListener("click", () => removeRoutingRuleCondition(newCondition));
+    }
+
+    function removeRoutingRuleCondition(conditionEl) {
+        if (!conditionEl) return;
+        const container = conditionEl.closest("[data-rule-conditions]");
+        if (container && container.querySelectorAll("[data-rule-condition]").length <= 1) {
+            toast("В правиле должно остаться хотя бы одно условие.", "error");
+            return;
+        }
+        conditionEl.remove();
+    }
+
+    function toggleRoutingRuleResultSections(cardEl) {
+        if (!cardEl) return;
+        const outputKeySelect = cardEl.querySelector("[data-rule-output-key]");
+        const isZone = !outputKeySelect || outputKeySelect.value === "zone";
+        const zoneSection = cardEl.querySelector("[data-rule-result-zone]");
+        const otherSection = cardEl.querySelector("[data-rule-result-other]");
+        if (zoneSection) zoneSection.style.display = isZone ? "" : "none";
+        if (otherSection) otherSection.style.display = isZone ? "none" : "";
     }
 
     async function removeRoutingRuleRow(rowEl) {
@@ -12344,20 +12406,24 @@
             const priority = Math.max(1, Math.trunc(settingNumber(row.querySelector("[data-rule-priority]") && row.querySelector("[data-rule-priority]").value, 0)));
             const name = normalizeText(row.querySelector("[data-rule-name]") && row.querySelector("[data-rule-name]").value);
             const outputKey = (row.querySelector("[data-rule-output-key]") && row.querySelector("[data-rule-output-key]").value) || "zone";
-            const attribute = row.querySelector("[data-rule-attribute]").value;
-            const operator = row.querySelector("[data-rule-operator]").value;
-            const rawValue = normalizeText(row.querySelector("[data-rule-value]") && row.querySelector("[data-rule-value]").value);
-            const value = (operator === "in" || operator === "between")
-                ? rawValue.split(",").map((part) => part.trim()).filter(Boolean)
-                : rawValue;
             const isActive = row.querySelector("[data-rule-active]").checked;
-            if (!name || !rawValue) return null;
+            const conditions = Array.from(row.querySelectorAll("[data-rule-condition]")).map((conditionEl) => {
+                const attribute = conditionEl.querySelector("[data-condition-attribute]").value;
+                const operator = conditionEl.querySelector("[data-condition-operator]").value;
+                const rawValue = normalizeText(conditionEl.querySelector("[data-condition-value]") && conditionEl.querySelector("[data-condition-value]").value);
+                const value = (operator === "in" || operator === "between")
+                    ? rawValue.split(",").map((part) => part.trim()).filter(Boolean)
+                    : rawValue;
+                return { attribute, operator, value, rawValue };
+            }).filter((condition) => condition.rawValue);
+            if (!name || !conditions.length) return null;
+            const cleanConditions = conditions.map(({ attribute, operator, value }) => ({ attribute, operator, value }));
             const base = {
                 ...(id ? { id } : {}),
                 priority,
                 name,
                 is_active: isActive,
-                conditions: [{ attribute, operator, value }],
+                conditions: cleanConditions,
                 output_key: outputKey,
                 updated_at: new Date().toISOString(),
             };
