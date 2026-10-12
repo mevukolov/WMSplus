@@ -3255,7 +3255,6 @@
             void syncNmDirectoryFromSuperset(rows).catch((error) => console.warn("nm directory sync skipped:", error));
             void pushSupersetRowsToCache(rows)
                 .then(() => hydrateSupersetCache(rows.map((row) => row.shk)))
-                .then(() => supabaseDb().rpc("wms_apply_routing_rules", { p_shks: rows.map((row) => row.shk) }))
                 .then(() => loadReviewTasks())
                 .then(() => renderReview())
                 .catch((error) => console.warn("superset cache push skipped:", error));
