@@ -1973,6 +1973,11 @@
                     <h2 class="tasks-action-title">Правила маршрутизации</h2>
                     <p class="tasks-action-text">Куда класть осиротевшие ШК по статусу/таре после актуализации Superset -- без правки кода.</p>
                 </button>
+                <button id="openModuleSettings" class="tasks-action-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">⚙️</span>
+                    <h2 class="tasks-action-title">Параметры модулей</h2>
+                    <p class="tasks-action-text">Нестатичные параметры выгрузки (пороги, сдвиги дат и т.п.) без правки кода.</p>
+                </button>
                 <button id="openDebugSandbox" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">🛠</span>
                     <h2 class="tasks-action-title">Отладка</h2>
@@ -2826,6 +2831,25 @@
             <button id="reloadRoutingRules" class="btn btn-outline" type="button">Обновить из Supabase</button>
         </div>
         <div id="routingRulesStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="moduleSettingsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Параметры модулей</h3>
+                <p class="work-subtitle">Нестатичные параметры выгрузки (пороги цены, сдвиги дат, поле группировки и т.п.) -- ключ-значение на модуль.</p>
+            </div>
+            <button id="closeModuleSettings" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="moduleSettingsWrap" class="writeoff-terms-wrap"></div>
+        <div class="file-row">
+            <button id="addModuleSetting" class="btn btn-outline" type="button">Добавить параметр</button>
+            <button id="saveModuleSettings" class="btn btn-rect" type="button">Сохранить параметры</button>
+            <button id="reloadModuleSettings" class="btn btn-outline" type="button">Обновить из Supabase</button>
+        </div>
+        <div id="moduleSettingsStatus" class="review-status"></div>
     </div>
 </section>
 
