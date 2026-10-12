@@ -3262,11 +3262,7 @@
             void syncNmDirectoryFromSuperset(rows).catch((error) => console.warn("nm directory sync skipped:", error));
             void pushSupersetRowsToCache(rows)
                 .then(() => hydrateSupersetCache(rows.map((row) => row.shk)))
-                .then(() => {
-                    const latestByShk = Array.from(latestSupersetByShk(rows).values());
-                    const mxRows = latestByShk.map((row) => ({ shk: row.shk, mx: row.last_mx || null }));
-                    return supabaseDb().rpc("wms_log_shk_mx_batch", { p_rows: mxRows });
-                })
+                .then(() => logShkMxBatch(rows))
                 .then(() => loadReviewTasks())
                 .then(() => renderReview())
                 .catch((error) => console.warn("superset cache push skipped:", error));
@@ -3606,6 +3602,23 @@
     // ШК" (снесена вместе с игрой в dc65a11) и была обвешана её
     // состоянием; здесь -- тот же принцип, без привязки к конкретной
     // фиче, как общий источник для отображения статуса где угодно.
+    async function logShkMxBatch(rows) {
+        const db = supabaseDb();
+        if (!db) return;
+        const latest = Array.from(latestSupersetByShk(rows || []).values());
+        if (!latest.length) return;
+        const mxRows = latest.map((row) => ({ shk: row.shk, mx: row.last_mx || null }));
+        for (const chunk of chunkArray(mxRows, SUPERSET_CACHE_CHUNK_SIZE)) {
+            try {
+                const { error } = await db.rpc("wms_log_shk_mx_batch", { p_rows: chunk });
+                if (error) throw error;
+            } catch (error) {
+                console.warn("shk mx history log skipped:", error);
+                return;
+            }
+        }
+    }
+
     async function pushSupersetRowsToCache(rows) {
         const db = supabaseDb();
         if (!db) return;
