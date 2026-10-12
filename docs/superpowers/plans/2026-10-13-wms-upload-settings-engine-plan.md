@@ -497,7 +497,7 @@ insert into public.wms_routing_rules (priority, name, is_active, conditions, out
 values
   (90020, 'evaluate-test-high', true, jsonb_build_array(jsonb_build_object('attribute', 'price', 'operator', 'gte', 'value', '5000')), 'priority_tier', jsonb_build_object('priority', 2, 'label', 'Высокий')),
   (90021, 'evaluate-test-low', true, jsonb_build_array(jsonb_build_object('attribute', 'price', 'operator', 'lt', 'value', '5000')), 'priority_tier', jsonb_build_object('priority', 0, 'label', 'Низкий')),
-  (90022, 'evaluate-test-inactive', false, jsonb_build_array(jsonb_build_object('attribute', 'price', 'operator', 'gte', 'value', '0')), 'priority_tier', jsonb_build_object('priority', 99, 'label', 'Не должно сработать'));
+  (90022, 'evaluate-test-inactive-only', false, jsonb_build_array(jsonb_build_object('attribute', 'price', 'operator', 'gte', 'value', '0')), 'inactive_test_key', jsonb_build_object('priority', 99, 'label', 'Не должно сработать'));
 
 create temp table eval_high as
 select public.wms_evaluate_rule('priority_tier', jsonb_build_object('price', '9000')) as result;
@@ -524,7 +524,7 @@ insert into test_results values ('evaluate_returns_null_when_output_key_unknown'
   'true');
 
 create temp table eval_inactive as
-select public.wms_evaluate_rule('priority_tier', jsonb_build_object('price', '-1')) as result;
+select public.wms_evaluate_rule('inactive_test_key', jsonb_build_object('price', '100')) as result;
 
 insert into test_results values ('evaluate_skips_inactive_rules',
   (select (result is null)::text from eval_inactive),
