@@ -3262,6 +3262,11 @@
             void syncNmDirectoryFromSuperset(rows).catch((error) => console.warn("nm directory sync skipped:", error));
             void pushSupersetRowsToCache(rows)
                 .then(() => hydrateSupersetCache(rows.map((row) => row.shk)))
+                .then(() => {
+                    const latestByShk = Array.from(latestSupersetByShk(rows).values());
+                    const mxRows = latestByShk.map((row) => ({ shk: row.shk, mx: row.last_mx || null }));
+                    return supabaseDb().rpc("wms_log_shk_mx_batch", { p_rows: mxRows });
+                })
                 .then(() => loadReviewTasks())
                 .then(() => renderReview())
                 .catch((error) => console.warn("superset cache push skipped:", error));
@@ -3617,6 +3622,7 @@
             last_status_at: row.last_status_at || null,
             last_status_ts: row.last_status_ts || null,
             last_tare: row.last_tare || null,
+            last_mx: row.last_mx || null,
             price: row.price || null,
             updated_at: now,
         }));
