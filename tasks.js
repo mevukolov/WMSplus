@@ -12240,8 +12240,8 @@
             + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет'>"
             + "<input data-rule-name type='text' value='" + escapeHtml(row.name || "") + "' placeholder='Название'>"
             + "<select data-rule-output-key>"
-            + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона</option>"
-            + "<option value='priority_tier'" + (outputKey === "priority_tier" ? " selected" : "") + ">Приоритет по цене</option>"
+            + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона (рабочее)</option>"
+            + "<option value='priority_tier'" + (outputKey === "priority_tier" ? " selected" : "") + ">Приоритет по цене (пока не используется)</option>"
             + "</select>"
             + "<select data-rule-attribute>"
             + "<option value='status'" + (attribute === "status" ? " selected" : "") + ">Статус</option>"
@@ -12260,13 +12260,13 @@
             + "<option value='lte'" + (operator === "lte" ? " selected" : "") + ">меньше или равно</option>"
             + "<option value='between'" + (operator === "between" ? " selected" : "") + ">между (через запятую)</option>"
             + "</select>"
-            + "<input data-rule-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение(я)'>"
+            + "<input data-rule-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение(я) -- через запятую для \"один из\"/\"между\"'>"
             + "<select data-rule-target" + (isZone ? "" : " style='display:none'") + ">" + targetOptions + "</select>"
             + "<select data-rule-grouping" + (isZone ? "" : " style='display:none'") + ">"
             + "<option value=''" + (!row.grouping_attribute ? " selected" : "") + ">Каждый ШК отдельно</option>"
             + "<option value='tare_id'" + (row.grouping_attribute === "tare_id" ? " selected" : "") + ">По таре</option>"
             + "</select>"
-            + "<input data-rule-output-value type='text' value='" + escapeHtml(outputValueText) + "' placeholder='output_value (JSON)'" + (isZone ? " style='display:none'" : "") + ">"
+            + "<input data-rule-output-value type='text' value='" + escapeHtml(outputValueText) + "' placeholder='Результат в формате JSON, например {\"priority\":2,\"label\":\"Высокий\"} -- пока нигде не используется'" + (isZone ? " style='display:none'" : "") + ">"
             + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
             + "<button type='button' class='btn btn-square' data-rule-remove aria-label='Удалить'>×</button>"
             + "</div>";
@@ -12278,7 +12278,7 @@
         const rows = state.routingRules.rows || [];
         target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
             + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
-            + "<div class='writeoff-term-head'><span>Приоритет</span><span>Название</span><span>Тип</span><span>Атрибут</span><span>Оператор</span><span>Значение</span><span>Зона</span><span>Группировка</span><span>Результат (JSON)</span><span>Вкл.</span></div>"
+            + "<div class='writeoff-term-head'><span>Приоритет (меньше -- важнее)</span><span>Название</span><span>Тип правила</span><span>Условие: атрибут</span><span>Условие: оператор</span><span>Условие: значение</span><span>Куда класть (зона)</span><span>Группировать по таре?</span><span>Результат (для нерабочих типов)</span><span>Включено</span></div>"
             + "<div class='writeoff-term-list'>" + rows.map(routingRuleRowHtml).join("") + "</div>";
         target.querySelectorAll("[data-rule-remove]").forEach((button) => {
             button.addEventListener("click", () => removeRoutingRuleRow(button.closest("[data-routing-rule-row]")));
@@ -12463,9 +12463,9 @@
     function moduleSettingRowHtml(row) {
         const valueText = row.value !== undefined && row.value !== null ? JSON.stringify(row.value) : "";
         return "<div class='writeoff-term-row' data-module-setting-row data-setting-module='" + escapeHtml(row.module || "") + "' data-setting-key-original='" + escapeHtml(row.setting_key || "") + "'>"
-            + "<input data-setting-module type='text' value='" + escapeHtml(row.module || "") + "' placeholder='Модуль'>"
-            + "<input data-setting-key type='text' value='" + escapeHtml(row.setting_key || "") + "' placeholder='Ключ'>"
-            + "<input data-setting-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение (JSON)'>"
+            + "<input data-setting-module type='text' value='" + escapeHtml(row.module || "") + "' placeholder='Модуль, например no_order'>"
+            + "<input data-setting-key type='text' value='" + escapeHtml(row.setting_key || "") + "' placeholder='Ключ, например cheap_row_threshold_rub'>"
+            + "<input data-setting-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение в JSON: число пишите как есть (2000), текст -- в кавычках (\"corrugated\")'>"
             + "<button type='button' class='btn btn-square' data-setting-remove aria-label='Удалить'>×</button>"
             + "</div>";
     }
@@ -12476,7 +12476,7 @@
         const rows = state.moduleSettings.rows || [];
         target.innerHTML = (state.moduleSettings.error ? "<div class='status-line error'>" + escapeHtml(state.moduleSettings.error) + "</div>" : "")
             + (state.moduleSettings.loading ? "<div class='status-line'>Загружаю параметры...</div>" : "")
-            + "<div class='writeoff-term-head'><span>Модуль</span><span>Ключ</span><span>Значение (JSON)</span></div>"
+            + "<div class='writeoff-term-head'><span>Модуль (участок выгрузки)</span><span>Ключ (название параметра)</span><span>Значение (JSON -- число без кавычек, текст в кавычках)</span></div>"
             + "<div class='writeoff-term-list'>" + rows.map(moduleSettingRowHtml).join("") + "</div>";
         target.querySelectorAll("[data-setting-remove]").forEach((button) => {
             button.addEventListener("click", () => removeModuleSettingRow(button.closest("[data-module-setting-row]")));
