@@ -4844,6 +4844,8 @@
 
     function taskSectionName(row) {
         const taskType = normalizeForMatch(row && row.task_type);
+        const exactMatch = activeReviewZones().find((zone) => normalizeForMatch(zone) === taskType);
+        if (exactMatch) return exactMatch;
         const title = normalizeForMatch(row && row.title);
         const sourceModule = normalizeForMatch(row && row.source_module);
         const combined = [taskType, title, sourceModule, normalizeForMatch(row && row.upload_type)].join(" ");
