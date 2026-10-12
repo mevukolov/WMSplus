@@ -12354,6 +12354,20 @@
             await loadRoutingRules(true);
             if (status) status.textContent = "Правила сохранены.";
             toast("Правила маршрутизации сохранены.", "success");
+            try {
+                const { data: previewCount, error: previewError } = await db.rpc("wms_preview_sweep_active_routing");
+                if (previewError) throw previewError;
+                const count = Number(previewCount) || 0;
+                if (count > 0 && window.confirm("Sweep переклассифицирует " + count + " активных ШК, включая невзятые в работу. Продолжить?")) {
+                    const { error: sweepError } = await db.rpc("wms_sweep_active_routing");
+                    if (sweepError) throw sweepError;
+                    toast("Sweep применил переклассификацию: " + count + " ШК.", "success");
+                    await loadReviewTasks();
+                    renderReview();
+                }
+            } catch (sweepCheckError) {
+                console.warn("routing rules sweep skipped:", sweepCheckError);
+            }
         } catch (error) {
             const message = error && error.message ? error.message : String(error);
             state.routingRules.error = "Не удалось сохранить правила: " + message;
