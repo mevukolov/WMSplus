@@ -160,20 +160,23 @@ create temp table test_results (test_name text primary key, actual text, expecte
 -- Фикстура 1: активный ШК, зона "Маркетплейс", задача "Не начато",
 -- правило уводит в "ПЦ" -- должно НЕ примениться (защита).
 create temp table t1_task as
-insert into public.wms_tasks (
-    source_module, source_table, source_id, source_payload,
-    source_shk_ids, task_type, title, task_status, opp_verdict,
-    responsibility_zone, tags, last_seen_at
-) values (
-    'phase2a_test', 'manual_xlsx', 'phase2a-t1', jsonb_build_object(
-        'task_items', jsonb_build_array(jsonb_build_object(
-            'shk', '90000000001', 'nm', null, 'name', 't1', 'price', 0,
-            'status', '', 'movement', '', 'mx', ''
-        ))
-    ),
-    array['90000000001'], 'Маркетплейс', 'Phase2a test 1', 'Не начато', 'Не выбран',
-    'Нет привязки', '[]'::jsonb, now()
-) returning id;
+with ins as (
+  insert into public.wms_tasks (
+      source_module, source_table, source_id, source_payload,
+      source_shk_ids, task_type, title, task_status, opp_verdict,
+      responsibility_zone, tags, last_seen_at
+  ) values (
+      'phase2a_test', 'manual_xlsx', 'phase2a-t1', jsonb_build_object(
+          'task_items', jsonb_build_array(jsonb_build_object(
+              'shk', '90000000001', 'nm', null, 'name', 't1', 'price', 0,
+              'status', '', 'movement', '', 'mx', ''
+          ))
+      ),
+      array['90000000001'], 'Маркетплейс', 'Phase2a test 1', 'Не начато', 'Не выбран',
+      'Нет привязки', '[]'::jsonb, now()
+  ) returning id
+)
+select * from ins;
 
 insert into public.wms_superset_cache (wh_id, shk, last_status, last_tare)
 values ('50144199', '90000000001', 'XYZ: тестовый статус', null)
@@ -198,20 +201,23 @@ insert into test_results values ('t1_item_zone_unchanged',
 
 -- Фикстура 2: тот же сетап, но задача "Отложено" -- должно примениться.
 create temp table t2_task as
-insert into public.wms_tasks (
-    source_module, source_table, source_id, source_payload,
-    source_shk_ids, task_type, title, task_status, opp_verdict,
-    responsibility_zone, tags, last_seen_at
-) values (
-    'phase2a_test', 'manual_xlsx', 'phase2a-t2', jsonb_build_object(
-        'task_items', jsonb_build_array(jsonb_build_object(
-            'shk', '90000000002', 'nm', null, 'name', 't2', 'price', 0,
-            'status', '', 'movement', '', 'mx', ''
-        ))
-    ),
-    array['90000000002'], 'Маркетплейс', 'Phase2a test 2', 'Отложено', 'Не выбран',
-    'Нет привязки', '[]'::jsonb, now()
-) returning id;
+with ins as (
+  insert into public.wms_tasks (
+      source_module, source_table, source_id, source_payload,
+      source_shk_ids, task_type, title, task_status, opp_verdict,
+      responsibility_zone, tags, last_seen_at
+  ) values (
+      'phase2a_test', 'manual_xlsx', 'phase2a-t2', jsonb_build_object(
+          'task_items', jsonb_build_array(jsonb_build_object(
+              'shk', '90000000002', 'nm', null, 'name', 't2', 'price', 0,
+              'status', '', 'movement', '', 'mx', ''
+          ))
+      ),
+      array['90000000002'], 'Маркетплейс', 'Phase2a test 2', 'Отложено', 'Не выбран',
+      'Нет привязки', '[]'::jsonb, now()
+  ) returning id
+)
+select * from ins;
 
 insert into public.wms_superset_cache (wh_id, shk, last_status, last_tare)
 values ('50144199', '90000000002', 'XYZ: тестовый статус', null)
@@ -505,20 +511,23 @@ insert into test_results values ('orphan_created',
 
 -- Активный путь: ШК с активной задачей "Отложено" -- должен переехать, НЕ создавая orphan-задачу.
 create temp table active_task as
-insert into public.wms_tasks (
-    source_module, source_table, source_id, source_payload,
-    source_shk_ids, task_type, title, task_status, opp_verdict,
-    responsibility_zone, tags, last_seen_at
-) values (
-    'phase2a_test', 'manual_xlsx', 'phase2a-t5', jsonb_build_object(
-        'task_items', jsonb_build_array(jsonb_build_object(
-            'shk', '90000000011', 'nm', null, 'name', 't5', 'price', 0,
-            'status', '', 'movement', '', 'mx', ''
-        ))
-    ),
-    array['90000000011'], 'Маркетплейс', 'Phase2a test 5', 'Отложено', 'Не выбран',
-    'Нет привязки', '[]'::jsonb, now()
-) returning id;
+with ins as (
+  insert into public.wms_tasks (
+      source_module, source_table, source_id, source_payload,
+      source_shk_ids, task_type, title, task_status, opp_verdict,
+      responsibility_zone, tags, last_seen_at
+  ) values (
+      'phase2a_test', 'manual_xlsx', 'phase2a-t5', jsonb_build_object(
+          'task_items', jsonb_build_array(jsonb_build_object(
+              'shk', '90000000011', 'nm', null, 'name', 't5', 'price', 0,
+              'status', '', 'movement', '', 'mx', ''
+          ))
+      ),
+      array['90000000011'], 'Маркетплейс', 'Phase2a test 5', 'Отложено', 'Не выбран',
+      'Нет привязки', '[]'::jsonb, now()
+  ) returning id
+)
+select * from ins;
 
 insert into public.wms_superset_cache (wh_id, shk, last_status, last_tare)
 values ('50144199', '90000000011', 'XYZ: тестовый статус', null)
@@ -656,20 +665,23 @@ insert into test_results values ('trigger_insert_orphan_created',
 
 -- Активный ШК: изменение статуса через UPDATE должно само переклассифицировать.
 create temp table active_task as
-insert into public.wms_tasks (
-    source_module, source_table, source_id, source_payload,
-    source_shk_ids, task_type, title, task_status, opp_verdict,
-    responsibility_zone, tags, last_seen_at
-) values (
-    'phase2a_test', 'manual_xlsx', 'phase2a-t6', jsonb_build_object(
-        'task_items', jsonb_build_array(jsonb_build_object(
-            'shk', '90000000021', 'nm', null, 'name', 't6', 'price', 0,
-            'status', '', 'movement', '', 'mx', ''
-        ))
-    ),
-    array['90000000021'], 'Маркетплейс', 'Phase2a test 6', 'Отложено', 'Не выбран',
-    'Нет привязки', '[]'::jsonb, now()
-) returning id;
+with ins as (
+  insert into public.wms_tasks (
+      source_module, source_table, source_id, source_payload,
+      source_shk_ids, task_type, title, task_status, opp_verdict,
+      responsibility_zone, tags, last_seen_at
+  ) values (
+      'phase2a_test', 'manual_xlsx', 'phase2a-t6', jsonb_build_object(
+          'task_items', jsonb_build_array(jsonb_build_object(
+              'shk', '90000000021', 'nm', null, 'name', 't6', 'price', 0,
+              'status', '', 'movement', '', 'mx', ''
+          ))
+      ),
+      array['90000000021'], 'Маркетплейс', 'Phase2a test 6', 'Отложено', 'Не выбран',
+      'Нет привязки', '[]'::jsonb, now()
+  ) returning id
+)
+select * from ins;
 
 insert into public.wms_superset_cache (wh_id, shk, last_status, last_tare)
 values ('50144199', '90000000021', 'AAA: исходный', null)
@@ -805,20 +817,23 @@ values (90004, 'phase2a-test-rule-4', true, jsonb_build_array(jsonb_build_object
 on conflict (priority) do update set name = excluded.name, is_active = excluded.is_active, conditions = excluded.conditions, target_task_type = excluded.target_task_type;
 
 create temp table active_task as
-insert into public.wms_tasks (
-    source_module, source_table, source_id, source_payload,
-    source_shk_ids, task_type, title, task_status, opp_verdict,
-    responsibility_zone, tags, last_seen_at
-) values (
-    'phase2a_test', 'manual_xlsx', 'phase2a-t7', jsonb_build_object(
-        'task_items', jsonb_build_array(jsonb_build_object(
-            'shk', '90000000030', 'nm', null, 'name', 't7', 'price', 0,
-            'status', '', 'movement', '', 'mx', ''
-        ))
-    ),
-    array['90000000030'], 'Маркетплейс', 'Phase2a test 7', 'Не начато', 'Не выбран',
-    'Нет привязки', '[]'::jsonb, now()
-) returning id;
+with ins as (
+  insert into public.wms_tasks (
+      source_module, source_table, source_id, source_payload,
+      source_shk_ids, task_type, title, task_status, opp_verdict,
+      responsibility_zone, tags, last_seen_at
+  ) values (
+      'phase2a_test', 'manual_xlsx', 'phase2a-t7', jsonb_build_object(
+          'task_items', jsonb_build_array(jsonb_build_object(
+              'shk', '90000000030', 'nm', null, 'name', 't7', 'price', 0,
+              'status', '', 'movement', '', 'mx', ''
+          ))
+      ),
+      array['90000000030'], 'Маркетплейс', 'Phase2a test 7', 'Не начато', 'Не выбран',
+      'Нет привязки', '[]'::jsonb, now()
+  ) returning id
+)
+select * from ins;
 
 insert into public.wms_superset_cache (wh_id, shk, last_status, last_tare)
 values ('50144199', '90000000030', 'XYZ: тест', null)
@@ -942,20 +957,23 @@ values (90005, 'phase2a-test-rule-5', true, jsonb_build_array(jsonb_build_object
 on conflict (priority) do update set name = excluded.name, is_active = excluded.is_active, conditions = excluded.conditions, target_task_type = excluded.target_task_type;
 
 create temp table active_task as
-insert into public.wms_tasks (
-    source_module, source_table, source_id, source_payload,
-    source_shk_ids, task_type, title, task_status, opp_verdict,
-    responsibility_zone, tags, last_seen_at
-) values (
-    'phase2a_test', 'manual_xlsx', 'phase2a-t8', jsonb_build_object(
-        'task_items', jsonb_build_array(jsonb_build_object(
-            'shk', '90000000040', 'nm', null, 'name', 't8', 'price', 0,
-            'status', '', 'movement', '', 'mx', ''
-        ))
-    ),
-    array['90000000040'], 'Маркетплейс', 'Phase2a test 8', 'Не начато', 'Не выбран',
-    'Нет привязки', '[]'::jsonb, now()
-) returning id;
+with ins as (
+  insert into public.wms_tasks (
+      source_module, source_table, source_id, source_payload,
+      source_shk_ids, task_type, title, task_status, opp_verdict,
+      responsibility_zone, tags, last_seen_at
+  ) values (
+      'phase2a_test', 'manual_xlsx', 'phase2a-t8', jsonb_build_object(
+          'task_items', jsonb_build_array(jsonb_build_object(
+              'shk', '90000000040', 'nm', null, 'name', 't8', 'price', 0,
+              'status', '', 'movement', '', 'mx', ''
+          ))
+      ),
+      array['90000000040'], 'Маркетплейс', 'Phase2a test 8', 'Не начато', 'Не выбран',
+      'Нет привязки', '[]'::jsonb, now()
+  ) returning id
+)
+select * from ins;
 
 insert into public.wms_superset_cache (wh_id, shk, last_status, last_tare)
 values ('50144199', '90000000040', 'XYZ: тест', null)
