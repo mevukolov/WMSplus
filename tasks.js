@@ -544,6 +544,13 @@
             loaded: false,
             error: "",
         },
+        reviewZones: {
+            rows: [],
+            loading: false,
+            saving: false,
+            loaded: false,
+            error: "",
+        },
         staffStats: {
             date: todayIsoInMoscow(),
             loading: false,
@@ -1918,7 +1925,18 @@
         return roster;
     }
 
-    const SHIFT_ROSTER_ZONES = REVIEW_SECTIONS.concat(REQUEST_SECTIONS);
+    function activeReviewZones() {
+        const rows = (state.reviewZones.rows || [])
+            .filter((row) => row.is_active !== false)
+            .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+            .map((row) => row.name)
+            .filter(Boolean);
+        return rows.length ? rows : REVIEW_SECTIONS;
+    }
+
+    function shiftRosterZones() {
+        return activeReviewZones().concat(REQUEST_SECTIONS);
+    }
 
     function shiftRosterZoneCheckboxesHtml(selectedZones) {
         const selected = new Set(selectedZones || []);
@@ -12545,6 +12563,34 @@
         }
     }
 
+    async function loadReviewZones(force) {
+        if (state.reviewZones.loaded && !force) return true;
+        const db = supabaseDb();
+        state.reviewZones.loading = true;
+        state.reviewZones.error = "";
+        if (!db) {
+            state.reviewZones.loading = false;
+            return false;
+        }
+        try {
+            const { data, error } = await db
+                .from("wms_review_zones")
+                .select("*")
+                .order("sort_order", { ascending: true });
+            if (error) throw error;
+            state.reviewZones.rows = data || [];
+            state.reviewZones.loaded = true;
+            return true;
+        } catch (error) {
+            state.reviewZones.error = "Не удалось загрузить участки: " + (error && error.message ? error.message : String(error));
+            console.warn("review zones load skipped:", error);
+            return false;
+        } finally {
+            state.reviewZones.loading = false;
+            renderReviewZonesModal();
+        }
+    }
+
     function moduleSettingRowHtml(row) {
         const valueText = row.value !== undefined && row.value !== null ? JSON.stringify(row.value) : "";
         return "<div class='writeoff-term-row' data-module-setting-row data-setting-module='" + escapeHtml(row.module || "") + "' data-setting-key-original='" + escapeHtml(row.setting_key || "") + "'>"
@@ -18853,6 +18899,7 @@
         void loadShiftState();
         void loadAchievements();
         void loadWriteoffTerms();
+        void loadReviewZones();
         void loadPrintAlertState();
         setInterval(() => { void loadPrintAlertState(); }, 120000);
     }
