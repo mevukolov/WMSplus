@@ -1993,6 +1993,11 @@
                     <h2 class="tasks-action-title">Параметры модулей</h2>
                     <p class="tasks-action-text">Нестатичные параметры выгрузки (пороги, сдвиги дат и т.п.) без правки кода.</p>
                 </button>
+                <button id="openReviewZones" class="tasks-action-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">🗂️</span>
+                    <h2 class="tasks-action-title">Участки разбора</h2>
+                    <p class="tasks-action-text">Список участков Предразбора (Упаковка, RWP, ПЦ и т.д.) -- без правки кода.</p>
+                </button>
                 <button id="openDebugSandbox" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">🛠</span>
                     <h2 class="tasks-action-title">Отладка</h2>
@@ -2868,6 +2873,25 @@
             <button id="reloadModuleSettings" class="btn btn-outline" type="button">Обновить из Supabase</button>
         </div>
         <div id="moduleSettingsStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="reviewZonesModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Участки разбора</h3>
+                <p class="work-subtitle">Список "папок" Предразбора (Упаковка, RWP, ПЦ и т.д.) -- отсюда их читают Предразбор, Флоу и ростер смены. Порядок задаёт очерёдность показа, выключенный участок скрывается из этих списков (существующие задачи никуда не денутся -- просто попадут в "Другие задачи").</p>
+            </div>
+            <button id="closeReviewZones" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="reviewZonesWrap" class="writeoff-terms-wrap"></div>
+        <div class="file-row">
+            <button id="addReviewZone" class="btn btn-outline" type="button">Добавить участок</button>
+            <button id="saveReviewZones" class="btn btn-rect" type="button">Сохранить участки</button>
+            <button id="reloadReviewZones" class="btn btn-outline" type="button">Обновить из Supabase</button>
+        </div>
+        <div id="reviewZonesStatus" class="review-status"></div>
     </div>
 </section>
 

@@ -12657,6 +12657,111 @@
         }).filter(Boolean);
     }
 
+    function reviewZoneRowHtml(row) {
+        return "<div class='writeoff-term-row' data-review-zone-row data-zone-name-original='" + escapeHtml(row.name || "") + "'>"
+            + "<input data-zone-sort type='number' min='1' step='1' value='" + escapeHtml(row.sort_order || "") + "' placeholder='Порядок'>"
+            + "<input data-zone-name type='text' value='" + escapeHtml(row.name || "") + "' placeholder='Название участка'>"
+            + "<label class='writeoff-term-active'><input data-zone-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активен</label>"
+            + "<button type='button' class='btn btn-square' data-zone-remove aria-label='Удалить'>×</button>"
+            + "</div>";
+    }
+
+    function renderReviewZonesModal() {
+        const target = $("reviewZonesWrap");
+        if (!target) return;
+        const rows = state.reviewZones.rows || [];
+        target.innerHTML = (state.reviewZones.error ? "<div class='status-line error'>" + escapeHtml(state.reviewZones.error) + "</div>" : "")
+            + (state.reviewZones.loading ? "<div class='status-line'>Загружаю участки...</div>" : "")
+            + "<div class='writeoff-term-head'><span>Порядок</span><span>Название</span><span>Вкл.</span></div>"
+            + "<div class='writeoff-term-list'>" + rows.map(reviewZoneRowHtml).join("") + "</div>";
+        target.querySelectorAll("[data-zone-remove]").forEach((button) => {
+            button.addEventListener("click", () => removeReviewZoneRow(button.closest("[data-review-zone-row]")));
+        });
+    }
+
+    async function removeReviewZoneRow(rowEl) {
+        if (!rowEl) return;
+        const name = rowEl.getAttribute("data-zone-name-original");
+        if (name) {
+            const db = supabaseDb();
+            if (db) {
+                try {
+                    const { error } = await db.from("wms_review_zones").delete().eq("name", name);
+                    if (error) throw error;
+                } catch (error) {
+                    toast("Не удалось удалить участок: " + (error && error.message ? error.message : String(error)), "error");
+                    return;
+                }
+            }
+        }
+        rowEl.remove();
+    }
+
+    function addReviewZoneDraft() {
+        const rows = state.reviewZones.rows || [];
+        const nextOrder = rows.reduce((max, row) => Math.max(max, Number(row.sort_order) || 0), 0) + 1;
+        state.reviewZones.rows = rows.concat({ name: "", sort_order: nextOrder, is_active: true });
+        renderReviewZonesModal();
+    }
+
+    function reviewZoneInputRows() {
+        return Array.from(document.querySelectorAll("[data-review-zone-row]")).map((row) => {
+            const name = normalizeText(row.querySelector("[data-zone-name]") && row.querySelector("[data-zone-name]").value);
+            if (!name) return null;
+            return {
+                name,
+                sort_order: Math.max(1, Math.trunc(settingNumber(row.querySelector("[data-zone-sort]") && row.querySelector("[data-zone-sort]").value, 1))),
+                is_active: row.querySelector("[data-zone-active]").checked,
+                updated_at: new Date().toISOString(),
+            };
+        }).filter(Boolean);
+    }
+
+    async function openReviewZonesModal() {
+        if (!ensureDevelopmentAccess("Участки разбора")) return;
+        closeFlowModals();
+        setFlowModalOpen("reviewZonesModal", true);
+        renderReviewZonesModal();
+        await loadReviewZones(true);
+    }
+
+    function closeReviewZonesModal() {
+        setFlowModalOpen("reviewZonesModal", false);
+    }
+
+    async function saveReviewZonesFromModal() {
+        const db = supabaseDb();
+        const status = $("reviewZonesStatus");
+        const button = $("saveReviewZones");
+        const rows = reviewZoneInputRows();
+        if (!rows.length) {
+            if (status) status.textContent = "Нет строк для сохранения.";
+            return;
+        }
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен.";
+            return;
+        }
+        if (button) button.disabled = true;
+        state.reviewZones.saving = true;
+        if (status) status.textContent = "Сохраняю участки...";
+        try {
+            const { error } = await db.from("wms_review_zones").upsert(rows, { onConflict: "name" });
+            if (error) throw error;
+            state.reviewZones.loaded = false;
+            await loadReviewZones(true);
+            if (status) status.textContent = "Участки сохранены.";
+            toast("Участки разбора сохранены.", "success");
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            state.reviewZones.error = "Не удалось сохранить участки: " + message;
+            if (status) status.textContent = state.reviewZones.error;
+        } finally {
+            state.reviewZones.saving = false;
+            if (button) button.disabled = false;
+        }
+    }
+
     async function openModuleSettingsModal() {
         if (!ensureDevelopmentAccess("Параметры модулей")) return;
         closeFlowModals();
@@ -18609,6 +18714,7 @@
         $("openWriteoffTerms").addEventListener("click", () => { void openWriteoffTermsModal(); });
         $("openRoutingRules").addEventListener("click", () => { void openRoutingRulesModal(); });
         $("openModuleSettings").addEventListener("click", () => { void openModuleSettingsModal(); });
+        $("openReviewZones").addEventListener("click", () => { void openReviewZonesModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
             if ((state.taskSearch.rows || []).length) setTaskSearchResultsVisible(true);
@@ -18662,6 +18768,10 @@
         $("saveRoutingRules").addEventListener("click", () => { void saveRoutingRulesFromModal(); });
         $("reloadRoutingRules").addEventListener("click", () => { void loadRoutingRules(true); });
         $("closeModuleSettings").addEventListener("click", closeModuleSettingsModal);
+        $("closeReviewZones").addEventListener("click", closeReviewZonesModal);
+        $("addReviewZone").addEventListener("click", addReviewZoneDraft);
+        $("saveReviewZones").addEventListener("click", () => { void saveReviewZonesFromModal(); });
+        $("reloadReviewZones").addEventListener("click", () => { void loadReviewZones(true); });
         $("addModuleSetting").addEventListener("click", addModuleSettingDraft);
         $("saveModuleSettings").addEventListener("click", () => { void saveModuleSettingsFromModal(); });
         $("reloadModuleSettings").addEventListener("click", () => { void loadModuleSettings(true); });
@@ -18828,6 +18938,7 @@
         $("writeoffTermsModal").addEventListener("click", (event) => { if (event.target === $("writeoffTermsModal")) closeWriteoffTermsModal(); });
         $("routingRulesModal").addEventListener("click", (event) => { if (event.target === $("routingRulesModal")) closeRoutingRulesModal(); });
         $("moduleSettingsModal").addEventListener("click", (event) => { if (event.target === $("moduleSettingsModal")) closeModuleSettingsModal(); });
+        $("reviewZonesModal").addEventListener("click", (event) => { if (event.target === $("reviewZonesModal")) closeReviewZonesModal(); });
         $("moduleChooser").addEventListener("click", (event) => { if (event.target === $("moduleChooser")) setFlowModalOpen("moduleChooser", false); });
         $("uploadWork").addEventListener("click", (event) => { if (event.target === $("uploadWork")) openChooser(state.manualDate); });
         $("masterWork").addEventListener("click", (event) => { if (event.target === $("masterWork")) setFlowModalOpen("masterWork", false); });
