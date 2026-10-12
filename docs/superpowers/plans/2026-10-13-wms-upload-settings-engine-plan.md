@@ -277,15 +277,15 @@ begin
         elsif v_op = 'contains' then
             if v_actual_text is null or position(lower(v_value#>>'{}') in lower(v_actual_text)) = 0 then return false; end if;
         elsif v_op in ('gt', 'gte', 'lt', 'lte') then
-            v_actual_num := nullif(v_actual_text, '')::numeric;
-            if v_actual_num is null then return false; end if;
+            if v_actual_text is null or v_actual_text !~ '^-?[0-9]+(\.[0-9]+)?$' then return false; end if;
+            v_actual_num := v_actual_text::numeric;
             if v_op = 'gt' and not (v_actual_num > (v_value#>>'{}')::numeric) then return false; end if;
             if v_op = 'gte' and not (v_actual_num >= (v_value#>>'{}')::numeric) then return false; end if;
             if v_op = 'lt' and not (v_actual_num < (v_value#>>'{}')::numeric) then return false; end if;
             if v_op = 'lte' and not (v_actual_num <= (v_value#>>'{}')::numeric) then return false; end if;
         elsif v_op = 'between' then
-            v_actual_num := nullif(v_actual_text, '')::numeric;
-            if v_actual_num is null then return false; end if;
+            if v_actual_text is null or v_actual_text !~ '^-?[0-9]+(\.[0-9]+)?$' then return false; end if;
+            v_actual_num := v_actual_text::numeric;
             if not (v_actual_num >= (v_value->>0)::numeric and v_actual_num <= (v_value->>1)::numeric) then return false; end if;
         else
             return false;
@@ -324,7 +324,7 @@ insert into test_results values ('status_in_no_match',
 -- eq
 insert into test_results values ('eq_match',
   (public.wms_rule_conditions_match(
-    jsonb_build_array(jsonb_build_object('attribute', 'tare_id', 'operator', 'eq', 'value', '"12345"')),
+    jsonb_build_array(jsonb_build_object('attribute', 'tare_id', 'operator', 'eq', 'value', '12345')),
     jsonb_build_object('tare_id', '12345')
   ))::text,
   'true');
@@ -332,7 +332,7 @@ insert into test_results values ('eq_match',
 -- contains (mx substring, регистронезависимо)
 insert into test_results values ('contains_match_case_insensitive',
   (public.wms_rule_conditions_match(
-    jsonb_build_array(jsonb_build_object('attribute', 'mx', 'operator', 'contains', 'value', '"буфер"')),
+    jsonb_build_array(jsonb_build_object('attribute', 'mx', 'operator', 'contains', 'value', 'буфер')),
     jsonb_build_object('mx', 'Общий БУФЕР мультиотгрузки')
   ))::text,
   'true');
@@ -370,7 +370,7 @@ insert into test_results values ('multi_condition_and',
   (public.wms_rule_conditions_match(
     jsonb_build_array(
       jsonb_build_object('attribute', 'status', 'operator', 'in', 'value', jsonb_build_array('GWS')),
-      jsonb_build_object('attribute', 'mx', 'operator', 'contains', 'value', '"сортировка в сетки"')
+      jsonb_build_object('attribute', 'mx', 'operator', 'contains', 'value', 'сортировка в сетки')
     ),
     jsonb_build_object('status', 'GWS: статус', 'mx', 'Сортировка в сетки №3')
   ))::text,
