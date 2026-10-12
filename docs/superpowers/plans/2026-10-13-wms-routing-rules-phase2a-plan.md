@@ -86,7 +86,11 @@ begin
         v_rule := null;
     end loop;
 
-    if v_rule is null or v_rule.target_task_type = v_item_task_type then
+    if v_rule is null then
+        return;
+    end if;
+
+    if v_rule.target_task_type = v_item_task_type then
         return;
     end if;
 
@@ -633,9 +637,12 @@ create trigger wms_superset_cache_route_insert
     for each statement
     execute function public.wms_superset_cache_route_changed();
 
+-- Postgres не позволяет сочетать transition tables с "UPDATE OF
+-- <колонки>" (0A000) -- фильтрация по last_status/last_tare уже
+-- внутри функции (join new_rows/old_rows с IS DISTINCT FROM).
 drop trigger if exists wms_superset_cache_route_update on public.wms_superset_cache;
 create trigger wms_superset_cache_route_update
-    after update of last_status, last_tare on public.wms_superset_cache
+    after update on public.wms_superset_cache
     referencing new table as new_rows old table as old_rows
     for each statement
     execute function public.wms_superset_cache_route_changed();
