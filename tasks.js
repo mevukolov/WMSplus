@@ -9296,6 +9296,7 @@
         task_incoming_box_last_movement: "Последнее движение",
         task_incoming_box_analysis: "Разбор",
         task_no_shk_found: "Найден без ШК",
+        task_refreshed_same_module: "Обновлено повторной выгрузкой",
     };
 
     function taskHistoryEventLabel(eventType) {
@@ -9350,8 +9351,9 @@
         const isCrossModuleTouch = item.event_type === "task_cross_module_touch";
         const isNoShkFound = item.event_type === "task_no_shk_found";
         const isSystemClosed = item.event_type === "task_system_closed" || isSystemCompletionVerdict(payload.verdict);
-        const isSystem = isSystemClosed || isForecast || isCreated || isUploadMarker || (!rawActorName && !rawActorId);
-        const actorDisplay = (isSystemClosed || isForecast || isCreated || isUploadMarker) ? "Система" : (rawActorName || rawActorId || "Система");
+        const isRefreshedSameModule = item.event_type === "task_refreshed_same_module";
+        const isSystem = isSystemClosed || isForecast || isCreated || isUploadMarker || isRefreshedSameModule || (!rawActorName && !rawActorId);
+        const actorDisplay = (isSystemClosed || isForecast || isCreated || isUploadMarker || isRefreshedSameModule) ? "Система" : (rawActorName || rawActorId || "Система");
         const verdict = isForecast
             ? "Прогнозируемая дата списания"
             : isStatusLine
