@@ -795,7 +795,14 @@ insert into test_results values ('orphan_routed_to_zone_rule_not_tier',
   (select task_type from public.wms_tasks where source_module = 'routing_engine' and '90030000001' = any(source_shk_ids)),
   'ПЦ');
 
--- wms_compute_reroute_target тоже игнорирует non-zone правила.
+-- Активная задача "Отложено" с другим статусом: триггер на insert в
+-- wms_superset_cache (Фаза 2a, уже в проде) сам вызовет
+-- wms_apply_routing_rules и переклассифицирует её автоматически --
+-- проверяем КОНЕЧНЫЙ результат цепочки, не вызываем
+-- wms_compute_reroute_target вручную (к этому моменту переклассификация
+-- уже случится сама, и ручной вызов вернёт пусто -- target уже
+-- совпадёт с current, это не баг, а доказательство, что цепочка
+-- работает).
 create temp table active_task as
 with ins as (
   insert into public.wms_tasks (
@@ -819,11 +826,8 @@ insert into public.wms_superset_cache (wh_id, shk, last_status, last_tare)
 values ('50144199', '90030000002', 'ZFT: тест', null)
 on conflict (wh_id, shk) do update set last_status = excluded.last_status, last_tare = excluded.last_tare;
 
-create temp table compute_result as
-select * from public.wms_compute_reroute_target((select id from active_task), '90030000002');
-
-insert into test_results values ('reroute_target_is_zone_not_tier',
-  (select target_zone from compute_result),
+insert into test_results values ('active_item_auto_rerouted_to_zone_not_tier',
+  (select task_type from public.wms_task_items where task_id = (select id from active_task) and shk = '90030000002'),
   'ПЦ');
 
 select test_name, actual, expected, (actual = expected) as pass from test_results order by test_name;
