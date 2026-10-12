@@ -1913,7 +1913,7 @@
         }
         const outgoingId = normalizeIdentifier(shift.outgoing_employee_id);
         if (outgoingId) {
-            const outgoingZones = REVIEW_SECTIONS.concat(["Списания AWH"]);
+            const outgoingZones = activeReviewZones().concat(["Списания AWH"]);
             const existing = roster.find((entry) => entry.employee_id === outgoingId);
             if (existing) existing.zones = existing.zones.concat(outgoingZones);
             else roster.push({
@@ -1940,7 +1940,7 @@
 
     function shiftRosterZoneCheckboxesHtml(selectedZones) {
         const selected = new Set(selectedZones || []);
-        return SHIFT_ROSTER_ZONES.map((zone) => "<label class='shift-roster-zone'><input type='checkbox' value='" + escapeHtml(zone) + "'" + (selected.has(zone) ? " checked" : "") + ">" + escapeHtml(zone) + "</label>").join("");
+        return shiftRosterZones().map((zone) => "<label class='shift-roster-zone'><input type='checkbox' value='" + escapeHtml(zone) + "'" + (selected.has(zone) ? " checked" : "") + ">" + escapeHtml(zone) + "</label>").join("");
     }
 
     function shiftRosterEmployeeOptionsHtml(selectedId) {
@@ -2760,7 +2760,7 @@
         const rosterRows = roster || collectShiftRosterFromForm();
         const covered = new Set();
         rosterRows.forEach((entry) => (entry.zones || []).forEach((zone) => covered.add(zone)));
-        const uncovered = SHIFT_ROSTER_ZONES.filter((zone) => !covered.has(zone));
+        const uncovered = shiftRosterZones().filter((zone) => !covered.has(zone));
         if (uncovered.length) {
             el.textContent = "Не закрыты участки: " + uncovered.join(", ");
             el.style.display = "";
@@ -2904,7 +2904,7 @@
                 state.review.loaded = true;
                 const grouped = reviewGroupedRows();
                 if (!state.review.activeSection || !(grouped.get(state.review.activeSection) || []).length) {
-                    state.review.activeSection = REVIEW_SECTIONS.find((section) => (grouped.get(section) || []).length) || REVIEW_SECTIONS[0];
+                    state.review.activeSection = activeReviewZones().find((section) => (grouped.get(section) || []).length) || activeReviewZones()[0];
                 }
                 setReviewStatus("Загружено активных задач: " + state.review.rows.length + ".");
                 void refreshWritebackFailuresBanner();
@@ -5046,7 +5046,7 @@
 
     function flowZoneCounts(rows) {
         const counts = {};
-        SHIFT_ROSTER_ZONES.forEach((zone) => { counts[zone] = 0; });
+        shiftRosterZones().forEach((zone) => { counts[zone] = 0; });
         (rows || []).filter(isActiveReviewTask).forEach((row) => {
             const key = flowTaskZoneKey(row);
             counts[key] = (counts[key] || 0) + 1;
@@ -6095,7 +6095,7 @@
     }
 
     function reviewGroupedRows() {
-        const grouped = new Map(REVIEW_SECTIONS.map((section) => [section, []]));
+        const grouped = new Map(activeReviewZones().map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
             if (isPrespisokTask(row) || requestSectionName(row) || isPureLossesZoneTask(row)) return;
             const section = grouped.has(taskSectionName(row)) ? taskSectionName(row) : "Другие задачи";
@@ -6373,7 +6373,7 @@
             entityTypes: ["shk", "tare"].filter((value) => (rows || []).some((row) => taskEntityFilterValue(row) === value)),
             taskStatuses: sortedUnique((rows || []).map(taskStatusFilterValue)),
             specialTags: SPECIAL_TAG_ORDER.filter((tag) => (rows || []).some((row) => taskSpecialTagFilterValues(row).includes(tag))),
-            sectionNames: REVIEW_SECTIONS.filter((section) => (rows || []).some((row) => taskSectionName(row) === section)),
+            sectionNames: activeReviewZones().filter((section) => (rows || []).some((row) => taskSectionName(row) === section)),
         };
     }
 
@@ -7027,14 +7027,14 @@
         if (wrap) wrap.classList.toggle("is-collapsed", expanded);
         // In the compact strip, empty sections are demoted to the tail so
         // the scrollable row leads with sections actually worth picking;
-        // the big-card grid keeps REVIEW_SECTIONS' own order untouched.
+        // the big-card grid keeps activeReviewZones()' own order untouched.
         const orderedSections = expanded
-            ? REVIEW_SECTIONS.slice().sort((a, b) => {
+            ? activeReviewZones().sort((a, b) => {
                 const aEmpty = !(grouped.get(a) || []).length;
                 const bEmpty = !(grouped.get(b) || []).length;
                 return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
             })
-            : REVIEW_SECTIONS;
+            : activeReviewZones();
         grid.innerHTML = orderedSections.map((section) => {
             const rows = grouped.get(section) || [];
             const total = rows.reduce((acc, row) => acc + reviewPrice(row), 0);
@@ -7051,7 +7051,7 @@
         }).join("");
         grid.querySelectorAll("[data-review-section]").forEach((button) => {
             button.addEventListener("click", () => {
-                const clicked = button.dataset.reviewSection || REVIEW_SECTIONS[0];
+                const clicked = button.dataset.reviewSection || activeReviewZones()[0];
                 if (state.review.sectionExpanded && state.review.activeSection === clicked) {
                     collapseReviewSection();
                     return;
@@ -7179,7 +7179,7 @@
     }
 
     function renderReviewTable(grouped) {
-        const section = state.review.activeSection || REVIEW_SECTIONS[0];
+        const section = state.review.activeSection || activeReviewZones()[0];
         const baseRows = grouped.get(section) || [];
         const filteredRows = applySectionFilters("review", baseRows);
         const rows = sortedReviewRows(filteredRows);
@@ -12294,7 +12294,7 @@
         const conditions = Array.isArray(row.conditions) && row.conditions.length ? row.conditions : [{ attribute: "status", operator: "in", value: [] }];
         const outputKey = row.output_key || "zone";
         const isZone = outputKey === "zone";
-        const targetOptions = REVIEW_SECTIONS.map((section) =>
+        const targetOptions = activeReviewZones().map((section) =>
             "<option value='" + escapeHtml(section) + "'" + (row.target_task_type === section ? " selected" : "") + ">" + escapeHtml(section) + "</option>"
         ).join("");
         const outputValueText = isZone ? "" : JSON.stringify(row.output_value !== undefined ? row.output_value : {});
@@ -12411,7 +12411,7 @@
             is_active: true,
             conditions: [{ attribute: "status", operator: "in", value: [] }],
             output_key: "zone",
-            target_task_type: REVIEW_SECTIONS[0],
+            target_task_type: activeReviewZones()[0],
             grouping_attribute: null,
             output_value: null,
         });
