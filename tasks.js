@@ -15990,7 +15990,7 @@
         return { mode: "after_sale_movement", sourceRows: sourceRows.length, rowsCount: rows.length, dateFilteredOut: sourceRows.length - rows.length, duplicateProductCount, specialCandidateIds: productIdsFromRows(rows), tasks, afterSaleMovementTasks: tasks.length };
     }
 
-    function buildPreviewForModule(module, rows, carrierRows, businessDate, specialMap) {
+    async function buildPreviewForModule(module, rows, carrierRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         if (module === "packaging" || module === "rwp") return buildPackagingPreview(rows, module, businessDate, specialMap);
         if (module === "pm") return buildPmPreview(rows, carrierRows || [], businessDate, specialMap);
@@ -16033,7 +16033,7 @@
                 try {
                     const specialMap = await loadSpecialMap(ids);
                     if (!state.specialCheck || state.specialCheck.token !== token) return null;
-                    const enriched = buildPreviewForModule(module, rows, carrierRows || [], businessDate, specialMap);
+                    const enriched = await buildPreviewForModule(module, rows, carrierRows || [], businessDate, specialMap);
                     enriched.specialStatus = "done";
                     enriched.specialLookupCount = ids.length;
                     enriched.specialMatchedCount = specialMap.size;
@@ -16079,7 +16079,7 @@
         state.specialCheck = null;
         if (module === "pm") {
             state.rows.carrier = [];
-            state.preview = buildPreviewForModule(module, rows, [], state.activeDate);
+            state.preview = await buildPreviewForModule(module, rows, [], state.activeDate);
             renderPreview(state.preview);
             $("copyTransfers").disabled = !(state.preview.copiedTransferIds || []).length;
             $("skipCarrier").disabled = false;
@@ -16087,7 +16087,7 @@
             startSpecialBackground(module, rows, [], state.activeDate, "Основной файл прочитан. Строк: " + rows.length + ". Скопируйте передачи и загрузите проверку отгрузки либо пропустите второй файл.");
             return;
         }
-        state.preview = buildPreviewForModule(module, rows, [], state.activeDate);
+        state.preview = await buildPreviewForModule(module, rows, [], state.activeDate);
         renderPreview(state.preview);
         $("saveUpload").disabled = !state.preview.tasks.length;
         startSpecialBackground(module, rows, [], state.activeDate, state.preview.tasks.length ? "Предпросмотр готов. К сохранению: " + state.preview.tasks.length + "." : "Нет задач по текущим правилам.");
@@ -16100,7 +16100,7 @@
         const rows = await readWorkbookRows(file, "pmCarrier");
         state.rows.carrier = rows;
         state.specialCheck = null;
-        state.preview = buildPreviewForModule("pm", state.rows.primary || [], rows, state.activeDate);
+        state.preview = await buildPreviewForModule("pm", state.rows.primary || [], rows, state.activeDate);
         renderPreview(state.preview);
         $("saveUpload").disabled = !state.preview.tasks.length;
         startSpecialBackground("pm", state.rows.primary || [], rows, state.activeDate, state.preview.tasks.length ? "Предпросмотр готов. К сохранению: " + state.preview.tasks.length + "." : "Нет задач по текущим правилам.");
@@ -16110,7 +16110,7 @@
         state.rows.carrier = [];
         state.files.carrier = null;
         state.specialCheck = null;
-        state.preview = buildPreviewForModule("pm", state.rows.primary || [], [], state.activeDate);
+        state.preview = await buildPreviewForModule("pm", state.rows.primary || [], [], state.activeDate);
         renderPreview(state.preview);
         $("saveUpload").disabled = !state.preview.tasks.length;
         startSpecialBackground("pm", state.rows.primary || [], [], state.activeDate, "Второй файл пропущен. К сохранению: " + state.preview.tasks.length + ".");
@@ -18462,7 +18462,7 @@
         const rows = await readWorkbookRows(file, slot.kind);
         state.master.rows[slot.key] = rows;
         if (slot.key === "main") {
-            const pmPreview = buildPreviewForModule("pm", rows, [], uploadDateForModule("pm"));
+            const pmPreview = await buildPreviewForModule("pm", rows, [], uploadDateForModule("pm"));
             state.master.pmTransferIds = pmPreview.copiedTransferIds || [];
             $("copyMasterTransfers").disabled = !state.master.pmTransferIds.length;
         }
@@ -18554,7 +18554,7 @@
                 const job = jobs[i];
                 setMasterStatus("Расчет " + (i + 1) + "/" + jobs.length + ": " + moduleDef(job.module).label + "...");
                 await nextPaint();
-                modules.push({ module: job.module, date: job.date, preview: buildPreviewForModule(job.module, job.rows, job.carrierRows, job.date) });
+                modules.push({ module: job.module, date: job.date, preview: await buildPreviewForModule(job.module, job.rows, job.carrierRows, job.date) });
                 state.master.preview.totalTasks = totalMasterTasks(modules);
                 renderMasterPreview("Расчет " + (i + 1) + "/" + jobs.length + ".");
             }
@@ -18618,7 +18618,7 @@
                     const specialMap = await loadSpecialMap(ids);
                     if (!state.master.specialCheck || state.master.specialCheck.token !== token) return null;
                     const dates = masterDatePlan();
-                    const modules = masterPreviewJobs(dates).map((job) => ({ module: job.module, date: job.date, preview: buildPreviewForModule(job.module, job.rows, job.carrierRows, job.date, specialMap) }));
+                    const modules = await Promise.all(masterPreviewJobs(dates).map(async (job) => ({ module: job.module, date: job.date, preview: await buildPreviewForModule(job.module, job.rows, job.carrierRows, job.date, specialMap) })));
                     state.master.preview = { dates, modules, totalTasks: totalMasterTasks(modules), specialStatus: "done", specialLookupCount: ids.length, specialMatchedCount: specialMap.size };
                     renderMasterPreview();
                     return state.master.preview;
