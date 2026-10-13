@@ -12314,6 +12314,7 @@
             + "<option value='in'" + (operator === "in" ? " selected" : "") + ">один из (через запятую)</option>"
             + "<option value='eq'" + (operator === "eq" ? " selected" : "") + ">равно</option>"
             + "<option value='contains'" + (operator === "contains" ? " selected" : "") + ">содержит</option>"
+            + "<option value='not_contains'" + (operator === "not_contains" ? " selected" : "") + ">не содержит</option>"
             + "<option value='gt'" + (operator === "gt" ? " selected" : "") + ">больше</option>"
             + "<option value='gte'" + (operator === "gte" ? " selected" : "") + ">больше или равно</option>"
             + "<option value='lt'" + (operator === "lt" ? " selected" : "") + ">меньше</option>"
