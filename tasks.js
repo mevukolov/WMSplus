@@ -2080,17 +2080,45 @@
         const menuButton = $("tasksMenuNotifications");
         const list = $("notificationsList");
         const hasPrintAlert = Boolean(state.printAlert.failedCount);
-        if (menuButton) menuButton.classList.toggle("has-alert", hasPrintAlert);
+        const writebackFailures = state.review.writebackFailures || [];
+        const hasWritebackFailures = Boolean(writebackFailures.length);
+        if (menuButton) menuButton.classList.toggle("has-alert", hasPrintAlert || hasWritebackFailures);
         if (!list) return;
-        if (!hasPrintAlert) {
-            list.innerHTML = "<div class='empty-state'>Пока пусто. Скоро подключим уведомления.</div>";
-            return;
+        const sections = [];
+        if (hasPrintAlert) {
+            const count = state.printAlert.failedCount;
+            const label = count === 1 ? "этикетку" : "этикеток";
+            const text = "Не удалось напечатать " + count + " " + label + " подряд. Последняя ошибка: "
+                + (state.printAlert.lastError || "неизвестная ошибка") + ". Проверьте принтер на складе.";
+            sections.push("<div class='status-line warn'><strong>Принтер не отвечает</strong><br>" + escapeHtml(text) + "</div>");
         }
-        const count = state.printAlert.failedCount;
-        const label = count === 1 ? "этикетку" : "этикеток";
-        const text = "Не удалось напечатать " + count + " " + label + " подряд. Последняя ошибка: "
-            + (state.printAlert.lastError || "неизвестная ошибка") + ". Проверьте принтер на складе.";
-        list.innerHTML = "<div class='status-line warn'><strong>Принтер не отвечает</strong><br>" + escapeHtml(text) + "</div>";
+        if (hasWritebackFailures) {
+            const canIgnore = flowAccessAllowed();
+            const rowsHtml = writebackFailures.map((row) => {
+                const writeback = taskPayload(row).wms_writeback || {};
+                const shk = escapeHtml(normalizeText(row.source_id));
+                const errorText = escapeHtml(normalizeText(writeback.error) || "неизвестная ошибка");
+                return "<div class='notification-writeback-row' data-writeback-row data-task-id='" + escapeHtml(row.id) + "'>"
+                    + "<div class='notification-writeback-text'><strong>" + shk + "</strong><br>" + errorText + "</div>"
+                    + (canIgnore ? "<button type='button' class='btn btn-square' data-writeback-ignore aria-label='Игнорировать'>Игнорировать</button>" : "")
+                    + "</div>";
+            }).join("");
+            sections.push("<div class='status-line warn'><strong>Не записалось в таблицу (" + writebackFailures.length + ")</strong>"
+                + "<div class='notification-writeback-list'>" + rowsHtml + "</div>"
+                + "<button id='retryWritebackFailures' class='btn btn-outline' type='button' style='margin-top:8px'>Повторить</button>"
+                + "</div>");
+        }
+        list.innerHTML = sections.length ? sections.join("") : "<div class='empty-state'>Пока пусто. Скоро подключим уведомления.</div>";
+        const retryBtn = $("retryWritebackFailures");
+        if (retryBtn) retryBtn.addEventListener("click", () => { void retryWritebackFailures(retryBtn); });
+        list.querySelectorAll("[data-writeback-ignore]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const rowEl = button.closest("[data-writeback-row]");
+                const taskId = rowEl && rowEl.getAttribute("data-task-id");
+                const row = writebackFailures.find((item) => item.id === taskId);
+                if (row) void ignoreWritebackFailure(row);
+            });
+        });
     }
 
     async function loadPrintAlertState() {
@@ -2907,7 +2935,7 @@
                     state.review.activeSection = activeReviewZones().find((section) => (grouped.get(section) || []).length) || activeReviewZones()[0];
                 }
                 setReviewStatus("Загружено активных задач: " + state.review.rows.length + ".");
-                void refreshWritebackFailuresBanner();
+                void refreshWritebackFailures();
                 void hydrateSupersetCache(allTaskShkList(state.review.rows)).then(() => renderReview());
             } catch (error) {
                 console.error("wms review load failed:", error);
@@ -11003,8 +11031,9 @@
     // take anywhere from one to tens of seconds, and blocking the operator on
     // it just to keep the sheet in sync isn't worth the wait. This merges the
     // outcome into the already-completed row's source_payload afterward, and
-    // refreshWritebackFailuresBanner() is how a failure stays visible instead
-    // of silently vanishing once the operator has moved to the next task.
+    // refreshWritebackFailures() is how a failure stays visible (in the
+    // notifications bell) instead of silently vanishing once the operator
+    // has moved to the next task.
     async function updateTaskWritebackField(taskId, nextPayloadBase, writebackValue) {
         const db = supabaseDb();
         if (!db) return;
@@ -11025,13 +11054,11 @@
                     error: error && error.message ? error.message : String(error),
                     conflict: isIncomingFlowWritebackConflict(error),
                     failed_at: new Date().toISOString(),
-                }).then(() => refreshWritebackFailuresBanner());
+                }).then(() => refreshWritebackFailures());
             });
     }
 
-    async function refreshWritebackFailuresBanner() {
-        const el = $("writebackFailuresBanner");
-        if (!el) return;
+    async function refreshWritebackFailures() {
         const db = supabaseDb();
         if (!db) return;
         const { data, error } = await db
@@ -11044,21 +11071,8 @@
             console.warn("writeback failures check skipped:", error);
             return;
         }
-        state.review.writebackFailures = data || [];
-        if (!state.review.writebackFailures.length) {
-            el.style.display = "none";
-            el.innerHTML = "";
-            return;
-        }
-        const shkList = state.review.writebackFailures.map((row) => normalizeText(row.source_id)).slice(0, 5).join(", ");
-        const firstUrl = incomingFlowSourceSheetUrl(state.review.writebackFailures[0]);
-        el.style.display = "";
-        el.innerHTML = "Не записалось в таблицу (" + state.review.writebackFailures.length + "): " + escapeHtml(shkList)
-            + (state.review.writebackFailures.length > 5 ? "…" : "")
-            + " <button id='retryWritebackFailures' class='btn btn-outline' type='button' style='margin-left:8px'>Повторить</button>"
-            + (firstUrl ? " <a class='btn btn-outline' href='" + escapeHtml(firstUrl) + "' target='_blank' rel='noopener'>Открыть таблицу</a>" : "");
-        const retryBtn = $("retryWritebackFailures");
-        if (retryBtn) retryBtn.addEventListener("click", () => { void retryWritebackFailures(retryBtn); });
+        state.review.writebackFailures = (data || []).filter((row) => !taskPayload(row).wms_writeback || !taskPayload(row).wms_writeback.ignored);
+        renderNotifications();
     }
 
     async function retryWritebackFailures(button) {
@@ -11081,7 +11095,26 @@
                 });
             }
         }
-        await refreshWritebackFailuresBanner();
+        await refreshWritebackFailures();
+    }
+
+    async function ignoreWritebackFailure(row) {
+        if (!flowAccessAllowed()) return;
+        const db = supabaseDb();
+        if (!db) return;
+        const user = currentWmsUser();
+        const nextWriteback = { ...(taskPayload(row).wms_writeback || {}), ignored: true, ignored_by: user.id || null, ignored_at: new Date().toISOString() };
+        const { error } = await db
+            .from(WMS_TASKS_TABLE)
+            .update({ source_payload: { ...taskPayload(row), wms_writeback: nextWriteback } })
+            .eq("id", row.id);
+        if (error) {
+            console.error("wms writeback ignore failed:", error);
+            toast("Не удалось скрыть ошибку: " + (error && error.message ? error.message : String(error)), "error");
+            return;
+        }
+        state.review.writebackFailures = (state.review.writebackFailures || []).filter((item) => item.id !== row.id);
+        renderNotifications();
     }
 
     // Фаза 2: вердикт разошедшемуся ШК внутри общей тары пишется в его
@@ -11214,7 +11247,7 @@
         // Apps Script round trips are slow and unpredictable (cold starts can
         // run past a minute) -- the task completes right away and the sheet
         // write happens after, in the background. A failure doesn't get lost:
-        // it lands in wms_writeback below and refreshWritebackFailuresBanner()
+        // it lands in wms_writeback below and refreshWritebackFailures()
         // surfaces it for retry instead of blocking this operator's screen.
         const needsWriteback = !isDeferred && needsSourceWriteback(row) && !opts.skipSourceWriteback && !state.flow.debugMode;
         const writebackResponse = opts.skipSourceWriteback
@@ -19015,6 +19048,8 @@
         void loadReviewZones();
         void loadPrintAlertState();
         setInterval(() => { void loadPrintAlertState(); }, 120000);
+        void refreshWritebackFailures();
+        setInterval(() => { void refreshWritebackFailures(); }, 120000);
     }
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
