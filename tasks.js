@@ -15061,7 +15061,9 @@
     function mxHasBuffer(row) { return normalizeForMatch(row && row.mx).includes("буфер"); }
 
     function zoneRuleAttributesForRow(row) {
-        return { status: row.product_status, mx: row.mx };
+        const status = row.product_status !== undefined ? row.product_status : row.last_status;
+        const mx = row.mx !== undefined ? row.mx : row.last_mx;
+        return { status, mx, route_number: routeNumberFromMx(mx) };
     }
 
     async function evaluateRuleBatchForOutputKey(outputKey, rows) {
@@ -15622,11 +15624,18 @@
         return (rows || []).slice().sort((a, b) => parseDateTime(b[field]).ts - parseDateTime(a[field]).ts)[0] || rows[0];
     }
 
-    function buildPackagingPreview(rows, module, businessDate, specialMap) {
+    async function buildPackagingPreview(rows, module, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const isRwp = module === "rwp";
         const def = moduleDef(module);
-        const statusRows = rows.filter((row) => isRwp ? isRwpStatus(row.last_status) : !isRwpStatus(row.last_status));
+        const decisions = await evaluateZoneRulesBatch(rows);
+        const decidedByRow = new Map();
+        rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
+        const statusRows = rows.filter((row) => {
+            const decided = decidedByRow.get(row);
+            if (decided) return decided === def.column;
+            return isRwp ? isRwpStatus(row.last_status) : !isRwpStatus(row.last_status);
+        });
         const dateRows = statusRows.filter((row) => parseDateTime(row.last_movement).date === businessDate);
         const byShk = new Map();
         let duplicateShkCount = 0;
@@ -15797,7 +15806,7 @@
         return { tasks, groupedTareCount, singleCount: singles.length + split.special.length, specialCount: split.special.length };
     }
 
-    function buildPmPreview(sourceRows, carrierRows, businessDate, specialMap) {
+    async function buildPmPreview(sourceRows, carrierRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const def = moduleDef("pm");
         const pmDueDate = dueDateForBusinessDate("pm", businessDate, "pm");
@@ -15805,6 +15814,14 @@
         const dateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
         const eligibleDateRows = dateRows.filter((row) => !mxHasBoxes(row));
         const smsRows = eligibleDateRows.filter((row) => isPmBufferStatus(row.product_status));
+        const decisions = await evaluateZoneRulesBatch(eligibleDateRows);
+        const decidedByRow = new Map();
+        eligibleDateRows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
+        const isMailRow = (row) => {
+            const decided = decidedByRow.get(row);
+            if (decided) return decided === "Почта";
+            return isMailRoute(routeNumberFromMx(row.mx));
+        };
         const transferIds = Array.from(new Set(smsRows.map((row) => row.transfer).filter(isGroupableIdentifier))).sort((a, b) => a.localeCompare(b, "ru"));
         // Presence alone means shipped now -- the operator scopes this file to
         // just the copied transfer numbers before exporting it, so any row
@@ -15831,7 +15848,7 @@
                 specialTaskCount += 1;
                 const routeNumber = routeNumberFromMx(row.mx);
                 const routeLabel = routeLabelFromMx(row.mx, isMultiShipmentBufferMx(row.mx) ? routeNumberFromMx(row.mx) : routeNumber);
-                const mail = isMailRoute(routeNumber);
+                const mail = isMailRow(row);
                 const taskType = mail ? "Разбор ОПП // Почта" : "Разбор ОПП // ПМ";
                 tasks.push(taskRecord({
                     module: "pm",
@@ -15862,7 +15879,7 @@
             const primary = groupRows.find((row) => isPmBufferStatus(row.product_status)) || groupRows[0];
             const routeNumber = routeNumberFromMx(primary.mx);
             const routeLabel = routeLabelFromMx(primary.mx, isMultiShipmentBufferMx(primary.mx) ? routeNumberFromMx(primary.mx) : routeNumber);
-            const mail = isMailRoute(routeNumber);
+            const mail = isMailRow(primary);
             const taskType = mail ? "Разбор ОПП // Почта" : "Разбор ОПП // ПМ";
             tasks.push(taskRecord({
                 module: "pm",
@@ -15946,11 +15963,18 @@
         return { mode: "marketplace_pc", sourceRows: sourceRows.length, rowsCount: marketplaceRows.length + pcRows.length, dateFilteredOut: sourceRows.filter((row) => !targetDates.has(parseDateTime(row.created_at).date)).length, marketplaceRows: marketplaceRows.length, pcRows: pcRows.length, groupedTareCount: marketplace.groupedTareCount + pc.groupedTareCount, specialCount: marketplace.specialCount + pc.specialCount, specialCandidateIds: productIdsFromRows(marketplaceRows.concat(pcRows)), tasks, marketplaceTasks: marketplace.tasks.length, pcTasks: pc.tasks.length };
     }
 
-    function buildWmiMpPcPreview(sourceRows, businessDate, specialMap) {
+    async function buildWmiMpPcPreview(sourceRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const def = moduleDef("wmi_mp_pc");
         const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const wmiRows = rows.filter(isWmiMpPcStatus);
+        const decisions = await evaluateZoneRulesBatch(rows);
+        const decidedByRow = new Map();
+        rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
+        const wmiRows = rows.filter((row) => {
+            const decided = decidedByRow.get(row);
+            if (decided) return decided === def.column;
+            return isWmiMpPcStatus(row);
+        });
         const grouped = appendGroupedTasks(wmiRows, { module: "wmi_mp_pc", sourceModule: def.sourceModule, uploadType: def.uploadType, businessDate, sourcePrefix: "wmi_mp_pc", titlePrefix: "WMI (МП + ПЦ)", taskType: def.taskType, descriptionTaskType: def.taskTypeLabel, column: def.column, dueDate: dueDateForBusinessDate("wmi_mp_pc", businessDate), responsibilityZone: def.responsibilityZone, specialMap });
         return { mode: "wmi_mp_pc", sourceRows: sourceRows.length, rowsCount: wmiRows.length, dateFilteredOut: sourceRows.length - rows.length, groupedTareCount: grouped.groupedTareCount, specialCount: grouped.specialCount, specialCandidateIds: productIdsFromRows(wmiRows), tasks: grouped.tasks, wmiTasks: grouped.tasks.length };
     }
