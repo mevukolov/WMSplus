@@ -15064,7 +15064,7 @@
         return { status: row.product_status, mx: row.mx };
     }
 
-    async function evaluateZoneRulesBatch(rows) {
+    async function evaluateRuleBatchForOutputKey(outputKey, rows) {
         const decisions = new Array(rows.length).fill(null);
         const db = supabaseDb();
         if (!db || !rows.length) return decisions;
@@ -15072,7 +15072,7 @@
             const chunk = rows.slice(offset, offset + SUPERSET_CACHE_CHUNK_SIZE);
             const payload = chunk.map((row, index) => ({ row_id: String(offset + index), ...zoneRuleAttributesForRow(row) }));
             try {
-                const { data, error } = await db.rpc("wms_evaluate_rule_batch", { p_output_key: "zone", p_rows: payload });
+                const { data, error } = await db.rpc("wms_evaluate_rule_batch", { p_output_key: outputKey, p_rows: payload });
                 if (error) throw error;
                 (data || []).forEach((item) => {
                     const idx = Number(item.row_id);
@@ -15081,11 +15081,13 @@
                     }
                 });
             } catch (error) {
-                console.warn("zone rule batch evaluation failed, falling back to hardcoded classification for this chunk:", error);
+                console.warn(outputKey + " rule batch evaluation failed, falling back to hardcoded classification for this chunk:", error);
             }
         }
         return decisions;
     }
+    async function evaluateZoneRulesBatch(rows) { return evaluateRuleBatchForOutputKey("zone", rows); }
+    async function evaluateNoOrderFolderRulesBatch(rows) { return evaluateRuleBatchForOutputKey("no_order_folder", rows); }
     function isPresortStatus(row) {
         const status = sourceRowStatus(row);
         if (status === "sps") return true;
@@ -15942,15 +15944,30 @@
         return { mode: "wmi_mp_pc", sourceRows: sourceRows.length, rowsCount: wmiRows.length, dateFilteredOut: sourceRows.length - rows.length, groupedTareCount: grouped.groupedTareCount, specialCount: grouped.specialCount, specialCandidateIds: productIdsFromRows(wmiRows), tasks: grouped.tasks, wmiTasks: grouped.tasks.length };
     }
 
-    function buildNoOrderPreview(sourceRows, businessDate, specialMap) {
+    async function buildNoOrderPreview(sourceRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const def = moduleDef("no_order");
         const usdDef = moduleDef("usd");
         const tmmDef = moduleDef("tmm");
         const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const usdRows = rows.filter(isNoOrderUsdStatus);
-        const tmmRows = rows.filter(isNoOrderTmmStatus);
-        const noOrderRows = rows.filter((row) => !isNoOrderUsdStatus(row) && !isNoOrderTmmStatus(row));
+        const decisions = await evaluateNoOrderFolderRulesBatch(rows);
+        const decidedByRow = new Map();
+        rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
+        const usdRows = rows.filter((row) => {
+            const decided = decidedByRow.get(row);
+            if (decided) return decided === usdDef.taskType;
+            return isNoOrderUsdStatus(row);
+        });
+        const tmmRows = rows.filter((row) => {
+            const decided = decidedByRow.get(row);
+            if (decided) return decided === tmmDef.taskType;
+            return isNoOrderTmmStatus(row);
+        });
+        const noOrderRows = rows.filter((row) => {
+            const decided = decidedByRow.get(row);
+            if (decided) return decided === def.taskType;
+            return !isNoOrderUsdStatus(row) && !isNoOrderTmmStatus(row);
+        });
         const noOrder = appendGroupedTasks(noOrderRows, { module: "no_order", sourceModule: def.sourceModule, uploadType: def.uploadType, businessDate, sourcePrefix: "no_order", titlePrefix: "Без заказа", taskType: def.taskType, descriptionTaskType: def.taskTypeLabel, column: def.column, dueDate: dueDateForBusinessDate("no_order", businessDate), responsibilityZone: def.responsibilityZone, specialMap });
         const usd = appendGroupedTasks(usdRows, { module: "usd", sourceModule: usdDef.sourceModule, uploadType: usdDef.uploadType, businessDate, sourcePrefix: "usd", titlePrefix: "USD", taskType: usdDef.taskType, descriptionTaskType: usdDef.taskTypeLabel, column: usdDef.column, dueDate: dueDateForBusinessDate("usd", businessDate), responsibilityZone: usdDef.responsibilityZone, specialMap, forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"] });
         const tmm = appendGroupedTasks(tmmRows, { module: "tmm", sourceModule: tmmDef.sourceModule, uploadType: tmmDef.uploadType, businessDate, sourcePrefix: "tmm", titlePrefix: "TMM", taskType: tmmDef.taskType, descriptionTaskType: tmmDef.taskTypeLabel, column: tmmDef.column, dueDate: dueDateForBusinessDate("tmm", businessDate), responsibilityZone: tmmDef.responsibilityZone, specialMap, forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"] });
