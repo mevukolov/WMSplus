@@ -15057,6 +15057,33 @@
     function mxHasPresortExclusion(mx) { const normalized = normalizeForMatch(mx); return PRESORT_EXCLUDED_MX_PARTS.some((part) => normalized.includes(part)); }
     function mxIncludes(row, part) { return normalizeForMatch(row && row.mx).includes(normalizeForMatch(part)); }
     function mxHasBuffer(row) { return normalizeForMatch(row && row.mx).includes("буфер"); }
+
+    function zoneRuleAttributesForRow(row) {
+        return { status: row.product_status, mx: row.mx };
+    }
+
+    async function evaluateZoneRulesBatch(rows) {
+        const decisions = new Array(rows.length).fill(null);
+        const db = supabaseDb();
+        if (!db || !rows.length) return decisions;
+        for (let offset = 0; offset < rows.length; offset += SUPERSET_CACHE_CHUNK_SIZE) {
+            const chunk = rows.slice(offset, offset + SUPERSET_CACHE_CHUNK_SIZE);
+            const payload = chunk.map((row, index) => ({ row_id: String(offset + index), ...zoneRuleAttributesForRow(row) }));
+            try {
+                const { data, error } = await db.rpc("wms_evaluate_rule_batch", { p_output_key: "zone", p_rows: payload });
+                if (error) throw error;
+                (data || []).forEach((item) => {
+                    const idx = Number(item.row_id);
+                    if (Number.isFinite(idx) && item.output_value && item.output_value.target_task_type) {
+                        decisions[idx] = item.output_value.target_task_type;
+                    }
+                });
+            } catch (error) {
+                console.warn("zone rule batch evaluation failed, falling back to hardcoded classification for this chunk:", error);
+            }
+        }
+        return decisions;
+    }
     function isPresortStatus(row) {
         const status = sourceRowStatus(row);
         if (status === "sps") return true;
@@ -15875,7 +15902,7 @@
         return { mode: "presort", sourceRows: sourceRows.length, rowsCount: presortRows.length, dateFilteredOut: sourceRows.length - rows.length, labelingRows: labelingRows.length, groupedTareCount: presort.groupedTareCount + labeling.groupedTareCount, specialCount: presort.specialCount + labeling.specialCount, specialCandidateIds: productIdsFromRows(presortRows.concat(labelingRows)), tasks, presortTasks: presort.tasks.length, labelingTasks: labeling.tasks.length };
     }
 
-    function buildMarketplacePcPreview(sourceRows, businessDate, specialMap) {
+    async function buildMarketplacePcPreview(sourceRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const marketplaceDef = moduleDef("marketplace");
         const pcDef = moduleDef("pc");
@@ -15883,8 +15910,20 @@
         const pcDate = state.manualDate ? businessDate : uploadDateForModule("pc");
         const marketplaceDateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === marketplaceDate);
         const pcDateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === pcDate);
-        const marketplaceRows = marketplaceDateRows.filter((row) => isMarketplaceStatus(row) && !mxHasBuffer(row));
-        const pcRows = pcDateRows.filter((row) => isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row));
+        const candidateRows = Array.from(new Set(marketplaceDateRows.concat(pcDateRows)));
+        const decisions = await evaluateZoneRulesBatch(candidateRows);
+        const zoneByRow = new Map();
+        candidateRows.forEach((row, index) => { zoneByRow.set(row, decisions[index]); });
+        const marketplaceRows = marketplaceDateRows.filter((row) => {
+            const decided = zoneByRow.get(row);
+            if (decided) return decided === marketplaceDef.column;
+            return isMarketplaceStatus(row) && !mxHasBuffer(row);
+        });
+        const pcRows = pcDateRows.filter((row) => {
+            const decided = zoneByRow.get(row);
+            if (decided) return decided === pcDef.column;
+            return isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row);
+        });
         const marketplace = appendGroupedTasks(marketplaceRows, { module: "marketplace", sourceModule: marketplaceDef.sourceModule, uploadType: marketplaceDef.uploadType, businessDate: marketplaceDate, sourcePrefix: "marketplace", titlePrefix: "Маркетплейс", taskType: marketplaceDef.taskType, descriptionTaskType: marketplaceDef.taskTypeLabel, column: marketplaceDef.column, dueDate: dueDateForBusinessDate("marketplace", marketplaceDate), responsibilityZone: marketplaceDef.responsibilityZone, specialMap });
         const pc = appendGroupedTasks(pcRows, { module: "pc", sourceModule: pcDef.sourceModule, uploadType: pcDef.uploadType, businessDate: pcDate, sourcePrefix: "pc", titlePrefix: "ПЦ", taskType: pcDef.taskType, descriptionTaskType: pcDef.taskTypeLabel, column: pcDef.column, dueDate: dueDateForBusinessDate("pc", pcDate), responsibilityZone: pcDef.responsibilityZone, specialMap });
         const tasks = marketplace.tasks.concat(pc.tasks);
