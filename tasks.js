@@ -18163,6 +18163,24 @@
         return keys;
     }
 
+    async function fetchActiveShkCoverage(db, shkIds) {
+        const found = new Set();
+        const ids = Array.from(new Set((shkIds || []).filter(Boolean)));
+        if (!db || !ids.length) return found;
+        const chunks = chunkArray(ids, 200);
+        for (let i = 0; i < chunks.length; i += 1) {
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .select("source_shk_ids")
+                .overlaps("source_shk_ids", chunks[i])
+                .eq("is_deleted", false)
+                .neq("task_status", "Завершено");
+            if (error) throw error;
+            (data || []).forEach((row) => (row.source_shk_ids || []).forEach((shk) => found.add(normalizeIdentifier(shk))));
+        }
+        return found;
+    }
+
     async function saveRepairTasks(db, tasks, context) {
         const chunks = chunkArray(tasks || [], 3);
         let repaired = 0;
@@ -18212,7 +18230,24 @@
                 });
             }
             const saved = await fetchSavedTaskKeys(db, Array.from(expected.values()));
-            const missing = Array.from(expected.entries()).filter(([key]) => !saved.has(key)).map(([, task]) => task);
+            let missing = Array.from(expected.entries()).filter(([key]) => !saved.has(key)).map(([, task]) => task);
+            if (missing.length) {
+                // A task can be "missing" by exact key yet perfectly safe --
+                // save_wms_manual_upload may have merged its ШК into an
+                // already-active task from a DIFFERENT module
+                // (task_cross_module_touch), which intentionally keeps that
+                // task's own identity instead of adopting this upload's
+                // source_id. That merge is correct and final -- re-querying
+                // by (source_module, source_id) can never see it. Treat a
+                // task as accounted for once every one of its ШК is already
+                // active somewhere.
+                const allShkIds = Array.from(new Set(missing.flatMap((task) => task.source_shk_ids || [])));
+                const activeShks = await fetchActiveShkCoverage(db, allShkIds);
+                missing = missing.filter((task) => {
+                    const shkIds = (task.source_shk_ids || []).filter(Boolean);
+                    return !(shkIds.length && shkIds.every((shk) => activeShks.has(normalizeIdentifier(shk))));
+                });
+            }
             if (!missing.length) return { expectedCount: expected.size, repairedCount };
             if (attempt >= 3) {
                 throw new Error("После контрольной сверки не сохранилось задач: " + missing.length + ". Попробуйте повторить выгрузку; WMS+ не будет делать вид, что всё ок.");
