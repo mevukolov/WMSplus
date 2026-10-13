@@ -15889,13 +15889,24 @@
         return { mode: "pm", sourceRows: sourceRows.length, rowsCount: smsRows.length, dateFilteredOut: sourceRows.length - dateRows.length, boxesFilteredOut: dateRows.length - eligibleDateRows.length, smsTransfers: transferIds.length, excludedByCarrier, cheapTransfers, specialTaskCount, specialCandidateIds, copiedTransferIds: transferIds, tasks, pmTasks: tasks.filter((task) => task.task_type === "Разбор ОПП // ПМ").length, mailTasks: tasks.filter((task) => task.task_type === "Разбор ОПП // Почта").length };
     }
 
-    function buildPresortPreview(sourceRows, businessDate, specialMap) {
+    async function buildPresortPreview(sourceRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const presortDef = moduleDef("presort");
         const labelingDef = moduleDef("labeling");
         const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const presortRows = rows.filter(isPresortStatus);
-        const labelingRows = rows.filter(isLabelingStatus);
+        const decisions = await evaluateZoneRulesBatch(rows);
+        const decidedByRow = new Map();
+        rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
+        const presortRows = rows.filter((row) => {
+            const decided = decidedByRow.get(row);
+            if (decided) return decided === presortDef.column;
+            return isPresortStatus(row);
+        });
+        const labelingRows = rows.filter((row) => {
+            const decided = decidedByRow.get(row);
+            if (decided) return decided === labelingDef.column;
+            return isLabelingStatus(row);
+        });
         const presort = appendGroupedTasks(presortRows, {
             module: "presort", sourceModule: presortDef.sourceModule, uploadType: presortDef.uploadType, businessDate, sourcePrefix: "presort", titlePrefix: "Предсортировка", taskType: presortDef.taskType, descriptionTaskType: presortDef.taskTypeLabel, column: presortDef.column, dueDate: dueDateForBusinessDate("presort", businessDate), responsibilityZone: presortDef.responsibilityZone, specialMap,
         });
