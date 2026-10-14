@@ -12732,6 +12732,19 @@
         return null;
     }
 
+    // Fields some build functions already compute and return, naming a
+    // reason rows got dropped AFTER classification -- by the module's own
+    // business logic (price thresholds, carrier confirmation, box MX),
+    // nothing to do with the rules engine. Surfaced so "excluded" numbers
+    // don't look like unexplained routing-engine losses.
+    const TEST_UPLOAD_DIAGNOSTIC_LABELS = {
+        boxesFilteredOut: "МХ содержит \"коробки\" (строк)",
+        excludedByCarrier: "Исключено по подтверждению перевозчика (передач, не ШК)",
+        cheapTransfers: "Передача дешевле 2000 ₽ -- пропущена целиком (передач, не ШК)",
+        skippedCheap: "ШК дешевле 1000 ₽ -- пропущен (строк)",
+        duplicateShkCount: "Дубликат ШК -- оставлена самая свежая запись (строк)",
+    };
+
     async function testUploadBreakdown(module, rows, businessDate) {
         const dateField = testUploadDateField(module);
         const dateRows = rows.filter((row) => parseDateTime(row[dateField]).date === businessDate);
@@ -12739,13 +12752,18 @@
         const decisions = dateRows.length ? await evaluator(dateRows) : [];
         const byRule = new Map();
         const statusField = testUploadStatusField(module);
+        // Scoped to rows that could plausibly belong to the TESTED module
+        // (same hardcode check as excludedRows) -- otherwise testing "pm"
+        // on a file that also carries PAP/SMC rows shows those as "no
+        // rule matched" too, which is true but about a different module
+        // entirely and reads as a false alarm in this context.
         const unmatchedByCode = new Map();
         const unmatchedRowsByCode = new Map();
         dateRows.forEach((row, index) => {
             const decided = decisions[index];
             const key = decided ? (decided.ruleName ? decided.ruleName + " → " + decided.zone : decided.zone) : "(без правила -- решает хардкод в коде)";
             byRule.set(key, (byRule.get(key) || 0) + 1);
-            if (!decided) {
+            if (!decided && testUploadIsModuleCandidate(module, row)) {
                 const code = latinStatusCode(row[statusField]) || "(без распознаваемого кода)";
                 unmatchedByCode.set(code, (unmatchedByCode.get(code) || 0) + 1);
                 const bucket = unmatchedRowsByCode.get(code) || [];
@@ -12792,6 +12810,22 @@
             const hardcodeRelevant = testUploadIsModuleCandidate(module, row);
             return (ruleRelevant || hardcodeRelevant) && !rowToTaskZone.has(testUploadRowIdentifier(module, row));
         });
+        const diagnostics = Object.keys(TEST_UPLOAD_DIAGNOSTIC_LABELS)
+            .filter((key) => typeof preview[key] === "number" && preview[key] > 0)
+            .map((key) => ({ label: TEST_UPLOAD_DIAGNOSTIC_LABELS[key], count: preview[key] }));
+        // buildPmPreview silently drops any ШК whose "Передача" is empty
+        // or "0" -- isGroupableIdentifier rejects both, so such a row
+        // never enters transferIds and is never processed into a task,
+        // with ZERO accounting anywhere in buildPmPreview's own return
+        // value. Recomputed here (not exposed by the function) because it
+        // is a real way for eligible ШК to vanish, in the test tool AND
+        // in a real upload.
+        if (module === "pm") {
+            const ungroupableCount = dateRows.filter((row) => !mxHasBoxes(row) && isPmBufferStatus(row.product_status) && !isGroupableIdentifier(row.transfer)).length;
+            if (ungroupableCount > 0) {
+                diagnostics.push({ label: "Нет группируемой \"Передачи\" (пусто или \"0\") -- потерялась бы и при обычной загрузке (строк)", count: ungroupableCount });
+            }
+        }
         return {
             module,
             totalRows: rows.length,
@@ -12803,6 +12837,7 @@
             taskCount: (preview.tasks || []).length,
             coveredCount: rowToTaskZone.size,
             excludedRows,
+            diagnostics,
         };
     }
 
@@ -12844,6 +12879,11 @@
             + "<p class='work-subtitle' style='margin:0 0 8px'>Не значит, что строка потеряется -- хардкод-фоллбэк может всё равно её классифицировать. Значит только, что НИ ОДНО активное правило этот код статуса не ловит -- удобно для поиска пробелов. Нажмите на строку, чтобы увидеть, что с этими ШК стало.</p>"
             + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Код статуса</th><th>ШК</th></tr></thead><tbody>" + (unmatchedRows || "<tr><td colspan='2'>Все статусы в файле попали хоть под какое-то правило.</td></tr>") + "</tbody></table></div>"
             + "<div id='routingRuleTestUnmatchedDetail'></div>"
+            + (result.diagnostics.length
+                ? "<h4>Доп. причины отсева (не из движка правил -- из собственной логики участка)</h4>"
+                    + "<p class='work-subtitle' style='margin:0 0 8px'>Эти ШК могли решить правило правильно, но их отсеяла другая, не связанная с движком проверка -- цена, коробки, перевозчик и т.п. Единицы измерения разные -- где написано \"передач\", а не \"ШК\", одна передача может включать несколько ШК.</p>"
+                    + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Причина</th><th>Количество</th></tr></thead><tbody>" + result.diagnostics.map((d) => "<tr><td>" + escapeHtml(d.label) + "</td><td>" + d.count + "</td></tr>").join("") + "</tbody></table></div>"
+                : "")
             + (result.excludedRows.length
                 ? "<h4>Должно было подойти этому участку, но не попало никуда (до 50 из " + result.excludedRows.length + ")</h4>"
                     + "<p class='work-subtitle' style='margin:0 0 8px'>Только строки, которые реально относятся к этому участку (подошли под правило или под хардкод) -- строки других статусов/участков (например ПМ-статусы при тесте marketplace_pc) сюда не попадают, это не шум.</p>"
