@@ -16005,6 +16005,7 @@
         specialMap = specialMap || new Map();
         const isRwp = module === "rwp";
         const def = moduleDef(module);
+
         const decisions = await evaluateZoneRulesBatch("packaging", rows);
         const decidedByRow = new Map();
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
@@ -16015,12 +16016,23 @@
         // for a different module, since that decided value matches
         // neither "RWP" nor "Упаковка". Only the RWP side is a real
         // positive match; packaging is everything else.
-        const statusRows = rows.filter((row) => {
+        function isRwpRow(row) {
             const decided = decidedByRow.get(row);
-            const isRwpDecided = decided ? decided.zone === "RWP" : isRwpStatus(row.last_status);
-            return isRwp ? isRwpDecided : !isRwpDecided;
+            return decided ? decided.zone === "RWP" : isRwpStatus(row.last_status);
+        }
+
+        const statusRows = rows.filter((row) => (isRwp ? isRwpRow(row) : !isRwpRow(row)));
+
+        // businessDate приходит уже сдвинутым снаружи (uploadDateForModule
+        // применяет def.offsetDays до вызова этой функции) -- здесь
+        // сравниваем напрямую, без повторного сдвига, иначе offset
+        // применился бы дважды.
+        let dateFilteredOut = 0;
+        const dateRows = statusRows.filter((row) => {
+            if (parseDateTime(row.last_movement).date !== businessDate) { dateFilteredOut += 1; return false; }
+            return true;
         });
-        const dateRows = statusRows.filter((row) => parseDateTime(row.last_movement).date === businessDate);
+
         const byShk = new Map();
         let duplicateShkCount = 0;
         dateRows.forEach((row) => {
@@ -16042,8 +16054,13 @@
         });
         const tasks = [];
         let groupedTareCount = 0;
-        let skippedCheap = 0;
-        const dueDate = dueDateForBusinessDate(module, businessDate);
+        const skippedCheap = 0;
+        const dueDateFor = (row) => {
+            const decided = decidedByRow.get(row);
+            const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : settingNumber(def.taskDeadlineDays, 1);
+            const offsetDays = decided ? decided.uploadOffsetDays : Number(def.offsetDays || 0);
+            return addDays(addDays(businessDate, -offsetDays), deadlineDays);
+        };
         byTare.forEach((group, tareId) => {
             if (group.length > 1) {
                 groupedTareCount += 1;
@@ -16060,7 +16077,7 @@
                     taskType: def.taskType,
                     descriptionTaskType: def.taskTypeLabel,
                     column: def.column,
-                    dueDate,
+                    dueDate: dueDateFor(sorted[0]),
                     responsibilityZone: def.responsibilityZone,
                     productIds: sorted.map((item) => item.shk),
                     rows: sorted,
@@ -16072,9 +16089,19 @@
                 }));
             } else singles.push(group[0]);
         });
-        singles.concat(split.special).forEach((row) => {
-            const price = Number(row.price) || 0;
-            if (!isRwp && !specialMap.has(row.shk) && price < 1000) { skippedCheap += 1; return; }
+
+        // Фильтр-правило (порог суммы) проверяется в ТОЙ ЖЕ точке, где жил
+        // старый хардкод `!isRwp && !specialMap.has(row.shk) && price < 1000`
+        // -- после группировки по таре (сгруппированные задачи фильтру не
+        // подлежат, как и раньше), только для singles, никогда для RWP и
+        // никогда для 2ШК/ПУ-строк (split.special всегда проходит).
+        const filterCandidates = isRwp ? [] : singles;
+        const filterDecisions = await evaluateFilterRulesBatch("packaging", filterCandidates);
+        const filteredRowSet = new Set();
+        filterCandidates.forEach((row, index) => { if (filterDecisions[index]) filteredRowSet.add(row); });
+        const filteredByRule = filteredRowSet.size;
+
+        singles.filter((row) => !filteredRowSet.has(row)).concat(split.special).forEach((row) => {
             tasks.push(taskRecord({
                 module,
                 sourceModule: def.sourceModule,
@@ -16085,7 +16112,7 @@
                 taskType: def.taskType,
                 descriptionTaskType: def.taskTypeLabel,
                 column: def.column,
-                dueDate,
+                dueDate: dueDateFor(row),
                 responsibilityZone: def.responsibilityZone,
                 productIds: [row.shk],
                 rows: [row],
@@ -16096,7 +16123,7 @@
                 infoLines: ["Искомый ШК: " + row.shk, "Тара: " + (row.tare_id || "-"), "Статус крайнего движения: " + (row.last_status || "-"), "Время крайнего движения: " + (row.last_movement || "-")],
             }));
         });
-        return { mode: module, sourceRows: rows.length, rowsCount: uniqueRows.length, dateFilteredOut: statusRows.length - dateRows.length, duplicateShkCount, groupedTareCount, skippedCheap, specialCount: split.special.length, specialCandidateIds: uniqueRows.map((row) => row.shk), tasks };
+        return { mode: module, sourceRows: rows.length, rowsCount: uniqueRows.length, dateFilteredOut, duplicateShkCount, groupedTareCount, skippedCheap, filteredByRule, specialCount: split.special.length, specialCandidateIds: uniqueRows.map((row) => row.shk), tasks };
     }
 
     function sortRowsByCreatedAt(rows) {
