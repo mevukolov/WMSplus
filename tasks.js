@@ -239,8 +239,22 @@
 
     const DEFAULT_MODULES = [
         {
+            module: "general",
+            label: "Типовая выгрузка",
+            sourceModule: "manual_general_upload",
+            uploadType: "general",
+            offsetDays: 0,
+            taskDeadlineDays: 1,
+            taskType: "",
+            taskTypeLabel: "",
+            column: "",
+            description: "Один файл на все участки, использующие общий формат колонок (ПМ, Предсортировка, Маркетплейс+ПЦ, WMI, Без заказа) -- куда попадёт каждый ШК решают правила в админке.",
+            responsibilityZone: "Исходящий поток",
+            required: true,
+        },
+        {
             module: "packaging",
-            label: "Переупаковка",
+            label: "Упаковка / RWP",
             sourceModule: "manual_packaging_opp",
             uploadType: "packaging",
             offsetDays: -7,
@@ -424,7 +438,7 @@
         },
     ];
 
-    const VISIBLE_MODULES = ["packaging", "rwp", "pm", "presort", "marketplace_pc", "wmi_mp_pc", "no_order", "after_sale_movement"];
+    const VISIBLE_MODULES = ["general", "packaging", "after_sale_movement"];
     const REVIEW_SECTIONS = [
         "Упаковка",
         "RWP",
@@ -14755,7 +14769,7 @@
         $("workTitle").textContent = def.label;
         $("workSubtitle").textContent = "Выгрузка за " + formatRuDate(state.activeDate) + ". Дата списания считается по статусу каждого ШК.";
         $("workInstruction").innerHTML = instructionHtml(module, state.activeDate);
-        $("pmCarrierConfirmRow").classList.toggle("hidden", module !== "pm");
+        $("pmCarrierConfirmRow").classList.toggle("hidden", module !== "general");
         $("doneBox").classList.remove("visible");
         $("saveUpload").disabled = true;
         $("saveUpload").classList.remove("hidden");
@@ -14785,28 +14799,23 @@
     }
 
     function instructionHtml(module, date) {
-        if (module === "packaging" || module === "rwp") {
-            const title = module === "rwp" ? "Выгрузить RWP" : "Выгрузить зависший товар";
-            return "<strong>" + title + "</strong>"
+        if (module === "packaging") {
+            return "<strong>Выгрузить Упаковку / RWP</strong>"
                 + "<ol>"
                 + "<li>Откройте отчет <a href='https://reports.wbwh.tech/reports/lost-and-non-movable-goods' target='_blank' rel='noopener'>Утерянные и обездвиженные товары</a>.</li>"
                 + "<li>Укажите склад \"СЦ Нижний Новгород Ларина\".</li>"
                 + "<li>Укажите дату " + formatRuDate(date) + ".</li>"
                 + "<li>Откройте вкладку \"Обездвижено\" и выгрузите XLSX.</li>"
-                + "<li>Без изменений загрузите файл ниже.</li>"
+                + "<li>Без изменений загрузите файл ниже -- WMS+ сам решит по правилам, что относится к Упаковке, а что к RWP.</li>"
                 + "</ol>";
         }
-        if (module === "pm") {
-            return "<strong>Выгрузить ПМ / Почту</strong><ol><li>Загрузите основной файл \"Товары без движения - В заказе\".</li><li>Задачи сохранятся сразу -- проверка отгрузки теперь отдельное действие (кнопка \"Проверить передачи на отгрузку\" на экране участка).</li></ol>";
-        }
-        if (module === "no_order") return "<strong>Выгрузить Без заказа</strong><ol><li>Загрузите отдельную таблицу Без заказа.</li><li>WMS+ возьмет строки за " + formatRuDate(date) + " и сохранит задачи.</li></ol>";
         if (module === "after_sale_movement") return "<strong>Выгрузить Движение после продажи</strong><ol><li>Загрузите отдельную таблицу.</li><li>WMS+ возьмет строки за " + formatRuDate(date) + " по дате статуса.</li></ol>";
-        return "<strong>Выгрузить " + escapeHtml(moduleDef(module).label) + "</strong><ol><li>Загрузите основной файл \"Товары без движения - В заказе\".</li><li>WMS+ сам применит фильтры за " + formatRuDate(date) + ".</li></ol>";
+        return "<strong>Выгрузить типовую выгрузку</strong><ol><li>Загрузите основной файл \"Товары без движения\" -- без разницы, В заказе или Без заказа.</li><li>WMS+ сам решит по правилам, в какой участок положить каждый ШК (включая ПМ/Почту -- второй файл проверки отгрузки теперь отдельное действие), и применит фильтры за " + formatRuDate(date) + ".</li></ol>";
     }
 
     function renderFileControls(module) {
         $("fileControls").innerHTML = fileInputHtml("primary", "Выбрать файл") + "<span id='fileName' class='file-name'>Файл пока не выбран</span>";
-        const kind = module === "packaging" || module === "rwp" ? "packaging" : module === "after_sale_movement" ? "afterSaleMovement" : "pmPrimary";
+        const kind = module === "packaging" ? "packaging" : module === "after_sale_movement" ? "afterSaleMovement" : "pmPrimary";
         bindFileInput("primary", (file) => handleSingleFile(module, file, kind));
     }
 
@@ -16085,34 +16094,25 @@
         return (rows || []).slice().sort((a, b) => parseDateTime(b[field]).ts - parseDateTime(a[field]).ts)[0] || rows[0];
     }
 
-    async function buildPackagingPreview(rows, module, businessDate, specialMap) {
+    async function buildPackagingPreview(rows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
-        const isRwp = module === "rwp";
-        const def = moduleDef(module);
+        const packagingDef = moduleDef("packaging");
+        const rwpDef = moduleDef("rwp");
 
         const decisions = await evaluateZoneRulesBatch("packaging", rows);
         const decidedByRow = new Map();
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
-        // "Упаковка" is a catch-all (everything that isn't RWP), not a
-        // specific rule target -- gating it on "decided === def.column"
-        // the way the other modules do would silently drop a row whose
-        // status happens to match some unrelated rule (e.g. PAP) added
-        // for a different module, since that decided value matches
-        // neither "RWP" nor "Упаковка". Only the RWP side is a real
-        // positive match; packaging is everything else.
         function isRwpRow(row) {
             const decided = decidedByRow.get(row);
             return decided ? decided.zone === "RWP" : isRwpStatus(row.last_status);
         }
-
-        const statusRows = rows.filter((row) => (isRwp ? isRwpRow(row) : !isRwpRow(row)));
 
         // businessDate приходит уже сдвинутым снаружи (uploadDateForModule
         // применяет def.offsetDays до вызова этой функции) -- здесь
         // сравниваем напрямую, без повторного сдвига, иначе offset
         // применился бы дважды.
         let dateFilteredOut = 0;
-        const dateRows = statusRows.filter((row) => {
+        const dateRows = rows.filter((row) => {
             if (parseDateTime(row.last_movement).date !== businessDate) { dateFilteredOut += 1; return false; }
             return true;
         });
@@ -16131,7 +16131,7 @@
         const byTare = new Map();
         const singles = [];
         split.regular.forEach((row) => {
-            if (isRwp || !isGroupableIdentifier(row.tare_id)) { singles.push(row); return; }
+            if (isRwpRow(row) || !isGroupableIdentifier(row.tare_id)) { singles.push(row); return; }
             const group = byTare.get(row.tare_id) || [];
             group.push(row);
             byTare.set(row.tare_id, group);
@@ -16139,20 +16139,21 @@
         const tasks = [];
         let groupedTareCount = 0;
         const skippedCheap = 0;
-        const dueDateFor = (row) => {
+        const dueDateFor = (row, def) => {
             const decided = decidedByRow.get(row);
             const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : settingNumber(def.taskDeadlineDays, 1);
             const offsetDays = decided ? decided.uploadOffsetDays : Number(def.offsetDays || 0);
             return addDays(addDays(businessDate, -offsetDays), deadlineDays);
         };
         byTare.forEach((group, tareId) => {
+            const def = packagingDef;
             if (group.length > 1) {
                 groupedTareCount += 1;
                 const sorted = group.slice().sort((a, b) => a.shk.localeCompare(b.shk, "ru"));
                 const price = rowsPrice(sorted, "price");
                 const status = newestRow(sorted, "last_movement").last_status || "-";
                 tasks.push(taskRecord({
-                    module,
+                    module: "packaging",
                     sourceModule: def.sourceModule,
                     uploadType: def.uploadType,
                     businessDate,
@@ -16161,7 +16162,7 @@
                     taskType: def.taskType,
                     descriptionTaskType: def.taskTypeLabel,
                     column: def.column,
-                    dueDate: dueDateFor(sorted[0]),
+                    dueDate: dueDateFor(sorted[0], def),
                     responsibilityZone: def.responsibilityZone,
                     productIds: sorted.map((item) => item.shk),
                     rows: sorted,
@@ -16179,15 +16180,17 @@
         // -- после группировки по таре (сгруппированные задачи фильтру не
         // подлежат, как и раньше), только для singles, никогда для RWP и
         // никогда для 2ШК/ПУ-строк (split.special всегда проходит).
-        const filterCandidates = isRwp ? [] : singles;
+        const filterCandidates = singles.filter((row) => !isRwpRow(row));
         const filterDecisions = await evaluateFilterRulesBatch("packaging", filterCandidates);
         const filteredRowSet = new Set();
         filterCandidates.forEach((row, index) => { if (filterDecisions[index]) filteredRowSet.add(row); });
         const filteredByRule = filteredRowSet.size;
 
         singles.filter((row) => !filteredRowSet.has(row)).concat(split.special).forEach((row) => {
+            const isRwp = isRwpRow(row);
+            const def = isRwp ? rwpDef : packagingDef;
             tasks.push(taskRecord({
-                module,
+                module: isRwp ? "rwp" : "packaging",
                 sourceModule: def.sourceModule,
                 uploadType: def.uploadType,
                 businessDate,
@@ -16196,7 +16199,7 @@
                 taskType: def.taskType,
                 descriptionTaskType: def.taskTypeLabel,
                 column: def.column,
-                dueDate: dueDateFor(row),
+                dueDate: dueDateFor(row, def),
                 responsibilityZone: def.responsibilityZone,
                 productIds: [row.shk],
                 rows: [row],
@@ -16207,7 +16210,7 @@
                 infoLines: ["Искомый ШК: " + row.shk, "Тара: " + (row.tare_id || "-"), "Статус крайнего движения: " + (row.last_status || "-"), "Время крайнего движения: " + (row.last_movement || "-")],
             }));
         });
-        return { mode: module, sourceRows: rows.length, rowsCount: uniqueRows.length, dateFilteredOut, duplicateShkCount, groupedTareCount, skippedCheap, filteredByRule, specialCount: split.special.length, specialCandidateIds: uniqueRows.map((row) => row.shk), tasks };
+        return { mode: "packaging", sourceRows: rows.length, rowsCount: uniqueRows.length, dateFilteredOut, duplicateShkCount, groupedTareCount, skippedCheap, filteredByRule, specialCount: split.special.length, specialCandidateIds: uniqueRows.map((row) => row.shk), tasks };
     }
 
     function sortRowsByCreatedAt(rows) {
@@ -16621,8 +16624,8 @@
 
     async function buildPreviewForModule(module, rows, carrierRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
-        if (module === "packaging" || module === "rwp") return buildPackagingPreview(rows, module, businessDate, specialMap);
-        if (["pm", "presort", "marketplace_pc", "wmi_mp_pc", "no_order"].includes(module)) return buildGeneralPreview(rows, businessDate, specialMap);
+        if (module === "packaging" || module === "rwp") return buildPackagingPreview(rows, businessDate, specialMap);
+        if (["general", "pm", "presort", "marketplace_pc", "wmi_mp_pc", "no_order"].includes(module)) return buildGeneralPreview(rows, businessDate, specialMap);
         if (module === "after_sale_movement") return buildAfterSaleMovementPreview(rows, businessDate, specialMap);
         return { mode: module, tasks: [] };
     }
