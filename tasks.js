@@ -12698,7 +12698,7 @@
     async function testUploadBreakdown(module, rows, businessDate) {
         const dateField = testUploadDateField(module);
         const dateRows = rows.filter((row) => parseDateTime(row[dateField]).date === businessDate);
-        const decisions = dateRows.length ? await evaluateZoneRulesBatch(dateRows) : [];
+        const decisions = dateRows.length ? await evaluateZoneRulesBatch(sourceFormatForModule(module), dateRows) : [];
         const byRule = new Map();
         const statusField = testUploadStatusField(module);
         // Scoped to rows that could plausibly belong to the TESTED module
@@ -15417,19 +15417,23 @@
     function mxIncludes(row, part) { return normalizeForMatch(row && row.mx).includes(normalizeForMatch(part)); }
     function mxHasBuffer(row) { return normalizeForMatch(row && row.mx).includes("буфер"); }
 
+    function sourceFormatForModule(module) {
+        if (module === "packaging" || module === "rwp") return "packaging";
+        if (module === "after_sale_movement") return "after_sale_movement";
+        return "general";
+    }
+
     function zoneRuleAttributesForRow(row) {
         const status = row.product_status !== undefined ? row.product_status : row.last_status;
         const mx = row.mx !== undefined ? row.mx : row.last_mx;
-        return { status, mx, route_number: routeNumberFromMx(mx) };
+        return { status, mx, route_number: routeNumberFromMx(mx), price: Number(row.price) || 0 };
     }
 
-    // Each decision is null (no rule matched, caller falls back to hardcode)
-    // or { zone, grouping } -- zone is the matched rule's target_task_type,
-    // grouping is its grouping_attribute ("tare_id" or null), so callers
-    // that group rows into tasks (appendGroupedTasks) can honor the rule's
-    // own "По таре"/"Каждый ШК отдельно" choice instead of only reading it
-    // in the orphan-absorb SQL path.
-    async function evaluateRuleBatchForOutputKey(outputKey, rows) {
+    // decided is null (нет совпадения -- вызывающий код падает на хардкод),
+    // или { ruleName } для filter-правил (строка отсекается, задача не
+    // создаётся), или { zone, grouping, forceHighPriority, tags,
+    // taskDeadlineDays, uploadOffsetDays, ruleName } для zone-правил.
+    async function evaluateRuleBatchForOutputKey(outputKey, sourceFormat, rows) {
         const decisions = new Array(rows.length).fill(null);
         const db = supabaseDb();
         if (!db || !rows.length) return decisions;
@@ -15437,21 +15441,32 @@
             const chunk = rows.slice(offset, offset + SUPERSET_CACHE_CHUNK_SIZE);
             const payload = chunk.map((row, index) => ({ row_id: String(offset + index), ...zoneRuleAttributesForRow(row) }));
             try {
-                const { data, error } = await db.rpc("wms_evaluate_rule_batch", { p_output_key: outputKey, p_rows: payload });
+                const { data, error } = await db.rpc("wms_evaluate_rule_batch", { p_output_key: outputKey, p_source_format: sourceFormat, p_rows: payload });
                 if (error) throw error;
                 (data || []).forEach((item) => {
                     const idx = Number(item.row_id);
-                    if (Number.isFinite(idx) && item.output_value && item.output_value.target_task_type) {
-                        decisions[idx] = { zone: item.output_value.target_task_type, grouping: item.output_value.grouping_attribute || null, ruleName: item.rule_name || null };
-                    }
+                    if (!Number.isFinite(idx) || !item.rule_name) return;
+                    const ov = item.output_value || {};
+                    decisions[idx] = ov.target_task_type
+                        ? {
+                            zone: ov.target_task_type,
+                            grouping: ov.force_tare_grouping ? "tare_id" : null,
+                            forceHighPriority: Boolean(ov.force_high_priority),
+                            tags: Array.isArray(ov.tags) ? ov.tags : [],
+                            taskDeadlineDays: Number.isFinite(ov.task_deadline_days) ? ov.task_deadline_days : null,
+                            uploadOffsetDays: Number.isFinite(ov.upload_offset_days) ? ov.upload_offset_days : 0,
+                            ruleName: item.rule_name,
+                        }
+                        : { ruleName: item.rule_name };
                 });
             } catch (error) {
-                console.warn(outputKey + " rule batch evaluation failed, falling back to hardcoded classification for this chunk:", error);
+                console.warn(outputKey + "/" + sourceFormat + " rule batch evaluation failed, falling back to hardcoded classification for this chunk:", error);
             }
         }
         return decisions;
     }
-    async function evaluateZoneRulesBatch(rows) { return evaluateRuleBatchForOutputKey("zone", rows); }
+    async function evaluateZoneRulesBatch(sourceFormat, rows) { return evaluateRuleBatchForOutputKey("zone", sourceFormat, rows); }
+    async function evaluateFilterRulesBatch(sourceFormat, rows) { return evaluateRuleBatchForOutputKey("filter", sourceFormat, rows); }
     function isPresortStatus(row) {
         const status = sourceRowStatus(row);
         if (status === "sps") return true;
@@ -15990,7 +16005,7 @@
         specialMap = specialMap || new Map();
         const isRwp = module === "rwp";
         const def = moduleDef(module);
-        const decisions = await evaluateZoneRulesBatch(rows);
+        const decisions = await evaluateZoneRulesBatch("packaging", rows);
         const decidedByRow = new Map();
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         // "Упаковка" is a catch-all (everything that isn't RWP), not a
@@ -16207,7 +16222,7 @@
         const dateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
         const eligibleDateRows = dateRows.filter((row) => !mxHasBoxes(row));
         const smsRows = eligibleDateRows.filter((row) => isPmBufferStatus(row.product_status));
-        const decisions = await evaluateZoneRulesBatch(eligibleDateRows);
+        const decisions = await evaluateZoneRulesBatch("general", eligibleDateRows);
         const decidedByRow = new Map();
         eligibleDateRows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const isMailRow = (row) => {
@@ -16311,7 +16326,7 @@
         const presortDef = moduleDef("presort");
         const labelingDef = moduleDef("labeling");
         const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const decisions = await evaluateZoneRulesBatch(rows);
+        const decisions = await evaluateZoneRulesBatch("general", rows);
         const decidedByRow = new Map();
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const presortRows = rows.filter((row) => {
@@ -16343,7 +16358,7 @@
         const marketplaceDateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === marketplaceDate);
         const pcDateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === pcDate);
         const candidateRows = Array.from(new Set(marketplaceDateRows.concat(pcDateRows)));
-        const decisions = await evaluateZoneRulesBatch(candidateRows);
+        const decisions = await evaluateZoneRulesBatch("general", candidateRows);
         const zoneByRow = new Map();
         candidateRows.forEach((row, index) => { zoneByRow.set(row, decisions[index]); });
         const marketplaceRows = marketplaceDateRows.filter((row) => {
@@ -16367,7 +16382,7 @@
         specialMap = specialMap || new Map();
         const def = moduleDef("wmi_mp_pc");
         const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const decisions = await evaluateZoneRulesBatch(rows);
+        const decisions = await evaluateZoneRulesBatch("general", rows);
         const decidedByRow = new Map();
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const wmiRows = rows.filter((row) => {
@@ -16385,7 +16400,7 @@
         const usdDef = moduleDef("usd");
         const tmmDef = moduleDef("tmm");
         const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const decisions = await evaluateZoneRulesBatch(rows);
+        const decisions = await evaluateZoneRulesBatch("general", rows);
         const decidedByRow = new Map();
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const usdRows = rows.filter((row) => {
@@ -19144,7 +19159,7 @@
         const presortDef = moduleDef("presort");
         const labelingDef = moduleDef("labeling");
         const wmiDef = moduleDef("wmi_mp_pc");
-        const mainDecisions = await evaluateZoneRulesBatch(rows.main);
+        const mainDecisions = await evaluateZoneRulesBatch("general", rows.main);
         const mainDecidedByRow = new Map();
         rows.main.forEach((row, index) => { mainDecidedByRow.set(row, mainDecisions[index]); });
         rows.main.forEach((row) => {
@@ -19162,7 +19177,7 @@
             if (isWmi && date !== dates.wmi_mp_pc) pushReject(list, "wmi_mp_pc", row, "Нужна дата " + formatRuDate(dates.wmi_mp_pc), date, "wmi_mp_pc");
         });
         rows.noOrder.forEach((row) => { const date = rowDate(row); if (date !== dates.no_order) pushReject(list, "no_order", row, "Нужна дата " + formatRuDate(dates.no_order), date, "no_order"); });
-        const packagingDecisions = await evaluateZoneRulesBatch(rows.packaging);
+        const packagingDecisions = await evaluateZoneRulesBatch("packaging", rows.packaging);
         const packagingDecidedByRow = new Map();
         rows.packaging.forEach((row, index) => { packagingDecidedByRow.set(row, packagingDecisions[index]); });
         rows.packaging.forEach((row) => {
@@ -19181,7 +19196,7 @@
         const mainTargetDates = new Set(MASTER_MAIN_MODULES.map((module) => dates[module]));
         const marketplaceDef = moduleDef("marketplace");
         const pcDef = moduleDef("pc");
-        const mainDecisions = await evaluateZoneRulesBatch(rows.main);
+        const mainDecisions = await evaluateZoneRulesBatch("general", rows.main);
         const mainDecidedByRow = new Map();
         rows.main.forEach((row, index) => { mainDecidedByRow.set(row, mainDecisions[index]); });
         rows.main.forEach((row) => {
