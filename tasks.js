@@ -12338,23 +12338,28 @@
             + "</div>";
     }
 
-    const NO_ORDER_FOLDER_TARGETS = [
-        { value: "Разбор ОПП // USD", label: "USD" },
-        { value: "Разбор ОПП // TMM", label: "TMM" },
+    // USD/TMM are normal targets now -- the only thing that ever needed
+    // "Подпапка внутри Без заказа" as a separate concept was keeping them
+    // out of the global reach of ordinary zone rules, and that's now
+    // handled by from_zone (see "Триггер «Без заказа»" below), not by a
+    // separate output_key/screen.
+    const ROUTING_RULE_EXTRA_TARGETS = [
+        { value: "Разбор ОПП // USD", label: "USD (подпапка «Без заказа»)" },
+        { value: "Разбор ОПП // TMM", label: "TMM (подпапка «Без заказа»)" },
     ];
+    const BEZ_ZAKAZA_TASK_TYPE = "Разбор ОПП // Без заказа";
+
+    function routingRuleTargetOptionsHtml(selectedValue) {
+        const options = activeReviewZones().map((section) => ({ value: section, label: section })).concat(ROUTING_RULE_EXTRA_TARGETS);
+        return options.map((opt) =>
+            "<option value='" + escapeHtml(opt.value) + "'" + (selectedValue === opt.value ? " selected" : "") + ">" + escapeHtml(opt.label) + "</option>"
+        ).join("");
+    }
 
     function routingRuleRowHtml(row) {
         const conditions = Array.isArray(row.conditions) && row.conditions.length ? row.conditions : [{ attribute: "status", operator: "in", value: [] }];
-        const outputKey = row.output_key || "zone";
-        const isZone = outputKey === "zone";
-        const isFolder = outputKey === "no_order_folder";
-        const targetOptions = activeReviewZones().map((section) =>
-            "<option value='" + escapeHtml(section) + "'" + (row.target_task_type === section ? " selected" : "") + ">" + escapeHtml(section) + "</option>"
-        ).join("");
-        const folderTargetValue = (row.output_value && row.output_value.target_task_type) || "";
-        const folderTargetOptions = NO_ORDER_FOLDER_TARGETS.map((opt) =>
-            "<option value='" + escapeHtml(opt.value) + "'" + (folderTargetValue === opt.value ? " selected" : "") + ">" + escapeHtml(opt.label) + "</option>"
-        ).join("");
+        const targetValue = row.target_task_type || (row.output_value && row.output_value.target_task_type) || "";
+        const fromBezZakaza = row.from_zone === BEZ_ZAKAZA_TASK_TYPE;
         return "<div class='routing-rule-card' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
             + "<div class='routing-rule-head'>"
             + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет (меньше -- проверяется раньше)'>"
@@ -12362,50 +12367,33 @@
             + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
             + "</div>"
             + "<div class='routing-rule-section'>"
-            + "<div class='routing-rule-section-label'>Тип правила</div>"
-            + "<select data-rule-output-key>"
-            + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона (обычное правило)</option>"
-            + "<option value='no_order_folder'" + (isFolder ? " selected" : "") + ">Спецслучай: подпапка внутри \"Без заказа\"</option>"
-            + "</select>"
-            + "<p class='work-subtitle' style='margin:8px 0 0'>99% правил -- \"Зона\": она решает, в какой участок целиком кладётся ШК (Маркетплейс, ПЦ, Предсортировка и т.д.) -- именно её ты почти всегда и настраиваешь. \"Подпапка внутри 'Без заказа'\" -- конкретный, измеримый эффект: ШК вместо вкладки \"Без заказа\" у операторов показывается во вкладке \"Другие задачи\" -- сейчас так устроены только USD и TMM (их специально выделяют из общей массы \"Без заказа\" в отдельную очередь). Если не настраиваешь именно это переключение между вкладками -- оставь \"Зона\".</p>"
-            + "</div>"
-            + "<div class='routing-rule-section'>"
             + "<div class='routing-rule-section-label'>Условия (все должны совпасть)</div>"
             + "<div class='routing-rule-conditions' data-rule-conditions>" + conditions.map(routingRuleConditionHtml).join("") + "</div>"
             + "<button type='button' class='btn btn-outline' data-add-condition style='margin-top:8px'>+ Добавить условие</button>"
             + "</div>"
-            + "<div class='routing-rule-section' data-rule-result-zone" + (isZone ? "" : " style='display:none'") + ">"
+            + "<div class='routing-rule-section'>"
             + "<div class='routing-rule-section-label'>Куда положить ШК</div>"
             + "<div class='routing-rule-result'>"
-            + "<select data-rule-target>" + targetOptions + "</select>"
-            + "</div>"
-            + "<p class='work-subtitle' style='margin:8px 0 0'>ШК, лежащие в одной физической таре, объединяются в одну задачу автоматически и всегда -- это не настраивается per-правило, так было и до движка правил.</p>"
-            + "</div>"
-            + "<div class='routing-rule-section' data-rule-result-folder" + (isFolder ? "" : " style='display:none'") + ">"
-            + "<div class='routing-rule-section-label'>В какую подпапку \"Без заказа\"</div>"
-            + "<div class='routing-rule-result'>"
-            + "<select data-rule-folder-target>" + folderTargetOptions + "</select>"
+            + "<select data-rule-target>" + routingRuleTargetOptionsHtml(targetValue) + "</select>"
             + "</div>"
             + "<p class='work-subtitle' style='margin:8px 0 0'>ШК, лежащие в одной физической таре, объединяются в одну задачу автоматически и всегда -- это не настраивается per-правило.</p>"
+            + "<label class='writeoff-term-active' style='margin-top:10px'><input data-rule-from-bez-zakaza type='checkbox'" + (fromBezZakaza ? " checked" : "") + "> Триггер «Без заказа»</label>"
+            + "<p class='work-subtitle' style='margin:4px 0 0'>Обычно выключено -- правило тогда проверяет ЛЮБОЙ активный ШК, где бы он ни лежал. Включи, только если правило должно срабатывать исключительно для ШК, УЖЕ лежащих в зоне «Без заказа» -- так настроены USD и TMM, чтобы не задевать такой же статус у ШК в других зонах.</p>"
             + "</div>"
             + "</div>";
     }
 
     function routingRuleSummaryRowHtml(row, index) {
-        const outputKey = row.output_key || "zone";
-        const isFolder = outputKey === "no_order_folder";
-        const kindLabel = isFolder ? "Подпапка" : "Зона";
-        const targetLabel = isFolder
-            ? ((row.output_value && row.output_value.target_task_type) || "-- не выбрано --")
-            : (row.target_task_type || "-- не выбрано --");
+        const targetLabel = row.target_task_type || (row.output_value && row.output_value.target_task_type) || "-- не выбрано --";
         const conditionCount = Array.isArray(row.conditions) ? row.conditions.length : 0;
         const isActive = row.is_active !== false;
         const name = row.name || "(без названия)";
+        const fromZoneBadge = row.from_zone ? "<span class='routing-rule-summary-badge'>только из «" + escapeHtml(row.from_zone.replace("Разбор ОПП // ", "")) + "»</span>" : "";
         return "<div class='routing-rule-summary-row" + (isActive ? "" : " inactive") + "' data-rule-summary-row data-rule-index='" + index + "' tabindex='0' role='button'>"
             + "<span class='routing-rule-summary-priority'>#" + escapeHtml(row.priority || "?") + "</span>"
             + "<span class='routing-rule-summary-name'>" + escapeHtml(name) + "</span>"
-            + "<span class='routing-rule-summary-badge'>" + escapeHtml(kindLabel) + "</span>"
             + "<span class='routing-rule-summary-target'>→ " + escapeHtml(targetLabel) + "</span>"
+            + fromZoneBadge
             + "<span class='routing-rule-summary-meta'>" + conditionCount + " " + (conditionCount === 1 ? "условие" : "условий") + "</span>"
             + "<span class='routing-rule-summary-status'>" + (isActive ? "активно" : "выключено") + "</span>"
             + "<button type='button' class='btn btn-square' data-rule-summary-remove aria-label='Удалить правило'>×</button>"
@@ -12441,9 +12429,6 @@
         });
         cardEl.querySelectorAll("[data-condition-remove]").forEach((button) => {
             button.addEventListener("click", () => removeRoutingRuleCondition(button.closest("[data-rule-condition]")));
-        });
-        cardEl.querySelectorAll("[data-rule-output-key]").forEach((select) => {
-            select.addEventListener("change", () => toggleRoutingRuleResultSections(select.closest("[data-routing-rule-row]")));
         });
     }
 
@@ -12509,16 +12494,6 @@
         if (removeButton) removeButton.addEventListener("click", () => removeRoutingRuleCondition(refreshedFirst));
     }
 
-    function toggleRoutingRuleResultSections(cardEl) {
-        if (!cardEl) return;
-        const outputKeySelect = cardEl.querySelector("[data-rule-output-key]");
-        const outputKey = (outputKeySelect && outputKeySelect.value) || "zone";
-        const zoneSection = cardEl.querySelector("[data-rule-result-zone]");
-        const folderSection = cardEl.querySelector("[data-rule-result-folder]");
-        if (zoneSection) zoneSection.style.display = outputKey === "zone" ? "" : "none";
-        if (folderSection) folderSection.style.display = outputKey === "no_order_folder" ? "" : "none";
-    }
-
     async function removeRoutingRuleRow(index) {
         const row = (state.routingRules.rows || [])[index];
         if (!row) return;
@@ -12551,6 +12526,7 @@
             output_key: "zone",
             target_task_type: activeReviewZones()[0],
             grouping_attribute: null,
+            from_zone: null,
             output_value: null,
         });
         renderRoutingRulesModal();
@@ -12565,7 +12541,6 @@
         const id = (existingRow && existingRow.id) || undefined;
         const priority = Math.max(1, Math.trunc(settingNumber(cardEl.querySelector("[data-rule-priority]") && cardEl.querySelector("[data-rule-priority]").value, 0)));
         const name = normalizeText(cardEl.querySelector("[data-rule-name]") && cardEl.querySelector("[data-rule-name]").value);
-        const outputKey = (cardEl.querySelector("[data-rule-output-key]") && cardEl.querySelector("[data-rule-output-key]").value) || "zone";
         const isActive = cardEl.querySelector("[data-rule-active]").checked;
         const conditions = Array.from(cardEl.querySelectorAll("[data-rule-condition]")).map((conditionEl) => {
             const attribute = conditionEl.querySelector("[data-condition-attribute]").value;
@@ -12582,30 +12557,21 @@
         const cleanConditions = conditions.map(({ attribute, operator, value, logic }) =>
             logic ? { attribute, operator, value, logic } : { attribute, operator, value }
         );
-        const base = {
+        const targetTaskType = cardEl.querySelector("[data-rule-target]").value;
+        const fromBezZakazaEl = cardEl.querySelector("[data-rule-from-bez-zakaza]");
+        const fromZone = (fromBezZakazaEl && fromBezZakazaEl.checked) ? BEZ_ZAKAZA_TASK_TYPE : null;
+        return {
             ...(existingRow || {}),
             ...(id ? { id } : {}),
             priority,
             name,
             is_active: isActive,
             conditions: cleanConditions,
-            output_key: outputKey,
-        };
-        if (outputKey === "zone") {
-            const targetTaskType = cardEl.querySelector("[data-rule-target]").value;
-            return {
-                ...base,
-                target_task_type: targetTaskType,
-                grouping_attribute: null,
-                output_value: { target_task_type: targetTaskType, grouping_attribute: null },
-            };
-        }
-        const folderTarget = cardEl.querySelector("[data-rule-folder-target]").value;
-        return {
-            ...base,
-            target_task_type: null,
+            output_key: "zone",
+            target_task_type: targetTaskType,
             grouping_attribute: null,
-            output_value: { target_task_type: folderTarget, grouping_attribute: null },
+            from_zone: fromZone,
+            output_value: { target_task_type: targetTaskType, grouping_attribute: null },
         };
     }
 
@@ -12741,8 +12707,7 @@
     async function testUploadBreakdown(module, rows, businessDate) {
         const dateField = testUploadDateField(module);
         const dateRows = rows.filter((row) => parseDateTime(row[dateField]).date === businessDate);
-        const evaluator = module === "no_order" ? evaluateNoOrderFolderRulesBatch : evaluateZoneRulesBatch;
-        const decisions = dateRows.length ? await evaluator(dateRows) : [];
+        const decisions = dateRows.length ? await evaluateZoneRulesBatch(dateRows) : [];
         const byRule = new Map();
         const statusField = testUploadStatusField(module);
         // Scoped to rows that could plausibly belong to the TESTED module
@@ -15496,7 +15461,6 @@
         return decisions;
     }
     async function evaluateZoneRulesBatch(rows) { return evaluateRuleBatchForOutputKey("zone", rows); }
-    async function evaluateNoOrderFolderRulesBatch(rows) { return evaluateRuleBatchForOutputKey("no_order_folder", rows); }
     function isPresortStatus(row) {
         const status = sourceRowStatus(row);
         if (status === "sps") return true;
@@ -16430,7 +16394,7 @@
         const usdDef = moduleDef("usd");
         const tmmDef = moduleDef("tmm");
         const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const decisions = await evaluateNoOrderFolderRulesBatch(rows);
+        const decisions = await evaluateZoneRulesBatch(rows);
         const decidedByRow = new Map();
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const usdRows = rows.filter((row) => {
