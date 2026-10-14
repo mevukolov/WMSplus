@@ -18661,8 +18661,8 @@
                 state.master.preview.totalTasks = totalMasterTasks(modules);
                 renderMasterPreview("Расчет " + (i + 1) + "/" + jobs.length + ".");
             }
-            state.master.dateRejects = buildMasterDateRejects({ main, noOrder, packaging, afterSale }, dates);
-            state.master.conditionRejects = buildMasterConditionRejects({ main, noOrder, packaging, carrier }, dates);
+            state.master.dateRejects = await buildMasterDateRejects({ main, noOrder, packaging, afterSale }, dates);
+            state.master.conditionRejects = await buildMasterConditionRejects({ main, noOrder, packaging, carrier }, dates);
             renderMasterPreview();
             startMasterSpecialBackground();
         } catch (error) {
@@ -18751,31 +18751,70 @@
         list.push({ module: moduleDef(module).label || module, matched_upload: matchedUpload ? moduleDef(matchedUpload).label : moduleDef(module).label, row_number: row.row_number || "", source_id: row.product || row.shk || row.transfer || "", date: dateValue || "", reason });
     }
 
-    function buildMasterDateRejects(rows, dates) {
+    async function buildMasterDateRejects(rows, dates) {
         const list = [];
+        const marketplaceDef = moduleDef("marketplace");
+        const pcDef = moduleDef("pc");
+        const presortDef = moduleDef("presort");
+        const labelingDef = moduleDef("labeling");
+        const wmiDef = moduleDef("wmi_mp_pc");
+        const mainDecisions = await evaluateZoneRulesBatch(rows.main);
+        const mainDecidedByRow = new Map();
+        rows.main.forEach((row, index) => { mainDecidedByRow.set(row, mainDecisions[index]); });
         rows.main.forEach((row) => {
             const date = rowDate(row);
+            const decided = mainDecidedByRow.get(row);
+            const isPresort = decided ? decided === presortDef.column : isPresortStatus(row);
+            const isLabeling = decided ? decided === labelingDef.column : isLabelingStatus(row);
+            const isMarketplace = decided ? decided === marketplaceDef.column : (isMarketplaceStatus(row) && !mxHasBuffer(row));
+            const isPc = decided ? decided === pcDef.column : (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row));
+            const isWmi = decided ? decided === wmiDef.column : isWmiMpPcStatus(row);
             if (isPmBufferStatus(row.product_status) && date !== dates.pm) pushReject(list, "pm", row, "Нужна дата " + formatRuDate(dates.pm), date, "pm");
-            if ((isPresortStatus(row) || isLabelingStatus(row)) && date !== dates.presort) pushReject(list, "presort", row, "Нужна дата " + formatRuDate(dates.presort), date, "presort");
-            if (isMarketplaceStatus(row) && date !== dates.marketplace) pushReject(list, "marketplace_pc", row, "Нужна дата Маркетплейса " + formatRuDate(dates.marketplace), date, "marketplace");
-            if (isPcStatus(row) && !isMarketplaceStatus(row) && date !== dates.pc) pushReject(list, "marketplace_pc", row, "Нужна дата ПЦ " + formatRuDate(dates.pc), date, "pc");
-            if (isWmiMpPcStatus(row) && date !== dates.wmi_mp_pc) pushReject(list, "wmi_mp_pc", row, "Нужна дата " + formatRuDate(dates.wmi_mp_pc), date, "wmi_mp_pc");
+            if ((isPresort || isLabeling) && date !== dates.presort) pushReject(list, "presort", row, "Нужна дата " + formatRuDate(dates.presort), date, "presort");
+            if (isMarketplace && date !== dates.marketplace) pushReject(list, "marketplace_pc", row, "Нужна дата Маркетплейса " + formatRuDate(dates.marketplace), date, "marketplace");
+            if (isPc && date !== dates.pc) pushReject(list, "marketplace_pc", row, "Нужна дата ПЦ " + formatRuDate(dates.pc), date, "pc");
+            if (isWmi && date !== dates.wmi_mp_pc) pushReject(list, "wmi_mp_pc", row, "Нужна дата " + formatRuDate(dates.wmi_mp_pc), date, "wmi_mp_pc");
         });
         rows.noOrder.forEach((row) => { const date = rowDate(row); if (date !== dates.no_order) pushReject(list, "no_order", row, "Нужна дата " + formatRuDate(dates.no_order), date, "no_order"); });
-        rows.packaging.forEach((row) => { const date = packDate(row); if (!isRwpStatus(row.last_status) && date !== dates.packaging) pushReject(list, "packaging", row, "Нужна дата " + formatRuDate(dates.packaging), date, "packaging"); if (isRwpStatus(row.last_status) && date !== dates.rwp) pushReject(list, "rwp", row, "Нужна дата " + formatRuDate(dates.rwp), date, "rwp"); });
+        const packagingDecisions = await evaluateZoneRulesBatch(rows.packaging);
+        const packagingDecidedByRow = new Map();
+        rows.packaging.forEach((row, index) => { packagingDecidedByRow.set(row, packagingDecisions[index]); });
+        rows.packaging.forEach((row) => {
+            const date = packDate(row);
+            const decided = packagingDecidedByRow.get(row);
+            const isRwp = decided ? decided === "RWP" : isRwpStatus(row.last_status);
+            if (!isRwp && date !== dates.packaging) pushReject(list, "packaging", row, "Нужна дата " + formatRuDate(dates.packaging), date, "packaging");
+            if (isRwp && date !== dates.rwp) pushReject(list, "rwp", row, "Нужна дата " + formatRuDate(dates.rwp), date, "rwp");
+        });
         rows.afterSale.forEach((row) => { const date = afterDate(row); if (date !== dates.after_sale_movement) pushReject(list, "after_sale_movement", row, "Нужна дата " + formatRuDate(dates.after_sale_movement), date, "after_sale_movement"); });
         return list.slice(0, 1000);
     }
 
-    function buildMasterConditionRejects(rows, dates) {
+    async function buildMasterConditionRejects(rows, dates) {
         const list = [];
         const mainTargetDates = new Set(MASTER_MAIN_MODULES.map((module) => dates[module]));
+        const mainDecisions = await evaluateZoneRulesBatch(rows.main);
+        const mainDecidedByRow = new Map();
+        rows.main.forEach((row, index) => { mainDecidedByRow.set(row, mainDecisions[index]); });
         rows.main.forEach((row) => {
             const date = rowDate(row);
             if (!mainTargetDates.has(date)) return;
-            const matches = isPmBufferStatus(row.product_status) || isPresortStatus(row) || isLabelingStatus(row) || isMarketplaceStatus(row) || isPcStatus(row) || isWmiMpPcStatus(row);
+            const decided = mainDecidedByRow.get(row);
+            // "matches" answers "does ANY active rule (or the hardcode
+            // fallback) claim this row" -- true the moment a rule fired,
+            // regardless of which one, so a future admin-added rule is
+            // correctly recognized here too.
+            const matches = decided
+                ? true
+                : (isPmBufferStatus(row.product_status) || isPresortStatus(row) || isLabelingStatus(row) || isMarketplaceStatus(row) || isPcStatus(row) || isWmiMpPcStatus(row));
             if (!matches) pushReject(list, "pm", row, "Дата подходит, но статус/МХ не подошли ни под одну выгрузку. Статус: " + (row.product_status || "-") + "; МХ: " + (row.mx || "-"), date, "pm");
             if (isPmBufferStatus(row.product_status) && mxHasBoxes(row)) pushReject(list, "pm", row, "МХ содержит слово \"коробки\", строка исключена из ПМ/Почты", date, "pm");
+            // Buffer-exclusion message is intentionally raw-hardcode: the
+            // active rules already bake "не содержит буфер" into their own
+            // conditions, so a buffered row never decides to Маркетплейс/ПЦ
+            // in the first place -- this check explains WHY by testing the
+            // underlying status/MX shape, independent of where it would
+            // route.
             if ((isMarketplaceStatus(row) || isPcStatus(row)) && mxHasBuffer(row)) pushReject(list, "marketplace_pc", row, "МХ содержит Буфер, строка исключена", date, "marketplace_pc");
         });
         return list.slice(0, 1000);
