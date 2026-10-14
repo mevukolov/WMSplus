@@ -16465,16 +16465,39 @@
         };
     }
 
-    function buildAfterSaleMovementPreview(sourceRows, businessDate, specialMap) {
+    async function buildAfterSaleMovementPreview(sourceRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const def = moduleDef("after_sale_movement");
-        const rows = sourceRows.filter((row) => parseDateTime(row.status_at).date === businessDate);
+
+        const filterDecisions = await evaluateFilterRulesBatch("after_sale_movement", sourceRows);
+        const filteredSet = new Set();
+        sourceRows.forEach((row, index) => { if (filterDecisions[index]) filteredSet.add(row); });
+        const filteredByRule = filteredSet.size;
+        const survivors = sourceRows.filter((row) => !filteredSet.has(row));
+
+        const zoneDecisions = await evaluateZoneRulesBatch("after_sale_movement", survivors);
+        const decidedByRow = new Map();
+        survivors.forEach((row, index) => { decidedByRow.set(row, zoneDecisions[index]); });
+
+        let dateFilteredOut = 0;
+        const rows = survivors.filter((row) => {
+            const decided = decidedByRow.get(row);
+            const offsetDays = decided ? decided.uploadOffsetDays : 0;
+            const targetDate = addDays(businessDate, -offsetDays);
+            if (parseDateTime(row.status_at).date !== targetDate) { dateFilteredOut += 1; return false; }
+            return true;
+        });
+
         const seen = new Set();
         let duplicateProductCount = 0;
         const tasks = [];
         rows.forEach((row) => {
             if (seen.has(row.product)) { duplicateProductCount += 1; return; }
             seen.add(row.product);
+            const decided = decidedByRow.get(row);
+            const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : 1;
+            const offsetDays = decided ? decided.uploadOffsetDays : 0;
+            const dueDate = addDays(addDays(businessDate, -offsetDays), deadlineDays);
             tasks.push(taskRecord({
                 module: "after_sale_movement",
                 sourceModule: def.sourceModule,
@@ -16485,7 +16508,7 @@
                 taskType: def.taskType,
                 descriptionTaskType: def.taskTypeLabel,
                 column: def.column,
-                dueDate: dueDateForBusinessDate("after_sale_movement", businessDate),
+                dueDate,
                 responsibilityZone: def.responsibilityZone,
                 productIds: [row.product],
                 rows: [row],
@@ -16496,7 +16519,7 @@
                 infoLines: ["Искомый ШК: " + row.product, "Тара: " + (row.tare || "-"), "МХ: " + (row.mx || "-"), "Статус после реализации: " + (row.status || "-"), "Дата статуса: " + (row.status_at || "-")],
             }));
         });
-        return { mode: "after_sale_movement", sourceRows: sourceRows.length, rowsCount: rows.length, dateFilteredOut: sourceRows.length - rows.length, duplicateProductCount, specialCandidateIds: productIdsFromRows(rows), tasks, afterSaleMovementTasks: tasks.length };
+        return { mode: "after_sale_movement", sourceRows: sourceRows.length, rowsCount: rows.length, dateFilteredOut, filteredByRule, duplicateProductCount, specialCandidateIds: productIdsFromRows(rows), tasks, afterSaleMovementTasks: tasks.length };
     }
 
     async function buildPreviewForModule(module, rows, carrierRows, businessDate, specialMap) {
