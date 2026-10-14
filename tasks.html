@@ -224,6 +224,17 @@
         .writeoff-term-active { display: inline-flex; align-items: center; gap: 6px; color: #64748b; font-size: 12px; font-weight: 900; }
         .writeoff-term-add { display: grid; grid-template-columns: minmax(140px, 1fr) 120px auto; gap: 8px; align-items: center; }
         .routing-rule-list { display: grid; gap: 12px; }
+        .routing-rule-summary-list { display: grid; gap: 6px; }
+        .routing-rule-summary-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+        .routing-rule-summary-row:hover { background: #f1f5f9; }
+        .routing-rule-summary-row.inactive { opacity: .55; }
+        .routing-rule-summary-priority { color: #64748b; font-weight: 1000; min-width: 28px; }
+        .routing-rule-summary-name { font-weight: 1000; color: #242038; flex: 1 1 160px; }
+        .routing-rule-summary-badge { font-size: 11px; font-weight: 1000; text-transform: uppercase; letter-spacing: .03em; color: #6d28d9; background: #ede9fe; border-radius: 999px; padding: 3px 9px; }
+        .routing-rule-summary-target { color: #475569; font-weight: 900; }
+        .routing-rule-summary-meta { color: #94a3b8; font-size: 12px; font-weight: 800; }
+        .routing-rule-summary-status { font-size: 12px; font-weight: 1000; color: #15803d; }
+        .routing-rule-summary-row.inactive .routing-rule-summary-status { color: #94a3b8; }
         .routing-rule-card { border-radius: 16px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; display: grid; gap: 10px; }
         .routing-rule-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         .routing-rule-head input[type="text"], .routing-rule-head input[type="number"], .routing-rule-head select { border: 1px solid #e2e8f0; border-radius: 11px; padding: 9px 10px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #fff; }
@@ -2856,8 +2867,45 @@
             <button id="addRoutingRule" class="btn btn-outline" type="button">Добавить правило</button>
             <button id="saveRoutingRules" class="btn btn-rect" type="button">Сохранить правила</button>
             <button id="reloadRoutingRules" class="btn btn-outline" type="button">Обновить из Supabase</button>
+            <button id="openRoutingRuleTest" class="btn btn-outline" type="button">Протестировать выгрузку</button>
         </div>
         <div id="routingRulesStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="routingRuleEditModal" class="tasks-flow-modal upload-work" aria-hidden="true" style="z-index:4200;">
+    <div class="tasks-flow-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Правило маршрутизации</h3>
+                <p class="work-subtitle">Изменения применятся после "Сохранить правила" в предыдущем окне.</p>
+            </div>
+            <button id="closeRoutingRuleEdit" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="routingRuleEditWrap"></div>
+    </div>
+</section>
+
+<section id="routingRuleTestModal" class="tasks-flow-modal upload-work" aria-hidden="true" style="z-index:4200;">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Протестировать выгрузку</h3>
+                <p class="work-subtitle">Прогоняет файл через текущие правила -- показывает, что получилось бы: сколько ШК по какому правилу куда ушло, сколько задач создалось бы, что отброшено и почему. Ничего не сохраняет и не создаёт.</p>
+            </div>
+            <button id="closeRoutingRuleTest" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="file-row">
+            <select id="routingRuleTestModule"></select>
+            <label class="btn btn-rect" for="routingRuleTestFile">Выбрать файл</label>
+            <input id="routingRuleTestFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+            <span id="routingRuleTestFileName" class="file-name">Файл пока не выбран</span>
+        </div>
+        <div id="routingRuleTestDateRow" class="file-row" style="display:none">
+            <select id="routingRuleTestDate"></select>
+            <button id="runRoutingRuleTest" class="btn btn-rect" type="button">Запустить</button>
+        </div>
+        <div id="routingRuleTestResult"></div>
     </div>
 </section>
 

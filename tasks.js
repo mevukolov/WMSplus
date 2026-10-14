@@ -536,6 +536,11 @@
             saving: false,
             loaded: false,
             error: "",
+            editingIndex: null,
+        },
+        routingRuleTest: {
+            rows: null,
+            module: null,
         },
         moduleSettings: {
             rows: [],
@@ -12391,25 +12396,85 @@
             + "</div>";
     }
 
+    function routingRuleSummaryRowHtml(row, index) {
+        const outputKey = row.output_key || "zone";
+        const isFolder = outputKey === "no_order_folder";
+        const kindLabel = isFolder ? "Подпапка" : "Зона";
+        const targetLabel = isFolder
+            ? ((row.output_value && row.output_value.target_task_type) || "-- не выбрано --")
+            : (row.target_task_type || "-- не выбрано --");
+        const conditionCount = Array.isArray(row.conditions) ? row.conditions.length : 0;
+        const isActive = row.is_active !== false;
+        const name = row.name || "(без названия)";
+        return "<div class='routing-rule-summary-row" + (isActive ? "" : " inactive") + "' data-rule-summary-row data-rule-index='" + index + "' tabindex='0' role='button'>"
+            + "<span class='routing-rule-summary-priority'>#" + escapeHtml(row.priority || "?") + "</span>"
+            + "<span class='routing-rule-summary-name'>" + escapeHtml(name) + "</span>"
+            + "<span class='routing-rule-summary-badge'>" + escapeHtml(kindLabel) + "</span>"
+            + "<span class='routing-rule-summary-target'>→ " + escapeHtml(targetLabel) + "</span>"
+            + "<span class='routing-rule-summary-meta'>" + conditionCount + " " + (conditionCount === 1 ? "условие" : "условий") + "</span>"
+            + "<span class='routing-rule-summary-status'>" + (isActive ? "активно" : "выключено") + "</span>"
+            + "<button type='button' class='btn btn-square' data-rule-summary-remove aria-label='Удалить правило'>×</button>"
+            + "</div>";
+    }
+
     function renderRoutingRulesModal() {
         const target = $("routingRulesWrap");
         if (!target) return;
         const rows = state.routingRules.rows || [];
         target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
             + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
-            + "<div class='routing-rule-list'>" + rows.map(routingRuleRowHtml).join("") + "</div>";
-        target.querySelectorAll("[data-rule-remove]").forEach((button) => {
-            button.addEventListener("click", () => removeRoutingRuleRow(button.closest("[data-routing-rule-row]")));
+            + (!rows.length && !state.routingRules.loading ? "<div class='empty-state'>Правил пока нет. Нажмите \"Добавить правило\".</div>" : "")
+            + "<div class='routing-rule-summary-list'>" + rows.map(routingRuleSummaryRowHtml).join("") + "</div>";
+        target.querySelectorAll("[data-rule-summary-row]").forEach((rowEl) => {
+            const open = () => openRoutingRuleEditModal(Number(rowEl.getAttribute("data-rule-index")));
+            rowEl.addEventListener("click", (event) => { if (!event.target.closest("[data-rule-summary-remove]")) open(); });
+            rowEl.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
         });
-        target.querySelectorAll("[data-add-condition]").forEach((button) => {
+        target.querySelectorAll("[data-rule-summary-remove]").forEach((button) => {
+            button.addEventListener("click", (event) => {
+                event.stopPropagation();
+                const index = Number(button.closest("[data-rule-summary-row]").getAttribute("data-rule-index"));
+                void removeRoutingRuleRow(index);
+            });
+        });
+    }
+
+    function wireRoutingRuleCardListeners(cardEl) {
+        if (!cardEl) return;
+        cardEl.querySelectorAll("[data-add-condition]").forEach((button) => {
             button.addEventListener("click", () => addRoutingRuleCondition(button.closest("[data-routing-rule-row]")));
         });
-        target.querySelectorAll("[data-condition-remove]").forEach((button) => {
+        cardEl.querySelectorAll("[data-condition-remove]").forEach((button) => {
             button.addEventListener("click", () => removeRoutingRuleCondition(button.closest("[data-rule-condition]")));
         });
-        target.querySelectorAll("[data-rule-output-key]").forEach((select) => {
+        cardEl.querySelectorAll("[data-rule-output-key]").forEach((select) => {
             select.addEventListener("change", () => toggleRoutingRuleResultSections(select.closest("[data-routing-rule-row]")));
         });
+    }
+
+    function openRoutingRuleEditModal(index) {
+        const row = (state.routingRules.rows || [])[index];
+        if (!row) return;
+        state.routingRules.editingIndex = index;
+        const wrap = $("routingRuleEditWrap");
+        if (wrap) {
+            wrap.innerHTML = routingRuleRowHtml(row);
+            wireRoutingRuleCardListeners(wrap);
+        }
+        setFlowModalOpen("routingRuleEditModal", true);
+    }
+
+    function closeRoutingRuleEditModal() {
+        const index = state.routingRules.editingIndex;
+        const wrap = $("routingRuleEditWrap");
+        const cardEl = wrap && wrap.querySelector("[data-routing-rule-row]");
+        if (cardEl && index !== null && index !== undefined && state.routingRules.rows[index]) {
+            const updated = readRoutingRuleFormValues(cardEl, state.routingRules.rows[index]);
+            if (updated) state.routingRules.rows[index] = updated;
+        }
+        state.routingRules.editingIndex = null;
+        setFlowModalOpen("routingRuleEditModal", false);
+        renderRoutingRulesModal();
     }
 
     function addRoutingRuleCondition(cardEl) {
@@ -12459,17 +12524,16 @@
         if (folderSection) folderSection.style.display = outputKey === "no_order_folder" ? "" : "none";
     }
 
-    async function removeRoutingRuleRow(rowEl) {
-        if (!rowEl) return;
-        const nameInput = rowEl.querySelector("[data-rule-name]");
-        const ruleName = (nameInput && nameInput.value) || "без названия";
+    async function removeRoutingRuleRow(index) {
+        const row = (state.routingRules.rows || [])[index];
+        if (!row) return;
+        const ruleName = row.name || "без названия";
         if (!window.confirm("Удалить правило \"" + ruleName + "\"? Это необратимо.")) return;
-        const ruleId = rowEl.getAttribute("data-rule-id");
-        if (ruleId) {
+        if (row.id) {
             const db = supabaseDb();
             if (db) {
                 try {
-                    const { error } = await db.from("wms_routing_rules").delete().eq("id", ruleId);
+                    const { error } = await db.from("wms_routing_rules").delete().eq("id", row.id);
                     if (error) throw error;
                 } catch (error) {
                     toast("Не удалось удалить правило: " + (error && error.message ? error.message : String(error)), "error");
@@ -12477,7 +12541,8 @@
                 }
             }
         }
-        rowEl.remove();
+        state.routingRules.rows = (state.routingRules.rows || []).filter((_, i) => i !== index);
+        renderRoutingRulesModal();
     }
 
     function addRoutingRuleDraft() {
@@ -12494,69 +12559,75 @@
             output_value: null,
         });
         renderRoutingRulesModal();
+        openRoutingRuleEditModal(state.routingRules.rows.length - 1);
     }
 
-    function routingRuleInputRows() {
-        return Array.from(document.querySelectorAll("[data-routing-rule-row]")).map((row) => {
-            const id = row.getAttribute("data-rule-id") || undefined;
-            const priority = Math.max(1, Math.trunc(settingNumber(row.querySelector("[data-rule-priority]") && row.querySelector("[data-rule-priority]").value, 0)));
-            const name = normalizeText(row.querySelector("[data-rule-name]") && row.querySelector("[data-rule-name]").value);
-            const outputKey = (row.querySelector("[data-rule-output-key]") && row.querySelector("[data-rule-output-key]").value) || "zone";
-            const isActive = row.querySelector("[data-rule-active]").checked;
-            const conditions = Array.from(row.querySelectorAll("[data-rule-condition]")).map((conditionEl) => {
-                const attribute = conditionEl.querySelector("[data-condition-attribute]").value;
-                const operator = conditionEl.querySelector("[data-condition-operator]").value;
-                const rawValue = normalizeText(conditionEl.querySelector("[data-condition-value]") && conditionEl.querySelector("[data-condition-value]").value);
-                const value = (operator === "in" || operator === "between")
-                    ? rawValue.split(",").map((part) => part.trim()).filter(Boolean)
-                    : rawValue;
-                const logicEl = conditionEl.querySelector("[data-condition-logic]");
-                const logic = logicEl ? logicEl.value : undefined;
-                return { attribute, operator, value, rawValue, logic };
-            }).filter((condition) => condition.rawValue);
-            if (!name || !conditions.length) return null;
-            const cleanConditions = conditions.map(({ attribute, operator, value, logic }) =>
-                logic ? { attribute, operator, value, logic } : { attribute, operator, value }
-            );
-            const base = {
-                ...(id ? { id } : {}),
-                priority,
-                name,
-                is_active: isActive,
-                conditions: cleanConditions,
-                output_key: outputKey,
-                updated_at: new Date().toISOString(),
-            };
-            if (outputKey === "zone") {
-                const targetTaskType = row.querySelector("[data-rule-target]").value;
-                const groupingAttribute = row.querySelector("[data-rule-grouping]").value || null;
-                return {
-                    ...base,
-                    target_task_type: targetTaskType,
-                    grouping_attribute: groupingAttribute,
-                    output_value: { target_task_type: targetTaskType, grouping_attribute: groupingAttribute },
-                };
-            }
-            const folderTarget = row.querySelector("[data-rule-folder-target]").value;
-            const folderGrouping = row.querySelector("[data-rule-folder-grouping]").value || null;
+    // Reads one rendered rule card's current form values back into a
+    // DB-shaped row object. Used both to commit edits made in the
+    // single-rule modal (closeRoutingRuleEditModal) and, if needed,
+    // for ad-hoc reads of a card still in the DOM.
+    function readRoutingRuleFormValues(cardEl, existingRow) {
+        const id = (existingRow && existingRow.id) || undefined;
+        const priority = Math.max(1, Math.trunc(settingNumber(cardEl.querySelector("[data-rule-priority]") && cardEl.querySelector("[data-rule-priority]").value, 0)));
+        const name = normalizeText(cardEl.querySelector("[data-rule-name]") && cardEl.querySelector("[data-rule-name]").value);
+        const outputKey = (cardEl.querySelector("[data-rule-output-key]") && cardEl.querySelector("[data-rule-output-key]").value) || "zone";
+        const isActive = cardEl.querySelector("[data-rule-active]").checked;
+        const conditions = Array.from(cardEl.querySelectorAll("[data-rule-condition]")).map((conditionEl) => {
+            const attribute = conditionEl.querySelector("[data-condition-attribute]").value;
+            const operator = conditionEl.querySelector("[data-condition-operator]").value;
+            const rawValue = normalizeText(conditionEl.querySelector("[data-condition-value]") && conditionEl.querySelector("[data-condition-value]").value);
+            const value = (operator === "in" || operator === "between")
+                ? rawValue.split(",").map((part) => part.trim()).filter(Boolean)
+                : rawValue;
+            const logicEl = conditionEl.querySelector("[data-condition-logic]");
+            const logic = logicEl ? logicEl.value : undefined;
+            return { attribute, operator, value, rawValue, logic };
+        }).filter((condition) => condition.rawValue);
+        if (!name || !conditions.length) return null;
+        const cleanConditions = conditions.map(({ attribute, operator, value, logic }) =>
+            logic ? { attribute, operator, value, logic } : { attribute, operator, value }
+        );
+        const base = {
+            ...(existingRow || {}),
+            ...(id ? { id } : {}),
+            priority,
+            name,
+            is_active: isActive,
+            conditions: cleanConditions,
+            output_key: outputKey,
+        };
+        if (outputKey === "zone") {
+            const targetTaskType = cardEl.querySelector("[data-rule-target]").value;
+            const groupingAttribute = cardEl.querySelector("[data-rule-grouping]").value || null;
             return {
                 ...base,
-                target_task_type: null,
-                grouping_attribute: null,
-                output_value: { target_task_type: folderTarget, grouping_attribute: folderGrouping },
+                target_task_type: targetTaskType,
+                grouping_attribute: groupingAttribute,
+                output_value: { target_task_type: targetTaskType, grouping_attribute: groupingAttribute },
             };
-        }).filter(Boolean);
+        }
+        const folderTarget = cardEl.querySelector("[data-rule-folder-target]").value;
+        const folderGrouping = cardEl.querySelector("[data-rule-folder-grouping]").value || null;
+        return {
+            ...base,
+            target_task_type: null,
+            grouping_attribute: null,
+            output_value: { target_task_type: folderTarget, grouping_attribute: folderGrouping },
+        };
     }
 
     async function openRoutingRulesModal() {
         if (!ensureDevelopmentAccess("Правила маршрутизации")) return;
         closeFlowModals();
+        state.routingRules.editingIndex = null;
         setFlowModalOpen("routingRulesModal", true);
         renderRoutingRulesModal();
         await loadRoutingRules(true);
     }
 
     function closeRoutingRulesModal() {
+        setFlowModalOpen("routingRuleEditModal", false);
+        setFlowModalOpen("routingRuleTestModal", false);
         setFlowModalOpen("routingRulesModal", false);
     }
 
@@ -12564,7 +12635,9 @@
         const db = supabaseDb();
         const status = $("routingRulesStatus");
         const button = $("saveRoutingRules");
-        const rows = routingRuleInputRows();
+        const rows = (state.routingRules.rows || [])
+            .filter((row) => row.name && Array.isArray(row.conditions) && row.conditions.length)
+            .map((row) => ({ ...row, updated_at: new Date().toISOString() }));
         if (!rows.length) {
             if (status) status.textContent = "Нет строк для сохранения.";
             return;
@@ -12603,6 +12676,126 @@
             if (status) status.textContent = state.routingRules.error;
         } finally {
             state.routingRules.saving = false;
+            if (button) button.disabled = false;
+        }
+    }
+
+    const ROUTING_RULE_TEST_MODULES = ["pm", "presort", "marketplace_pc", "wmi_mp_pc", "no_order", "packaging", "rwp", "after_sale_movement"];
+
+    function kindForModule(module) {
+        const slot = MASTER_SLOTS.find((s) => s.modules.includes(module));
+        return slot ? slot.kind : "pmPrimary";
+    }
+
+    function testUploadDateField(module) {
+        if (module === "packaging" || module === "rwp") return "last_movement";
+        if (module === "after_sale_movement") return "status_at";
+        return "created_at";
+    }
+
+    function testUploadRowIdentifier(module, row) {
+        const raw = (module === "packaging" || module === "rwp") ? row.shk : row.product;
+        return normalizeIdentifier(raw);
+    }
+
+    async function testUploadBreakdown(module, rows, businessDate) {
+        const dateField = testUploadDateField(module);
+        const dateRows = rows.filter((row) => parseDateTime(row[dateField]).date === businessDate);
+        const evaluator = module === "no_order" ? evaluateNoOrderFolderRulesBatch : evaluateZoneRulesBatch;
+        const decisions = dateRows.length ? await evaluator(dateRows) : [];
+        const byRule = new Map();
+        dateRows.forEach((row, index) => {
+            const decided = decisions[index];
+            const key = decided ? (decided.ruleName ? decided.ruleName + " → " + decided.zone : decided.zone) : "(без правила -- решает хардкод в коде)";
+            byRule.set(key, (byRule.get(key) || 0) + 1);
+        });
+        const preview = module === "pm"
+            ? await buildPreviewForModule("pm", dateRows, [], businessDate)
+            : await buildPreviewForModule(module, dateRows, [], businessDate);
+        const coveredIds = new Set();
+        (preview.tasks || []).forEach((task) => (task.source_shk_ids || []).forEach((id) => coveredIds.add(id)));
+        const excludedRows = dateRows.filter((row) => !coveredIds.has(testUploadRowIdentifier(module, row)));
+        return {
+            totalRows: rows.length,
+            dateRowsCount: dateRows.length,
+            byRule: Array.from(byRule.entries()).map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count),
+            taskCount: (preview.tasks || []).length,
+            coveredCount: coveredIds.size,
+            excludedRows,
+        };
+    }
+
+    function routingRuleTestResultHtml(result) {
+        const ruleRows = result.byRule.map((r) => "<tr><td>" + escapeHtml(r.key) + "</td><td>" + r.count + "</td></tr>").join("");
+        const excludedSample = result.excludedRows.slice(0, 50).map((row) => {
+            const id = row.product || row.shk || "-";
+            const status = row.product_status || row.last_status || "-";
+            return "<tr><td>" + escapeHtml(id) + "</td><td>" + escapeHtml(status) + "</td><td>" + escapeHtml(row.mx || "-") + "</td></tr>";
+        }).join("");
+        return "<div class='status-line good'>Ничего не сохранено -- это только прогноз.</div>"
+            + "<p>Строк за выбранную дату: " + result.dateRowsCount + " (всего в файле: " + result.totalRows + ")</p>"
+            + "<p>Будет создано задач: <strong>" + result.taskCount + "</strong>. Войдёт в задачи ШК: <strong>" + result.coveredCount + "</strong>. Не войдёт никуда: <strong>" + result.excludedRows.length + "</strong>.</p>"
+            + "<h4>По какому правилу сколько ШК</h4>"
+            + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Правило → зона</th><th>ШК</th></tr></thead><tbody>" + (ruleRows || "<tr><td colspan='2'>Совпадений нет.</td></tr>") + "</tbody></table></div>"
+            + (result.excludedRows.length
+                ? "<h4>Исключённые строки (до 50 из " + result.excludedRows.length + ")</h4><div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>ШК</th><th>Статус</th><th>МХ</th></tr></thead><tbody>" + excludedSample + "</tbody></table></div>"
+                : "");
+    }
+
+    function openRoutingRuleTestModal() {
+        const select = $("routingRuleTestModule");
+        if (select) select.innerHTML = ROUTING_RULE_TEST_MODULES.map((m) => "<option value='" + m + "'>" + escapeHtml(moduleDef(m).label) + "</option>").join("");
+        $("routingRuleTestFile").value = "";
+        $("routingRuleTestFileName").textContent = "Файл пока не выбран";
+        $("routingRuleTestDateRow").style.display = "none";
+        $("routingRuleTestResult").innerHTML = "";
+        state.routingRuleTest = { rows: null, module: null };
+        setFlowModalOpen("routingRuleTestModal", true);
+    }
+
+    function closeRoutingRuleTestModal() {
+        setFlowModalOpen("routingRuleTestModal", false);
+    }
+
+    async function handleRoutingRuleTestFile(file) {
+        const module = $("routingRuleTestModule").value;
+        $("routingRuleTestFileName").textContent = "Читаю файл...";
+        $("routingRuleTestDateRow").style.display = "none";
+        $("routingRuleTestResult").innerHTML = "";
+        try {
+            const kind = kindForModule(module);
+            const rows = await readWorkbookRows(file, kind);
+            state.routingRuleTest = { rows, module };
+            $("routingRuleTestFileName").textContent = file.name + " -- строк: " + rows.length;
+            const dateField = testUploadDateField(module);
+            const counts = new Map();
+            rows.forEach((row) => {
+                const d = parseDateTime(row[dateField]).date;
+                if (d) counts.set(d, (counts.get(d) || 0) + 1);
+            });
+            const dates = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+            const dateSelect = $("routingRuleTestDate");
+            dateSelect.innerHTML = dates.map(([d, n]) => "<option value='" + d + "'>" + formatRuDate(d) + " (" + n + " стр.)</option>").join("");
+            $("routingRuleTestDateRow").style.display = dates.length ? "" : "none";
+            if (!dates.length) $("routingRuleTestFileName").textContent += " -- дат в файле не нашёл.";
+        } catch (error) {
+            $("routingRuleTestFileName").textContent = "Ошибка чтения: " + (error && error.message ? error.message : String(error));
+        }
+    }
+
+    async function runRoutingRuleTest() {
+        const { rows, module } = state.routingRuleTest || {};
+        if (!rows || !module) return;
+        const date = $("routingRuleTestDate").value;
+        const button = $("runRoutingRuleTest");
+        if (button) button.disabled = true;
+        $("routingRuleTestResult").innerHTML = "<div class='status-line'>Считаю...</div>";
+        try {
+            const result = await testUploadBreakdown(module, rows, date);
+            $("routingRuleTestResult").innerHTML = routingRuleTestResultHtml(result);
+        } catch (error) {
+            $("routingRuleTestResult").innerHTML = "<div class='status-line error'>" + escapeHtml(error && error.message ? error.message : String(error)) + "</div>";
+        } finally {
             if (button) button.disabled = false;
         }
     }
@@ -15125,7 +15318,7 @@
                 (data || []).forEach((item) => {
                     const idx = Number(item.row_id);
                     if (Number.isFinite(idx) && item.output_value && item.output_value.target_task_type) {
-                        decisions[idx] = { zone: item.output_value.target_task_type, grouping: item.output_value.grouping_attribute || null };
+                        decisions[idx] = { zone: item.output_value.target_task_type, grouping: item.output_value.grouping_attribute || null, ruleName: item.rule_name || null };
                     }
                 });
             } catch (error) {
@@ -19055,6 +19248,16 @@
         $("addRoutingRule").addEventListener("click", addRoutingRuleDraft);
         $("saveRoutingRules").addEventListener("click", () => { void saveRoutingRulesFromModal(); });
         $("reloadRoutingRules").addEventListener("click", () => { void loadRoutingRules(true); });
+        $("closeRoutingRuleEdit").addEventListener("click", closeRoutingRuleEditModal);
+        $("routingRuleEditModal").addEventListener("click", (event) => { if (event.target === $("routingRuleEditModal")) closeRoutingRuleEditModal(); });
+        $("openRoutingRuleTest").addEventListener("click", openRoutingRuleTestModal);
+        $("closeRoutingRuleTest").addEventListener("click", closeRoutingRuleTestModal);
+        $("routingRuleTestModal").addEventListener("click", (event) => { if (event.target === $("routingRuleTestModal")) closeRoutingRuleTestModal(); });
+        $("routingRuleTestFile").addEventListener("change", () => {
+            const file = $("routingRuleTestFile").files && $("routingRuleTestFile").files[0];
+            if (file) void handleRoutingRuleTestFile(file);
+        });
+        $("runRoutingRuleTest").addEventListener("click", () => { void runRoutingRuleTest(); });
         $("closeModuleSettings").addEventListener("click", closeModuleSettingsModal);
         $("closeReviewZones").addEventListener("click", closeReviewZonesModal);
         $("addReviewZone").addEventListener("click", addReviewZoneDraft);
