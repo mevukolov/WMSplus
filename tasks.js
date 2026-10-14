@@ -12710,6 +12710,7 @@
         const byRule = new Map();
         const statusField = testUploadStatusField(module);
         const unmatchedByCode = new Map();
+        const unmatchedRowsByCode = new Map();
         dateRows.forEach((row, index) => {
             const decided = decisions[index];
             const key = decided ? (decided.ruleName ? decided.ruleName + " → " + decided.zone : decided.zone) : "(без правила -- решает хардкод в коде)";
@@ -12717,28 +12718,58 @@
             if (!decided) {
                 const code = latinStatusCode(row[statusField]) || "(без распознаваемого кода)";
                 unmatchedByCode.set(code, (unmatchedByCode.get(code) || 0) + 1);
+                const bucket = unmatchedRowsByCode.get(code) || [];
+                bucket.push(row);
+                unmatchedRowsByCode.set(code, bucket);
             }
         });
         const preview = module === "pm"
             ? await buildPreviewForModule("pm", dateRows, [], businessDate)
             : await buildPreviewForModule(module, dateRows, [], businessDate);
-        const coveredIds = new Set();
-        (preview.tasks || []).forEach((task) => (task.source_shk_ids || []).forEach((id) => coveredIds.add(id)));
-        const excludedRows = dateRows.filter((row) => !coveredIds.has(testUploadRowIdentifier(module, row)));
+        const rowToTaskZone = new Map();
+        (preview.tasks || []).forEach((task) => {
+            const zoneLabel = task.task_type || task.column || "-";
+            (task.source_shk_ids || []).forEach((id) => rowToTaskZone.set(id, zoneLabel));
+        });
+        const excludedRows = dateRows.filter((row) => !rowToTaskZone.has(testUploadRowIdentifier(module, row)));
         return {
+            module,
             totalRows: rows.length,
             dateRowsCount: dateRows.length,
             byRule: Array.from(byRule.entries()).map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count),
             unmatchedStatuses: Array.from(unmatchedByCode.entries()).map(([code, count]) => ({ code, count })).sort((a, b) => b.count - a.count),
+            unmatchedRowsByCode,
+            rowToTaskZone,
             taskCount: (preview.tasks || []).length,
-            coveredCount: coveredIds.size,
+            coveredCount: rowToTaskZone.size,
             excludedRows,
         };
     }
 
+    function routingRuleTestUnmatchedDetailHtml(result, code) {
+        const rows = result.unmatchedRowsByCode.get(code) || [];
+        const items = rows.slice(0, 100).map((row) => {
+            const id = testUploadRowIdentifier(result.module, row) || "-";
+            const status = row.product_status || row.last_status || "-";
+            const mx = row.mx || "-";
+            const zone = result.rowToTaskZone.get(testUploadRowIdentifier(result.module, row));
+            const fate = zone
+                ? "Попало в задачу (хардкод-фоллбэк): " + zone
+                : "Никуда не попало -- ни правило, ни хардкод, ни что-то дальше (цена/дубликат и т.п.) эту строку не подхватили";
+            return "<tr><td>" + escapeHtml(id) + "</td><td>" + escapeHtml(status) + "</td><td>" + escapeHtml(mx) + "</td><td>" + escapeHtml(fate) + "</td></tr>";
+        }).join("");
+        return "<div class='routing-rule-test-detail'>"
+            + "<h5>Код \"" + escapeHtml(code) + "\" -- " + rows.length + " ШК</h5>"
+            + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>ШК</th><th>Статус</th><th>МХ</th><th>Куда делось</th></tr></thead><tbody>" + (items || "<tr><td colspan='4'>Нет строк.</td></tr>") + "</tbody></table></div>"
+            + (rows.length > 100 ? "<p class='work-subtitle'>Показаны первые 100 из " + rows.length + ".</p>" : "")
+            + "</div>";
+    }
+
     function routingRuleTestResultHtml(result) {
         const ruleRows = result.byRule.map((r) => "<tr><td>" + escapeHtml(r.key) + "</td><td>" + r.count + "</td></tr>").join("");
-        const unmatchedRows = result.unmatchedStatuses.map((r) => "<tr><td>" + escapeHtml(r.code) + "</td><td>" + r.count + "</td></tr>").join("");
+        const unmatchedRows = result.unmatchedStatuses.map((r) =>
+            "<tr class='routing-rule-test-unmatched-row' data-unmatched-code='" + escapeHtml(r.code) + "'><td>" + escapeHtml(r.code) + "</td><td>" + r.count + "</td></tr>"
+        ).join("");
         const excludedSample = result.excludedRows.slice(0, 50).map((row) => {
             const id = row.product || row.shk || "-";
             const status = row.product_status || row.last_status || "-";
@@ -12750,11 +12781,29 @@
             + "<h4>По какому правилу сколько ШК</h4>"
             + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Правило → зона</th><th>ШК</th></tr></thead><tbody>" + (ruleRows || "<tr><td colspan='2'>Совпадений нет.</td></tr>") + "</tbody></table></div>"
             + "<h4>Статусы, которые не подошли ни по одному из правил</h4>"
-            + "<p class='work-subtitle' style='margin:0 0 8px'>Не значит, что строка потеряется -- хардкод-фоллбэк может всё равно её классифицировать. Значит только, что НИ ОДНО активное правило этот код статуса не ловит -- удобно для поиска пробелов.</p>"
+            + "<p class='work-subtitle' style='margin:0 0 8px'>Не значит, что строка потеряется -- хардкод-фоллбэк может всё равно её классифицировать. Значит только, что НИ ОДНО активное правило этот код статуса не ловит -- удобно для поиска пробелов. Нажмите на строку, чтобы увидеть, что с этими ШК стало.</p>"
             + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Код статуса</th><th>ШК</th></tr></thead><tbody>" + (unmatchedRows || "<tr><td colspan='2'>Все статусы в файле попали хоть под какое-то правило.</td></tr>") + "</tbody></table></div>"
+            + "<div id='routingRuleTestUnmatchedDetail'></div>"
             + (result.excludedRows.length
                 ? "<h4>Исключённые строки (до 50 из " + result.excludedRows.length + ")</h4><div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>ШК</th><th>Статус</th><th>МХ</th></tr></thead><tbody>" + excludedSample + "</tbody></table></div>"
                 : "");
+    }
+
+    function wireRoutingRuleTestResultListeners(result) {
+        const container = $("routingRuleTestResult");
+        if (!container) return;
+        container.querySelectorAll("[data-unmatched-code]").forEach((rowEl) => {
+            rowEl.addEventListener("click", () => {
+                const code = rowEl.getAttribute("data-unmatched-code");
+                const detail = $("routingRuleTestUnmatchedDetail");
+                if (!detail) return;
+                const alreadyOpenForThisCode = rowEl.classList.contains("open");
+                container.querySelectorAll("[data-unmatched-code]").forEach((other) => other.classList.remove("open"));
+                if (alreadyOpenForThisCode) { detail.innerHTML = ""; return; }
+                rowEl.classList.add("open");
+                detail.innerHTML = routingRuleTestUnmatchedDetailHtml(result, code);
+            });
+        });
     }
 
     function openRoutingRuleTestModal() {
@@ -12816,6 +12865,7 @@
         try {
             const result = await testUploadBreakdown(module, rows, date);
             $("routingRuleTestResult").innerHTML = routingRuleTestResultHtml(result);
+            wireRoutingRuleTestResultListeners(result);
         } catch (error) {
             $("routingRuleTestResult").innerHTML = "<div class='status-line error'>" + escapeHtml(error && error.message ? error.message : String(error)) + "</div>";
         } finally {
