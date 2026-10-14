@@ -18793,6 +18793,8 @@
     async function buildMasterConditionRejects(rows, dates) {
         const list = [];
         const mainTargetDates = new Set(MASTER_MAIN_MODULES.map((module) => dates[module]));
+        const marketplaceDef = moduleDef("marketplace");
+        const pcDef = moduleDef("pc");
         const mainDecisions = await evaluateZoneRulesBatch(rows.main);
         const mainDecidedByRow = new Map();
         rows.main.forEach((row, index) => { mainDecidedByRow.set(row, mainDecisions[index]); });
@@ -18809,13 +18811,15 @@
                 : (isPmBufferStatus(row.product_status) || isPresortStatus(row) || isLabelingStatus(row) || isMarketplaceStatus(row) || isPcStatus(row) || isWmiMpPcStatus(row));
             if (!matches) pushReject(list, "pm", row, "Дата подходит, но статус/МХ не подошли ни под одну выгрузку. Статус: " + (row.product_status || "-") + "; МХ: " + (row.mx || "-"), date, "pm");
             if (isPmBufferStatus(row.product_status) && mxHasBoxes(row)) pushReject(list, "pm", row, "МХ содержит слово \"коробки\", строка исключена из ПМ/Почты", date, "pm");
-            // Buffer-exclusion message is intentionally raw-hardcode: the
-            // active rules already bake "не содержит буфер" into their own
-            // conditions, so a buffered row never decides to Маркетплейс/ПЦ
-            // in the first place -- this check explains WHY by testing the
-            // underlying status/MX shape, independent of where it would
-            // route.
-            if ((isMarketplaceStatus(row) || isPcStatus(row)) && mxHasBuffer(row)) pushReject(list, "marketplace_pc", row, "МХ содержит Буфер, строка исключена", date, "marketplace_pc");
+            // Row looks like a marketplace/pc candidate by raw status, its
+            // MX has buffer, and it is NOT actually routed to Маркетплейс/
+            // ПЦ right now -- report buffer as the reason only while that
+            // holds. If an admin ever removes "не содержит буфер" from the
+            // rule, decided flips to Маркетплейс/ПЦ and this stops firing,
+            // instead of lying that a row is excluded when it isn't.
+            const looksMarketplaceOrPc = isMarketplaceStatus(row) || isPcStatus(row);
+            const routedToMarketplaceOrPc = decided === marketplaceDef.column || decided === pcDef.column;
+            if (looksMarketplaceOrPc && mxHasBuffer(row) && !routedToMarketplaceOrPc) pushReject(list, "marketplace_pc", row, "МХ содержит Буфер, строка исключена", date, "marketplace_pc");
         });
         return list.slice(0, 1000);
     }
