@@ -12339,6 +12339,18 @@
 
     const BEZ_ZAKAZA_TASK_TYPE = "Разбор ОПП // Без заказа";
 
+    const SOURCE_FORMAT_OPTIONS = [
+        { value: "general", label: "Типовая выгрузка (ПМ/Предсортировка/Маркетплейс+ПЦ/WMI/Без заказа)" },
+        { value: "packaging", label: "Упаковка / RWP" },
+        { value: "after_sale_movement", label: "Движение после продажи" },
+    ];
+
+    function sourceFormatOptionsHtml(selectedValue) {
+        return SOURCE_FORMAT_OPTIONS.map((opt) =>
+            "<option value='" + opt.value + "'" + (selectedValue === opt.value ? " selected" : "") + ">" + escapeHtml(opt.label) + "</option>"
+        ).join("");
+    }
+
     function routingRuleTargetOptionsHtml(selectedValue) {
         const options = activeReviewZones().map((section) => ({ value: section, label: section }));
         return options.map((opt) =>
@@ -12350,6 +12362,8 @@
         const conditions = Array.isArray(row.conditions) && row.conditions.length ? row.conditions : [{ attribute: "status", operator: "in", value: [] }];
         const targetValue = row.target_task_type || (row.output_value && row.output_value.target_task_type) || "";
         const fromBezZakaza = row.from_zone === BEZ_ZAKAZA_TASK_TYPE;
+        const isFilter = row.output_key === "filter";
+        const sourceFormat = row.source_format || "general";
         return "<div class='routing-rule-card' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
             + "<div class='routing-rule-head'>"
             + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет (меньше -- проверяется раньше)'>"
@@ -12357,16 +12371,28 @@
             + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
             + "</div>"
             + "<div class='routing-rule-section'>"
+            + "<div class='routing-rule-section-label'>Вид правила и выгрузка</div>"
+            + "<label class='writeoff-term-active'><input data-rule-is-filter type='checkbox'" + (isFilter ? " checked" : "") + "> Фильтр (не создавать задачу, а не маршрутизировать)</label>"
+            + "<p class='work-subtitle' style='margin:4px 0 0'>Обычное правило (не отмечено) кладёт ШК в зону. Фильтр -- отсеивает строку целиком: если условия совпали, задача вообще не создаётся (например, цена ниже порога).</p>"
+            + "<select data-rule-source-format style='margin-top:8px'>" + sourceFormatOptionsHtml(sourceFormat) + "</select>"
+            + "<p class='work-subtitle' style='margin:4px 0 0'>В какой выгрузке (по формату файла) правило участвует.</p>"
+            + "</div>"
+            + "<div class='routing-rule-section'>"
             + "<div class='routing-rule-section-label'>Условия (все должны совпасть)</div>"
             + "<div class='routing-rule-conditions' data-rule-conditions>" + conditions.map(routingRuleConditionHtml).join("") + "</div>"
             + "<button type='button' class='btn btn-outline' data-add-condition style='margin-top:8px'>+ Добавить условие</button>"
             + "</div>"
-            + "<div class='routing-rule-section'>"
+            + "<div class='routing-rule-section' data-rule-zone-result style='" + (isFilter ? "display:none" : "") + "'>"
             + "<div class='routing-rule-section-label'>Куда положить ШК</div>"
             + "<div class='routing-rule-result'>"
             + "<select data-rule-target>" + routingRuleTargetOptionsHtml(targetValue) + "</select>"
             + "</div>"
-            + "<p class='work-subtitle' style='margin:8px 0 0'>ШК, лежащие в одной физической таре, объединяются в одну задачу автоматически и всегда -- это не настраивается per-правило.</p>"
+            + "<p class='work-subtitle' style='margin:8px 0 0'>ШК, лежащие в одной физической таре, объединяются в одну задачу автоматически, если их несколько -- чекбокс ниже заставляет объединять, даже когда ШК всего один.</p>"
+            + "<label class='writeoff-term-active' style='margin-top:10px'><input data-rule-force-tare-grouping type='checkbox'" + (row.force_tare_grouping ? " checked" : "") + "> Группировать по таре, даже если ШК один</label>"
+            + "<label class='writeoff-term-active' style='margin-top:6px'><input data-rule-force-high-priority type='checkbox'" + (row.force_high_priority ? " checked" : "") + "> Высокий приоритет</label>"
+            + "<input data-rule-tags type='text' style='margin-top:8px' value='" + escapeHtml((row.tags || []).join(", ")) + "' placeholder='Теги через запятую (необязательно)'>"
+            + "<input data-rule-task-deadline-days type='number' min='0' step='1' style='margin-top:8px' value='" + escapeHtml(row.task_deadline_days === null || row.task_deadline_days === undefined ? "" : row.task_deadline_days) + "' placeholder='Срок выполнения, дней (пусто = 1 по умолчанию)'>"
+            + "<input data-rule-upload-offset-days type='number' step='1' style='margin-top:8px' value='" + escapeHtml(row.upload_offset_days || 0) + "' placeholder='Окно выгрузки, дней назад от выбранной даты (0 = сегодня)'>"
             + "<label class='writeoff-term-active' style='margin-top:10px'><input data-rule-from-bez-zakaza type='checkbox'" + (fromBezZakaza ? " checked" : "") + "> Триггер «Без заказа»</label>"
             + "<p class='work-subtitle' style='margin:4px 0 0'>Обычно выключено -- правило тогда проверяет ЛЮБОЙ активный ШК, где бы он ни лежал. Включи, только если правило должно срабатывать исключительно для ШК, УЖЕ лежащих в зоне «Без заказа» -- так настроены USD и TMM, чтобы не задевать такой же статус у ШК в других зонах.</p>"
             + "</div>"
@@ -12374,7 +12400,7 @@
     }
 
     function routingRuleSummaryRowHtml(row, index) {
-        const targetLabel = row.target_task_type || (row.output_value && row.output_value.target_task_type) || "-- не выбрано --";
+        const targetLabel = row.output_key === "filter" ? "Фильтр (не создавать задачу)" : (row.target_task_type || (row.output_value && row.output_value.target_task_type) || "-- не выбрано --");
         const conditionCount = Array.isArray(row.conditions) ? row.conditions.length : 0;
         const isActive = row.is_active !== false;
         const name = row.name || "(без названия)";
@@ -12420,6 +12446,13 @@
         cardEl.querySelectorAll("[data-condition-remove]").forEach((button) => {
             button.addEventListener("click", () => removeRoutingRuleCondition(button.closest("[data-rule-condition]")));
         });
+        const isFilterEl = cardEl.querySelector("[data-rule-is-filter]");
+        const zoneResultEl = cardEl.querySelector("[data-rule-zone-result]");
+        if (isFilterEl && zoneResultEl) {
+            isFilterEl.addEventListener("change", () => {
+                zoneResultEl.style.display = isFilterEl.checked ? "none" : "";
+            });
+        }
     }
 
     function openRoutingRuleEditModal(index) {
@@ -12514,10 +12547,16 @@
             is_active: true,
             conditions: [{ attribute: "status", operator: "in", value: [] }],
             output_key: "zone",
+            source_format: "general",
             target_task_type: activeReviewZones()[0],
             grouping_attribute: null,
             from_zone: null,
             output_value: null,
+            force_tare_grouping: false,
+            force_high_priority: false,
+            tags: [],
+            task_deadline_days: null,
+            upload_offset_days: 0,
         });
         renderRoutingRulesModal();
         openRoutingRuleEditModal(state.routingRules.rows.length - 1);
@@ -12547,9 +12586,42 @@
         const cleanConditions = conditions.map(({ attribute, operator, value, logic }) =>
             logic ? { attribute, operator, value, logic } : { attribute, operator, value }
         );
+        const isFilterEl = cardEl.querySelector("[data-rule-is-filter]");
+        const isFilter = Boolean(isFilterEl && isFilterEl.checked);
+        const sourceFormatEl = cardEl.querySelector("[data-rule-source-format]");
+        const sourceFormat = sourceFormatEl ? sourceFormatEl.value : "general";
+        if (isFilter) {
+            return {
+                ...(existingRow || {}),
+                ...(id ? { id } : {}),
+                priority,
+                name,
+                is_active: isActive,
+                conditions: cleanConditions,
+                output_key: "filter",
+                source_format: sourceFormat,
+                target_task_type: null,
+                grouping_attribute: null,
+                from_zone: null,
+                output_value: {},
+                force_tare_grouping: false,
+                force_high_priority: false,
+                tags: [],
+                task_deadline_days: null,
+                upload_offset_days: 0,
+            };
+        }
         const targetTaskType = cardEl.querySelector("[data-rule-target]").value;
         const fromBezZakazaEl = cardEl.querySelector("[data-rule-from-bez-zakaza]");
         const fromZone = (fromBezZakazaEl && fromBezZakazaEl.checked) ? BEZ_ZAKAZA_TASK_TYPE : null;
+        const forceTareGrouping = Boolean(cardEl.querySelector("[data-rule-force-tare-grouping]") && cardEl.querySelector("[data-rule-force-tare-grouping]").checked);
+        const forceHighPriority = Boolean(cardEl.querySelector("[data-rule-force-high-priority]") && cardEl.querySelector("[data-rule-force-high-priority]").checked);
+        const tagsRaw = normalizeText(cardEl.querySelector("[data-rule-tags]") && cardEl.querySelector("[data-rule-tags]").value);
+        const tags = tagsRaw ? tagsRaw.split(",").map((part) => part.trim()).filter(Boolean) : [];
+        const deadlineRaw = cardEl.querySelector("[data-rule-task-deadline-days]") && cardEl.querySelector("[data-rule-task-deadline-days]").value;
+        const taskDeadlineDays = normalizeText(deadlineRaw) === "" ? null : Math.max(0, Math.trunc(settingNumber(deadlineRaw, 1)));
+        const offsetRaw = cardEl.querySelector("[data-rule-upload-offset-days]") && cardEl.querySelector("[data-rule-upload-offset-days]").value;
+        const uploadOffsetDays = Math.trunc(settingNumber(offsetRaw, 0));
         return {
             ...(existingRow || {}),
             ...(id ? { id } : {}),
@@ -12558,10 +12630,16 @@
             is_active: isActive,
             conditions: cleanConditions,
             output_key: "zone",
+            source_format: sourceFormat,
             target_task_type: targetTaskType,
             grouping_attribute: null,
             from_zone: fromZone,
             output_value: { target_task_type: targetTaskType, grouping_attribute: null },
+            force_tare_grouping: forceTareGrouping,
+            force_high_priority: forceHighPriority,
+            tags,
+            task_deadline_days: taskDeadlineDays,
+            upload_offset_days: uploadOffsetDays,
         };
     }
 
