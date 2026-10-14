@@ -12297,12 +12297,20 @@
         }
     }
 
-    function routingRuleConditionHtml(condition) {
+    function routingRuleConditionHtml(condition, index) {
         const attribute = (condition && condition.attribute) || "status";
         const operator = (condition && condition.operator) || "in";
         const rawValue = condition && condition.value;
         const valueText = Array.isArray(rawValue) ? rawValue.join(", ") : normalizeText(rawValue);
+        const logic = (condition && condition.logic) || "and";
+        const logicHtml = index > 0
+            ? "<select data-condition-logic>"
+                + "<option value='and'" + (logic !== "or" ? " selected" : "") + ">И</option>"
+                + "<option value='or'" + (logic === "or" ? " selected" : "") + ">ИЛИ</option>"
+                + "</select>"
+            : "<span class='routing-rule-condition-first'>Если</span>";
         return "<div class='routing-rule-condition' data-rule-condition>"
+            + logicHtml
             + "<select data-condition-attribute>"
             + "<option value='status'" + (attribute === "status" ? " selected" : "") + ">Статус</option>"
             + "<option value='mx'" + (attribute === "mx" ? " selected" : "") + ">МХ</option>"
@@ -12408,7 +12416,8 @@
         if (!cardEl) return;
         const container = cardEl.querySelector("[data-rule-conditions]");
         if (!container) return;
-        container.insertAdjacentHTML("beforeend", routingRuleConditionHtml({ attribute: "status", operator: "in", value: [] }));
+        const existingCount = container.querySelectorAll("[data-rule-condition]").length;
+        container.insertAdjacentHTML("beforeend", routingRuleConditionHtml({ attribute: "status", operator: "in", value: [] }, existingCount));
         const newCondition = container.lastElementChild;
         const removeButton = newCondition && newCondition.querySelector("[data-condition-remove]");
         if (removeButton) removeButton.addEventListener("click", () => removeRoutingRuleCondition(newCondition));
@@ -12417,11 +12426,27 @@
     function removeRoutingRuleCondition(conditionEl) {
         if (!conditionEl) return;
         const container = conditionEl.closest("[data-rule-conditions]");
-        if (container && container.querySelectorAll("[data-rule-condition]").length <= 1) {
+        if (!container) return;
+        const items = Array.from(container.querySelectorAll("[data-rule-condition]"));
+        if (items.length <= 1) {
             toast("В правиле должно остаться хотя бы одно условие.", "error");
             return;
         }
+        const wasFirst = items[0] === conditionEl;
         conditionEl.remove();
+        if (!wasFirst) return;
+        // The new first row still carries its old (now meaningless)
+        // И/ИЛИ selector -- re-render it as the "Если" lead row instead.
+        const newFirst = container.querySelector("[data-rule-condition]");
+        if (!newFirst) return;
+        const attribute = newFirst.querySelector("[data-condition-attribute]").value;
+        const operator = newFirst.querySelector("[data-condition-operator]").value;
+        const rawValue = newFirst.querySelector("[data-condition-value]").value;
+        const value = (operator === "in" || operator === "between") ? rawValue.split(",").map((part) => part.trim()).filter(Boolean) : rawValue;
+        newFirst.outerHTML = routingRuleConditionHtml({ attribute, operator, value }, 0);
+        const refreshedFirst = container.querySelector("[data-rule-condition]");
+        const removeButton = refreshedFirst && refreshedFirst.querySelector("[data-condition-remove]");
+        if (removeButton) removeButton.addEventListener("click", () => removeRoutingRuleCondition(refreshedFirst));
     }
 
     function toggleRoutingRuleResultSections(cardEl) {
@@ -12436,6 +12461,9 @@
 
     async function removeRoutingRuleRow(rowEl) {
         if (!rowEl) return;
+        const nameInput = rowEl.querySelector("[data-rule-name]");
+        const ruleName = (nameInput && nameInput.value) || "без названия";
+        if (!window.confirm("Удалить правило \"" + ruleName + "\"? Это необратимо.")) return;
         const ruleId = rowEl.getAttribute("data-rule-id");
         if (ruleId) {
             const db = supabaseDb();
@@ -12482,10 +12510,14 @@
                 const value = (operator === "in" || operator === "between")
                     ? rawValue.split(",").map((part) => part.trim()).filter(Boolean)
                     : rawValue;
-                return { attribute, operator, value, rawValue };
+                const logicEl = conditionEl.querySelector("[data-condition-logic]");
+                const logic = logicEl ? logicEl.value : undefined;
+                return { attribute, operator, value, rawValue, logic };
             }).filter((condition) => condition.rawValue);
             if (!name || !conditions.length) return null;
-            const cleanConditions = conditions.map(({ attribute, operator, value }) => ({ attribute, operator, value }));
+            const cleanConditions = conditions.map(({ attribute, operator, value, logic }) =>
+                logic ? { attribute, operator, value, logic } : { attribute, operator, value }
+            );
             const base = {
                 ...(id ? { id } : {}),
                 priority,
