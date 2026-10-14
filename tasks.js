@@ -12362,7 +12362,6 @@
         const folderTargetOptions = NO_ORDER_FOLDER_TARGETS.map((opt) =>
             "<option value='" + escapeHtml(opt.value) + "'" + (folderTargetValue === opt.value ? " selected" : "") + ">" + escapeHtml(opt.label) + "</option>"
         ).join("");
-        const folderGroupingValue = (row.output_value && row.output_value.grouping_attribute) || "";
         return "<div class='routing-rule-card' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
             + "<div class='routing-rule-head'>"
             + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет (меньше -- проверяется раньше)'>"
@@ -12372,7 +12371,6 @@
             + "<option value='no_order_folder'" + (isFolder ? " selected" : "") + ">Подпапка внутри \"Без заказа\"</option>"
             + "</select>"
             + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
-            + "<button type='button' class='btn btn-square' data-rule-remove aria-label='Удалить правило'>×</button>"
             + "</div>"
             + "<div class='routing-rule-section'>"
             + "<div class='routing-rule-section-label'>Условия (все должны совпасть)</div>"
@@ -12390,8 +12388,8 @@
             + "<div class='routing-rule-section-label'>В какую подпапку \"Без заказа\"</div>"
             + "<div class='routing-rule-result'>"
             + "<select data-rule-folder-target>" + folderTargetOptions + "</select>"
-            + routingRuleGroupingSelectHtml("data-rule-folder-grouping", folderGroupingValue)
             + "</div>"
+            + "<p class='work-subtitle' style='margin:8px 0 0'>Подпапки всегда группируются по таре -- это не настраивается per-правило, в отличие от зон.</p>"
             + "</div>"
             + "</div>";
     }
@@ -12607,12 +12605,11 @@
             };
         }
         const folderTarget = cardEl.querySelector("[data-rule-folder-target]").value;
-        const folderGrouping = cardEl.querySelector("[data-rule-folder-grouping]").value || null;
         return {
             ...base,
             target_task_type: null,
             grouping_attribute: null,
-            output_value: { target_task_type: folderTarget, grouping_attribute: folderGrouping },
+            output_value: { target_task_type: folderTarget, grouping_attribute: null },
         };
     }
 
