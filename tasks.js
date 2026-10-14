@@ -15066,6 +15066,12 @@
         return { status, mx, route_number: routeNumberFromMx(mx) };
     }
 
+    // Each decision is null (no rule matched, caller falls back to hardcode)
+    // or { zone, grouping } -- zone is the matched rule's target_task_type,
+    // grouping is its grouping_attribute ("tare_id" or null), so callers
+    // that group rows into tasks (appendGroupedTasks) can honor the rule's
+    // own "По таре"/"Каждый ШК отдельно" choice instead of only reading it
+    // in the orphan-absorb SQL path.
     async function evaluateRuleBatchForOutputKey(outputKey, rows) {
         const decisions = new Array(rows.length).fill(null);
         const db = supabaseDb();
@@ -15079,7 +15085,7 @@
                 (data || []).forEach((item) => {
                     const idx = Number(item.row_id);
                     if (Number.isFinite(idx) && item.output_value && item.output_value.target_task_type) {
-                        decisions[idx] = item.output_value.target_task_type;
+                        decisions[idx] = { zone: item.output_value.target_task_type, grouping: item.output_value.grouping_attribute || null };
                     }
                 });
             } catch (error) {
@@ -15640,7 +15646,7 @@
         // positive match; packaging is everything else.
         const statusRows = rows.filter((row) => {
             const decided = decidedByRow.get(row);
-            const isRwpDecided = decided ? decided === "RWP" : isRwpStatus(row.last_status);
+            const isRwpDecided = decided ? decided.zone === "RWP" : isRwpStatus(row.last_status);
             return isRwp ? isRwpDecided : !isRwpDecided;
         });
         const dateRows = statusRows.filter((row) => parseDateTime(row.last_movement).date === businessDate);
@@ -15813,6 +15819,30 @@
         return { tasks, groupedTareCount, singleCount: singles.length + split.special.length, specialCount: split.special.length };
     }
 
+    // Splits rows by their matched rule's own grouping_attribute (from
+    // evaluateZoneRulesBatch) before handing them to appendGroupedTasks, so
+    // a rule set to "По таре" in the admin actually forces tare-grouping
+    // for its matches, instead of only affecting the separate orphan-absorb
+    // SQL path. Rows with no decision (hardcode fallback) or
+    // grouping !== "tare_id" go through with options unchanged.
+    function appendGroupedTasksByRuleGrouping(rows, decidedByRow, options) {
+        const tareForced = [];
+        const normal = [];
+        rows.forEach((row) => {
+            const decided = decidedByRow.get(row);
+            (decided && decided.grouping === "tare_id" ? tareForced : normal).push(row);
+        });
+        const empty = { tasks: [], groupedTareCount: 0, singleCount: 0, specialCount: 0 };
+        const forced = tareForced.length ? appendGroupedTasks(tareForced, { ...options, forceTareGrouping: true }) : empty;
+        const plain = normal.length ? appendGroupedTasks(normal, options) : empty;
+        return {
+            tasks: forced.tasks.concat(plain.tasks),
+            groupedTareCount: forced.groupedTareCount + plain.groupedTareCount,
+            singleCount: forced.singleCount + plain.singleCount,
+            specialCount: forced.specialCount + plain.specialCount,
+        };
+    }
+
     async function buildPmPreview(sourceRows, carrierRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const def = moduleDef("pm");
@@ -15832,8 +15862,8 @@
             // number, so it must fall back to the hardcode route check,
             // not be read as "not mail".
             const decided = decidedByRow.get(row);
-            if (decided === "Почта") return true;
-            if (decided === "ПМ") return false;
+            if (decided && decided.zone === "Почта") return true;
+            if (decided && decided.zone === "ПМ") return false;
             return isMailRoute(routeNumberFromMx(row.mx));
         };
         const transferIds = Array.from(new Set(smsRows.map((row) => row.transfer).filter(isGroupableIdentifier))).sort((a, b) => a.localeCompare(b, "ru"));
@@ -15930,18 +15960,18 @@
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const presortRows = rows.filter((row) => {
             const decided = decidedByRow.get(row);
-            if (decided) return decided === presortDef.column;
+            if (decided) return decided.zone === presortDef.column;
             return isPresortStatus(row);
         });
         const labelingRows = rows.filter((row) => {
             const decided = decidedByRow.get(row);
-            if (decided) return decided === labelingDef.column;
+            if (decided) return decided.zone === labelingDef.column;
             return isLabelingStatus(row);
         });
-        const presort = appendGroupedTasks(presortRows, {
+        const presort = appendGroupedTasksByRuleGrouping(presortRows, decidedByRow, {
             module: "presort", sourceModule: presortDef.sourceModule, uploadType: presortDef.uploadType, businessDate, sourcePrefix: "presort", titlePrefix: "Предсортировка", taskType: presortDef.taskType, descriptionTaskType: presortDef.taskTypeLabel, column: presortDef.column, dueDate: dueDateForBusinessDate("presort", businessDate), responsibilityZone: presortDef.responsibilityZone, specialMap,
         });
-        const labeling = appendGroupedTasks(labelingRows, {
+        const labeling = appendGroupedTasksByRuleGrouping(labelingRows, decidedByRow, {
             module: "labeling", sourceModule: labelingDef.sourceModule, uploadType: labelingDef.uploadType, businessDate, sourcePrefix: "labeling", titlePrefix: "Оклейка", taskType: labelingDef.taskType, descriptionTaskType: labelingDef.taskTypeLabel, column: labelingDef.column, dueDate: dueDateForBusinessDate("labeling", businessDate), responsibilityZone: labelingDef.responsibilityZone, specialMap, forceHighPriority: true,
         });
         const tasks = presort.tasks.concat(labeling.tasks);
@@ -15962,16 +15992,16 @@
         candidateRows.forEach((row, index) => { zoneByRow.set(row, decisions[index]); });
         const marketplaceRows = marketplaceDateRows.filter((row) => {
             const decided = zoneByRow.get(row);
-            if (decided) return decided === marketplaceDef.column;
+            if (decided) return decided.zone === marketplaceDef.column;
             return isMarketplaceStatus(row) && !mxHasBuffer(row);
         });
         const pcRows = pcDateRows.filter((row) => {
             const decided = zoneByRow.get(row);
-            if (decided) return decided === pcDef.column;
+            if (decided) return decided.zone === pcDef.column;
             return isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row);
         });
-        const marketplace = appendGroupedTasks(marketplaceRows, { module: "marketplace", sourceModule: marketplaceDef.sourceModule, uploadType: marketplaceDef.uploadType, businessDate: marketplaceDate, sourcePrefix: "marketplace", titlePrefix: "Маркетплейс", taskType: marketplaceDef.taskType, descriptionTaskType: marketplaceDef.taskTypeLabel, column: marketplaceDef.column, dueDate: dueDateForBusinessDate("marketplace", marketplaceDate), responsibilityZone: marketplaceDef.responsibilityZone, specialMap });
-        const pc = appendGroupedTasks(pcRows, { module: "pc", sourceModule: pcDef.sourceModule, uploadType: pcDef.uploadType, businessDate: pcDate, sourcePrefix: "pc", titlePrefix: "ПЦ", taskType: pcDef.taskType, descriptionTaskType: pcDef.taskTypeLabel, column: pcDef.column, dueDate: dueDateForBusinessDate("pc", pcDate), responsibilityZone: pcDef.responsibilityZone, specialMap });
+        const marketplace = appendGroupedTasksByRuleGrouping(marketplaceRows, zoneByRow, { module: "marketplace", sourceModule: marketplaceDef.sourceModule, uploadType: marketplaceDef.uploadType, businessDate: marketplaceDate, sourcePrefix: "marketplace", titlePrefix: "Маркетплейс", taskType: marketplaceDef.taskType, descriptionTaskType: marketplaceDef.taskTypeLabel, column: marketplaceDef.column, dueDate: dueDateForBusinessDate("marketplace", marketplaceDate), responsibilityZone: marketplaceDef.responsibilityZone, specialMap });
+        const pc = appendGroupedTasksByRuleGrouping(pcRows, zoneByRow, { module: "pc", sourceModule: pcDef.sourceModule, uploadType: pcDef.uploadType, businessDate: pcDate, sourcePrefix: "pc", titlePrefix: "ПЦ", taskType: pcDef.taskType, descriptionTaskType: pcDef.taskTypeLabel, column: pcDef.column, dueDate: dueDateForBusinessDate("pc", pcDate), responsibilityZone: pcDef.responsibilityZone, specialMap });
         const tasks = marketplace.tasks.concat(pc.tasks);
         const targetDates = new Set([marketplaceDate, pcDate]);
         return { mode: "marketplace_pc", sourceRows: sourceRows.length, rowsCount: marketplaceRows.length + pcRows.length, dateFilteredOut: sourceRows.filter((row) => !targetDates.has(parseDateTime(row.created_at).date)).length, marketplaceRows: marketplaceRows.length, pcRows: pcRows.length, groupedTareCount: marketplace.groupedTareCount + pc.groupedTareCount, specialCount: marketplace.specialCount + pc.specialCount, specialCandidateIds: productIdsFromRows(marketplaceRows.concat(pcRows)), tasks, marketplaceTasks: marketplace.tasks.length, pcTasks: pc.tasks.length };
@@ -15986,10 +16016,10 @@
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const wmiRows = rows.filter((row) => {
             const decided = decidedByRow.get(row);
-            if (decided) return decided === def.column;
+            if (decided) return decided.zone === def.column;
             return isWmiMpPcStatus(row);
         });
-        const grouped = appendGroupedTasks(wmiRows, { module: "wmi_mp_pc", sourceModule: def.sourceModule, uploadType: def.uploadType, businessDate, sourcePrefix: "wmi_mp_pc", titlePrefix: "WMI (МП + ПЦ)", taskType: def.taskType, descriptionTaskType: def.taskTypeLabel, column: def.column, dueDate: dueDateForBusinessDate("wmi_mp_pc", businessDate), responsibilityZone: def.responsibilityZone, specialMap });
+        const grouped = appendGroupedTasksByRuleGrouping(wmiRows, decidedByRow, { module: "wmi_mp_pc", sourceModule: def.sourceModule, uploadType: def.uploadType, businessDate, sourcePrefix: "wmi_mp_pc", titlePrefix: "WMI (МП + ПЦ)", taskType: def.taskType, descriptionTaskType: def.taskTypeLabel, column: def.column, dueDate: dueDateForBusinessDate("wmi_mp_pc", businessDate), responsibilityZone: def.responsibilityZone, specialMap });
         return { mode: "wmi_mp_pc", sourceRows: sourceRows.length, rowsCount: wmiRows.length, dateFilteredOut: sourceRows.length - rows.length, groupedTareCount: grouped.groupedTareCount, specialCount: grouped.specialCount, specialCandidateIds: productIdsFromRows(wmiRows), tasks: grouped.tasks, wmiTasks: grouped.tasks.length };
     }
 
@@ -16004,20 +16034,20 @@
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const usdRows = rows.filter((row) => {
             const decided = decidedByRow.get(row);
-            if (decided) return decided === usdDef.taskType;
+            if (decided) return decided.zone === usdDef.taskType;
             return isNoOrderUsdStatus(row);
         });
         const tmmRows = rows.filter((row) => {
             const decided = decidedByRow.get(row);
-            if (decided) return decided === tmmDef.taskType;
+            if (decided) return decided.zone === tmmDef.taskType;
             return isNoOrderTmmStatus(row);
         });
         const noOrderRows = rows.filter((row) => {
             const decided = decidedByRow.get(row);
-            if (decided) return decided === def.taskType;
+            if (decided) return decided.zone === def.taskType;
             return !isNoOrderUsdStatus(row) && !isNoOrderTmmStatus(row);
         });
-        const noOrder = appendGroupedTasks(noOrderRows, { module: "no_order", sourceModule: def.sourceModule, uploadType: def.uploadType, businessDate, sourcePrefix: "no_order", titlePrefix: "Без заказа", taskType: def.taskType, descriptionTaskType: def.taskTypeLabel, column: def.column, dueDate: dueDateForBusinessDate("no_order", businessDate), responsibilityZone: def.responsibilityZone, specialMap });
+        const noOrder = appendGroupedTasksByRuleGrouping(noOrderRows, decidedByRow, { module: "no_order", sourceModule: def.sourceModule, uploadType: def.uploadType, businessDate, sourcePrefix: "no_order", titlePrefix: "Без заказа", taskType: def.taskType, descriptionTaskType: def.taskTypeLabel, column: def.column, dueDate: dueDateForBusinessDate("no_order", businessDate), responsibilityZone: def.responsibilityZone, specialMap });
         const usd = appendGroupedTasks(usdRows, { module: "usd", sourceModule: usdDef.sourceModule, uploadType: usdDef.uploadType, businessDate, sourcePrefix: "usd", titlePrefix: "USD", taskType: usdDef.taskType, descriptionTaskType: usdDef.taskTypeLabel, column: usdDef.column, dueDate: dueDateForBusinessDate("usd", businessDate), responsibilityZone: usdDef.responsibilityZone, specialMap, forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"] });
         const tmm = appendGroupedTasks(tmmRows, { module: "tmm", sourceModule: tmmDef.sourceModule, uploadType: tmmDef.uploadType, businessDate, sourcePrefix: "tmm", titlePrefix: "TMM", taskType: tmmDef.taskType, descriptionTaskType: tmmDef.taskTypeLabel, column: tmmDef.column, dueDate: dueDateForBusinessDate("tmm", businessDate), responsibilityZone: tmmDef.responsibilityZone, specialMap, forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"] });
         const tasks = noOrder.tasks.concat(usd.tasks, tmm.tasks);
@@ -18764,11 +18794,11 @@
         rows.main.forEach((row) => {
             const date = rowDate(row);
             const decided = mainDecidedByRow.get(row);
-            const isPresort = decided ? decided === presortDef.column : isPresortStatus(row);
-            const isLabeling = decided ? decided === labelingDef.column : isLabelingStatus(row);
-            const isMarketplace = decided ? decided === marketplaceDef.column : (isMarketplaceStatus(row) && !mxHasBuffer(row));
-            const isPc = decided ? decided === pcDef.column : (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row));
-            const isWmi = decided ? decided === wmiDef.column : isWmiMpPcStatus(row);
+            const isPresort = decided ? decided.zone === presortDef.column : isPresortStatus(row);
+            const isLabeling = decided ? decided.zone === labelingDef.column : isLabelingStatus(row);
+            const isMarketplace = decided ? decided.zone === marketplaceDef.column : (isMarketplaceStatus(row) && !mxHasBuffer(row));
+            const isPc = decided ? decided.zone === pcDef.column : (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row));
+            const isWmi = decided ? decided.zone === wmiDef.column : isWmiMpPcStatus(row);
             if (isPmBufferStatus(row.product_status) && date !== dates.pm) pushReject(list, "pm", row, "Нужна дата " + formatRuDate(dates.pm), date, "pm");
             if ((isPresort || isLabeling) && date !== dates.presort) pushReject(list, "presort", row, "Нужна дата " + formatRuDate(dates.presort), date, "presort");
             if (isMarketplace && date !== dates.marketplace) pushReject(list, "marketplace_pc", row, "Нужна дата Маркетплейса " + formatRuDate(dates.marketplace), date, "marketplace");
@@ -18782,7 +18812,7 @@
         rows.packaging.forEach((row) => {
             const date = packDate(row);
             const decided = packagingDecidedByRow.get(row);
-            const isRwp = decided ? decided === "RWP" : isRwpStatus(row.last_status);
+            const isRwp = decided ? decided.zone === "RWP" : isRwpStatus(row.last_status);
             if (!isRwp && date !== dates.packaging) pushReject(list, "packaging", row, "Нужна дата " + formatRuDate(dates.packaging), date, "packaging");
             if (isRwp && date !== dates.rwp) pushReject(list, "rwp", row, "Нужна дата " + formatRuDate(dates.rwp), date, "rwp");
         });
@@ -18818,7 +18848,7 @@
             // rule, decided flips to Маркетплейс/ПЦ and this stops firing,
             // instead of lying that a row is excluded when it isn't.
             const looksMarketplaceOrPc = isMarketplaceStatus(row) || isPcStatus(row);
-            const routedToMarketplaceOrPc = decided === marketplaceDef.column || decided === pcDef.column;
+            const routedToMarketplaceOrPc = decided && (decided.zone === marketplaceDef.column || decided.zone === pcDef.column);
             if (looksMarketplaceOrPc && mxHasBuffer(row) && !routedToMarketplaceOrPc) pushReject(list, "marketplace_pc", row, "МХ содержит Буфер, строка исключена", date, "marketplace_pc");
         });
         return list.slice(0, 1000);
