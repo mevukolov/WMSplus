@@ -12338,19 +12338,10 @@
             + "</div>";
     }
 
-    // USD/TMM are normal targets now -- the only thing that ever needed
-    // "Подпапка внутри Без заказа" as a separate concept was keeping them
-    // out of the global reach of ordinary zone rules, and that's now
-    // handled by from_zone (see "Триггер «Без заказа»" below), not by a
-    // separate output_key/screen.
-    const ROUTING_RULE_EXTRA_TARGETS = [
-        { value: "Разбор ОПП // USD", label: "USD (подпапка «Без заказа»)" },
-        { value: "Разбор ОПП // TMM", label: "TMM (подпапка «Без заказа»)" },
-    ];
     const BEZ_ZAKAZA_TASK_TYPE = "Разбор ОПП // Без заказа";
 
     function routingRuleTargetOptionsHtml(selectedValue) {
-        const options = activeReviewZones().map((section) => ({ value: section, label: section })).concat(ROUTING_RULE_EXTRA_TARGETS);
+        const options = activeReviewZones().map((section) => ({ value: section, label: section }));
         return options.map((opt) =>
             "<option value='" + escapeHtml(opt.value) + "'" + (selectedValue === opt.value ? " selected" : "") + ">" + escapeHtml(opt.label) + "</option>"
         ).join("");
