@@ -12716,6 +12716,22 @@
         return true;
     }
 
+    // The set of zone labels this module could ever actually produce --
+    // used so a rule match for a DIFFERENT module's zone (e.g. a PAP row
+    // matching "Маркетплейс" while testing "pm") doesn't get counted as
+    // "excluded from this module", which is just as noisy as counting
+    // rows with no rule at all. null means "don't know, don't filter".
+    function testUploadModuleZones(module) {
+        if (module === "marketplace_pc") return [moduleDef("marketplace").column, moduleDef("pc").column];
+        if (module === "presort") return [moduleDef("presort").column, moduleDef("labeling").column];
+        if (module === "wmi_mp_pc") return [moduleDef("wmi_mp_pc").column];
+        if (module === "packaging") return [moduleDef("packaging").column];
+        if (module === "rwp") return [moduleDef("rwp").column];
+        if (module === "pm") return ["ПМ", "Почта"];
+        if (module === "no_order") return [moduleDef("no_order").taskType, moduleDef("usd").taskType, moduleDef("tmm").taskType];
+        return null;
+    }
+
     async function testUploadBreakdown(module, rows, businessDate) {
         const dateField = testUploadDateField(module);
         const dateRows = rows.filter((row) => parseDateTime(row[dateField]).date === businessDate);
@@ -12761,15 +12777,21 @@
             const zoneLabel = task.task_type || task.column || "-";
             (task.source_shk_ids || []).forEach((id) => rowToTaskZone.set(id, zoneLabel));
         });
-        // "Excluded" should only flag rows that had SOME chance of
-        // belonging to this module (a rule matched them, or the module's
-        // own hardcode would have claimed them) -- a row whose status is
-        // simply from a different module entirely (e.g. an SMS/ПМ row
-        // sitting in the same file as a marketplace_pc test) was never a
-        // candidate here and showing it as "excluded" is just noise.
-        const excludedRows = dateRows.filter((row, index) =>
-            (decisions[index] || testUploadIsModuleCandidate(module, row)) && !rowToTaskZone.has(testUploadRowIdentifier(module, row))
-        );
+        // "Excluded" should only flag rows that had SOME real chance of
+        // belonging to THIS module: either the module's own hardcode
+        // would have claimed them, or a rule matched AND its target zone
+        // is actually one of this module's own possible zones. A rule
+        // matching some OTHER module's zone (e.g. a PAP row deciding
+        // "Маркетплейс" while testing "pm") is not this module's business
+        // and must not be counted as excluded -- that was still noise
+        // after the first fix, just one level deeper.
+        const relevantZones = testUploadModuleZones(module);
+        const excludedRows = dateRows.filter((row, index) => {
+            const decided = decisions[index];
+            const ruleRelevant = decided && (!relevantZones || relevantZones.includes(decided.zone));
+            const hardcodeRelevant = testUploadIsModuleCandidate(module, row);
+            return (ruleRelevant || hardcodeRelevant) && !rowToTaskZone.has(testUploadRowIdentifier(module, row));
+        });
         return {
             module,
             totalRows: rows.length,
