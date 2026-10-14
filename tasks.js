@@ -12720,25 +12720,12 @@
                 unmatchedRowsByCode.set(code, bucket);
             }
         });
-        // buildMarketplacePcPreview is the one build function that ignores
-        // the businessDate argument entirely unless state.manualDate is
-        // set -- it falls back to uploadDateForModule's own "planned"
-        // upload date, unrelated to whatever date the test file actually
-        // has. Every real upload flow (manual backfill included) always
-        // has state.manualDate set by that point; the test tool runs
-        // outside that flow, so it has to set it itself or marketplace_pc
-        // silently tests against the wrong date and drops rows that would
-        // otherwise have matched correctly.
-        const previousManualDate = state.manualDate;
-        state.manualDate = businessDate;
-        let preview;
-        try {
-            preview = module === "pm"
-                ? await buildPreviewForModule("pm", dateRows, [], businessDate)
-                : await buildPreviewForModule(module, dateRows, [], businessDate);
-        } finally {
-            state.manualDate = previousManualDate;
-        }
+        // buildGeneralPreview always filters by the businessDate argument
+        // directly (no more uploadDateForModule-based "planned date"
+        // fallback -- that quirk existed only in the old, per-module
+        // buildMarketplacePcPreview and is gone since the unification), so
+        // no manualDate workaround is needed here anymore.
+        const preview = await buildPreviewForModule(module, dateRows, [], businessDate);
         const rowToTaskZone = new Map();
         (preview.tasks || []).forEach((task) => {
             const zoneLabel = task.task_type || task.column || "-";
@@ -16217,85 +16204,197 @@
         return { tasks, groupedTareCount, singleCount: singles.length + split.special.length, specialCount: split.special.length };
     }
 
-    // Splits rows by their matched rule's own grouping_attribute (from
-    // evaluateZoneRulesBatch) before handing them to appendGroupedTasks, so
-    // a rule set to "По таре" in the admin actually forces tare-grouping
-    // for its matches, instead of only affecting the separate orphan-absorb
-    // SQL path. Rows with no decision (hardcode fallback) or
-    // grouping !== "tare_id" go through with options unchanged.
-    function appendGroupedTasksByRuleGrouping(rows, decidedByRow, options) {
-        const tareForced = [];
-        const normal = [];
-        rows.forEach((row) => {
-            const decided = decidedByRow.get(row);
-            (decided && decided.grouping === "tare_id" ? tareForced : normal).push(row);
-        });
-        const empty = { tasks: [], groupedTareCount: 0, singleCount: 0, specialCount: 0 };
-        const forced = tareForced.length ? appendGroupedTasks(tareForced, { ...options, forceTareGrouping: true }) : empty;
-        const plain = normal.length ? appendGroupedTasks(normal, options) : empty;
-        return {
-            tasks: forced.tasks.concat(plain.tasks),
-            groupedTareCount: forced.groupedTareCount + plain.groupedTareCount,
-            singleCount: forced.singleCount + plain.singleCount,
-            specialCount: forced.specialCount + plain.specialCount,
-        };
-    }
-
-    async function buildPmPreview(sourceRows, carrierRows, businessDate, specialMap) {
+    // Единая build-функция для всего формата "general" (общая для
+    // ПМ-основного файла, Предсортировки, Маркетплейс+ПЦ, WMI,
+    // Без заказа -- все используют один и тот же формат колонок
+    // normalizePmPrimaryRow). Заменяет buildPmPreview/buildPresortPreview/
+    // buildMarketplacePcPreview/buildWmiMpPcPreview/buildNoOrderPreview.
+    //
+    // ПМ-ветка -- единственное НЕ обобщаемое исключение (спека, раздел 4):
+    // группировка по transfer (не по таре/corrugated) и порог по сумме
+    // ПЕРЕДАЧИ (не цене строки) остаются собственной логикой здесь, не
+    // выражаются через force_tare_grouping/price-фильтр. mxHasBoxes --
+    // тоже ПМ-специфичное исключение (раньше ПМ был отдельной загрузкой,
+    // и коробки исключались только из её собственных строк -- если
+    // применить это глобально ко всем general-строкам, это задело бы
+    // Предсортировку/Маркетплейс/WMI/Без заказа, которые раньше этой
+    // проверке не подвергались вообще).
+    //
+    // "Другие задачи" -- особый зона-ключ: с ним сегодня совпадают СРАЗУ
+    // 3 разных правила (Оклейка/USD/TMM, см. недавнее упрощение экрана
+    // правил в этой же сессии) -- decided.zone один и тот же для всех
+    // трёх, поэтому бакетизация по одному только decided.zone их не
+    // различит. effectiveZoneKey дополнительно смотрит на статус строки,
+    // чтобы развести их по разным veTITLe/taskType.
+    async function buildGeneralPreview(sourceRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
-        const def = moduleDef("pm");
-        const pmDueDate = dueDateForBusinessDate("pm", businessDate, "pm");
-        const mailDueDate = dueDateForBusinessDate("pm", businessDate, "mail");
-        const dateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const eligibleDateRows = dateRows.filter((row) => !mxHasBoxes(row));
-        const smsRows = eligibleDateRows.filter((row) => isPmBufferStatus(row.product_status));
-        const decisions = await evaluateZoneRulesBatch("general", eligibleDateRows);
+
+        const filterDecisions = await evaluateFilterRulesBatch("general", sourceRows);
+        const filteredSet = new Set();
+        sourceRows.forEach((row, index) => { if (filterDecisions[index]) filteredSet.add(row); });
+        const filteredByRule = filteredSet.size;
+        const survivors = sourceRows.filter((row) => !filteredSet.has(row));
+
+        const zoneDecisions = await evaluateZoneRulesBatch("general", survivors);
         const decidedByRow = new Map();
-        eligibleDateRows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
-        const isMailRow = (row) => {
-            // Only trust a decided value that actually answers the
-            // mail/ПМ question (rules 17/18). A transfer can contain rows
-            // whose own status matches some unrelated rule (e.g. PAP) --
-            // that decided value says nothing about this row's route
-            // number, so it must fall back to the hardcode route check,
-            // not be read as "not mail".
+        survivors.forEach((row, index) => { decidedByRow.set(row, zoneDecisions[index]); });
+
+        // Хардкод-фоллбэк зоны для строк без совпавшего правила -- точная
+        // копия сегодняшней логики (один if-chain вместо пяти раздельных
+        // функций, тот же порядок предпочтения, что и в текущих
+        // build-функциях: presort/labeling -> marketplace/pc -> wmi ->
+        // no_order/usd/tmm -> pm/mail).
+        function hardcodeZoneFor(row) {
+            if (isPresortStatus(row)) return "Предсортировка";
+            if (isLabelingStatus(row)) return "Другие задачи";
+            if (isMarketplaceStatus(row) && !mxHasBuffer(row)) return "Маркетплейс";
+            if (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row)) return "ПЦ";
+            if (isWmiMpPcStatus(row)) return "WMI (МП + ПЦ)";
+            if (isNoOrderUsdStatus(row)) return "Другие задачи";
+            if (isNoOrderTmmStatus(row)) return "Другие задачи";
+            if (isPmBufferStatus(row.product_status)) return isMailRoute(routeNumberFromMx(row.mx)) ? "Почта" : "ПМ";
+            return "Без заказа";
+        }
+
+        // "Другие задачи" переполнен тремя историческими под-назначениями
+        // (Оклейка/USD/TMM), которые сегодня имеют одинаковый
+        // target_task_type -- различаем их по статусу строки, а не по
+        // зоне, независимо от того, решено ли правилом или хардкодом.
+        function effectiveZoneKey(row, zone) {
+            if (zone !== "Другие задачи") return zone;
+            if (isNoOrderUsdStatus(row)) return "usd_in_other";
+            if (isNoOrderTmmStatus(row)) return "tmm_in_other";
+            if (isLabelingStatus(row)) return "labeling_in_other";
+            return "Другие задачи";
+        }
+
+        let dateFilteredOut = 0;
+        const dated = [];
+        survivors.forEach((row) => {
             const decided = decidedByRow.get(row);
-            if (decided && decided.zone === "Почта") return true;
-            if (decided && decided.zone === "ПМ") return false;
-            return isMailRoute(routeNumberFromMx(row.mx));
+            const offsetDays = decided ? decided.uploadOffsetDays : 0;
+            const targetDate = addDays(businessDate, -offsetDays);
+            if (parseDateTime(row.created_at).date !== targetDate) { dateFilteredOut += 1; return; }
+            dated.push(row);
+        });
+
+        // ПМ/Почта идут по собственному, не обобщаемому пути -- выделяем
+        // их раньше общей группировки по зонам.
+        const pmRows = [];
+        const generalRows = [];
+        dated.forEach((row) => {
+            const decided = decidedByRow.get(row);
+            const zone = decided ? decided.zone : hardcodeZoneFor(row);
+            if (zone === "ПМ" || zone === "Почта") pmRows.push(row);
+            else generalRows.push({ row, key: effectiveZoneKey(row, zone), decided });
+        });
+
+        // -- Общая часть (всё кроме ПМ/Почта) --
+        // Бакет -- это (зона, отпечаток настроек правила), а не просто
+        // зона: если ДВА разных активных правила ведут в одну и ту же
+        // зону, но с РАЗНОЙ группировкой/приоритетом/тегами/сроком/окном
+        // (возможно после задачи 7, когда админ сможет такое создать),
+        // их нельзя смешивать в один bucket с настройками только первой
+        // встреченной строки.
+        function ruleSettingsFingerprint(decided) {
+            if (!decided) return "";
+            return JSON.stringify([decided.grouping, decided.forceHighPriority, decided.tags, decided.taskDeadlineDays, decided.uploadOffsetDays]);
+        }
+        const byKey = new Map();
+        generalRows.forEach(({ row, key, decided }) => {
+            const bucketKey = key + "::" + ruleSettingsFingerprint(decided);
+            const bucket = byKey.get(bucketKey) || { zoneKey: key, rows: [], decided: decided || null };
+            bucket.rows.push(row);
+            byKey.set(bucketKey, bucket);
+        });
+
+        const zoneTaskTypeMap = {
+            "Предсортировка": { taskType: "Разбор ОПП // Предсортировка", module: "presort", sourcePrefix: "presort", titlePrefix: "Предсортировка", countKey: "presortTasks" },
+            "labeling_in_other": { taskType: "Разбор ОПП // Оклейка", module: "labeling", sourcePrefix: "labeling", titlePrefix: "Оклейка", countKey: "labelingTasks", forceHighPriority: true, column: "Другие задачи" },
+            "Маркетплейс": { taskType: "Разбор ОПП // Маркетплейс", module: "marketplace", sourcePrefix: "marketplace", titlePrefix: "Маркетплейс", countKey: "marketplaceTasks" },
+            "ПЦ": { taskType: "Разбор ОПП // ПЦ", module: "pc", sourcePrefix: "pc", titlePrefix: "ПЦ", countKey: "pcTasks" },
+            "WMI (МП + ПЦ)": { taskType: "Разбор ОПП // WMI (МП + ПЦ)", descriptionTaskType: "WMI (МП + ПЦ)", module: "wmi_mp_pc", sourcePrefix: "wmi_mp_pc", titlePrefix: "WMI (МП + ПЦ)", countKey: "wmiTasks" },
+            "Без заказа": { taskType: "Разбор ОПП // Без заказа", module: "no_order", sourcePrefix: "no_order", titlePrefix: "Без заказа", countKey: "noOrderTasks" },
+            "usd_in_other": { taskType: "Разбор ОПП // USD", module: "usd", sourcePrefix: "usd", titlePrefix: "USD", countKey: "usdTasks", forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"], column: "Другие задачи" },
+            "tmm_in_other": { taskType: "Разбор ОПП // TMM", module: "tmm", sourcePrefix: "tmm", titlePrefix: "TMM", countKey: "tmmTasks", forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"], column: "Другие задачи" },
+            "Другие задачи": { taskType: "Другие задачи", module: "no_order", sourcePrefix: "other", titlePrefix: "Другое", countKey: null, column: "Другие задачи" },
         };
-        const transferIds = Array.from(new Set(smsRows.map((row) => row.transfer).filter(isGroupableIdentifier))).sort((a, b) => a.localeCompare(b, "ru"));
-        // Presence alone means shipped now -- the operator scopes this file to
-        // just the copied transfer numbers before exporting it, so any row
-        // for a transfer here is that transfer's shipment confirmation,
-        // whatever the action in column E says.
-        const excludedTransfers = new Set((carrierRows || []).map((row) => row.transfer).filter(Boolean));
+
+        let groupedTareCount = 0;
+        let specialCount = 0;
+        const counts = { presortTasks: 0, labelingTasks: 0, marketplaceTasks: 0, pcTasks: 0, wmiTasks: 0, noOrderTasks: 0, usdTasks: 0, tmmTasks: 0 };
+        let tasks = [];
+        byKey.forEach((bucket) => {
+            const info = zoneTaskTypeMap[bucket.zoneKey] || zoneTaskTypeMap["Без заказа"];
+            const decided = bucket.decided;
+            const forceTareGrouping = decided ? Boolean(decided.grouping === "tare_id") : Boolean(info.forceTareGrouping);
+            const forceHighPriority = decided ? Boolean(decided.forceHighPriority) : Boolean(info.forceHighPriority);
+            const tags = decided && decided.tags && decided.tags.length ? decided.tags : (info.tags || []);
+            const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : 1;
+            const offsetDays = decided ? decided.uploadOffsetDays : 0;
+            const dueDate = addDays(addDays(businessDate, -offsetDays), deadlineDays);
+            const moduleDefForBucket = moduleDef(info.module);
+            const grouped = appendGroupedTasks(bucket.rows, {
+                module: info.module,
+                sourceModule: moduleDefForBucket.sourceModule,
+                uploadType: moduleDefForBucket.uploadType,
+                businessDate,
+                sourcePrefix: info.sourcePrefix,
+                titlePrefix: info.titlePrefix,
+                taskType: info.taskType,
+                descriptionTaskType: info.descriptionTaskType || info.taskType,
+                column: info.column || bucket.zoneKey,
+                dueDate,
+                responsibilityZone: moduleDefForBucket.responsibilityZone,
+                specialMap,
+                forceTareGrouping,
+                forceHighPriority,
+                tags,
+            });
+            groupedTareCount += grouped.groupedTareCount;
+            specialCount += grouped.specialCount;
+            tasks = tasks.concat(grouped.tasks);
+            if (info.countKey && counts[info.countKey] !== undefined) counts[info.countKey] = grouped.tasks.length;
+        });
+
+        // -- ПМ/Почта: mxHasBoxes-исключение, группировка по transfer,
+        // порог по сумме передачи (перенесено из старой buildPmPreview
+        // практически без изменений; второй файл "проверка отгрузки"
+        // сюда больше не передаётся -- см. действие "Проверить передачи
+        // на отгрузку", Задача 6).
+        let boxesFilteredOut = 0;
+        const pmEligibleRows = pmRows.filter((row) => {
+            if (mxHasBoxes(row)) { boxesFilteredOut += 1; return false; }
+            return true;
+        });
+        const pmDueDate = addDays(businessDate, 2);
+        const mailDueDate = addDays(businessDate, 3);
         const byTransfer = new Map();
-        eligibleDateRows.forEach((row) => {
+        pmEligibleRows.forEach((row) => {
             const group = byTransfer.get(row.transfer) || [];
             group.push(row);
             byTransfer.set(row.transfer, group);
         });
-        const tasks = [];
-        let excludedByCarrier = 0;
+        const pmDef = moduleDef("pm");
         let cheapTransfers = 0;
-        let specialTaskCount = 0;
-        const specialCandidateIds = [];
+        let pmTasks = 0;
+        let mailTasks = 0;
+        const transferIds = Array.from(byTransfer.keys()).sort((a, b) => a.localeCompare(b, "ru"));
         transferIds.forEach((transfer) => {
             const allRows = byTransfer.get(transfer) || [];
-            if (excludedTransfers.has(transfer)) { excludedByCarrier += 1; return; }
-            specialCandidateIds.push(...allRows.map((row) => row.product));
             const specialSplit = splitSpecialRows(allRows, specialMap, "product");
             specialSplit.special.forEach((row) => {
-                specialTaskCount += 1;
+                specialCount += 1;
+                const decided = decidedByRow.get(row);
+                const mail = decided ? decided.zone === "Почта" : isMailRoute(routeNumberFromMx(row.mx));
                 const routeNumber = routeNumberFromMx(row.mx);
-                const routeLabel = routeLabelFromMx(row.mx, isMultiShipmentBufferMx(row.mx) ? routeNumberFromMx(row.mx) : routeNumber);
-                const mail = isMailRow(row);
+                const routeLabel = routeLabelFromMx(row.mx, isMultiShipmentBufferMx(row.mx) ? routeNumber : routeNumber);
                 const taskType = mail ? "Разбор ОПП // Почта" : "Разбор ОПП // ПМ";
+                if (mail) mailTasks += 1; else pmTasks += 1;
                 tasks.push(taskRecord({
                     module: "pm",
-                    sourceModule: def.sourceModule,
-                    uploadType: def.uploadType,
+                    sourceModule: pmDef.sourceModule,
+                    uploadType: pmDef.uploadType,
                     businessDate,
                     sourceId: (mail ? "mail" : "pm") + ":special:" + row.product + "|" + businessDate,
                     title: taskTitleForShk(row.product),
@@ -16303,7 +16402,7 @@
                     descriptionTaskType: taskType,
                     column: mail ? "Почта" : "ПМ",
                     dueDate: mail ? mailDueDate : pmDueDate,
-                    responsibilityZone: def.responsibilityZone,
+                    responsibilityZone: pmDef.responsibilityZone,
                     productIds: [row.product],
                     rows: [row],
                     tareId: transfer,
@@ -16319,14 +16418,16 @@
             const priceSum = rowsPrice(groupRows, "price");
             if (priceSum < 2000) { cheapTransfers += 1; return; }
             const primary = groupRows.find((row) => isPmBufferStatus(row.product_status)) || groupRows[0];
+            const decided = decidedByRow.get(primary);
+            const mail = decided ? decided.zone === "Почта" : isMailRoute(routeNumberFromMx(primary.mx));
             const routeNumber = routeNumberFromMx(primary.mx);
-            const routeLabel = routeLabelFromMx(primary.mx, isMultiShipmentBufferMx(primary.mx) ? routeNumberFromMx(primary.mx) : routeNumber);
-            const mail = isMailRow(primary);
+            const routeLabel = routeLabelFromMx(primary.mx, isMultiShipmentBufferMx(primary.mx) ? routeNumber : routeNumber);
             const taskType = mail ? "Разбор ОПП // Почта" : "Разбор ОПП // ПМ";
+            if (mail) mailTasks += 1; else pmTasks += 1;
             tasks.push(taskRecord({
                 module: "pm",
-                sourceModule: def.sourceModule,
-                uploadType: def.uploadType,
+                sourceModule: pmDef.sourceModule,
+                uploadType: pmDef.uploadType,
                 businessDate,
                 sourceId: (mail ? "mail" : "pm") + ":transfer:" + transfer + "|" + businessDate,
                 title: taskTitleForTare(transfer),
@@ -16334,7 +16435,7 @@
                 descriptionTaskType: taskType,
                 column: mail ? "Почта" : "ПМ",
                 dueDate: mail ? mailDueDate : pmDueDate,
-                responsibilityZone: def.responsibilityZone,
+                responsibilityZone: pmDef.responsibilityZone,
                 productIds: groupRows.map((row) => row.product),
                 rows: groupRows,
                 tareId: transfer,
@@ -16345,111 +16446,23 @@
                 infoLines: ["Передача: " + transfer, routeLabel || "-", "ШК в передаче:", ...groupRows.map((row) => "- " + row.product + " / " + (row.product_status || "-") + " / " + formatMoney(row.price))],
             }));
         });
-        return { mode: "pm", sourceRows: sourceRows.length, rowsCount: smsRows.length, dateFilteredOut: sourceRows.length - dateRows.length, boxesFilteredOut: dateRows.length - eligibleDateRows.length, smsTransfers: transferIds.length, excludedByCarrier, cheapTransfers, specialTaskCount, specialCandidateIds, copiedTransferIds: transferIds, tasks, pmTasks: tasks.filter((task) => task.task_type === "Разбор ОПП // ПМ").length, mailTasks: tasks.filter((task) => task.task_type === "Разбор ОПП // Почта").length };
-    }
 
-    async function buildPresortPreview(sourceRows, businessDate, specialMap) {
-        specialMap = specialMap || new Map();
-        const presortDef = moduleDef("presort");
-        const labelingDef = moduleDef("labeling");
-        const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const decisions = await evaluateZoneRulesBatch("general", rows);
-        const decidedByRow = new Map();
-        rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
-        const presortRows = rows.filter((row) => {
-            const decided = decidedByRow.get(row);
-            if (decided) return decided.zone === presortDef.column;
-            return isPresortStatus(row);
-        });
-        const labelingRows = rows.filter((row) => {
-            const decided = decidedByRow.get(row);
-            if (decided) return decided.zone === labelingDef.column;
-            return isLabelingStatus(row);
-        });
-        const presort = appendGroupedTasksByRuleGrouping(presortRows, decidedByRow, {
-            module: "presort", sourceModule: presortDef.sourceModule, uploadType: presortDef.uploadType, businessDate, sourcePrefix: "presort", titlePrefix: "Предсортировка", taskType: presortDef.taskType, descriptionTaskType: presortDef.taskTypeLabel, column: presortDef.column, dueDate: dueDateForBusinessDate("presort", businessDate), responsibilityZone: presortDef.responsibilityZone, specialMap,
-        });
-        const labeling = appendGroupedTasksByRuleGrouping(labelingRows, decidedByRow, {
-            module: "labeling", sourceModule: labelingDef.sourceModule, uploadType: labelingDef.uploadType, businessDate, sourcePrefix: "labeling", titlePrefix: "Оклейка", taskType: labelingDef.taskType, descriptionTaskType: labelingDef.taskTypeLabel, column: labelingDef.column, dueDate: dueDateForBusinessDate("labeling", businessDate), responsibilityZone: labelingDef.responsibilityZone, specialMap, forceHighPriority: true,
-        });
-        const tasks = presort.tasks.concat(labeling.tasks);
-        return { mode: "presort", sourceRows: sourceRows.length, rowsCount: presortRows.length, dateFilteredOut: sourceRows.length - rows.length, labelingRows: labelingRows.length, groupedTareCount: presort.groupedTareCount + labeling.groupedTareCount, specialCount: presort.specialCount + labeling.specialCount, specialCandidateIds: productIdsFromRows(presortRows.concat(labelingRows)), tasks, presortTasks: presort.tasks.length, labelingTasks: labeling.tasks.length };
-    }
-
-    async function buildMarketplacePcPreview(sourceRows, businessDate, specialMap) {
-        specialMap = specialMap || new Map();
-        const marketplaceDef = moduleDef("marketplace");
-        const pcDef = moduleDef("pc");
-        const marketplaceDate = state.manualDate ? businessDate : uploadDateForModule("marketplace");
-        const pcDate = state.manualDate ? businessDate : uploadDateForModule("pc");
-        const marketplaceDateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === marketplaceDate);
-        const pcDateRows = sourceRows.filter((row) => parseDateTime(row.created_at).date === pcDate);
-        const candidateRows = Array.from(new Set(marketplaceDateRows.concat(pcDateRows)));
-        const decisions = await evaluateZoneRulesBatch("general", candidateRows);
-        const zoneByRow = new Map();
-        candidateRows.forEach((row, index) => { zoneByRow.set(row, decisions[index]); });
-        const marketplaceRows = marketplaceDateRows.filter((row) => {
-            const decided = zoneByRow.get(row);
-            if (decided) return decided.zone === marketplaceDef.column;
-            return isMarketplaceStatus(row) && !mxHasBuffer(row);
-        });
-        const pcRows = pcDateRows.filter((row) => {
-            const decided = zoneByRow.get(row);
-            if (decided) return decided.zone === pcDef.column;
-            return isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row);
-        });
-        const marketplace = appendGroupedTasksByRuleGrouping(marketplaceRows, zoneByRow, { module: "marketplace", sourceModule: marketplaceDef.sourceModule, uploadType: marketplaceDef.uploadType, businessDate: marketplaceDate, sourcePrefix: "marketplace", titlePrefix: "Маркетплейс", taskType: marketplaceDef.taskType, descriptionTaskType: marketplaceDef.taskTypeLabel, column: marketplaceDef.column, dueDate: dueDateForBusinessDate("marketplace", marketplaceDate), responsibilityZone: marketplaceDef.responsibilityZone, specialMap });
-        const pc = appendGroupedTasksByRuleGrouping(pcRows, zoneByRow, { module: "pc", sourceModule: pcDef.sourceModule, uploadType: pcDef.uploadType, businessDate: pcDate, sourcePrefix: "pc", titlePrefix: "ПЦ", taskType: pcDef.taskType, descriptionTaskType: pcDef.taskTypeLabel, column: pcDef.column, dueDate: dueDateForBusinessDate("pc", pcDate), responsibilityZone: pcDef.responsibilityZone, specialMap });
-        const tasks = marketplace.tasks.concat(pc.tasks);
-        const targetDates = new Set([marketplaceDate, pcDate]);
-        return { mode: "marketplace_pc", sourceRows: sourceRows.length, rowsCount: marketplaceRows.length + pcRows.length, dateFilteredOut: sourceRows.filter((row) => !targetDates.has(parseDateTime(row.created_at).date)).length, marketplaceRows: marketplaceRows.length, pcRows: pcRows.length, groupedTareCount: marketplace.groupedTareCount + pc.groupedTareCount, specialCount: marketplace.specialCount + pc.specialCount, specialCandidateIds: productIdsFromRows(marketplaceRows.concat(pcRows)), tasks, marketplaceTasks: marketplace.tasks.length, pcTasks: pc.tasks.length };
-    }
-
-    async function buildWmiMpPcPreview(sourceRows, businessDate, specialMap) {
-        specialMap = specialMap || new Map();
-        const def = moduleDef("wmi_mp_pc");
-        const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const decisions = await evaluateZoneRulesBatch("general", rows);
-        const decidedByRow = new Map();
-        rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
-        const wmiRows = rows.filter((row) => {
-            const decided = decidedByRow.get(row);
-            if (decided) return decided.zone === def.column;
-            return isWmiMpPcStatus(row);
-        });
-        const grouped = appendGroupedTasksByRuleGrouping(wmiRows, decidedByRow, { module: "wmi_mp_pc", sourceModule: def.sourceModule, uploadType: def.uploadType, businessDate, sourcePrefix: "wmi_mp_pc", titlePrefix: "WMI (МП + ПЦ)", taskType: def.taskType, descriptionTaskType: def.taskTypeLabel, column: def.column, dueDate: dueDateForBusinessDate("wmi_mp_pc", businessDate), responsibilityZone: def.responsibilityZone, specialMap });
-        return { mode: "wmi_mp_pc", sourceRows: sourceRows.length, rowsCount: wmiRows.length, dateFilteredOut: sourceRows.length - rows.length, groupedTareCount: grouped.groupedTareCount, specialCount: grouped.specialCount, specialCandidateIds: productIdsFromRows(wmiRows), tasks: grouped.tasks, wmiTasks: grouped.tasks.length };
-    }
-
-    async function buildNoOrderPreview(sourceRows, businessDate, specialMap) {
-        specialMap = specialMap || new Map();
-        const def = moduleDef("no_order");
-        const usdDef = moduleDef("usd");
-        const tmmDef = moduleDef("tmm");
-        const rows = sourceRows.filter((row) => parseDateTime(row.created_at).date === businessDate);
-        const decisions = await evaluateZoneRulesBatch("general", rows);
-        const decidedByRow = new Map();
-        rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
-        const usdRows = rows.filter((row) => {
-            const decided = decidedByRow.get(row);
-            if (decided) return decided.zone === usdDef.taskType;
-            return isNoOrderUsdStatus(row);
-        });
-        const tmmRows = rows.filter((row) => {
-            const decided = decidedByRow.get(row);
-            if (decided) return decided.zone === tmmDef.taskType;
-            return isNoOrderTmmStatus(row);
-        });
-        const noOrderRows = rows.filter((row) => {
-            const decided = decidedByRow.get(row);
-            if (decided) return decided.zone === def.taskType;
-            return !isNoOrderUsdStatus(row) && !isNoOrderTmmStatus(row);
-        });
-        const noOrder = appendGroupedTasksByRuleGrouping(noOrderRows, decidedByRow, { module: "no_order", sourceModule: def.sourceModule, uploadType: def.uploadType, businessDate, sourcePrefix: "no_order", titlePrefix: "Без заказа", taskType: def.taskType, descriptionTaskType: def.taskTypeLabel, column: def.column, dueDate: dueDateForBusinessDate("no_order", businessDate), responsibilityZone: def.responsibilityZone, specialMap });
-        const usd = appendGroupedTasks(usdRows, { module: "usd", sourceModule: usdDef.sourceModule, uploadType: usdDef.uploadType, businessDate, sourcePrefix: "usd", titlePrefix: "USD", taskType: usdDef.taskType, descriptionTaskType: usdDef.taskTypeLabel, column: usdDef.column, dueDate: dueDateForBusinessDate("usd", businessDate), responsibilityZone: usdDef.responsibilityZone, specialMap, forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"] });
-        const tmm = appendGroupedTasks(tmmRows, { module: "tmm", sourceModule: tmmDef.sourceModule, uploadType: tmmDef.uploadType, businessDate, sourcePrefix: "tmm", titlePrefix: "TMM", taskType: tmmDef.taskType, descriptionTaskType: tmmDef.taskTypeLabel, column: tmmDef.column, dueDate: dueDateForBusinessDate("tmm", businessDate), responsibilityZone: tmmDef.responsibilityZone, specialMap, forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"] });
-        const tasks = noOrder.tasks.concat(usd.tasks, tmm.tasks);
-        return { mode: "no_order", sourceRows: sourceRows.length, rowsCount: rows.length, dateFilteredOut: sourceRows.length - rows.length, groupedTareCount: noOrder.groupedTareCount + usd.groupedTareCount + tmm.groupedTareCount, specialCount: noOrder.specialCount + usd.specialCount + tmm.specialCount, specialCandidateIds: productIdsFromRows(rows), usdRows: usdRows.length, tmmRows: tmmRows.length, tasks, noOrderTasks: noOrder.tasks.length, usdTasks: usd.tasks.length, tmmTasks: tmm.tasks.length };
+        return {
+            mode: "general",
+            sourceRows: sourceRows.length,
+            rowsCount: survivors.length,
+            dateFilteredOut,
+            filteredByRule,
+            boxesFilteredOut,
+            cheapTransfers,
+            groupedTareCount,
+            specialCount,
+            specialCandidateIds: productIdsFromRows(dated),
+            tasks,
+            ...counts,
+            pmTasks,
+            mailTasks,
+        };
     }
 
     function buildAfterSaleMovementPreview(sourceRows, businessDate, specialMap) {
@@ -16489,11 +16502,7 @@
     async function buildPreviewForModule(module, rows, carrierRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         if (module === "packaging" || module === "rwp") return buildPackagingPreview(rows, module, businessDate, specialMap);
-        if (module === "pm") return buildPmPreview(rows, carrierRows || [], businessDate, specialMap);
-        if (module === "presort") return buildPresortPreview(rows, businessDate, specialMap);
-        if (module === "marketplace_pc") return buildMarketplacePcPreview(rows, businessDate, specialMap);
-        if (module === "wmi_mp_pc") return buildWmiMpPcPreview(rows, businessDate, specialMap);
-        if (module === "no_order") return buildNoOrderPreview(rows, businessDate, specialMap);
+        if (["pm", "presort", "marketplace_pc", "wmi_mp_pc", "no_order"].includes(module)) return buildGeneralPreview(rows, businessDate, specialMap);
         if (module === "after_sale_movement") return buildAfterSaleMovementPreview(rows, businessDate, specialMap);
         return { mode: module, tasks: [] };
     }
