@@ -2375,6 +2375,10 @@
         </div>
         <div id="workInstruction" class="instruction"></div>
         <div id="fileControls" class="file-row"></div>
+        <div id="pmCarrierConfirmRow" class="file-row hidden">
+            <label class="btn btn-outline" for="pmCarrierConfirmFile">Проверить передачи на отгрузку</label>
+            <input id="pmCarrierConfirmFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+        </div>
         <div id="workStatus" class="status-line">Выберите файл.</div>
         <div id="previewGrid" class="preview-grid"></div>
         <div id="sampleWrap" class="sample-table-wrap"></div>
@@ -2397,10 +2401,8 @@
         </div>
         <div id="masterSlots" class="master-slots"></div>
         <div id="masterTopActions" class="file-row hidden">
-            <button id="copyMasterTransfers" class="btn btn-outline" type="button" disabled>Скопировать номера передач</button>
             <button id="buildMasterPreview" class="btn btn-rect" type="button" disabled>Проверить файлы</button>
         </div>
-        <textarea id="masterTransferFallback" class="input" style="display:none;min-height:120px;margin-top:10px" readonly></textarea>
         <div id="masterStatus" class="status-line">Жду файлы.</div>
         <div id="masterSummary" class="module-grid"></div>
         <div id="masterBottomActions" class="file-row hidden">

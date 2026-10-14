@@ -505,7 +505,6 @@
         { key: "noOrder", title: "Без заказа", kind: "pmPrimary", modules: ["no_order"] },
         { key: "packaging", title: "Утерянные и обездвиженные товары", kind: "packaging", modules: ["packaging", "rwp"] },
         { key: "afterSale", title: "Движение после продажи", kind: "afterSaleMovement", modules: ["after_sale_movement"] },
-        { key: "carrier", title: "Проверить наличие отгрузки", kind: "pmCarrier", modules: ["pm"], optional: true },
     ];
 
     const state = {
@@ -14678,6 +14677,7 @@
         $("workTitle").textContent = def.label;
         $("workSubtitle").textContent = "Выгрузка за " + formatRuDate(state.activeDate) + ". Дата списания считается по статусу каждого ШК.";
         $("workInstruction").innerHTML = instructionHtml(module, state.activeDate);
+        $("pmCarrierConfirmRow").classList.toggle("hidden", module !== "pm");
         $("doneBox").classList.remove("visible");
         $("saveUpload").disabled = true;
         $("saveUpload").classList.remove("hidden");
@@ -14719,7 +14719,7 @@
                 + "</ol>";
         }
         if (module === "pm") {
-            return "<strong>Выгрузить ПМ / Почту</strong><ol><li>Загрузите основной файл \"Товары без движения - В заказе\".</li><li>Нажмите \"Скопировать номера передач\".</li><li>Проверьте наличие отгрузки и загрузите второй файл или нажмите \"Пропустить второй файл\".</li></ol>";
+            return "<strong>Выгрузить ПМ / Почту</strong><ol><li>Загрузите основной файл \"Товары без движения - В заказе\".</li><li>Задачи сохранятся сразу -- проверка отгрузки теперь отдельное действие (кнопка \"Проверить передачи на отгрузку\" на экране участка).</li></ol>";
         }
         if (module === "no_order") return "<strong>Выгрузить Без заказа</strong><ol><li>Загрузите отдельную таблицу Без заказа.</li><li>WMS+ возьмет строки за " + formatRuDate(date) + " и сохранит задачи.</li></ol>";
         if (module === "after_sale_movement") return "<strong>Выгрузить Движение после продажи</strong><ol><li>Загрузите отдельную таблицу.</li><li>WMS+ возьмет строки за " + formatRuDate(date) + " по дате статуса.</li></ol>";
@@ -14727,18 +14727,6 @@
     }
 
     function renderFileControls(module) {
-        if (module === "pm") {
-            $("fileControls").innerHTML = fileInputHtml("primary", "Выбрать основной XLSX")
-                + fileInputHtml("carrier", "Выбрать проверку отгрузки", true)
-                + "<button id='copyTransfers' class='btn btn-outline' type='button' disabled>Скопировать номера передач</button>"
-                + "<button id='skipCarrier' class='btn btn-outline' type='button' disabled>Пропустить второй файл</button>"
-                + "<span id='fileName' class='file-name'>Файлы пока не выбраны</span>";
-            bindFileInput("primary", (file) => handleSingleFile(module, file, "pmPrimary"));
-            bindFileInput("carrier", (file) => handleCarrierFile(file));
-            $("copyTransfers").addEventListener("click", copyActiveTransfers);
-            $("skipCarrier").addEventListener("click", skipCarrierFile);
-            return;
-        }
         $("fileControls").innerHTML = fileInputHtml("primary", "Выбрать файл") + "<span id='fileName' class='file-name'>Файл пока не выбран</span>";
         const kind = module === "packaging" || module === "rwp" ? "packaging" : module === "after_sale_movement" ? "afterSaleMovement" : "pmPrimary";
         bindFileInput("primary", (file) => handleSingleFile(module, file, kind));
@@ -14756,6 +14744,37 @@
             if (!file) return;
             input.value = "";
             handler(file).catch((error) => setStatus(error && error.message ? error.message : String(error), "error"));
+        });
+    }
+
+    // Отдельное пост-сохранное действие (не часть загрузки/предпросмотра):
+    // оператор загружает тот же файл-отчёт проверки отгрузки ПОСЛЕ того,
+    // как задачи ПМ/Почта уже созданы, и совпавшие по номеру передачи
+    // переводятся в "Завершено".
+    async function confirmPmCarrierShipments(file) {
+        setStatus("Читаю проверку отгрузки...");
+        const rows = await readWorkbookRows(file, "pmCarrier");
+        const transfers = Array.from(new Set(rows.map((row) => row.transfer).filter(Boolean)));
+        if (!transfers.length) { setStatus("В файле не найдено номеров передач.", "error"); return; }
+        const db = supabaseDb();
+        if (!db) { setStatus("Нет подключения к базе.", "error"); return; }
+        try {
+            const { data, error } = await db.rpc("wms_confirm_pm_carrier_shipments", { p_transfers: transfers });
+            if (error) throw error;
+            setStatus("Готово. Передач в файле: " + (data.transfer_count || 0) + ", завершено задач: " + (data.matched_count || 0) + ".", "good");
+        } catch (error) {
+            setStatus("Не удалось проверить отгрузку: " + (error && error.message ? error.message : String(error)), "error");
+        }
+    }
+
+    function wirePmCarrierConfirmButton() {
+        const input = $("pmCarrierConfirmFile");
+        if (!input) return;
+        input.addEventListener("change", () => {
+            const file = input.files && input.files[0];
+            if (!file) return;
+            input.value = "";
+            confirmPmCarrierShipments(file).catch((error) => setStatus(error && error.message ? error.message : String(error), "error"));
         });
     }
 
@@ -16605,51 +16624,10 @@
         const [rows] = await Promise.all([readWorkbookRows(file, kind), loadWriteoffTerms(true)]);
         state.rows.primary = rows;
         state.specialCheck = null;
-        if (module === "pm") {
-            state.rows.carrier = [];
-            state.preview = await buildPreviewForModule(module, rows, [], state.activeDate);
-            renderPreview(state.preview);
-            $("copyTransfers").disabled = !(state.preview.copiedTransferIds || []).length;
-            $("skipCarrier").disabled = false;
-            $("carrierLabel").style.display = "inline-flex";
-            startSpecialBackground(module, rows, [], state.activeDate, "Основной файл прочитан. Строк: " + rows.length + ". Скопируйте передачи и загрузите проверку отгрузки либо пропустите второй файл.");
-            return;
-        }
         state.preview = await buildPreviewForModule(module, rows, [], state.activeDate);
         renderPreview(state.preview);
         $("saveUpload").disabled = !state.preview.tasks.length;
         startSpecialBackground(module, rows, [], state.activeDate, state.preview.tasks.length ? "Предпросмотр готов. К сохранению: " + state.preview.tasks.length + "." : "Нет задач по текущим правилам.");
-    }
-
-    async function handleCarrierFile(file) {
-        state.files.carrier = file;
-        $("fileName").textContent = "Основной и второй файлы выбраны";
-        setStatus("Читаю проверку отгрузки...");
-        const rows = await readWorkbookRows(file, "pmCarrier");
-        state.rows.carrier = rows;
-        state.specialCheck = null;
-        state.preview = await buildPreviewForModule("pm", state.rows.primary || [], rows, state.activeDate);
-        renderPreview(state.preview);
-        $("saveUpload").disabled = !state.preview.tasks.length;
-        startSpecialBackground("pm", state.rows.primary || [], rows, state.activeDate, state.preview.tasks.length ? "Предпросмотр готов. К сохранению: " + state.preview.tasks.length + "." : "Нет задач по текущим правилам.");
-    }
-
-    async function skipCarrierFile() {
-        state.rows.carrier = [];
-        state.files.carrier = null;
-        state.specialCheck = null;
-        state.preview = await buildPreviewForModule("pm", state.rows.primary || [], [], state.activeDate);
-        renderPreview(state.preview);
-        $("saveUpload").disabled = !state.preview.tasks.length;
-        startSpecialBackground("pm", state.rows.primary || [], [], state.activeDate, "Второй файл пропущен. К сохранению: " + state.preview.tasks.length + ".");
-    }
-
-    async function copyActiveTransfers() {
-        const ids = state.preview && state.preview.copiedTransferIds ? state.preview.copiedTransferIds : [];
-        if (!ids.length) return;
-        const text = ids.join("\n");
-        const copied = await copyText(text);
-        toast(copied ? "Скопировано передач: " + ids.length : "Автокопирование заблокировано браузером.", copied ? "success" : "error");
     }
 
     async function copyText(text) {
@@ -18969,9 +18947,6 @@
         $("saveMaster").disabled = true;
         $("showRejects").disabled = true;
         $("buildMasterPreview").disabled = true;
-        $("copyMasterTransfers").disabled = true;
-        $("masterTransferFallback").style.display = "none";
-        $("masterTransferFallback").value = "";
     }
 
     function masterDatePlan() {
@@ -18997,23 +18972,14 @@
         const slotDates = Array.from(new Set(slot.modules.map((module) => dates[module]).filter(Boolean)));
         const note = slot.key === "main"
             ? "Выгрузите файл с " + formatRuDate(earliestDate(slotDates)) + " по " + formatRuDate(state.today) + "."
-            : slot.key === "carrier"
-                ? "Проверка передач ПМ/Почты за " + formatRuDate(dates.pm) + "."
-                : "Нужная дата: " + slotDates.map(formatRuDate).join(", ") + ".";
-        const carrierTools = slot.key === "carrier"
-            ? "<button id='copyMasterTransfersInline' class='btn btn-outline' type='button' " + ((state.master.pmTransferIds || []).length ? "" : "disabled") + ">Скопировать номера передач</button><button id='skipMasterSlot' class='btn btn-outline' type='button'>Пропустить</button>"
-            : "";
+            : "Нужная дата: " + slotDates.map(formatRuDate).join(", ") + ".";
         $("masterSlots").innerHTML = (completed ? "<div class='master-step-list'>" + completed + "</div>" : "")
-            + "<article class='slot-card master-step-card'><h4 class='slot-title'>" + escapeHtml(slot.title) + "</h4><p class='slot-note'>" + escapeHtml(note) + "</p><div class='file-row'><label class='btn btn-rect' for='master-" + slot.key + "'>Выбрать файл</label><input id='master-" + slot.key + "' class='file-input' type='file' accept='.xlsx,.xls,.csv'><span id='master-name-" + slot.key + "' class='file-name'>Файл пока не выбран</span>" + carrierTools + "</div></article>";
+            + "<article class='slot-card master-step-card'><h4 class='slot-title'>" + escapeHtml(slot.title) + "</h4><p class='slot-note'>" + escapeHtml(note) + "</p><div class='file-row'><label class='btn btn-rect' for='master-" + slot.key + "'>Выбрать файл</label><input id='master-" + slot.key + "' class='file-input' type='file' accept='.xlsx,.xls,.csv'><span id='master-name-" + slot.key + "' class='file-name'>Файл пока не выбран</span></div></article>";
         const input = $("master-" + slot.key);
         input.addEventListener("change", () => {
             const file = input.files && input.files[0];
             if (file) handleMasterFile(slot, file).catch((error) => setMasterStatus(error && error.message ? error.message : String(error), "error"));
         });
-        const copyInline = $("copyMasterTransfersInline");
-        if (copyInline) copyInline.addEventListener("click", () => { void copyMasterTransfers(); });
-        const skip = $("skipMasterSlot");
-        if (skip) skip.addEventListener("click", () => skipMasterSlot(slot));
     }
 
     function earliestDate(dates) { return (dates || []).filter(Boolean).sort()[0] || ""; }
@@ -19024,51 +18990,19 @@
         setMasterStatus("Читаю файл: " + slot.title + "...");
         const rows = await readWorkbookRows(file, slot.kind);
         state.master.rows[slot.key] = rows;
-        if (slot.key === "main") {
-            const pmPreview = await buildPreviewForModule("pm", rows, [], uploadDateForModule("pm"));
-            state.master.pmTransferIds = pmPreview.copiedTransferIds || [];
-            $("copyMasterTransfers").disabled = !state.master.pmTransferIds.length;
-        }
         $("buildMasterPreview").disabled = !masterCanBuild();
         setMasterStatus("Файл прочитан: " + slot.title + ". Строк: " + rows.length + ".", "good");
         advanceMasterSlot();
     }
 
     function masterCanBuild() {
-        return Boolean(state.master.rows.main && state.master.rows.noOrder && state.master.rows.packaging && state.master.rows.afterSale && (state.master.rows.carrier || state.master.skippedSlots.carrier));
-    }
-
-    function skipMasterSlot(slot) {
-        if (!slot || !slot.optional) return;
-        state.master.skippedSlots[slot.key] = true;
-        state.master.rows[slot.key] = [];
-        state.master.files[slot.key] = null;
-        setMasterStatus("Шаг пропущен: " + slot.title + ".", "good");
-        advanceMasterSlot();
+        return Boolean(state.master.rows.main && state.master.rows.noOrder && state.master.rows.packaging && state.master.rows.afterSale);
     }
 
     function advanceMasterSlot() {
         state.master.slotIndex = Math.min((state.master.slotIndex || 0) + 1, MASTER_SLOTS.length);
         renderMasterSlots();
         if ((state.master.slotIndex || 0) < MASTER_SLOTS.length) setMasterStatus("");
-    }
-
-    async function copyMasterTransfers() {
-        const ids = state.master.pmTransferIds || [];
-        if (!ids.length) {
-            setMasterStatus("В основном файле не нашел передач ПМ/Почты за нужную дату.", "error");
-            return;
-        }
-        const text = ids.join("\n");
-        $("masterTransferFallback").style.display = "none";
-        if (await copyText(text)) setMasterStatus("Скопировано передач: " + ids.length + ".", "good");
-        else {
-            $("masterTransferFallback").value = text;
-            $("masterTransferFallback").style.display = "block";
-            $("masterTransferFallback").focus();
-            $("masterTransferFallback").select();
-            setMasterStatus("Браузер заблокировал автокопирование. Я вывел список ниже и выделил его - нажмите Cmd+C.");
-        }
     }
 
     function nextPaint() {
@@ -19478,6 +19412,7 @@
         $("backToChooser").addEventListener("click", () => openChooser(state.manualDate));
         $("saveUpload").addEventListener("click", () => { void saveCurrentUpload(); });
         $("repeatUpload").addEventListener("click", resetCurrentUpload);
+        wirePmCarrierConfirmButton();
         $("closeMaster").addEventListener("click", () => setFlowModalOpen("masterWork", false));
         $("closeBackfillCalendar").addEventListener("click", () => setFlowModalOpen("backfillCalendarModal", false));
         $("reviewTabInactive").addEventListener("click", () => setReviewTab(REVIEW_TAB_INACTIVE));
@@ -19556,7 +19491,6 @@
         });
         $("sendBufferToSearch").addEventListener("click", () => { void sendBufferSelectionToSearch(); });
         $("downloadBufferCalculator").addEventListener("click", () => downloadBufferCalculatorResult($("bufferCalculatorResult").value));
-        $("copyMasterTransfers").addEventListener("click", () => { void copyMasterTransfers(); });
         $("buildMasterPreview").addEventListener("click", () => { void buildMasterPreview(); });
         $("showRejects").addEventListener("click", showMasterRejects);
         $("saveMaster").addEventListener("click", () => { void saveMasterUpload(); });
