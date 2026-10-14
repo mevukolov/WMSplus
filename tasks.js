@@ -12343,13 +12343,6 @@
         { value: "Разбор ОПП // TMM", label: "TMM" },
     ];
 
-    function routingRuleGroupingSelectHtml(dataAttr, value) {
-        return "<select " + dataAttr + ">"
-            + "<option value=''" + (!value ? " selected" : "") + ">Каждый ШК отдельно</option>"
-            + "<option value='tare_id'" + (value === "tare_id" ? " selected" : "") + ">По таре -- объединить в одну задачу</option>"
-            + "</select>";
-    }
-
     function routingRuleRowHtml(row) {
         const conditions = Array.isArray(row.conditions) && row.conditions.length ? row.conditions : [{ attribute: "status", operator: "in", value: [] }];
         const outputKey = row.output_key || "zone";
@@ -12374,7 +12367,7 @@
             + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона (обычное правило)</option>"
             + "<option value='no_order_folder'" + (isFolder ? " selected" : "") + ">Спецслучай: подпапка внутри \"Без заказа\"</option>"
             + "</select>"
-            + "<p class='work-subtitle' style='margin:8px 0 0'>99% правил -- \"Зона\": она решает, в какой участок целиком кладётся ШК (Маркетплейс, ПЦ, Предсортировка и т.д.) -- именно её ты почти всегда и настраиваешь. \"Подпапка внутри 'Без заказа'\" нужна только для дробления ОДНОЙ конкретной зоны ('Без заказа') на вложенные папки -- сейчас так устроены только USD и TMM. Если не настраиваешь именно это -- просто оставь \"Зона\".</p>"
+            + "<p class='work-subtitle' style='margin:8px 0 0'>99% правил -- \"Зона\": она решает, в какой участок целиком кладётся ШК (Маркетплейс, ПЦ, Предсортировка и т.д.) -- именно её ты почти всегда и настраиваешь. \"Подпапка внутри 'Без заказа'\" -- конкретный, измеримый эффект: ШК вместо вкладки \"Без заказа\" у операторов показывается во вкладке \"Другие задачи\" -- сейчас так устроены только USD и TMM (их специально выделяют из общей массы \"Без заказа\" в отдельную очередь). Если не настраиваешь именно это переключение между вкладками -- оставь \"Зона\".</p>"
             + "</div>"
             + "<div class='routing-rule-section'>"
             + "<div class='routing-rule-section-label'>Условия (все должны совпасть)</div>"
@@ -12385,16 +12378,15 @@
             + "<div class='routing-rule-section-label'>Куда положить ШК</div>"
             + "<div class='routing-rule-result'>"
             + "<select data-rule-target>" + targetOptions + "</select>"
-            + routingRuleGroupingSelectHtml("data-rule-grouping", row.grouping_attribute)
             + "</div>"
-            + "<p class='work-subtitle' style='margin:8px 0 0'>По умолчанию каждый подошедший ШК становится своей отдельной задачей. \"По таре\" нужен, только если несколько ШК физически лежат в одной таре/коробе и их нужно разбирать одной общей задачей, а не поштучно -- в большинстве правил это не нужно, оставляй \"Каждый ШК отдельно\".</p>"
+            + "<p class='work-subtitle' style='margin:8px 0 0'>ШК, лежащие в одной физической таре, объединяются в одну задачу автоматически и всегда -- это не настраивается per-правило, так было и до движка правил.</p>"
             + "</div>"
             + "<div class='routing-rule-section' data-rule-result-folder" + (isFolder ? "" : " style='display:none'") + ">"
             + "<div class='routing-rule-section-label'>В какую подпапку \"Без заказа\"</div>"
             + "<div class='routing-rule-result'>"
             + "<select data-rule-folder-target>" + folderTargetOptions + "</select>"
             + "</div>"
-            + "<p class='work-subtitle' style='margin:8px 0 0'>Подпапки всегда группируются по таре -- это не настраивается per-правило, в отличие от зон.</p>"
+            + "<p class='work-subtitle' style='margin:8px 0 0'>ШК, лежащие в одной физической таре, объединяются в одну задачу автоматически и всегда -- это не настраивается per-правило.</p>"
             + "</div>"
             + "</div>";
     }
@@ -12601,12 +12593,11 @@
         };
         if (outputKey === "zone") {
             const targetTaskType = cardEl.querySelector("[data-rule-target]").value;
-            const groupingAttribute = cardEl.querySelector("[data-rule-grouping]").value || null;
             return {
                 ...base,
                 target_task_type: targetTaskType,
-                grouping_attribute: groupingAttribute,
-                output_value: { target_task_type: targetTaskType, grouping_attribute: groupingAttribute },
+                grouping_attribute: null,
+                output_value: { target_task_type: targetTaskType, grouping_attribute: null },
             };
         }
         const folderTarget = cardEl.querySelector("[data-rule-folder-target]").value;
