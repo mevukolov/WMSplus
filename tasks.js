@@ -15631,10 +15631,17 @@
         const decisions = await evaluateZoneRulesBatch(rows);
         const decidedByRow = new Map();
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
+        // "Упаковка" is a catch-all (everything that isn't RWP), not a
+        // specific rule target -- gating it on "decided === def.column"
+        // the way the other modules do would silently drop a row whose
+        // status happens to match some unrelated rule (e.g. PAP) added
+        // for a different module, since that decided value matches
+        // neither "RWP" nor "Упаковка". Only the RWP side is a real
+        // positive match; packaging is everything else.
         const statusRows = rows.filter((row) => {
             const decided = decidedByRow.get(row);
-            if (decided) return decided === def.column;
-            return isRwp ? isRwpStatus(row.last_status) : !isRwpStatus(row.last_status);
+            const isRwpDecided = decided ? decided === "RWP" : isRwpStatus(row.last_status);
+            return isRwp ? isRwpDecided : !isRwpDecided;
         });
         const dateRows = statusRows.filter((row) => parseDateTime(row.last_movement).date === businessDate);
         const byShk = new Map();
@@ -15818,8 +15825,15 @@
         const decidedByRow = new Map();
         eligibleDateRows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         const isMailRow = (row) => {
+            // Only trust a decided value that actually answers the
+            // mail/ПМ question (rules 17/18). A transfer can contain rows
+            // whose own status matches some unrelated rule (e.g. PAP) --
+            // that decided value says nothing about this row's route
+            // number, so it must fall back to the hardcode route check,
+            // not be read as "not mail".
             const decided = decidedByRow.get(row);
-            if (decided) return decided === "Почта";
+            if (decided === "Почта") return true;
+            if (decided === "ПМ") return false;
             return isMailRoute(routeNumberFromMx(row.mx));
         };
         const transferIds = Array.from(new Set(smsRows.map((row) => row.transfer).filter(isGroupableIdentifier))).sort((a, b) => a.localeCompare(b, "ru"));
