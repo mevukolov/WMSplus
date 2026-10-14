@@ -12305,10 +12305,9 @@
         return "<div class='routing-rule-condition' data-rule-condition>"
             + "<select data-condition-attribute>"
             + "<option value='status'" + (attribute === "status" ? " selected" : "") + ">Статус</option>"
-            + "<option value='tare_id'" + (attribute === "tare_id" ? " selected" : "") + ">Тара</option>"
-            + "<option value='price'" + (attribute === "price" ? " selected" : "") + ">Цена</option>"
             + "<option value='mx'" + (attribute === "mx" ? " selected" : "") + ">МХ</option>"
-            + "<option value='route_number'" + (attribute === "route_number" ? " selected" : "") + ">Номер маршрута</option>"
+            + "<option value='route_number'" + (attribute === "route_number" ? " selected" : "") + ">Номер маршрута (из МХ)</option>"
+            + "<option value='tare_id'" + (attribute === "tare_id" ? " selected" : "") + ">Тара (только для уже созданных задач, не для новых выгрузок)</option>"
             + "</select>"
             + "<select data-condition-operator>"
             + "<option value='in'" + (operator === "in" ? " selected" : "") + ">один из (через запятую)</option>"
@@ -12326,22 +12325,38 @@
             + "</div>";
     }
 
+    const NO_ORDER_FOLDER_TARGETS = [
+        { value: "Разбор ОПП // USD", label: "USD" },
+        { value: "Разбор ОПП // TMM", label: "TMM" },
+    ];
+
+    function routingRuleGroupingSelectHtml(dataAttr, value) {
+        return "<select " + dataAttr + ">"
+            + "<option value=''" + (!value ? " selected" : "") + ">Каждый ШК отдельно</option>"
+            + "<option value='tare_id'" + (value === "tare_id" ? " selected" : "") + ">По таре -- объединить в одну задачу</option>"
+            + "</select>";
+    }
+
     function routingRuleRowHtml(row) {
         const conditions = Array.isArray(row.conditions) && row.conditions.length ? row.conditions : [{ attribute: "status", operator: "in", value: [] }];
         const outputKey = row.output_key || "zone";
         const isZone = outputKey === "zone";
+        const isFolder = outputKey === "no_order_folder";
         const targetOptions = activeReviewZones().map((section) =>
             "<option value='" + escapeHtml(section) + "'" + (row.target_task_type === section ? " selected" : "") + ">" + escapeHtml(section) + "</option>"
         ).join("");
-        const outputValueText = isZone ? "" : JSON.stringify(row.output_value !== undefined ? row.output_value : {});
+        const folderTargetValue = (row.output_value && row.output_value.target_task_type) || "";
+        const folderTargetOptions = NO_ORDER_FOLDER_TARGETS.map((opt) =>
+            "<option value='" + escapeHtml(opt.value) + "'" + (folderTargetValue === opt.value ? " selected" : "") + ">" + escapeHtml(opt.label) + "</option>"
+        ).join("");
+        const folderGroupingValue = (row.output_value && row.output_value.grouping_attribute) || "";
         return "<div class='routing-rule-card' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
             + "<div class='routing-rule-head'>"
-            + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет'>"
+            + "<input data-rule-priority type='number' min='1' step='1' value='" + escapeHtml(row.priority || "") + "' placeholder='Приоритет (меньше -- проверяется раньше)'>"
             + "<input data-rule-name type='text' value='" + escapeHtml(row.name || "") + "' placeholder='Название правила'>"
             + "<select data-rule-output-key>"
-            + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона (рабочее)</option>"
-            + "<option value='no_order_folder'" + (outputKey === "no_order_folder" ? " selected" : "") + ">Подпапка \"Без заказа\" (рабочее)</option>"
-            + "<option value='priority_tier'" + (outputKey === "priority_tier" ? " selected" : "") + ">Приоритет по цене (пока не используется)</option>"
+            + "<option value='zone'" + (isZone ? " selected" : "") + ">Зона -- куда кладём ШК</option>"
+            + "<option value='no_order_folder'" + (isFolder ? " selected" : "") + ">Подпапка внутри \"Без заказа\"</option>"
             + "</select>"
             + "<label class='writeoff-term-active'><input data-rule-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активно</label>"
             + "<button type='button' class='btn btn-square' data-rule-remove aria-label='Удалить правило'>×</button>"
@@ -12352,19 +12367,17 @@
             + "<button type='button' class='btn btn-outline' data-add-condition style='margin-top:8px'>+ Добавить условие</button>"
             + "</div>"
             + "<div class='routing-rule-section' data-rule-result-zone" + (isZone ? "" : " style='display:none'") + ">"
-            + "<div class='routing-rule-section-label'>Результат -- куда класть</div>"
+            + "<div class='routing-rule-section-label'>Куда положить ШК</div>"
             + "<div class='routing-rule-result'>"
             + "<select data-rule-target>" + targetOptions + "</select>"
-            + "<select data-rule-grouping>"
-            + "<option value=''" + (!row.grouping_attribute ? " selected" : "") + ">Каждый ШК отдельно</option>"
-            + "<option value='tare_id'" + (row.grouping_attribute === "tare_id" ? " selected" : "") + ">По таре</option>"
-            + "</select>"
+            + routingRuleGroupingSelectHtml("data-rule-grouping", row.grouping_attribute)
             + "</div>"
             + "</div>"
-            + "<div class='routing-rule-section' data-rule-result-other" + (isZone ? " style='display:none'" : "") + ">"
-            + "<div class='routing-rule-section-label'>Результат (JSON)</div>"
+            + "<div class='routing-rule-section' data-rule-result-folder" + (isFolder ? "" : " style='display:none'") + ">"
+            + "<div class='routing-rule-section-label'>В какую подпапку \"Без заказа\"</div>"
             + "<div class='routing-rule-result'>"
-            + "<input data-rule-output-value type='text' value='" + escapeHtml(outputValueText) + "' placeholder='Для подпапки \"Без заказа\": {\"target_task_type\":\"Разбор ОПП // USD\"}'>"
+            + "<select data-rule-folder-target>" + folderTargetOptions + "</select>"
+            + routingRuleGroupingSelectHtml("data-rule-folder-grouping", folderGroupingValue)
             + "</div>"
             + "</div>"
             + "</div>";
@@ -12414,11 +12427,11 @@
     function toggleRoutingRuleResultSections(cardEl) {
         if (!cardEl) return;
         const outputKeySelect = cardEl.querySelector("[data-rule-output-key]");
-        const isZone = !outputKeySelect || outputKeySelect.value === "zone";
+        const outputKey = (outputKeySelect && outputKeySelect.value) || "zone";
         const zoneSection = cardEl.querySelector("[data-rule-result-zone]");
-        const otherSection = cardEl.querySelector("[data-rule-result-other]");
-        if (zoneSection) zoneSection.style.display = isZone ? "" : "none";
-        if (otherSection) otherSection.style.display = isZone ? "none" : "";
+        const folderSection = cardEl.querySelector("[data-rule-result-folder]");
+        if (zoneSection) zoneSection.style.display = outputKey === "zone" ? "" : "none";
+        if (folderSection) folderSection.style.display = outputKey === "no_order_folder" ? "" : "none";
     }
 
     async function removeRoutingRuleRow(rowEl) {
@@ -12492,18 +12505,13 @@
                     output_value: { target_task_type: targetTaskType, grouping_attribute: groupingAttribute },
                 };
             }
-            const rawOutputValue = normalizeText(row.querySelector("[data-rule-output-value]") && row.querySelector("[data-rule-output-value]").value);
-            let outputValue;
-            try {
-                outputValue = rawOutputValue ? JSON.parse(rawOutputValue) : {};
-            } catch (error) {
-                outputValue = {};
-            }
+            const folderTarget = row.querySelector("[data-rule-folder-target]").value;
+            const folderGrouping = row.querySelector("[data-rule-folder-grouping]").value || null;
             return {
                 ...base,
                 target_task_type: null,
                 grouping_attribute: null,
-                output_value: outputValue,
+                output_value: { target_task_type: folderTarget, grouping_attribute: folderGrouping },
             };
         }).filter(Boolean);
     }

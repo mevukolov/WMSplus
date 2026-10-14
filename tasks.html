@@ -237,7 +237,7 @@
         .routing-rule-condition input[data-condition-value] { flex: 1 1 160px; min-width: 120px; }
         .routing-rule-result { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         .routing-rule-result select, .routing-rule-result input { border: 1px solid #e2e8f0; border-radius: 11px; padding: 9px 10px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #fff; }
-        .routing-rule-result input[data-rule-output-value] { flex: 1 1 260px; }
+        .routing-rule-result select[data-rule-folder-target] { flex: 1 1 200px; }
         .writeoff-reco-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
         .writeoff-reco-card { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; }
         .writeoff-reco-card strong { display: block; color: #242038; font-size: 20px; line-height: 1.05; }
@@ -2842,9 +2842,10 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Правила маршрутизации</h3>
-                <p class="work-subtitle">Решает, в какой участок (зону) кладётся ШК по его статусу/таре -- без правки кода. Работает и для новых ШК (без задачи), и для уже лежащих в работе: если статус поменялся и под него есть правило, ШК переедет в нужный участок сам. Правила проверяются по приоритету сверху вниз, первое подходящее побеждает.</p>
-                <p class="work-subtitle">Тип "Зона" -- рабочий, именно он сейчас решает участок. Остальные типы (например "Приоритет по цене") -- задел на будущее: условия/результат для них уже можно настроить и сохранить, но ни один модуль выгрузки их пока не читает, так что на участки они не влияют.</p>
-                <p class="work-subtitle">Для правил с типом "Зона" условие реально понимает только атрибуты "Статус" и "Тара" с операторами "один из"/"равно" -- остальные атрибуты/операторы в списке (Цена, МХ, Номер маршрута, "больше", "между" и т.п.) предназначены для будущих типов правил и для "Зоны" пока ничего не решают.</p>
+                <p class="work-subtitle">Решает, куда попадает ШК -- без правки кода. Работает и при новой выгрузке, и для уже созданных задач: если статус поменялся и под него есть правило, ШК переедет сам. Приоритет проверяется сверху вниз, побеждает первое подходящее правило.</p>
+                <p class="work-subtitle"><strong>Зона</strong> -- решает участок целиком (Маркетплейс, ПЦ, Предсортировка, WMI, RWP, ПМ/Почта и т.д.), для любой выгрузки. <strong>Подпапка внутри "Без заказа"</strong> -- дробит только саму зону "Без заказа" на вложенные папки (сейчас USD/TMM) и никогда не выпускает ШК за её пределы.</p>
+                <p class="work-subtitle">Условия: "Статус" и "МХ" работают и при загрузке файла, и при переклассификации уже созданных задач. "Номер маршрута" (берётся из МХ) -- тоже везде, нужен для правил ПМ/Почта. "Тара" работает только для уже созданных задач -- в момент самой загрузки не учитывается.</p>
+                <p class="work-subtitle">Несколько зон защищены от этого движка насовсем -- переехать В них можно, а ИЗ них нет: Чистые списания, Без заказа, Движение после продажи, Предсписок, ПМ, Почта.</p>
             </div>
             <button id="closeRoutingRules" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
