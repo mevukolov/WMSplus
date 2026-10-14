@@ -12698,16 +12698,26 @@
         return normalizeIdentifier(raw);
     }
 
+    function testUploadStatusField(module) {
+        return (module === "packaging" || module === "rwp") ? "last_status" : "product_status";
+    }
+
     async function testUploadBreakdown(module, rows, businessDate) {
         const dateField = testUploadDateField(module);
         const dateRows = rows.filter((row) => parseDateTime(row[dateField]).date === businessDate);
         const evaluator = module === "no_order" ? evaluateNoOrderFolderRulesBatch : evaluateZoneRulesBatch;
         const decisions = dateRows.length ? await evaluator(dateRows) : [];
         const byRule = new Map();
+        const statusField = testUploadStatusField(module);
+        const unmatchedByCode = new Map();
         dateRows.forEach((row, index) => {
             const decided = decisions[index];
             const key = decided ? (decided.ruleName ? decided.ruleName + " → " + decided.zone : decided.zone) : "(без правила -- решает хардкод в коде)";
             byRule.set(key, (byRule.get(key) || 0) + 1);
+            if (!decided) {
+                const code = latinStatusCode(row[statusField]) || "(без распознаваемого кода)";
+                unmatchedByCode.set(code, (unmatchedByCode.get(code) || 0) + 1);
+            }
         });
         const preview = module === "pm"
             ? await buildPreviewForModule("pm", dateRows, [], businessDate)
@@ -12719,6 +12729,7 @@
             totalRows: rows.length,
             dateRowsCount: dateRows.length,
             byRule: Array.from(byRule.entries()).map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count),
+            unmatchedStatuses: Array.from(unmatchedByCode.entries()).map(([code, count]) => ({ code, count })).sort((a, b) => b.count - a.count),
             taskCount: (preview.tasks || []).length,
             coveredCount: coveredIds.size,
             excludedRows,
@@ -12727,6 +12738,7 @@
 
     function routingRuleTestResultHtml(result) {
         const ruleRows = result.byRule.map((r) => "<tr><td>" + escapeHtml(r.key) + "</td><td>" + r.count + "</td></tr>").join("");
+        const unmatchedRows = result.unmatchedStatuses.map((r) => "<tr><td>" + escapeHtml(r.code) + "</td><td>" + r.count + "</td></tr>").join("");
         const excludedSample = result.excludedRows.slice(0, 50).map((row) => {
             const id = row.product || row.shk || "-";
             const status = row.product_status || row.last_status || "-";
@@ -12737,6 +12749,9 @@
             + "<p>Будет создано задач: <strong>" + result.taskCount + "</strong>. Войдёт в задачи ШК: <strong>" + result.coveredCount + "</strong>. Не войдёт никуда: <strong>" + result.excludedRows.length + "</strong>.</p>"
             + "<h4>По какому правилу сколько ШК</h4>"
             + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Правило → зона</th><th>ШК</th></tr></thead><tbody>" + (ruleRows || "<tr><td colspan='2'>Совпадений нет.</td></tr>") + "</tbody></table></div>"
+            + "<h4>Статусы, которые не подошли ни по одному из правил</h4>"
+            + "<p class='work-subtitle' style='margin:0 0 8px'>Не значит, что строка потеряется -- хардкод-фоллбэк может всё равно её классифицировать. Значит только, что НИ ОДНО активное правило этот код статуса не ловит -- удобно для поиска пробелов.</p>"
+            + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Код статуса</th><th>ШК</th></tr></thead><tbody>" + (unmatchedRows || "<tr><td colspan='2'>Все статусы в файле попали хоть под какое-то правило.</td></tr>") + "</tbody></table></div>"
             + (result.excludedRows.length
                 ? "<h4>Исключённые строки (до 50 из " + result.excludedRows.length + ")</h4><div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>ШК</th><th>Статус</th><th>МХ</th></tr></thead><tbody>" + excludedSample + "</tbody></table></div>"
                 : "");
@@ -12757,7 +12772,15 @@
         setFlowModalOpen("routingRuleTestModal", false);
     }
 
-    async function handleRoutingRuleTestFile(file) {
+    // Re-reads whatever file currently sits in the file input, parsed for
+    // whichever module is currently selected -- triggered by BOTH the file
+    // input's change and the module select's change, so switching modules
+    // after picking a file actually re-parses with the right row shape
+    // instead of silently keeping the stale module from file-select time.
+    async function reparseRoutingRuleTestFile() {
+        const fileInput = $("routingRuleTestFile");
+        const file = fileInput && fileInput.files && fileInput.files[0];
+        if (!file) return;
         const module = $("routingRuleTestModule").value;
         $("routingRuleTestFileName").textContent = "Читаю файл...";
         $("routingRuleTestDateRow").style.display = "none";
@@ -12766,7 +12789,7 @@
             const kind = kindForModule(module);
             const rows = await readWorkbookRows(file, kind);
             state.routingRuleTest = { rows, module };
-            $("routingRuleTestFileName").textContent = file.name + " -- строк: " + rows.length;
+            $("routingRuleTestFileName").textContent = file.name + " -- строк: " + rows.length + " (читаю как \"" + moduleDef(module).label + "\")";
             const dateField = testUploadDateField(module);
             const counts = new Map();
             rows.forEach((row) => {
@@ -19247,16 +19270,13 @@
         $("closeRoutingRules").addEventListener("click", closeRoutingRulesModal);
         $("addRoutingRule").addEventListener("click", addRoutingRuleDraft);
         $("saveRoutingRules").addEventListener("click", () => { void saveRoutingRulesFromModal(); });
-        $("reloadRoutingRules").addEventListener("click", () => { void loadRoutingRules(true); });
         $("closeRoutingRuleEdit").addEventListener("click", closeRoutingRuleEditModal);
         $("routingRuleEditModal").addEventListener("click", (event) => { if (event.target === $("routingRuleEditModal")) closeRoutingRuleEditModal(); });
         $("openRoutingRuleTest").addEventListener("click", openRoutingRuleTestModal);
         $("closeRoutingRuleTest").addEventListener("click", closeRoutingRuleTestModal);
         $("routingRuleTestModal").addEventListener("click", (event) => { if (event.target === $("routingRuleTestModal")) closeRoutingRuleTestModal(); });
-        $("routingRuleTestFile").addEventListener("change", () => {
-            const file = $("routingRuleTestFile").files && $("routingRuleTestFile").files[0];
-            if (file) void handleRoutingRuleTestFile(file);
-        });
+        $("routingRuleTestFile").addEventListener("change", () => { void reparseRoutingRuleTestFile(); });
+        $("routingRuleTestModule").addEventListener("change", () => { void reparseRoutingRuleTestFile(); });
         $("runRoutingRuleTest").addEventListener("click", () => { void runRoutingRuleTest(); });
         $("closeModuleSettings").addEventListener("click", closeModuleSettingsModal);
         $("closeReviewZones").addEventListener("click", closeReviewZonesModal);
