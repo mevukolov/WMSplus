@@ -12702,6 +12702,20 @@
         return (module === "packaging" || module === "rwp") ? "last_status" : "product_status";
     }
 
+    // Whether the module's OWN hardcode would ever have wanted this row,
+    // independent of any rule. Used to tell "this row belongs here but got
+    // filtered out somewhere" apart from "this row is from a completely
+    // different module and was never a candidate in the first place".
+    function testUploadIsModuleCandidate(module, row) {
+        if (module === "marketplace_pc") return (isMarketplaceStatus(row) && !mxHasBuffer(row)) || (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row));
+        if (module === "presort") return isPresortStatus(row) || isLabelingStatus(row);
+        if (module === "wmi_mp_pc") return isWmiMpPcStatus(row);
+        if (module === "packaging") return !isRwpStatus(row.last_status);
+        if (module === "rwp") return isRwpStatus(row.last_status);
+        if (module === "pm") return isPmBufferStatus(row.product_status);
+        return true;
+    }
+
     async function testUploadBreakdown(module, rows, businessDate) {
         const dateField = testUploadDateField(module);
         const dateRows = rows.filter((row) => parseDateTime(row[dateField]).date === businessDate);
@@ -12723,15 +12737,39 @@
                 unmatchedRowsByCode.set(code, bucket);
             }
         });
-        const preview = module === "pm"
-            ? await buildPreviewForModule("pm", dateRows, [], businessDate)
-            : await buildPreviewForModule(module, dateRows, [], businessDate);
+        // buildMarketplacePcPreview is the one build function that ignores
+        // the businessDate argument entirely unless state.manualDate is
+        // set -- it falls back to uploadDateForModule's own "planned"
+        // upload date, unrelated to whatever date the test file actually
+        // has. Every real upload flow (manual backfill included) always
+        // has state.manualDate set by that point; the test tool runs
+        // outside that flow, so it has to set it itself or marketplace_pc
+        // silently tests against the wrong date and drops rows that would
+        // otherwise have matched correctly.
+        const previousManualDate = state.manualDate;
+        state.manualDate = businessDate;
+        let preview;
+        try {
+            preview = module === "pm"
+                ? await buildPreviewForModule("pm", dateRows, [], businessDate)
+                : await buildPreviewForModule(module, dateRows, [], businessDate);
+        } finally {
+            state.manualDate = previousManualDate;
+        }
         const rowToTaskZone = new Map();
         (preview.tasks || []).forEach((task) => {
             const zoneLabel = task.task_type || task.column || "-";
             (task.source_shk_ids || []).forEach((id) => rowToTaskZone.set(id, zoneLabel));
         });
-        const excludedRows = dateRows.filter((row) => !rowToTaskZone.has(testUploadRowIdentifier(module, row)));
+        // "Excluded" should only flag rows that had SOME chance of
+        // belonging to this module (a rule matched them, or the module's
+        // own hardcode would have claimed them) -- a row whose status is
+        // simply from a different module entirely (e.g. an SMS/ПМ row
+        // sitting in the same file as a marketplace_pc test) was never a
+        // candidate here and showing it as "excluded" is just noise.
+        const excludedRows = dateRows.filter((row, index) =>
+            (decisions[index] || testUploadIsModuleCandidate(module, row)) && !rowToTaskZone.has(testUploadRowIdentifier(module, row))
+        );
         return {
             module,
             totalRows: rows.length,
@@ -12776,8 +12814,8 @@
             return "<tr><td>" + escapeHtml(id) + "</td><td>" + escapeHtml(status) + "</td><td>" + escapeHtml(row.mx || "-") + "</td></tr>";
         }).join("");
         return "<div class='status-line good'>Ничего не сохранено -- это только прогноз.</div>"
-            + "<p>Строк за выбранную дату: " + result.dateRowsCount + " (всего в файле: " + result.totalRows + ")</p>"
-            + "<p>Будет создано задач: <strong>" + result.taskCount + "</strong>. Войдёт в задачи ШК: <strong>" + result.coveredCount + "</strong>. Не войдёт никуда: <strong>" + result.excludedRows.length + "</strong>.</p>"
+            + "<p>Строк за выбранную дату: " + result.dateRowsCount + " (всего в файле: " + result.totalRows + ", среди них могут быть и строки других участков -- в эту цифру не входят)</p>"
+            + "<p>Будет создано задач: <strong>" + result.taskCount + "</strong>. Войдёт в задачи ШК: <strong>" + result.coveredCount + "</strong>. Должно было подойти, но не попало никуда: <strong>" + result.excludedRows.length + "</strong>.</p>"
             + "<h4>По какому правилу сколько ШК</h4>"
             + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Правило → зона</th><th>ШК</th></tr></thead><tbody>" + (ruleRows || "<tr><td colspan='2'>Совпадений нет.</td></tr>") + "</tbody></table></div>"
             + "<h4>Статусы, которые не подошли ни по одному из правил</h4>"
@@ -12785,7 +12823,9 @@
             + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>Код статуса</th><th>ШК</th></tr></thead><tbody>" + (unmatchedRows || "<tr><td colspan='2'>Все статусы в файле попали хоть под какое-то правило.</td></tr>") + "</tbody></table></div>"
             + "<div id='routingRuleTestUnmatchedDetail'></div>"
             + (result.excludedRows.length
-                ? "<h4>Исключённые строки (до 50 из " + result.excludedRows.length + ")</h4><div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>ШК</th><th>Статус</th><th>МХ</th></tr></thead><tbody>" + excludedSample + "</tbody></table></div>"
+                ? "<h4>Должно было подойти этому участку, но не попало никуда (до 50 из " + result.excludedRows.length + ")</h4>"
+                    + "<p class='work-subtitle' style='margin:0 0 8px'>Только строки, которые реально относятся к этому участку (подошли под правило или под хардкод) -- строки других статусов/участков (например ПМ-статусы при тесте marketplace_pc) сюда не попадают, это не шум.</p>"
+                    + "<div class='sample-table-wrap'><table class='sample-table'><thead><tr><th>ШК</th><th>Статус</th><th>МХ</th></tr></thead><tbody>" + excludedSample + "</tbody></table></div>"
                 : "");
     }
 
