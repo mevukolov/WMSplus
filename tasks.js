@@ -12518,8 +12518,13 @@
         const name = row.name || "(без названия)";
         const fromZoneBadge = row.from_zone ? "<span class='routing-rule-summary-badge'>только из «" + escapeHtml(row.from_zone.replace("Разбор ОПП // ", "")) + "»</span>" : "";
         const formatBadge = "<span class='routing-rule-summary-badge routing-rule-summary-format'>" + escapeHtml(sourceFormatLabel(row.source_format || "general")) + "</span>";
+        // "#N" у фильтров и у зона-правил -- РАЗНЫЕ последовательности
+        // (уникальность в БД на (output_key, priority), не просто
+        // priority): "Ф1" рядом с "З7" в одной группе -- это нормально,
+        // не "правила не по порядку", у каждого вида своя нумерация.
+        const priorityPrefix = row.output_key === "filter" ? "Ф" : "З";
         return "<div class='routing-rule-summary-row" + (isActive ? "" : " inactive") + "' data-rule-summary-row data-rule-index='" + index + "' tabindex='0' role='button'>"
-            + "<span class='routing-rule-summary-priority'>#" + escapeHtml(row.priority || "?") + "</span>"
+            + "<span class='routing-rule-summary-priority' title='" + (row.output_key === "filter" ? "Номер в очереди фильтров" : "Номер в очереди зона-правил") + "'>" + priorityPrefix + escapeHtml(row.priority || "?") + "</span>"
             + "<span class='routing-rule-summary-name'>" + escapeHtml(name) + "</span>"
             + formatBadge
             + "<span class='routing-rule-summary-target'>→ " + escapeHtml(targetLabel) + "</span>"
@@ -12540,6 +12545,13 @@
                 const fa = a.row.source_format || "general";
                 const fb = b.row.source_format || "general";
                 if (fa !== fb) return sourceFormatLabel(fa).localeCompare(sourceFormatLabel(fb), "ru");
+                // Фильтры и зона-правила -- разные последовательности
+                // приоритета (уникальность в БД на (output_key, priority)):
+                // сначала все фильтры по порядку, потом все зона-правила по
+                // порядку, а не единый список вперемешку по голому priority.
+                const ka = a.row.output_key === "filter" ? 0 : 1;
+                const kb = b.row.output_key === "filter" ? 0 : 1;
+                if (ka !== kb) return ka - kb;
                 return (Number(a.row.priority) || 0) - (Number(b.row.priority) || 0);
             });
         target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
@@ -12791,9 +12803,17 @@
         const db = supabaseDb();
         const status = $("routingRulesStatus");
         const button = $("saveRoutingRules");
+        // id/created_at заполняем здесь принудительно для ВСЕХ строк (не
+        // только новых) -- весь массив уходит одним bulk-upsert вместе с
+        // уже существующими строками, а PostgREST строит общий список
+        // колонок на весь батч: если у части строк (новый черновик) поле
+        // отсутствует, оно уходит как явный NULL вместо применения
+        // серверного дефолта -- отсюда "null value in column ... violates
+        // not-null constraint" на id/created_at у новых правил.
+        const nowIso = new Date().toISOString();
         const rows = (state.routingRules.rows || [])
             .filter((row) => row.name && Array.isArray(row.conditions) && row.conditions.length)
-            .map((row) => ({ ...row, updated_at: new Date().toISOString() }));
+            .map((row) => ({ ...row, id: row.id || uuidValue(), created_at: row.created_at || nowIso, updated_at: nowIso }));
         if (!rows.length) {
             if (status) status.textContent = "Нет строк для сохранения.";
             return;
