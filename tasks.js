@@ -12552,6 +12552,7 @@
             + "<option value='mx'" + (attribute === "mx" ? " selected" : "") + ">МХ</option>"
             + "<option value='route_number'" + (attribute === "route_number" ? " selected" : "") + ">Номер маршрута (из МХ)</option>"
             + "<option value='tare_id'" + (attribute === "tare_id" ? " selected" : "") + ">Тара (только для уже созданных задач, не для новых выгрузок)</option>"
+            + "<option value='price'" + (attribute === "price" ? " selected" : "") + ">Цена (только для новых выгрузок, не учитывается при переклассификации уже созданных задач)</option>"
             + "</select>"
             + "<select data-condition-operator>"
             + "<option value='in'" + (operator === "in" ? " selected" : "") + ">один из (через запятую)</option>"
