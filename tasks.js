@@ -12437,8 +12437,6 @@
             + "</div>";
     }
 
-    const BEZ_ZAKAZA_TASK_TYPE = "Разбор ОПП // Без заказа";
-
     const SOURCE_FORMAT_OPTIONS = [
         { value: "general", label: "Типовая выгрузка -- В заказе (ПМ/Предсортировка/Маркетплейс+ПЦ/WMI)" },
         { value: "no_order", label: "Без заказа (USD/TMM/остальное)" },
@@ -12462,7 +12460,6 @@
     function routingRuleRowHtml(row) {
         const conditions = Array.isArray(row.conditions) && row.conditions.length ? row.conditions : [{ attribute: "status", operator: "in", value: [] }];
         const targetValue = row.target_task_type || (row.output_value && row.output_value.target_task_type) || "";
-        const fromBezZakaza = row.from_zone === BEZ_ZAKAZA_TASK_TYPE;
         const isFilter = row.output_key === "filter";
         const sourceFormat = row.source_format || "general";
         return "<div class='routing-rule-card' data-routing-rule-row data-rule-id='" + escapeHtml(row.id || "") + "'>"
@@ -12493,15 +12490,15 @@
             + "<div class='routing-rule-checkbox-row'>"
             + "<label><input data-rule-force-tare-grouping type='checkbox'" + (row.force_tare_grouping ? " checked" : "") + "> Группировать по таре, даже если ШК один</label>"
             + "<label><input data-rule-force-high-priority type='checkbox'" + (row.force_high_priority ? " checked" : "") + "> Высокий приоритет</label>"
-            + "<label><input data-rule-from-bez-zakaza type='checkbox'" + (fromBezZakaza ? " checked" : "") + "> Триггер «Без заказа»</label>"
             + "</div>"
-            + "<p class='work-subtitle' style='margin:6px 0 0'>Триггер «Без заказа» обычно выключен -- правило тогда проверяет ЛЮБОЙ активный ШК, где бы он ни лежал. Включи, только если правило должно срабатывать исключительно для ШК, УЖЕ лежащих в зоне «Без заказа» -- так настроены USD и TMM.</p>"
             + "<div class='routing-rule-settings-grid'>"
+            + "<label class='routing-rule-settings-field'><span>Ограничить реклассификацию зоной (task_type)</span><input data-rule-from-zone type='text' value='" + escapeHtml(row.from_zone || "") + "' placeholder='пусто = любой активный ШК, где бы он ни лежал'></label>"
             + "<label class='routing-rule-settings-field'><span>Теги</span><input data-rule-tags type='text' value='" + escapeHtml((row.tags || []).join(", ")) + "' placeholder='через запятую, необязательно'></label>"
             + "<label class='routing-rule-settings-field'><span>Срок выполнения, дней</span><input data-rule-task-deadline-days type='number' min='0' step='1' value='" + escapeHtml(row.task_deadline_days === null || row.task_deadline_days === undefined ? "" : row.task_deadline_days) + "' placeholder='пусто = 1 по умолчанию'></label>"
             + "<label class='routing-rule-settings-field'><span>Окно выгрузки, дней назад</span><input data-rule-upload-offset-days type='number' step='1' value='" + escapeHtml(row.upload_offset_days || 0) + "' placeholder='0 = сегодня'></label>"
             + "</div>"
             + "<p class='work-subtitle' style='margin:4px 0 0'>0 -- строго сегодняшняя строка. Любое другое число (например -4) -- строка должна быть НЕ СВЕЖЕЕ этого числа дней (4+ дня, более старые тоже подходят); кнопка выгрузки сама запросит файл с нужным запасом по датам.</p>"
+            + "<p class='work-subtitle' style='margin:4px 0 0'>«Ограничить реклассификацию зоной» работает ТОЛЬКО для уже существующих активных задач (Sweep/автопереклассификация), на построение новых задач из выгрузки не влияет. Пусто -- правило при реклассификации проверяет любой активный ШК где бы он ни лежал (ОПАСНО для широких условий типа \"не содержит X\" -- может затронуть тысячи чужих задач, см. инцидент этой сессии). Укажи точный task_type -- либо зону-источник (так настроены USD/TMM: \"Разбор ОПП // Без заказа\"), либо ТУ ЖЕ зону, что и target (self-scope -- гарантированный no-op при реклассификации, нужен для правил, которые должны работать только при первом построении задачи из выгрузки).</p>"
             + "</div>"
             + "</div>";
     }
@@ -12753,8 +12750,8 @@
             };
         }
         const targetTaskType = cardEl.querySelector("[data-rule-target]").value;
-        const fromBezZakazaEl = cardEl.querySelector("[data-rule-from-bez-zakaza]");
-        const fromZone = (fromBezZakazaEl && fromBezZakazaEl.checked) ? BEZ_ZAKAZA_TASK_TYPE : null;
+        const fromZoneEl = cardEl.querySelector("[data-rule-from-zone]");
+        const fromZone = normalizeText(fromZoneEl && fromZoneEl.value) || null;
         const forceTareGrouping = Boolean(cardEl.querySelector("[data-rule-force-tare-grouping]") && cardEl.querySelector("[data-rule-force-tare-grouping]").checked);
         const forceHighPriority = Boolean(cardEl.querySelector("[data-rule-force-high-priority]") && cardEl.querySelector("[data-rule-force-high-priority]").checked);
         const tagsRaw = normalizeText(cardEl.querySelector("[data-rule-tags]") && cardEl.querySelector("[data-rule-tags]").value);
@@ -12817,6 +12814,32 @@
         if (!rows.length) {
             if (status) status.textContent = "Нет строк для сохранения.";
             return;
+        }
+        // Живой инцидент этой сессии (дважды): zone-правило без from_zone,
+        // у которого ВСЕ условия -- только not_contains/gt/gte/lt/lte
+        // (нет ни одного узкого "in"/"eq"/"contains"), при реклассификации
+        // существующих задач matches любой активный ШК почти в любой зоне
+        // (в отличие от build-time, где строка -- это конкретная строка
+        // выгрузки, при реклассификации "status" -- это ТЕКУЩИЙ живой
+        // статус любого активного ШК системы). Подтверждение здесь --
+        // дешёвая защита до того, как это снова случайно уйдёт в прод.
+        const riskyRules = rows.filter((row) => {
+            if (row.output_key !== "zone" || row.from_zone || row.is_active === false) return false;
+            const conditions = Array.isArray(row.conditions) ? row.conditions : [];
+            if (!conditions.length) return false;
+            return conditions.every((c) => ["not_contains", "gt", "gte", "lt", "lte", "between"].includes(c.operator));
+        });
+        if (riskyRules.length) {
+            const names = riskyRules.map((r) => "«" + r.name + "»").join(", ");
+            const proceed = window.confirm(
+                "Правило(а) " + names + " -- без ограничения зоны (\"Ограничить реклассификацию зоной\") и БЕЗ узкого условия (in/eq/contains). "
+                + "При реклассификации уже существующих задач это может затронуть тысячи ШК в чужих зонах (уже было дважды в этой сессии). "
+                + "Заполни поле \"Ограничить реклассификацию зоной\" точным task_type (например 'Разбор ОПП // Упаковка'), если это НЕ сознательно сделано для проверки любого активного ШК. Сохранить как есть?"
+            );
+            if (!proceed) {
+                if (status) status.textContent = "Сохранение отменено.";
+                return;
+            }
         }
         if (!db) {
             if (status) status.textContent = "Supabase недоступен.";
