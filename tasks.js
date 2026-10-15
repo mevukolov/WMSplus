@@ -12664,6 +12664,13 @@
         const rows = state.routingRules.rows || [];
         const nextPriority = rows.reduce((max, row) => Math.max(max, Number(row.priority) || 0), 0) + 1;
         state.routingRules.rows = rows.concat({
+            // Явный id нужен уже здесь, а не только на сервере: весь
+            // массив правил уходит ОДНИМ bulk-upsert вместе с уже
+            // существующими строками (у которых id есть) -- PostgREST
+            // строит общий список колонок на весь батч, и строка без id
+            // в этом случае получает NULL явно, а не "примени дефолт
+            // gen_random_uuid()" (отсюда "null value in column id").
+            id: uuidValue(),
             priority: nextPriority,
             name: "",
             is_active: true,
