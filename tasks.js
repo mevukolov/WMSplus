@@ -240,7 +240,7 @@
     const DEFAULT_MODULES = [
         {
             module: "general",
-            label: "Типовая выгрузка",
+            label: "Типовая выгрузка (В заказе)",
             sourceModule: "manual_general_upload",
             uploadType: "general",
             offsetDays: 0,
@@ -248,7 +248,7 @@
             taskType: "",
             taskTypeLabel: "",
             column: "",
-            description: "Один файл на все участки, использующие общий формат колонок (ПМ, Предсортировка, Маркетплейс+ПЦ, WMI, Без заказа) -- куда попадёт каждый ШК решают правила в админке.",
+            description: "Один файл на участки В ЗАКАЗЕ, использующие общий формат колонок (ПМ, Предсортировка, Маркетплейс+ПЦ, WMI) -- куда попадёт каждый ШК решают правила в админке. \"Без заказа\" -- отдельная кнопка, т.к. эта принадлежность не определяется по статусу строки.",
             responsibilityZone: "Исходящий поток",
             required: true,
         },
@@ -438,7 +438,7 @@
         },
     ];
 
-    const VISIBLE_MODULES = ["general", "packaging", "after_sale_movement"];
+    const VISIBLE_MODULES = ["general", "no_order", "packaging", "after_sale_movement"];
     const REVIEW_SECTIONS = [
         "Упаковка",
         "RWP",
@@ -12354,7 +12354,8 @@
     const BEZ_ZAKAZA_TASK_TYPE = "Разбор ОПП // Без заказа";
 
     const SOURCE_FORMAT_OPTIONS = [
-        { value: "general", label: "Типовая выгрузка (ПМ/Предсортировка/Маркетплейс+ПЦ/WMI/Без заказа)" },
+        { value: "general", label: "Типовая выгрузка -- В заказе (ПМ/Предсортировка/Маркетплейс+ПЦ/WMI)" },
+        { value: "no_order", label: "Без заказа (USD/TMM/остальное)" },
         { value: "packaging", label: "Упаковка / RWP" },
         { value: "after_sale_movement", label: "Движение после продажи" },
     ];
@@ -12769,7 +12770,7 @@
         if (module === "packaging") return [moduleDef("packaging").column];
         if (module === "rwp") return [moduleDef("rwp").column];
         if (module === "pm") return ["ПМ", "Почта"];
-        if (module === "no_order") return [moduleDef("no_order").taskType, moduleDef("usd").taskType, moduleDef("tmm").taskType];
+        if (module === "no_order") return [moduleDef("no_order").taskType, "Другие задачи"];
         return null;
     }
 
@@ -14810,7 +14811,8 @@
                 + "</ol>";
         }
         if (module === "after_sale_movement") return "<strong>Выгрузить Движение после продажи</strong><ol><li>Загрузите отдельную таблицу.</li><li>WMS+ возьмет строки за " + formatRuDate(date) + " по дате статуса.</li></ol>";
-        return "<strong>Выгрузить типовую выгрузку</strong><ol><li>Загрузите основной файл \"Товары без движения\" -- без разницы, В заказе или Без заказа.</li><li>WMS+ сам решит по правилам, в какой участок положить каждый ШК (включая ПМ/Почту -- второй файл проверки отгрузки теперь отдельное действие), и применит фильтры за " + formatRuDate(date) + ".</li></ol>";
+        if (module === "no_order") return "<strong>Выгрузить Без заказа</strong><ol><li>Загрузите основной файл, экспортированный с фильтром \"Без заказа\".</li><li>Это отдельная выгрузка -- WMS+ не умеет определить \"без заказа\" по статусу строки, только по тому, что вы загрузили именно сюда. WMS+ применит правила USD/TMM и фильтры за " + formatRuDate(date) + ".</li></ol>";
+        return "<strong>Выгрузить типовую выгрузку (В заказе)</strong><ol><li>Загрузите основной файл \"Товары без движения - В заказе\".</li><li>WMS+ сам решит по правилам, в какой участок положить каждый ШК (включая ПМ/Почту -- второй файл проверки отгрузки теперь отдельное действие), и применит фильтры за " + formatRuDate(date) + ".</li></ol>";
     }
 
     function renderFileControls(module) {
@@ -15513,6 +15515,7 @@
     function sourceFormatForModule(module) {
         if (module === "packaging" || module === "rwp") return "packaging";
         if (module === "after_sale_movement") return "after_sale_movement";
+        if (module === "no_order" || module === "usd" || module === "tmm") return "no_order";
         return "general";
     }
 
@@ -16343,27 +16346,29 @@
         // копия сегодняшней логики (один if-chain вместо пяти раздельных
         // функций, тот же порядок предпочтения, что и в текущих
         // build-функциях: presort/labeling -> marketplace/pc -> wmi ->
-        // no_order/usd/tmm -> pm/mail).
+        // pm/mail). Без заказа/USD/TMM сюда НЕ входят -- это другой
+        // формат (source_format='no_order', buildNoOrderPreview), т.к.
+        // "без заказа"-принадлежность определяется внешним фильтром
+        // WB-экспорта, а не статусом строки (см. buildNoOrderPreview).
+        // Строка, не подошедшая НИ ПОД ОДНО правило и НИ ПОД ОДИН из этих
+        // хардкод-признаков, не создаёт задачу вообще -- null, а не
+        // default-зона (раньше, до этого фикса, тут ошибочно стояло
+        // "Без заказа").
         function hardcodeZoneFor(row) {
             if (isPresortStatus(row)) return "Предсортировка";
             if (isLabelingStatus(row)) return "Другие задачи";
             if (isMarketplaceStatus(row) && !mxHasBuffer(row)) return "Маркетплейс";
             if (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row)) return "ПЦ";
             if (isWmiMpPcStatus(row)) return "WMI (МП + ПЦ)";
-            if (isNoOrderUsdStatus(row)) return "Другие задачи";
-            if (isNoOrderTmmStatus(row)) return "Другие задачи";
             if (isPmBufferStatus(row.product_status)) return isMailRoute(routeNumberFromMx(row.mx)) ? "Почта" : "ПМ";
-            return "Без заказа";
+            return null;
         }
 
-        // "Другие задачи" переполнен тремя историческими под-назначениями
-        // (Оклейка/USD/TMM), которые сегодня имеют одинаковый
-        // target_task_type -- различаем их по статусу строки, а не по
-        // зоне, независимо от того, решено ли правилом или хардкодом.
+        // "Другие задачи" сегодня также цель правила "Оклейка" --
+        // различаем по статусу строки, а не по зоне, независимо от того,
+        // решено ли правилом или хардкодом.
         function effectiveZoneKey(row, zone) {
             if (zone !== "Другие задачи") return zone;
-            if (isNoOrderUsdStatus(row)) return "usd_in_other";
-            if (isNoOrderTmmStatus(row)) return "tmm_in_other";
             if (isLabelingStatus(row)) return "labeling_in_other";
             return "Другие задачи";
         }
@@ -16379,12 +16384,15 @@
         });
 
         // ПМ/Почта идут по собственному, не обобщаемому пути -- выделяем
-        // их раньше общей группировки по зонам.
+        // их раньше общей группировки по зонам. Строки без зоны (ни
+        // правило, ни хардкод не подошли) просто не создают задачу.
+        let unmatchedCount = 0;
         const pmRows = [];
         const generalRows = [];
         dated.forEach((row) => {
             const decided = decidedByRow.get(row);
             const zone = decided ? decided.zone : hardcodeZoneFor(row);
+            if (zone === null || zone === undefined) { unmatchedCount += 1; return; }
             if (zone === "ПМ" || zone === "Почта") pmRows.push(row);
             else generalRows.push({ row, key: effectiveZoneKey(row, zone), decided });
         });
@@ -16414,18 +16422,23 @@
             "Маркетплейс": { taskType: "Разбор ОПП // Маркетплейс", module: "marketplace", sourcePrefix: "marketplace", titlePrefix: "Маркетплейс", countKey: "marketplaceTasks" },
             "ПЦ": { taskType: "Разбор ОПП // ПЦ", module: "pc", sourcePrefix: "pc", titlePrefix: "ПЦ", countKey: "pcTasks" },
             "WMI (МП + ПЦ)": { taskType: "Разбор ОПП // WMI (МП + ПЦ)", descriptionTaskType: "WMI (МП + ПЦ)", module: "wmi_mp_pc", sourcePrefix: "wmi_mp_pc", titlePrefix: "WMI (МП + ПЦ)", countKey: "wmiTasks" },
-            "Без заказа": { taskType: "Разбор ОПП // Без заказа", module: "no_order", sourcePrefix: "no_order", titlePrefix: "Без заказа", countKey: "noOrderTasks" },
-            "usd_in_other": { taskType: "Разбор ОПП // USD", module: "usd", sourcePrefix: "usd", titlePrefix: "USD", countKey: "usdTasks", forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"], column: "Другие задачи" },
-            "tmm_in_other": { taskType: "Разбор ОПП // TMM", module: "tmm", sourcePrefix: "tmm", titlePrefix: "TMM", countKey: "tmmTasks", forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"], column: "Другие задачи" },
-            "Другие задачи": { taskType: "Другие задачи", module: "no_order", sourcePrefix: "other", titlePrefix: "Другое", countKey: null, column: "Другие задачи" },
+            "Другие задачи": { taskType: "Другие задачи", module: "presort", sourcePrefix: "other", titlePrefix: "Другое", countKey: null, column: "Другие задачи" },
         };
+        // Общий fallback для зоны, которую явно выбрало правило, но
+        // которой нет в карте выше (admin мог нацелить general-правило
+        // на произвольную зону из общего списка) -- используем саму
+        // зону как taskType буквально, как уже делает запись "Другие
+        // задачи".
+        function zoneTaskTypeInfo(zoneKey) {
+            return zoneTaskTypeMap[zoneKey] || { taskType: zoneKey, module: "presort", sourcePrefix: "other", titlePrefix: zoneKey, countKey: null, column: zoneKey };
+        }
 
         let groupedTareCount = 0;
         let specialCount = 0;
-        const counts = { presortTasks: 0, labelingTasks: 0, marketplaceTasks: 0, pcTasks: 0, wmiTasks: 0, noOrderTasks: 0, usdTasks: 0, tmmTasks: 0 };
+        const counts = { presortTasks: 0, labelingTasks: 0, marketplaceTasks: 0, pcTasks: 0, wmiTasks: 0 };
         let tasks = [];
         byKey.forEach((bucket) => {
-            const info = zoneTaskTypeMap[bucket.zoneKey] || zoneTaskTypeMap["Без заказа"];
+            const info = zoneTaskTypeInfo(bucket.zoneKey);
             const decided = bucket.decided;
             const forceTareGrouping = decided ? Boolean(decided.grouping === "tare_id") : Boolean(info.forceTareGrouping);
             const forceHighPriority = decided ? Boolean(decided.forceHighPriority) : Boolean(info.forceHighPriority);
@@ -16553,6 +16566,7 @@
             rowsCount: survivors.length,
             dateFilteredOut,
             filteredByRule,
+            unmatchedCount,
             boxesFilteredOut,
             cheapTransfers,
             groupedTareCount,
@@ -16562,6 +16576,125 @@
             ...counts,
             pmTasks,
             mailTasks,
+        };
+    }
+
+    // "Без заказа" -- ЕДИНСТВЕННЫЙ формат, принадлежность к которому
+    // нельзя определить по содержимому строки: это тот же отчёт, что у
+    // general-формата, но экспортированный с внешним фильтром "Без
+    // заказа" на стороне WB -- в самих колонках этого признака нет.
+    // Проверено на реальных данных: статусы "без заказа" строк (WMI/
+    // PSR/SMS/PAP/GWS/SPS/SWT/SMC/PWT) полностью пересекаются со
+    // статусами, которые для general-формата являются позитивными
+    // признаками Предсортировки/Маркетплейса/ПЦ/WMI/ПМ. Поэтому "Без
+    // заказа" НЕ участвует в общей позитивной классификации
+    // buildGeneralPreview -- здесь любая строка по умолчанию "Без
+    // заказа", и только явные правила (USD/TMM) выделяют из неё
+    // подкатегории.
+    async function buildNoOrderPreview(sourceRows, businessDate, specialMap) {
+        specialMap = specialMap || new Map();
+        const def = moduleDef("no_order");
+
+        const filterDecisions = await evaluateFilterRulesBatch("no_order", sourceRows);
+        const filteredSet = new Set();
+        sourceRows.forEach((row, index) => { if (filterDecisions[index]) filteredSet.add(row); });
+        const filteredByRule = filteredSet.size;
+        const survivors = sourceRows.filter((row) => !filteredSet.has(row));
+
+        const zoneDecisions = await evaluateZoneRulesBatch("no_order", survivors);
+        const decidedByRow = new Map();
+        survivors.forEach((row, index) => { decidedByRow.set(row, zoneDecisions[index]); });
+
+        let dateFilteredOut = 0;
+        const dated = [];
+        survivors.forEach((row) => {
+            const decided = decidedByRow.get(row);
+            const offsetDays = decided ? decided.uploadOffsetDays : 0;
+            const targetDate = addDays(businessDate, -offsetDays);
+            if (parseDateTime(row.created_at).date !== targetDate) { dateFilteredOut += 1; return; }
+            dated.push(row);
+        });
+
+        // "Другие задачи" -- тот же коллизионный зона-ключ, что и в
+        // buildGeneralPreview: USD/TMM-правила целятся именно туда, но
+        // их нужно различать по статусу, а не только по зоне.
+        function effectiveKey(row, decided) {
+            const zone = decided ? decided.zone : (isNoOrderUsdStatus(row) || isNoOrderTmmStatus(row) ? "Другие задачи" : "Без заказа");
+            if (zone !== "Другие задачи") return zone;
+            if (isNoOrderUsdStatus(row)) return "usd_in_other";
+            if (isNoOrderTmmStatus(row)) return "tmm_in_other";
+            return "Другие задачи";
+        }
+        function ruleSettingsFingerprint(decided) {
+            if (!decided) return "";
+            return JSON.stringify([decided.grouping, decided.forceHighPriority, decided.tags, decided.taskDeadlineDays, decided.uploadOffsetDays]);
+        }
+
+        const zoneTaskTypeMap = {
+            "Без заказа": { taskType: "Разбор ОПП // Без заказа", module: "no_order", sourcePrefix: "no_order", titlePrefix: "Без заказа", countKey: "noOrderTasks" },
+            "usd_in_other": { taskType: "Разбор ОПП // USD", module: "usd", sourcePrefix: "usd", titlePrefix: "USD", countKey: "usdTasks", forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"], column: "Другие задачи" },
+            "tmm_in_other": { taskType: "Разбор ОПП // TMM", module: "tmm", sourcePrefix: "tmm", titlePrefix: "TMM", countKey: "tmmTasks", forceHighPriority: true, forceTareGrouping: true, tags: ["Идентификация из ОПП"], column: "Другие задачи" },
+            "Другие задачи": { taskType: "Другие задачи", module: "no_order", sourcePrefix: "other", titlePrefix: "Другое", countKey: null, column: "Другие задачи" },
+        };
+
+        const byKey = new Map();
+        dated.forEach((row) => {
+            const decided = decidedByRow.get(row);
+            const key = effectiveKey(row, decided);
+            const bucketKey = key + "::" + ruleSettingsFingerprint(decided);
+            const bucket = byKey.get(bucketKey) || { zoneKey: key, rows: [], decided: decided || null };
+            bucket.rows.push(row);
+            byKey.set(bucketKey, bucket);
+        });
+
+        let groupedTareCount = 0;
+        let specialCount = 0;
+        const counts = { noOrderTasks: 0, usdTasks: 0, tmmTasks: 0 };
+        let tasks = [];
+        byKey.forEach((bucket) => {
+            const info = zoneTaskTypeMap[bucket.zoneKey] || zoneTaskTypeMap["Без заказа"];
+            const decided = bucket.decided;
+            const forceTareGrouping = decided ? Boolean(decided.grouping === "tare_id") : Boolean(info.forceTareGrouping);
+            const forceHighPriority = decided ? Boolean(decided.forceHighPriority) : Boolean(info.forceHighPriority);
+            const tags = decided && decided.tags && decided.tags.length ? decided.tags : (info.tags || []);
+            const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : 1;
+            const offsetDays = decided ? decided.uploadOffsetDays : 0;
+            const dueDate = addDays(addDays(businessDate, -offsetDays), deadlineDays);
+            const moduleDefForBucket = moduleDef(info.module);
+            const grouped = appendGroupedTasks(bucket.rows, {
+                module: info.module,
+                sourceModule: moduleDefForBucket.sourceModule,
+                uploadType: moduleDefForBucket.uploadType,
+                businessDate,
+                sourcePrefix: info.sourcePrefix,
+                titlePrefix: info.titlePrefix,
+                taskType: info.taskType,
+                descriptionTaskType: info.taskType,
+                column: info.column || bucket.zoneKey,
+                dueDate,
+                responsibilityZone: moduleDefForBucket.responsibilityZone,
+                specialMap,
+                forceTareGrouping,
+                forceHighPriority,
+                tags,
+            });
+            groupedTareCount += grouped.groupedTareCount;
+            specialCount += grouped.specialCount;
+            tasks = tasks.concat(grouped.tasks);
+            if (info.countKey && counts[info.countKey] !== undefined) counts[info.countKey] = grouped.tasks.length;
+        });
+
+        return {
+            mode: "no_order",
+            sourceRows: sourceRows.length,
+            rowsCount: survivors.length,
+            dateFilteredOut,
+            filteredByRule,
+            groupedTareCount,
+            specialCount,
+            specialCandidateIds: productIdsFromRows(dated),
+            tasks,
+            ...counts,
         };
     }
 
@@ -16625,7 +16758,8 @@
     async function buildPreviewForModule(module, rows, carrierRows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         if (module === "packaging" || module === "rwp") return buildPackagingPreview(rows, businessDate, specialMap);
-        if (["general", "pm", "presort", "marketplace_pc", "wmi_mp_pc", "no_order"].includes(module)) return buildGeneralPreview(rows, businessDate, specialMap);
+        if (["general", "pm", "presort", "marketplace_pc", "wmi_mp_pc"].includes(module)) return buildGeneralPreview(rows, businessDate, specialMap);
+        if (module === "no_order") return buildNoOrderPreview(rows, businessDate, specialMap);
         if (module === "after_sale_movement") return buildAfterSaleMovementPreview(rows, businessDate, specialMap);
         return { mode: module, tasks: [] };
     }
