@@ -11525,8 +11525,7 @@
             if (needsWriteback && !state.flow.debugMode) {
                 runSourceWritebackInBackground(completedForAchievements, nextPayload, reviewPayload, { overwrite: opts.overwriteSourceWriteback });
             }
-            const stateRow = (state.review.rows || []).find((item) => item.id === id);
-            if (stateRow) Object.assign(stateRow, data || payload);
+            refreshTaskRow(id, data || payload);
             state.review.rows = (state.review.rows || []).filter((item) => item.id !== id || isActiveReviewTask(item));
             if (state.flow.currentRowId === id) {
                 state.flow.currentRowId = "";
@@ -11669,8 +11668,7 @@
                 comment: reason,
                 reopen_after: reopenAfter,
             });
-            const activeRow = (state.review.rows || []).find((item) => item.id === id);
-            if (activeRow) Object.assign(activeRow, data || payload);
+            refreshTaskRow(id, data || payload);
             state.review.rows = (state.review.rows || []).filter((item) => item.id !== id || isActiveReviewTask(item));
             closeDeferTaskModal();
             setReviewStatus("Задача отложена до " + formatRuDateTime(reopenAfter) + ".", "good");
