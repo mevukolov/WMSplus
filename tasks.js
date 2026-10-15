@@ -1853,6 +1853,7 @@
         setFlowModalOpen("writeoffTermsModal", false);
         setFlowModalOpen("editTareTaskModal", false);
         setFlowModalOpen("deferTaskModal", false);
+        setFlowModalOpen("rememberShkModal", false);
         setFlowModalOpen("reopenConfirmModal", false);
         setFlowModalOpen("expensiveWriteoffModal", false);
         setFlowModalOpen("splitShkConfirmModal", false);

@@ -1090,6 +1090,13 @@
         .review-tool-square.is-away { opacity: 0; transform: scale(.5); pointer-events: none; transition: opacity .16s ease, transform .22s cubic-bezier(.5,-.3,.7,.4); }
         .review-tool-square.active { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); }
         .review-tool-square.active:hover { color: #fff; }
+        /* Away slots in this toolbar must collapse to zero footprint, not
+           just fade -- otherwise a hidden context button (e.g. no
+           section-specific action for the current zone) leaves a dead gap
+           between the two buttons flanking it. */
+        .review-toolbar-presort-only .review-tool-square { margin-left: 10px; overflow: hidden; transition: opacity .22s ease, transform .32s cubic-bezier(.34,1.56,.64,1), color .2s ease, box-shadow .16s ease, width .22s ease, margin-left .22s ease; }
+        .review-toolbar-presort-only .review-tool-square:first-child { margin-left: 0; }
+        .review-toolbar-presort-only .review-tool-square.is-away { width: 0; margin-left: 0; transition: opacity .16s ease, transform .22s cubic-bezier(.5,-.3,.7,.4), width .22s ease .06s, margin-left .22s ease .06s; }
         .review-context-flash {
             position: fixed;
             z-index: 5000;
@@ -1118,7 +1125,7 @@
         .review-pager-viewport { contain: inline-size; clip-path: inset(-64px); }
         .review-pager-track { display: flex; gap: 96px; width: calc(5 * var(--pager-panel-w, 20%) + 384px); transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 var(--pager-panel-w, 100%); min-width: 0; }
-        .review-toolbar-presort-only { display: flex; flex-direction: row; gap: 10px; margin-left: auto; }
+        .review-toolbar-presort-only { display: flex; flex-direction: row; align-items: center; margin-left: auto; }
         .review-status { color: #64748b; font-size: 13px; min-height: 18px; }
         .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; perspective: 900px; transition: opacity .2s ease, transform .34s cubic-bezier(.34,1.56,.64,1); }
         .review-sections-grid.is-mode-out { opacity: 0; transform: scale(.92); }
@@ -3071,7 +3078,7 @@
     </div>
 </section>
 
-<section id="rememberShkModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+<section id="rememberShkModal" class="tasks-flow-modal upload-work side-drawer-modal" aria-hidden="true">
     <div class="tasks-flow-card task-small-card">
         <div class="work-head">
             <div>
