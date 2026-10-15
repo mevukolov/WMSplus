@@ -1418,6 +1418,24 @@
         return Math.min(0, fallback, Number.isFinite(ruleMin) ? ruleMin : 0);
     }
 
+    // Самый МЕЛКИЙ (ближе к нулю) offset среди активных правил формата --
+    // конец запрашиваемого окна выгрузки. Правило с offset=-N допускает
+    // строки "не свежее N дней", БЕЗ верхней границы -- значит строки
+    // новее, чем нужно самому мелкому активному правилу, не нужны вообще
+    // НИ ОДНОМУ правилу этого формата (они ещё не "дозрели" даже для
+    // самого нетерпеливого). Раньше конец окна всегда был "сегодня" --
+    // лишне просил более свежие даты, которые ни одно правило всё равно
+    // не приняло бы. Для offset=0 правил max(...)=0, так что для
+    // general/no_order/after_sale (сегодня все 0) конец окна остаётся
+    // "сегодня" без изменений.
+    function shallowestOffsetDaysForModule(module) {
+        const def = moduleDef(module);
+        const fallback = Number(def.offsetDays || 0) || 0;
+        const fmt = sourceFormatForModule(module);
+        const ruleMax = state.sourceFormatDepth && state.sourceFormatDepth.maxMap ? state.sourceFormatDepth.maxMap[fmt] : undefined;
+        return Math.min(0, Math.max(fallback, Number.isFinite(ruleMax) ? ruleMax : fallback));
+    }
+
     async function ensureSourceFormatDepthLoaded(force) {
         if (state.sourceFormatDepth.loaded && !force) return state.sourceFormatDepth.map;
         const db = supabaseDb();
@@ -1431,12 +1449,15 @@
                 .eq("is_active", true);
             if (error) throw error;
             const map = {};
+            const maxMap = {};
             (data || []).forEach((row) => {
                 const fmt = row.source_format || "general";
                 const val = Number(row.upload_offset_days) || 0;
                 if (!(fmt in map) || val < map[fmt]) map[fmt] = val;
+                if (!(fmt in maxMap) || val > maxMap[fmt]) maxMap[fmt] = val;
             });
             state.sourceFormatDepth.map = map;
+            state.sourceFormatDepth.maxMap = maxMap;
             state.sourceFormatDepth.loaded = true;
         } catch (error) {
             console.warn("source format depth load skipped:", error);
@@ -1490,9 +1511,16 @@
     }
 
     function uploadWindowForModule(module) {
-        const end = state.manualDate || state.today;
+        // Конец окна -- НЕ всегда "сегодня": правило с offset=-N допускает
+        // строки "не свежее N дней", без верхней границы, значит строки
+        // новее, чем нужно самому мелкому (ближе к нулю) активному
+        // правилу формата, не нужны ВООБЩЕ НИКОМУ -- они ещё не дозрели
+        // даже для самого нетерпеливого правила. Для offset=0 правил
+        // (general/no_order/after_sale) это всегда сворачивается обратно
+        // в "сегодня" (shallowest=0), без изменений.
+        const end = state.manualDate || addDays(state.today, shallowestOffsetDaysForModule(module));
         const start = uploadDateForModule(module);
-        return { start: start || end, end };
+        return { start: start || end, end: end || start };
     }
 
     // businessDate/activeDate для форматов с offset=0 продолжает решать
