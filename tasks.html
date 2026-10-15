@@ -1545,8 +1545,12 @@
         .task-small-form { display: grid; gap: 12px; margin-top: 14px; }
         .task-small-form label { color: #334155; font-size: 13px; font-weight: 900; }
         .task-small-form textarea,
-        .task-small-form input { box-sizing: border-box; width: 100%; border: 1px solid #dbe3ec; border-radius: 14px; padding: 11px 12px; background: #fff; color: #242038; font: inherit; }
+        .task-small-form input,
+        .task-small-form select { box-sizing: border-box; width: 100%; border: 1px solid #dbe3ec; border-radius: 14px; padding: 11px 12px; background: #fff; color: #242038; font: inherit; }
         .task-small-form textarea { min-height: 104px; resize: vertical; }
+        .task-small-checkbox-row { display: flex; align-items: center; gap: 8px; font-weight: 700 !important; cursor: pointer; }
+        .task-small-checkbox-row input[type="checkbox"] { width: auto; }
+        #rememberShkCreateTaskFields, #rememberShkPostponeFields { display: grid; gap: 12px; margin-top: 12px; }
         .tare-edit-list { display: grid; gap: 8px; margin-top: 14px; }
         .tare-edit-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 10px 12px; }
         .tare-edit-row:hover { border-color: rgba(98,60,234,.28); box-shadow: var(--shadow-sm); }
@@ -2113,6 +2117,7 @@
                     </div>
                 </div>
                 <div id="reviewContextTools" class="review-toolbar-presort-only">
+                    <button id="reviewMemoryContextBtn" class="review-tool-square is-away" type="button"></button>
                     <button id="reviewSectionContextBtn" class="review-tool-square is-away" type="button"></button>
                     <button id="reviewModeContextBtn" class="review-tool-square is-away" type="button"></button>
                 </div>
@@ -3062,6 +3067,41 @@
                 <button id="cancelDeferTask" class="btn btn-outline" type="button">Отмена</button>
             </div>
             <div id="deferTaskStatus" class="review-status"></div>
+        </div>
+    </div>
+</section>
+
+<section id="rememberShkModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Запомнить ШК</h3>
+                <p class="work-subtitle">Если по ШК уже есть активная задача — заметка уйдёт в её историю. Если нет — попадёт туда сама, когда такая задача появится.</p>
+            </div>
+            <button id="closeRememberShk" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="task-small-form">
+            <label for="rememberShkInput">ШК</label>
+            <input id="rememberShkInput" type="text" class="input" placeholder="ШК">
+            <label for="rememberShkComment">Комментарий по ШК</label>
+            <textarea id="rememberShkComment" placeholder="Что нужно запомнить"></textarea>
+            <label for="rememberShkStatus">Статус последнего движения (не обязательно)</label>
+            <input id="rememberShkStatus" type="text" class="input" placeholder="Например, SGR">
+            <label class="task-small-checkbox-row"><input id="rememberShkCreateTask" type="checkbox"> Создать задачу</label>
+            <div id="rememberShkCreateTaskFields" class="hidden">
+                <label for="rememberShkZone">Папка</label>
+                <select id="rememberShkZone" class="input"></select>
+                <label class="task-small-checkbox-row"><input id="rememberShkPostpone" type="checkbox"> Отложить</label>
+                <div id="rememberShkPostponeFields" class="hidden">
+                    <label for="rememberShkPostponeDate">Дата открытия задачи</label>
+                    <input id="rememberShkPostponeDate" type="datetime-local">
+                </div>
+            </div>
+            <div class="file-row">
+                <button id="saveRememberShk" class="btn btn-rect task-complete-btn" type="button" disabled>Запомнить</button>
+                <button id="cancelRememberShk" class="btn btn-outline" type="button">Отмена</button>
+            </div>
+            <div id="rememberShkModalStatus" class="review-status"></div>
         </div>
     </div>
 </section>

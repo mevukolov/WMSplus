@@ -3249,6 +3249,98 @@
         setFlowModalOpen("shkExclusionModal", false);
     }
 
+    function setRememberShkStatus(message, type) {
+        const el = $("rememberShkModalStatus");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = "review-status" + (type ? " " + type : "");
+    }
+
+    function rememberShkZoneOptionsHtml(selectedValue) {
+        return activeReviewZones().map((zone) =>
+            "<option value='" + escapeHtml(zone) + "'" + (selectedValue === zone ? " selected" : "") + ">" + escapeHtml(zone) + "</option>"
+        ).join("");
+    }
+
+    function openRememberShkModal() {
+        if ($("rememberShkInput")) $("rememberShkInput").value = "";
+        if ($("rememberShkComment")) $("rememberShkComment").value = "";
+        if ($("rememberShkStatus")) $("rememberShkStatus").value = "";
+        if ($("rememberShkCreateTask")) $("rememberShkCreateTask").checked = false;
+        if ($("rememberShkPostpone")) $("rememberShkPostpone").checked = false;
+        const zoneSelect = $("rememberShkZone");
+        if (zoneSelect) zoneSelect.innerHTML = rememberShkZoneOptionsHtml("Другие задачи");
+        if ($("rememberShkPostponeDate")) $("rememberShkPostponeDate").value = datetimeLocalValue(addDaysIso(1));
+        setRememberShkStatus("");
+        updateRememberShkForm();
+        setFlowModalOpen("rememberShkModal", true);
+    }
+
+    function closeRememberShkModal() {
+        setFlowModalOpen("rememberShkModal", false);
+    }
+
+    function updateRememberShkForm() {
+        const createTask = Boolean($("rememberShkCreateTask") && $("rememberShkCreateTask").checked);
+        const postpone = Boolean($("rememberShkPostpone") && $("rememberShkPostpone").checked);
+        if ($("rememberShkCreateTaskFields")) $("rememberShkCreateTaskFields").classList.toggle("hidden", !createTask);
+        if ($("rememberShkPostponeFields")) $("rememberShkPostponeFields").classList.toggle("hidden", !createTask || !postpone);
+
+        const shk = normalizeText($("rememberShkInput") && $("rememberShkInput").value);
+        const comment = normalizeText($("rememberShkComment") && $("rememberShkComment").value);
+        const postponeDate = isoFromDatetimeLocal($("rememberShkPostponeDate") && $("rememberShkPostponeDate").value);
+        const missing = [];
+        if (!shk) missing.push("ШК");
+        if (!comment) missing.push("комментарий");
+        if (createTask && postpone && (!postponeDate || Date.parse(postponeDate) <= Date.now())) missing.push("будущая дата открытия");
+        const button = $("saveRememberShk");
+        if (button) {
+            button.disabled = missing.length > 0;
+            button.title = missing.length ? "Не заполнено: " + missing.join(", ") : "";
+        }
+    }
+
+    async function submitRememberShk() {
+        const db = supabaseDb();
+        if (!db) return;
+        const shk = normalizeText($("rememberShkInput") && $("rememberShkInput").value);
+        const comment = normalizeText($("rememberShkComment") && $("rememberShkComment").value);
+        const status = normalizeText($("rememberShkStatus") && $("rememberShkStatus").value);
+        const createTask = Boolean($("rememberShkCreateTask") && $("rememberShkCreateTask").checked);
+        const postpone = createTask && Boolean($("rememberShkPostpone") && $("rememberShkPostpone").checked);
+        const zone = createTask ? normalizeText($("rememberShkZone") && $("rememberShkZone").value) : null;
+        const reopenAfter = postpone ? isoFromDatetimeLocal($("rememberShkPostponeDate") && $("rememberShkPostponeDate").value) : null;
+        if (!shk || !comment) { updateRememberShkForm(); return; }
+        const user = currentWmsUser();
+        const button = $("saveRememberShk");
+        if (button) button.disabled = true;
+        setRememberShkStatus("Сохраняю...");
+        try {
+            const { data, error } = await db.rpc("wms_remember_shk", {
+                p_shk: shk,
+                p_comment: comment,
+                p_last_movement_status: status || null,
+                p_create_task: createTask,
+                p_zone: zone,
+                p_reopen_after: reopenAfter,
+                p_actor_id: user.id || null,
+                p_actor_name: user.name || null,
+            });
+            if (error) throw error;
+            const mode = data && data.mode;
+            const modeText = mode === "attached_active" ? "Записано в историю активной задачи."
+                : mode === "created_task" ? "Задача создана, заметка записана."
+                : "Заметка сохранена, попадёт в поиск.";
+            setRememberShkStatus(modeText, "good");
+            await Promise.all([loadReviewTasks().catch(() => {}), loadInactiveTasks().catch(() => {})]);
+            setTimeout(closeRememberShkModal, 900);
+        } catch (error) {
+            console.error("remember shk failed:", error);
+            setRememberShkStatus("Не удалось сохранить: " + (error && error.message ? error.message : String(error)), "error");
+            if (button) button.disabled = false;
+        }
+    }
+
     // Single column of ШК, header optional -- unlike readSupersetRows this
     // file has no other columns to map, so we just take column A of every
     // row and drop anything that reads as a "ШК"/"SHK" header label.
@@ -7085,6 +7177,9 @@
 
     function renderReviewContextTools() {
         const tab = state.review.activeTab;
+        const memoryConfig = tab === REVIEW_TAB_PRESORT
+            ? { icon: "+", title: "Запомнить ШК", handler: () => openRememberShkModal() }
+            : null;
         let sectionConfig = null;
         if (tab === REVIEW_TAB_PRESORT && state.review.sectionExpanded) {
             const section = state.review.activeSection;
@@ -7113,6 +7208,7 @@
             // toolbar's shape is already right when it does get built.
             modeConfig = { icon: "📋", title: "Инвентаризация", handler: () => flashContextMessage("Скоро") };
         }
+        setContextButton($("reviewMemoryContextBtn"), memoryConfig);
         setContextButton($("reviewSectionContextBtn"), sectionConfig);
         setContextButton($("reviewModeContextBtn"), modeConfig);
     }
@@ -9509,6 +9605,7 @@
         task_incoming_box_analysis: "Разбор",
         task_no_shk_found: "Найден без ШК",
         task_refreshed_same_module: "Обновлено повторной выгрузкой",
+        shk_note_added: "Заметка по ШК",
         task_item_rerouted_by_rule: "Переклассифицировано правилом",
     };
 
@@ -20016,6 +20113,14 @@
             if (file) void handleActualizeSupersetFile(file);
         });
         $("closeShkExclusion").addEventListener("click", closeShkExclusionModal);
+        $("closeRememberShk").addEventListener("click", closeRememberShkModal);
+        $("cancelRememberShk").addEventListener("click", closeRememberShkModal);
+        $("saveRememberShk").addEventListener("click", () => { void submitRememberShk(); });
+        $("rememberShkInput").addEventListener("input", updateRememberShkForm);
+        $("rememberShkComment").addEventListener("input", updateRememberShkForm);
+        $("rememberShkCreateTask").addEventListener("change", updateRememberShkForm);
+        $("rememberShkPostpone").addEventListener("change", updateRememberShkForm);
+        $("rememberShkPostponeDate").addEventListener("input", updateRememberShkForm);
         $("shkExclusionFile").addEventListener("change", () => {
             const file = $("shkExclusionFile").files && $("shkExclusionFile").files[0];
             if (file) void handleShkExclusionFile(file);
@@ -20155,6 +20260,7 @@
                 || $("writeoffTermsModal").classList.contains("active")
                 || $("editTareTaskModal").classList.contains("active")
                 || $("deferTaskModal").classList.contains("active")
+                || $("rememberShkModal").classList.contains("active")
                 || $("reopenConfirmModal").classList.contains("active")
                 || $("splitShkConfirmModal").classList.contains("active")) return;
             if ($("noShkReviewModal").classList.contains("active")) closeNoShkReviewModal();
