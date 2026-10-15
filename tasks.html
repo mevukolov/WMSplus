@@ -1557,7 +1557,9 @@
         .task-small-form textarea { min-height: 104px; resize: vertical; }
         .task-small-checkbox-row { display: flex; align-items: center; gap: 8px; font-weight: 700 !important; cursor: pointer; }
         .task-small-checkbox-row input[type="checkbox"] { width: auto; }
-        #rememberShkCreateTaskFields, #rememberShkPostponeFields { display: grid; gap: 12px; margin-top: 12px; }
+        .remember-shk-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; margin-top: 0; transition: grid-template-rows .3s cubic-bezier(.4,0,.2,1), opacity .22s ease, margin-top .3s cubic-bezier(.4,0,.2,1); }
+        .remember-shk-collapse.is-open { grid-template-rows: 1fr; opacity: 1; margin-top: 12px; }
+        .remember-shk-collapse-inner { overflow: hidden; min-height: 0; display: grid; gap: 12px; }
         .tare-edit-list { display: grid; gap: 8px; margin-top: 14px; }
         .tare-edit-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 10px 12px; }
         .tare-edit-row:hover { border-color: rgba(98,60,234,.28); box-shadow: var(--shadow-sm); }
@@ -3095,13 +3097,17 @@
             <label for="rememberShkStatus">Статус последнего движения (не обязательно)</label>
             <input id="rememberShkStatus" type="text" class="input" placeholder="Например, SGR">
             <label class="task-small-checkbox-row"><input id="rememberShkCreateTask" type="checkbox"> Создать задачу</label>
-            <div id="rememberShkCreateTaskFields" class="hidden">
-                <label for="rememberShkZone">Папка</label>
-                <select id="rememberShkZone" class="input"></select>
-                <label class="task-small-checkbox-row"><input id="rememberShkPostpone" type="checkbox"> Отложить</label>
-                <div id="rememberShkPostponeFields" class="hidden">
-                    <label for="rememberShkPostponeDate">Дата открытия задачи</label>
-                    <input id="rememberShkPostponeDate" type="datetime-local">
+            <div id="rememberShkCreateTaskFields" class="remember-shk-collapse">
+                <div class="remember-shk-collapse-inner">
+                    <label for="rememberShkZone">Папка</label>
+                    <select id="rememberShkZone" class="input"></select>
+                    <label class="task-small-checkbox-row"><input id="rememberShkPostpone" type="checkbox"> Отложить</label>
+                    <div id="rememberShkPostponeFields" class="remember-shk-collapse">
+                        <div class="remember-shk-collapse-inner">
+                            <label for="rememberShkPostponeDate">Дата открытия задачи</label>
+                            <input id="rememberShkPostponeDate" type="datetime-local">
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="file-row">

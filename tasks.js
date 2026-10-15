@@ -3284,8 +3284,8 @@
     function updateRememberShkForm() {
         const createTask = Boolean($("rememberShkCreateTask") && $("rememberShkCreateTask").checked);
         const postpone = Boolean($("rememberShkPostpone") && $("rememberShkPostpone").checked);
-        if ($("rememberShkCreateTaskFields")) $("rememberShkCreateTaskFields").classList.toggle("hidden", !createTask);
-        if ($("rememberShkPostponeFields")) $("rememberShkPostponeFields").classList.toggle("hidden", !createTask || !postpone);
+        if ($("rememberShkCreateTaskFields")) $("rememberShkCreateTaskFields").classList.toggle("is-open", createTask);
+        if ($("rememberShkPostponeFields")) $("rememberShkPostponeFields").classList.toggle("is-open", createTask && postpone);
 
         const shk = normalizeText($("rememberShkInput") && $("rememberShkInput").value);
         const comment = normalizeText($("rememberShkComment") && $("rememberShkComment").value);
