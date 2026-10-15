@@ -595,13 +595,25 @@
             #intakeSearchModal.side-drawer-modal .tasks-flow-card { width: 100%; max-width: 100%; border-radius: 22px; }
         }
 
-        .intake-search-query-row { margin-top: 18px; margin-bottom: 12px; display: flex; gap: 10px; align-items: stretch; }
+        .intake-search-query-row { margin-top: 18px; margin-bottom: 12px; display: flex; gap: 10px; align-items: center; }
         .intake-search-query-row input { flex: 1; min-width: 0; box-sizing: border-box; font-size: 19px; font-weight: 800; padding: 14px 16px; }
         .intake-search-query-row #intakeSearchGoBtn { flex: 0 0 auto; font-size: 15px; padding-left: 22px; padding-right: 22px; }
+        /* Same look as reviewFiltersToggle (the "Упаковка/RWP/..." zone-pills
+           row's funnel button) -- kept as its own rule set rather than
+           reaching into tasks.js's parent-scoped .review-picker-row.is-collapsed
+           selector, per this file's self-containment convention. */
+        .intake-search-filter-toggle { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border: 0; border-radius: 9px; background: #fff; color: var(--accent-dark); cursor: pointer; box-shadow: var(--shadow-sm); transition: transform .18s ease, box-shadow .18s ease, background-color .2s ease, color .2s ease; }
+        .intake-search-filter-toggle:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+        .intake-search-filter-toggle svg { width: 15px; height: 15px; }
+        .intake-search-filter-toggle.active { background: var(--accent); color: #fff; }
         .intake-search-filter-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .3s cubic-bezier(.4,0,.2,1), opacity .22s ease; }
         .intake-search-filter-collapse.is-open { grid-template-rows: 1fr; opacity: 1; }
         .intake-search-filter-collapse-inner { overflow: hidden; min-height: 0; }
-        #intakeSearchFilterToggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+        /* Once fully expanded, stop clipping -- a collapsed-only overflow:hidden
+           was cutting off the review-filter-popover dropdowns (they open
+           below the filter row, taller than the row itself), so the result
+           cards underneath showed through where the dropdown should render. */
+        .intake-search-filter-collapse.is-open .intake-search-filter-collapse-inner { overflow: visible; }
         .intake-search-filter-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding-bottom: 14px; }
         .intake-search-filter-row .review-filter-panel { flex: 1; grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)); gap: 8px; }
         .intake-search-filter-row .review-filter-trigger { min-height: 32px; padding: 6px 10px; font-size: 12px; border-radius: 10px; box-shadow: none; }
@@ -2750,7 +2762,9 @@
         </div>
         <div class="intake-search-query-row">
             <input id="intakeSearchQuery" type="text" class="input" placeholder="Наименование товара">
-            <button id="intakeSearchFilterToggle" class="btn btn-square" type="button" title="Показать фильтры">▽</button>
+            <button id="intakeSearchFilterToggle" class="intake-search-filter-toggle" type="button" aria-label="Фильтры" title="Показать фильтры">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4 4 20 4 14 12 14 19 10 21 10 12 4 4"/></svg>
+            </button>
             <button id="intakeSearchGoBtn" class="btn btn-rect" type="button">Найти</button>
         </div>
         <div id="intakeSearchFilterCollapse" class="intake-search-filter-collapse">

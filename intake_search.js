@@ -248,18 +248,16 @@
     // ПАРАМЕТРЫ поиска) -- это чисто визуальное состояние, не должно
     // сбрасываться resetFiltersToDefault.
     let filterPanelExpanded = false;
-    const FILTER_TOGGLE_META = {
-        false: { icon: "▽", title: "Показать фильтры" },
-        true: { icon: "△", title: "Скрыть фильтры" },
+    const FILTER_TOGGLE_TITLE = {
+        false: "Показать фильтры",
+        true: "Скрыть фильтры",
     };
     function applyFilterPanelExpanded() {
         const collapse = $("intakeSearchFilterCollapse");
         const toggleBtn = $("intakeSearchFilterToggle");
         if (collapse) collapse.classList.toggle("is-open", filterPanelExpanded);
         if (toggleBtn) {
-            const meta = FILTER_TOGGLE_META[filterPanelExpanded];
-            toggleBtn.textContent = meta.icon;
-            toggleBtn.title = meta.title;
+            toggleBtn.title = FILTER_TOGGLE_TITLE[filterPanelExpanded];
             toggleBtn.classList.toggle("active", filterPanelExpanded);
         }
     }
