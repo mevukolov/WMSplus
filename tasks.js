@@ -12520,11 +12520,15 @@
             + "<div class='routing-rule-result'>"
             + (sourceFormat === "packaging"
                 ? "<input data-rule-target type='text' value='" + escapeHtml(targetValue) + "' placeholder='RWP (точно это слово) -- в RWP; что угодно другое -- в Упаковку'>"
-                : "<select data-rule-target>" + routingRuleTargetOptionsHtml(targetValue) + "</select>")
+                : row.from_zone
+                    ? "<input data-rule-target type='text' value='" + escapeHtml(targetValue) + "' placeholder='точный task_type, напр. Разбор ОПП // Без заказа'>"
+                    : "<select data-rule-target>" + routingRuleTargetOptionsHtml(targetValue) + "</select>")
             + "</div>"
             + (sourceFormat === "packaging"
                 ? "<p class='work-subtitle' style='margin:8px 0 0'>Упаковка/RWP -- бинарный выбор на уровне кода: условия решают RWP или не-RWP, цель здесь только для читаемости (и для self-scope через \"Ограничить реклассификацию зоной\" ниже) -- кроме случая, когда значение РОВНО \"RWP\" (тогда ШК физически идёт в модуль RWP). Для правила-дефолта (\"не RWP\") впиши сюда полный task_type -- 'Разбор ОПП // Упаковка' -- и то же самое в поле зоны ниже, иначе реклассификация существующих задач затронет всю Упаковку целиком (уже было).</p>"
-                : "<p class='work-subtitle' style='margin:8px 0 0'>ШК, лежащие в одной физической таре, объединяются в одну задачу автоматически, если их несколько.</p>")
+                : row.from_zone
+                    ? "<p class='work-subtitle' style='margin:8px 0 0'>У правила задано \"Ограничить реклассификацию зоной\" -- поле цели здесь текстовое (не список), т.к. self-scope-правилам нужен ТОЧНЫЙ task_type (с префиксом \"Разбор ОПП // ...\", если он есть), а не короткое имя из общего списка зон. Если цель должна совпадать с зоной-источником (no-op при реклассификации, нужен для правил вроде \"по умолчанию\") -- впиши СЮДА ровно то же значение, что и в поле зоны ниже.</p>"
+                    : "<p class='work-subtitle' style='margin:8px 0 0'>ШК, лежащие в одной физической таре, объединяются в одну задачу автоматически, если их несколько.</p>")
             + "<hr class='routing-rule-divider'>"
             + "<div class='routing-rule-checkbox-row'>"
             + "<label><input data-rule-force-tare-grouping type='checkbox'" + (row.force_tare_grouping ? " checked" : "") + "> Группировать по таре, даже если ШК один</label>"
