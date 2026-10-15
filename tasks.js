@@ -12559,13 +12559,8 @@
         const name = row.name || "(без названия)";
         const fromZoneBadge = row.from_zone ? "<span class='routing-rule-summary-badge'>только из «" + escapeHtml(row.from_zone.replace("Разбор ОПП // ", "")) + "»</span>" : "";
         const formatBadge = "<span class='routing-rule-summary-badge routing-rule-summary-format'>" + escapeHtml(sourceFormatLabel(row.source_format || "general")) + "</span>";
-        // "#N" у фильтров и у зона-правил -- РАЗНЫЕ последовательности
-        // (уникальность в БД на (output_key, priority), не просто
-        // priority): "Ф1" рядом с "З7" в одной группе -- это нормально,
-        // не "правила не по порядку", у каждого вида своя нумерация.
-        const priorityPrefix = row.output_key === "filter" ? "Ф" : "З";
         return "<div class='routing-rule-summary-row" + (isActive ? "" : " inactive") + "' data-rule-summary-row data-rule-index='" + index + "' tabindex='0' role='button'>"
-            + "<span class='routing-rule-summary-priority' title='" + (row.output_key === "filter" ? "Номер в очереди фильтров" : "Номер в очереди зона-правил") + "'>" + priorityPrefix + escapeHtml(row.priority || "?") + "</span>"
+            + "<span class='routing-rule-summary-priority'>#" + escapeHtml(row.priority || "?") + "</span>"
             + "<span class='routing-rule-summary-name'>" + escapeHtml(name) + "</span>"
             + formatBadge
             + "<span class='routing-rule-summary-target'>→ " + escapeHtml(targetLabel) + "</span>"
@@ -12580,25 +12575,19 @@
         const target = $("routingRulesWrap");
         if (!target) return;
         const rows = state.routingRules.rows || [];
-        const sortedIndexed = rows
-            .map((row, index) => ({ row, index }))
-            .sort((a, b) => {
-                const fa = a.row.source_format || "general";
-                const fb = b.row.source_format || "general";
-                if (fa !== fb) return sourceFormatLabel(fa).localeCompare(sourceFormatLabel(fb), "ru");
-                // Фильтры и зона-правила -- разные последовательности
-                // приоритета (уникальность в БД на (output_key, priority)):
-                // сначала все фильтры по порядку, потом все зона-правила по
-                // порядку, а не единый список вперемешку по голому priority.
-                const ka = a.row.output_key === "filter" ? 0 : 1;
-                const kb = b.row.output_key === "filter" ? 0 : 1;
-                if (ka !== kb) return ka - kb;
-                return (Number(a.row.priority) || 0) - (Number(b.row.priority) || 0);
-            });
+        const indexed = rows.map((row, index) => ({ row, index }));
+        const byPriority = (a, b) => (Number(a.row.priority) || 0) - (Number(b.row.priority) || 0);
+        const filterRows = indexed.filter((item) => item.row.output_key === "filter").sort(byPriority);
+        const zoneRows = indexed.filter((item) => item.row.output_key !== "filter").sort(byPriority);
+        const section = (title, items) => !items.length ? "" : "<div class='routing-rule-section-group'>"
+            + "<div class='routing-rule-section-heading'>" + escapeHtml(title) + "</div>"
+            + "<div class='routing-rule-summary-list'>" + items.map((item) => routingRuleSummaryRowHtml(item.row, item.index)).join("") + "</div>"
+            + "</div>";
         target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
             + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
             + (!rows.length && !state.routingRules.loading ? "<div class='empty-state'>Правил пока нет. Нажмите \"Добавить правило\".</div>" : "")
-            + "<div class='routing-rule-summary-list'>" + sortedIndexed.map((item) => routingRuleSummaryRowHtml(item.row, item.index)).join("") + "</div>";
+            + section("Правила (" + zoneRows.length + ")", zoneRows)
+            + section("Фильтры (" + filterRows.length + ")", filterRows);
         target.querySelectorAll("[data-rule-summary-row]").forEach((rowEl) => {
             const open = () => openRoutingRuleEditModal(Number(rowEl.getAttribute("data-rule-index")));
             rowEl.addEventListener("click", (event) => { if (!event.target.closest("[data-rule-summary-remove]")) open(); });
@@ -17175,6 +17164,9 @@
         renderPreview(state.preview);
         $("saveUpload").disabled = !state.preview.tasks.length;
         startSpecialBackground(module, rows, [], state.activeDate, state.preview.tasks.length ? "Предпросмотр готов. К сохранению: " + state.preview.tasks.length + "." : "Нет задач по текущим правилам.");
+        // До сохранения, не после -- чтобы модалка появлялась независимо
+        // от того, пройдёт ли реальное сохранение без ошибок.
+        if (module === "general") openPmCarrierModalIfRelevant(state.preview.tasks);
     }
 
     async function copyText(text) {
@@ -19168,7 +19160,6 @@
             $("doneBox").classList.add("visible");
             $("doneBox").textContent = "Выгрузка завершена. Создано/обновлено задач: " + (response.upserted_count || state.preview.tasks.length) + ".";
             setStatus("Готово. Данные сохранены в WMS+.", "good");
-            if (module === "general") openPmCarrierModalIfRelevant(state.preview.tasks);
         } catch (error) {
             $("saveUpload").disabled = false;
             setStatus(error && error.message ? error.message : String(error), "error");
@@ -19304,7 +19295,15 @@
             }
             if (!missing.length) return { expectedCount: expected.size, repairedCount };
             if (attempt >= 3) {
-                throw new Error("После контрольной сверки не сохранилось задач: " + missing.length + ". Попробуйте повторить выгрузку; WMS+ не будет делать вид, что всё ок.");
+                // Диагностика для разбора (ошибка плавающая, точную причину
+                // ещё не нашли) -- первые несколько реально пропавших задач:
+                // модуль/тип/sourceId/число ШК, чтобы было с чем разбираться
+                // в следующий раз, а не гадать вслепую.
+                const sample = missing.slice(0, 5).map((task) => {
+                    const shkIds = (task.source_shk_ids || []).filter(Boolean);
+                    return (task.source_module || "?") + "/" + (task.task_type || "?") + " id=" + (task.source_id || "?") + " шк=" + shkIds.length + (shkIds.length ? " [" + shkIds.slice(0, 3).join(",") + (shkIds.length > 3 ? ",..." : "") + "]" : "");
+                }).join(" | ");
+                throw new Error("После контрольной сверки не сохранилось задач: " + missing.length + ". Попробуйте повторить выгрузку; WMS+ не будет делать вид, что всё ок. Диагностика: " + sample);
             }
             if (context.onProgress) {
                 context.onProgress({

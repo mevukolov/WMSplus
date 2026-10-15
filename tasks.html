@@ -224,17 +224,21 @@
         .writeoff-term-active { display: inline-flex; align-items: center; gap: 6px; color: #64748b; font-size: 12px; font-weight: 900; }
         .writeoff-term-add { display: grid; grid-template-columns: minmax(140px, 1fr) 120px auto; gap: 8px; align-items: center; }
         .routing-rule-list { display: grid; gap: 12px; }
-        .routing-rule-summary-list { display: grid; gap: 6px; }
-        .routing-rule-summary-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+        #routingRulesModal .tasks-flow-card-wide { position: relative; }
+        .routing-rules-close { position: absolute; top: 14px; right: 14px; }
+        .routing-rule-section-group { margin-bottom: 14px; }
+        .routing-rule-section-heading { font-size: 12px; font-weight: 1000; text-transform: uppercase; letter-spacing: .04em; color: #64748b; margin: 0 0 6px; }
+        .routing-rule-summary-list { display: grid; gap: 4px; }
+        .routing-rule-summary-row { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 6px 9px; cursor: pointer; font-size: 12px; }
         .routing-rule-summary-row:hover { background: #f1f5f9; }
         .routing-rule-summary-row.inactive { opacity: .55; }
-        .routing-rule-summary-priority { color: #64748b; font-weight: 1000; min-width: 28px; }
-        .routing-rule-summary-name { font-weight: 1000; color: #242038; flex: 1 1 160px; }
-        .routing-rule-summary-badge { font-size: 11px; font-weight: 1000; text-transform: uppercase; letter-spacing: .03em; color: #6d28d9; background: #ede9fe; border-radius: 999px; padding: 3px 9px; }
+        .routing-rule-summary-priority { color: #94a3b8; font-weight: 800; min-width: 20px; font-size: 11px; }
+        .routing-rule-summary-name { font-weight: 800; color: #242038; flex: 1 1 140px; font-size: 12px; }
+        .routing-rule-summary-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; color: #6d28d9; background: #ede9fe; border-radius: 999px; padding: 2px 7px; }
         .routing-rule-summary-format { color: #0f766e; background: #ccfbf1; }
-        .routing-rule-summary-target { color: #475569; font-weight: 900; }
-        .routing-rule-summary-meta { color: #94a3b8; font-size: 12px; font-weight: 800; }
-        .routing-rule-summary-status { font-size: 12px; font-weight: 1000; color: #15803d; }
+        .routing-rule-summary-target { color: #475569; font-weight: 700; font-size: 12px; }
+        .routing-rule-summary-meta { color: #94a3b8; font-size: 11px; font-weight: 700; }
+        .routing-rule-summary-status { font-size: 11px; font-weight: 800; color: #15803d; }
         .routing-rule-summary-row.inactive .routing-rule-summary-status { color: #94a3b8; }
         .routing-rule-test-unmatched-row { cursor: pointer; }
         .routing-rule-test-unmatched-row:hover td { background: #f8fafc; }
@@ -2399,7 +2403,7 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Проверить передачи на отгрузку</h3>
-                <p class="work-subtitle">Среди сохранённых задач есть ПМ/Почта. Скопируйте номера передач, найдите их в отчёте отгрузки, выгрузите результат и загрузите файл сюда -- совпавшие передачи перейдут в "Завершено".</p>
+                <p class="work-subtitle">В этой выгрузке есть ПМ/Почта. Скопируйте номера передач, найдите их в отчёте отгрузки, выгрузите результат и загрузите файл сюда ПОСЛЕ сохранения выгрузки -- совпавшие передачи перейдут в "Завершено".</p>
             </div>
             <button id="closePmCarrierModal" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
@@ -2887,11 +2891,8 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Правила маршрутизации</h3>
-                <p class="work-subtitle">Решает, куда попадает ШК -- без правки кода. Работает и при новой выгрузке, и для уже созданных задач: если статус поменялся и под него есть правило, ШК переедет сам. Приоритет проверяется сверху вниз, побеждает первое подходящее правило.</p>
-                <p class="work-subtitle">Условия: "Статус" и "МХ" работают и при загрузке файла, и при переклассификации уже созданных задач. "Номер маршрута" (берётся из МХ) -- тоже везде, нужен для правил ПМ/Почта. "Тара" работает только для уже созданных задач -- в момент самой загрузки не учитывается.</p>
-                <p class="work-subtitle">Несколько зон защищены от этого движка насовсем -- переехать В них можно, а ИЗ них нет: Чистые списания, Без заказа, Движение после продажи, Предсписок, ПМ, Почта. Правило с включённым "Триггер «Без заказа»" -- единственное исключение: оно явно разрешено забирать ШК именно из "Без заказа" (так настроены USD и TMM) и больше ничего не открывает.</p>
             </div>
-            <button id="closeRoutingRules" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+            <button id="closeRoutingRules" class="btn btn-square routing-rules-close" type="button" aria-label="Закрыть">×</button>
         </div>
         <div id="routingRulesWrap" class="writeoff-terms-wrap"></div>
         <div class="file-row">
