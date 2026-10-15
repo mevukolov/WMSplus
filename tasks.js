@@ -12419,15 +12419,22 @@
             + "</div>";
     }
 
+    function sourceFormatLabel(sourceFormat) {
+        const opt = SOURCE_FORMAT_OPTIONS.find((o) => o.value === sourceFormat);
+        return opt ? opt.label : (sourceFormat || "general");
+    }
+
     function routingRuleSummaryRowHtml(row, index) {
         const targetLabel = row.output_key === "filter" ? "Фильтр (не создавать задачу)" : (row.target_task_type || (row.output_value && row.output_value.target_task_type) || "-- не выбрано --");
         const conditionCount = Array.isArray(row.conditions) ? row.conditions.length : 0;
         const isActive = row.is_active !== false;
         const name = row.name || "(без названия)";
         const fromZoneBadge = row.from_zone ? "<span class='routing-rule-summary-badge'>только из «" + escapeHtml(row.from_zone.replace("Разбор ОПП // ", "")) + "»</span>" : "";
+        const formatBadge = "<span class='routing-rule-summary-badge routing-rule-summary-format'>" + escapeHtml(sourceFormatLabel(row.source_format || "general")) + "</span>";
         return "<div class='routing-rule-summary-row" + (isActive ? "" : " inactive") + "' data-rule-summary-row data-rule-index='" + index + "' tabindex='0' role='button'>"
             + "<span class='routing-rule-summary-priority'>#" + escapeHtml(row.priority || "?") + "</span>"
             + "<span class='routing-rule-summary-name'>" + escapeHtml(name) + "</span>"
+            + formatBadge
             + "<span class='routing-rule-summary-target'>→ " + escapeHtml(targetLabel) + "</span>"
             + fromZoneBadge
             + "<span class='routing-rule-summary-meta'>" + conditionCount + " " + (conditionCount === 1 ? "условие" : "условий") + "</span>"
@@ -12440,10 +12447,18 @@
         const target = $("routingRulesWrap");
         if (!target) return;
         const rows = state.routingRules.rows || [];
+        const sortedIndexed = rows
+            .map((row, index) => ({ row, index }))
+            .sort((a, b) => {
+                const fa = a.row.source_format || "general";
+                const fb = b.row.source_format || "general";
+                if (fa !== fb) return sourceFormatLabel(fa).localeCompare(sourceFormatLabel(fb), "ru");
+                return (Number(a.row.priority) || 0) - (Number(b.row.priority) || 0);
+            });
         target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
             + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
             + (!rows.length && !state.routingRules.loading ? "<div class='empty-state'>Правил пока нет. Нажмите \"Добавить правило\".</div>" : "")
-            + "<div class='routing-rule-summary-list'>" + rows.map(routingRuleSummaryRowHtml).join("") + "</div>";
+            + "<div class='routing-rule-summary-list'>" + sortedIndexed.map((item) => routingRuleSummaryRowHtml(item.row, item.index)).join("") + "</div>";
         target.querySelectorAll("[data-rule-summary-row]").forEach((rowEl) => {
             const open = () => openRoutingRuleEditModal(Number(rowEl.getAttribute("data-rule-index")));
             rowEl.addEventListener("click", (event) => { if (!event.target.closest("[data-rule-summary-remove]")) open(); });
