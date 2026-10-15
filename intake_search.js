@@ -243,6 +243,27 @@
             + "</div>";
     }
 
+    // Пустая строка по умолчанию -- так виднее сам список результатов, а
+    // не вечный ряд фильтров. Не часть filters (которая описывает
+    // ПАРАМЕТРЫ поиска) -- это чисто визуальное состояние, не должно
+    // сбрасываться resetFiltersToDefault.
+    let filterPanelExpanded = false;
+    const FILTER_TOGGLE_META = {
+        false: { icon: "▽", title: "Показать фильтры" },
+        true: { icon: "△", title: "Скрыть фильтры" },
+    };
+    function applyFilterPanelExpanded() {
+        const collapse = $("intakeSearchFilterCollapse");
+        const toggleBtn = $("intakeSearchFilterToggle");
+        if (collapse) collapse.classList.toggle("is-open", filterPanelExpanded);
+        if (toggleBtn) {
+            const meta = FILTER_TOGGLE_META[filterPanelExpanded];
+            toggleBtn.textContent = meta.icon;
+            toggleBtn.title = meta.title;
+            toggleBtn.classList.toggle("active", filterPanelExpanded);
+        }
+    }
+
     function renderFilterPanel() {
         const panel = $("intakeSearchFilterPanel");
         if (!panel) return;
@@ -894,6 +915,15 @@
 
         const goBtn = $("intakeSearchGoBtn");
         if (goBtn) goBtn.addEventListener("click", () => void runSearch(true));
+
+        const filterToggleBtn = $("intakeSearchFilterToggle");
+        if (filterToggleBtn) {
+            applyFilterPanelExpanded();
+            filterToggleBtn.addEventListener("click", () => {
+                filterPanelExpanded = !filterPanelExpanded;
+                applyFilterPanelExpanded();
+            });
+        }
 
         const resetBtn = $("intakeSearchResetBtn");
         if (resetBtn) {
