@@ -555,6 +555,11 @@
             rows: null,
             module: null,
         },
+        sourceFormatDepth: {
+            loaded: false,
+            loading: false,
+            map: {},
+        },
         moduleSettings: {
             rows: [],
             loading: false,
@@ -957,6 +962,19 @@
         const date = new Date(isoDate + "T00:00:00Z");
         date.setUTCDate(date.getUTCDate() + Number(days || 0));
         return date.toISOString().slice(0, 10);
+    }
+
+    // offsetDays=0 -- строгое совпадение с today (как раньше). offsetDays!=0
+    // (отрицательное) -- строка должна быть НЕ СВЕЖЕЕ today+offsetDays, без
+    // нижней границы по давности: один широкий файл обслуживает сразу
+    // несколько правил с разными offset, более свежие строки просто ждут
+    // следующей выгрузки, более старые тоже проходят (а не только "ровно
+    // N дней назад", как было при единственной businessDate-фильтрации).
+    function rowDateAdmittedForOffset(rowDate, offsetDays, today) {
+        if (!rowDate) return false;
+        const offset = Number(offsetDays) || 0;
+        if (!offset) return rowDate === today;
+        return rowDate <= addDays(today, offset);
     }
 
     // Same idea as addDays() but keeps the time-of-day instead of truncating
@@ -1387,9 +1405,49 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     }
 
-    function configuredUploadDateForModule(module) {
+    // Самое глубокое (отрицательное) upload_offset_days среди активных
+    // zone-правил этого формата -- плюс "дефолтный" offsetDays модуля
+    // (нужен как fallback-отступ для строк, не попавших ни под одно
+    // правило, напр. Упаковка без RWP-правила). min(), т.к. более
+    // отрицательное число означает "смотреть дальше в прошлое".
+    function deepestOffsetDaysForModule(module) {
         const def = moduleDef(module);
-        return addDays(state.today, Number(def.offsetDays || 0));
+        const fallback = Number(def.offsetDays || 0) || 0;
+        const fmt = sourceFormatForModule(module);
+        const ruleMin = state.sourceFormatDepth && state.sourceFormatDepth.map ? state.sourceFormatDepth.map[fmt] : undefined;
+        return Math.min(0, fallback, Number.isFinite(ruleMin) ? ruleMin : 0);
+    }
+
+    async function ensureSourceFormatDepthLoaded(force) {
+        if (state.sourceFormatDepth.loaded && !force) return state.sourceFormatDepth.map;
+        const db = supabaseDb();
+        if (!db) return state.sourceFormatDepth.map;
+        state.sourceFormatDepth.loading = true;
+        try {
+            const { data, error } = await db
+                .from("wms_routing_rules")
+                .select("source_format, upload_offset_days")
+                .eq("output_key", "zone")
+                .eq("is_active", true);
+            if (error) throw error;
+            const map = {};
+            (data || []).forEach((row) => {
+                const fmt = row.source_format || "general";
+                const val = Number(row.upload_offset_days) || 0;
+                if (!(fmt in map) || val < map[fmt]) map[fmt] = val;
+            });
+            state.sourceFormatDepth.map = map;
+            state.sourceFormatDepth.loaded = true;
+        } catch (error) {
+            console.warn("source format depth load skipped:", error);
+        } finally {
+            state.sourceFormatDepth.loading = false;
+        }
+        return state.sourceFormatDepth.map;
+    }
+
+    function configuredUploadDateForModule(module) {
+        return addDays(state.today, deepestOffsetDaysForModule(module));
     }
 
     function moduleRunDates(module) {
@@ -1418,7 +1476,34 @@
 
     function uploadDateForModule(module) {
         if (state.manualDate) return state.manualDate;
-        return firstMissingUploadDate(module, configuredUploadDateForModule(module));
+        const target = configuredUploadDateForModule(module);
+        // Формат с ненулевым offset (напр. Упаковка/RWP, -7/-4) требует
+        // каждый раз заново охватывать весь период "N дней назад -- сегодня"
+        // целиком -- строки ЕЖЕДНЕВНО "дозревают" до порога (вчера строке
+        // было 3 дня, сегодня уже 4), так что это не разовый пропуск,
+        // догонять по одному дню здесь не нужно и не имеет смысла -- окно
+        // просто просят целиком, каждый раз. firstMissingUploadDate
+        // (пошаговая догонка пропущенных дней) остаётся только для
+        // offset=0 форматов, где только СЕГОДНЯШНИЙ снимок осмыслен.
+        if (target !== state.today) return target;
+        return firstMissingUploadDate(module, target);
+    }
+
+    function uploadWindowForModule(module) {
+        const end = state.manualDate || state.today;
+        const start = uploadDateForModule(module);
+        return { start: start || end, end };
+    }
+
+    // businessDate/activeDate для форматов с offset=0 продолжает решать
+    // старая пошаговая догонка пропусков (uploadDateForModule) -- без
+    // изменений. Для форматов с ненулевым offset (Упаковка/RWP) это
+    // больше не "целевая дата файла" -- весь нужный диапазон теперь
+    // определяет uploadWindowForModule, а якорем для due date и
+    // построчного porога остаётся обычное "сегодня".
+    function anchorDateForModule(module) {
+        if (state.manualDate) return state.manualDate;
+        return deepestOffsetDaysForModule(module) === 0 ? uploadDateForModule(module) : state.today;
     }
 
     function uploadDateGapInfo(module) {
@@ -12256,6 +12341,7 @@
             const [wmsSettings, wmsRuns] = await Promise.all([
                 readOptionalRows(db, SETTINGS_TABLE, (query) => query.select("*").order("sort_order", { ascending: true })),
                 readOptionalRows(db, RUNS_TABLE, (query) => query.select("*").gte("effective_date", range.start).lte("effective_date", range.end).order("effective_date", { ascending: false })),
+                ensureSourceFormatDepthLoaded(),
             ]);
             await loadWriteoffTerms();
             if (wmsSettings.rows.length) applySettings(wmsSettings.rows);
@@ -12415,6 +12501,7 @@
             + "<label class='routing-rule-settings-field'><span>Срок выполнения, дней</span><input data-rule-task-deadline-days type='number' min='0' step='1' value='" + escapeHtml(row.task_deadline_days === null || row.task_deadline_days === undefined ? "" : row.task_deadline_days) + "' placeholder='пусто = 1 по умолчанию'></label>"
             + "<label class='routing-rule-settings-field'><span>Окно выгрузки, дней назад</span><input data-rule-upload-offset-days type='number' step='1' value='" + escapeHtml(row.upload_offset_days || 0) + "' placeholder='0 = сегодня'></label>"
             + "</div>"
+            + "<p class='work-subtitle' style='margin:4px 0 0'>0 -- строго сегодняшняя строка. Любое другое число (например -4) -- строка должна быть НЕ СВЕЖЕЕ этого числа дней (4+ дня, более старые тоже подходят); кнопка выгрузки сама запросит файл с нужным запасом по датам.</p>"
             + "</div>"
             + "</div>";
     }
@@ -12716,6 +12803,7 @@
             if (error) throw error;
             state.routingRules.loaded = false;
             await loadRoutingRules(true);
+            await ensureSourceFormatDepthLoaded(true);
             if (status) status.textContent = "Правила сохранены.";
             toast("Правила маршрутизации сохранены.", "success");
             try {
@@ -14726,6 +14814,25 @@
                 run: runForUpload("marketplace", marketplace.actualDate) && runForUpload("pc", pc.actualDate),
             };
         }
+        // Для форматов с ненулевым offset (Упаковка/RWP) карточка должна
+        // показывать и проверять "уже выгружено?" по тому же якорю
+        // (сегодня), что реально пишется в run при сохранении -- см.
+        // anchorDateForModule/saveTasksAndRun. uploadDateGapInfo/
+        // info.actualDate тут не подходит: для таких форматов это теперь
+        // НАЧАЛО окна (today-7), а не дата run'а.
+        if (deepestOffsetDaysForModule(module) !== 0) {
+            const anchor = anchorDateForModule(module);
+            const window = uploadWindowForModule(module);
+            return {
+                date: anchor,
+                label: window.start !== window.end
+                    ? "За " + formatRuDate(window.start) + " -- " + formatRuDate(window.end)
+                    : "За " + formatRuDate(anchor),
+                hasGap: false,
+                gapLabel: "",
+                run: runForUpload(module, anchor),
+            };
+        }
         const info = uploadDateGapInfo(module);
         return {
             date: info.actualDate,
@@ -14774,7 +14881,7 @@
 
     function chooseModule(module) {
         state.activeModule = module;
-        state.activeDate = module === "marketplace_pc" ? chooserUploadDateInfo(module).date : uploadDateForModule(module);
+        state.activeDate = module === "marketplace_pc" ? chooserUploadDateInfo(module).date : anchorDateForModule(module);
         state.repeatUploadUnlocked = false;
         state.preview = null;
         state.rows = {};
@@ -14787,9 +14894,13 @@
 
     function renderWorkShell(module) {
         const def = moduleDef(module);
+        const window = uploadWindowForModule(module);
+        const subtitleDate = window.start !== window.end
+            ? "Выгрузка за период с " + formatRuDate(window.start) + " по " + formatRuDate(window.end)
+            : "Выгрузка за " + formatRuDate(state.activeDate);
         $("workTitle").textContent = def.label;
-        $("workSubtitle").textContent = "Выгрузка за " + formatRuDate(state.activeDate) + ". Дата списания считается по статусу каждого ШК.";
-        $("workInstruction").innerHTML = instructionHtml(module, state.activeDate);
+        $("workSubtitle").textContent = subtitleDate + ". Дата списания считается по статусу каждого ШК.";
+        $("workInstruction").innerHTML = instructionHtml(module, window);
         $("pmCarrierConfirmRow").classList.toggle("hidden", module !== "general");
         $("doneBox").classList.remove("visible");
         $("saveUpload").disabled = true;
@@ -14819,15 +14930,25 @@
         }
     }
 
-    function instructionHtml(module, date) {
+    function uploadWindowLabel(window) {
+        return window.start !== window.end
+            ? "период с " + formatRuDate(window.start) + " по " + formatRuDate(window.end)
+            : "дату " + formatRuDate(window.end);
+    }
+
+    function instructionHtml(module, window) {
+        const date = window.end;
         if (module === "packaging") {
+            const rangeNote = window.start !== window.end
+                ? "<li>Нужны данные за " + uploadWindowLabel(window) + " -- если отчёт умеет выгружать только один день за раз, выгрузите несколько файлов за эти даты и загрузите их по очереди (каждая выгрузка добавляется, не затирает предыдущую).</li>"
+                : "<li>Укажите дату " + formatRuDate(date) + ".</li>";
             return "<strong>Выгрузить Упаковку / RWP</strong>"
                 + "<ol>"
                 + "<li>Откройте отчет <a href='https://reports.wbwh.tech/reports/lost-and-non-movable-goods' target='_blank' rel='noopener'>Утерянные и обездвиженные товары</a>.</li>"
                 + "<li>Укажите склад \"СЦ Нижний Новгород Ларина\".</li>"
-                + "<li>Укажите дату " + formatRuDate(date) + ".</li>"
+                + rangeNote
                 + "<li>Откройте вкладку \"Обездвижено\" и выгрузите XLSX.</li>"
-                + "<li>Без изменений загрузите файл ниже -- WMS+ сам решит по правилам, что относится к Упаковке, а что к RWP.</li>"
+                + "<li>Без изменений загрузите файл ниже -- WMS+ сам решит по правилам, что относится к Упаковке, а что к RWP, и по каждому правилу отберёт только строки нужного возраста.</li>"
                 + "</ol>";
         }
         if (module === "after_sale_movement") return "<strong>Выгрузить Движение после продажи</strong><ol><li>Загрузите отдельную таблицу.</li><li>WMS+ возьмет строки за " + formatRuDate(date) + " по дате статуса.</li></ol>";
@@ -16117,6 +16238,16 @@
         return (rows || []).slice().sort((a, b) => parseDateTime(b[field]).ts - parseDateTime(a[field]).ts)[0] || rows[0];
     }
 
+    // Дата конкретной задачи/группы -- дата САМОЙ СВЕЖЕЙ строки в её
+    // составе (а не общий якорь businessDate run'а) -- нужно, когда окно
+    // выгрузки шире одного дня (см. rowDateAdmittedForOffset) и разные
+    // строки/группы внутри одного файла законно относятся к разным датам.
+    function groupBusinessDate(rows, field, fallback) {
+        const newest = newestRow(rows, field);
+        const found = newest ? parseDateTime(newest[field]).date : "";
+        return found || fallback;
+    }
+
     async function buildPackagingPreview(rows, businessDate, specialMap) {
         specialMap = specialMap || new Map();
         const packagingDef = moduleDef("packaging");
@@ -16130,13 +16261,27 @@
             return decided ? decided.zone === "RWP" : isRwpStatus(row.last_status);
         }
 
-        // businessDate приходит уже сдвинутым снаружи (uploadDateForModule
-        // применяет def.offsetDays до вызова этой функции) -- здесь
-        // сравниваем напрямую, без повторного сдвига, иначе offset
-        // применился бы дважды.
+        function offsetDaysForRow(row, defForRow) {
+            const decided = decidedByRow.get(row);
+            return decided && Number.isFinite(decided.uploadOffsetDays) ? decided.uploadOffsetDays : Number(defForRow.offsetDays || 0);
+        }
+
+        // businessDate -- якорь "сегодня" для этого запуска (не сдвинутая
+        // дата, как раньше). Каждая строка допускается по СВОЕМУ offset
+        // (Упаковка -7 по умолчанию, RWP -4 по правилу) -- см.
+        // rowDateAdmittedForOffset: offset=0 -- точное совпадение,
+        // offset!=0 -- "не свежее N дней", без ограничения снизу. Один
+        // широкий файл теперь обслуживает Упаковку и RWP одновременно --
+        // раньше здесь было точное сравнение с ОДНОЙ businessDate на всю
+        // кнопку, из-за чего после слияния кнопок "Упаковка/RWP" в этой
+        // сессии RWP-строки (offset -4) реально переставали проходить
+        // фильтр, когда businessDate была сдвинута под Упаковку (-7).
         let dateFilteredOut = 0;
         const dateRows = rows.filter((row) => {
-            if (parseDateTime(row.last_movement).date !== businessDate) { dateFilteredOut += 1; return false; }
+            const rowDate = parseDateTime(row.last_movement).date;
+            const def = isRwpRow(row) ? rwpDef : packagingDef;
+            const offsetDays = offsetDaysForRow(row, def);
+            if (!rowDateAdmittedForOffset(rowDate, offsetDays, businessDate)) { dateFilteredOut += 1; return false; }
             return true;
         });
 
@@ -16162,11 +16307,14 @@
         const tasks = [];
         let groupedTareCount = 0;
         const skippedCheap = 0;
+        // Срок -- всегда от якоря "сегодня" (момент создания задачи), а не
+        // от исторической даты строки: разбор возраста уже отражён в
+        // приоритете/force_high_priority, задваивать его в срок не нужно
+        // (сверено с поведением системы до слияния кнопок Упаковка+RWP).
         const dueDateFor = (row, def) => {
             const decided = decidedByRow.get(row);
             const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : settingNumber(def.taskDeadlineDays, 1);
-            const offsetDays = decided ? decided.uploadOffsetDays : Number(def.offsetDays || 0);
-            return addDays(addDays(businessDate, -offsetDays), deadlineDays);
+            return addDays(businessDate, deadlineDays);
         };
         byTare.forEach((group, tareId) => {
             const def = packagingDef;
@@ -16175,12 +16323,13 @@
                 const sorted = group.slice().sort((a, b) => a.shk.localeCompare(b.shk, "ru"));
                 const price = rowsPrice(sorted, "price");
                 const status = newestRow(sorted, "last_movement").last_status || "-";
+                const groupDate = groupBusinessDate(sorted, "last_movement", businessDate);
                 tasks.push(taskRecord({
                     module: "packaging",
                     sourceModule: def.sourceModule,
                     uploadType: def.uploadType,
-                    businessDate,
-                    sourceId: "tare:" + tareId + "|" + businessDate,
+                    businessDate: groupDate,
+                    sourceId: "tare:" + tareId + "|" + groupDate,
                     title: taskTitleForTare(tareId),
                     taskType: def.taskType,
                     descriptionTaskType: def.taskTypeLabel,
@@ -16212,12 +16361,13 @@
         singles.filter((row) => !filteredRowSet.has(row)).concat(split.special).forEach((row) => {
             const isRwp = isRwpRow(row);
             const def = isRwp ? rwpDef : packagingDef;
+            const rowDate = parseDateTime(row.last_movement).date || businessDate;
             tasks.push(taskRecord({
                 module: isRwp ? "rwp" : "packaging",
                 sourceModule: def.sourceModule,
                 uploadType: def.uploadType,
-                businessDate,
-                sourceId: (isRwp ? "rwp:" : "shk:") + row.shk + "|" + businessDate,
+                businessDate: rowDate,
+                sourceId: (isRwp ? "rwp:" : "shk:") + row.shk + "|" + rowDate,
                 title: taskTitleForShk(row.shk),
                 taskType: def.taskType,
                 descriptionTaskType: def.taskTypeLabel,
@@ -16398,8 +16548,7 @@
         survivors.forEach((row) => {
             const decided = decidedByRow.get(row);
             const offsetDays = decided ? decided.uploadOffsetDays : 0;
-            const targetDate = addDays(businessDate, -offsetDays);
-            if (parseDateTime(row.created_at).date !== targetDate) { dateFilteredOut += 1; return; }
+            if (!rowDateAdmittedForOffset(parseDateTime(row.created_at).date, offsetDays, businessDate)) { dateFilteredOut += 1; return; }
             dated.push(row);
         });
 
@@ -16464,30 +16613,44 @@
             const forceHighPriority = decided ? Boolean(decided.forceHighPriority) : Boolean(info.forceHighPriority);
             const tags = decided && decided.tags && decided.tags.length ? decided.tags : (info.tags || []);
             const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : 1;
-            const offsetDays = decided ? decided.uploadOffsetDays : 0;
-            const dueDate = addDays(addDays(businessDate, -offsetDays), deadlineDays);
+            // Срок -- от якоря "сегодня", не от даты строки (см. причину в
+            // buildPackagingPreview). Бакет может содержать строки с
+            // РАЗНЫМИ датами (если у правила ненулевое окно) -- делим по
+            // дате строки перед группировкой, каждая дата формирует свои
+            // задачи/sourceId независимо (иначе смешанные даты внутри
+            // одной sourceId/группировки по таре были бы неоднозначны).
+            const dueDate = addDays(businessDate, deadlineDays);
             const moduleDefForBucket = moduleDef(info.module);
-            const grouped = appendGroupedTasks(bucket.rows, {
-                module: info.module,
-                sourceModule: moduleDefForBucket.sourceModule,
-                uploadType: moduleDefForBucket.uploadType,
-                businessDate,
-                sourcePrefix: info.sourcePrefix,
-                titlePrefix: info.titlePrefix,
-                taskType: info.taskType,
-                descriptionTaskType: info.descriptionTaskType || info.taskType,
-                column: info.column || bucket.zoneKey,
-                dueDate,
-                responsibilityZone: moduleDefForBucket.responsibilityZone,
-                specialMap,
-                forceTareGrouping,
-                forceHighPriority,
-                tags,
+            const rowsByDate = new Map();
+            bucket.rows.forEach((row) => {
+                const rowDate = parseDateTime(row.created_at).date || businessDate;
+                const group = rowsByDate.get(rowDate) || [];
+                group.push(row);
+                rowsByDate.set(rowDate, group);
             });
-            groupedTareCount += grouped.groupedTareCount;
-            specialCount += grouped.specialCount;
-            tasks = tasks.concat(grouped.tasks);
-            if (info.countKey && counts[info.countKey] !== undefined) counts[info.countKey] = grouped.tasks.length;
+            rowsByDate.forEach((rowsForDate, rowDate) => {
+                const grouped = appendGroupedTasks(rowsForDate, {
+                    module: info.module,
+                    sourceModule: moduleDefForBucket.sourceModule,
+                    uploadType: moduleDefForBucket.uploadType,
+                    businessDate: rowDate,
+                    sourcePrefix: info.sourcePrefix,
+                    titlePrefix: info.titlePrefix,
+                    taskType: info.taskType,
+                    descriptionTaskType: info.descriptionTaskType || info.taskType,
+                    column: info.column || bucket.zoneKey,
+                    dueDate,
+                    responsibilityZone: moduleDefForBucket.responsibilityZone,
+                    specialMap,
+                    forceTareGrouping,
+                    forceHighPriority,
+                    tags,
+                });
+                groupedTareCount += grouped.groupedTareCount;
+                specialCount += grouped.specialCount;
+                tasks = tasks.concat(grouped.tasks);
+                if (info.countKey && counts[info.countKey] !== undefined) counts[info.countKey] = (counts[info.countKey] || 0) + grouped.tasks.length;
+            });
         });
 
         // -- ПМ/Почта: mxHasBoxes-исключение, группировка по transfer,
@@ -16630,8 +16793,7 @@
         survivors.forEach((row) => {
             const decided = decidedByRow.get(row);
             const offsetDays = decided ? decided.uploadOffsetDays : 0;
-            const targetDate = addDays(businessDate, -offsetDays);
-            if (parseDateTime(row.created_at).date !== targetDate) { dateFilteredOut += 1; return; }
+            if (!rowDateAdmittedForOffset(parseDateTime(row.created_at).date, offsetDays, businessDate)) { dateFilteredOut += 1; return; }
             dated.push(row);
         });
 
@@ -16678,30 +16840,38 @@
             const forceHighPriority = decided ? Boolean(decided.forceHighPriority) : Boolean(info.forceHighPriority);
             const tags = decided && decided.tags && decided.tags.length ? decided.tags : (info.tags || []);
             const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : 1;
-            const offsetDays = decided ? decided.uploadOffsetDays : 0;
-            const dueDate = addDays(addDays(businessDate, -offsetDays), deadlineDays);
+            const dueDate = addDays(businessDate, deadlineDays);
             const moduleDefForBucket = moduleDef(info.module);
-            const grouped = appendGroupedTasks(bucket.rows, {
-                module: info.module,
-                sourceModule: moduleDefForBucket.sourceModule,
-                uploadType: moduleDefForBucket.uploadType,
-                businessDate,
-                sourcePrefix: info.sourcePrefix,
-                titlePrefix: info.titlePrefix,
-                taskType: info.taskType,
-                descriptionTaskType: info.taskType,
-                column: info.column || bucket.zoneKey,
-                dueDate,
-                responsibilityZone: moduleDefForBucket.responsibilityZone,
-                specialMap,
-                forceTareGrouping,
-                forceHighPriority,
-                tags,
+            const rowsByDate = new Map();
+            bucket.rows.forEach((row) => {
+                const rowDate = parseDateTime(row.created_at).date || businessDate;
+                const group = rowsByDate.get(rowDate) || [];
+                group.push(row);
+                rowsByDate.set(rowDate, group);
             });
-            groupedTareCount += grouped.groupedTareCount;
-            specialCount += grouped.specialCount;
-            tasks = tasks.concat(grouped.tasks);
-            if (info.countKey && counts[info.countKey] !== undefined) counts[info.countKey] = grouped.tasks.length;
+            rowsByDate.forEach((rowsForDate, rowDate) => {
+                const grouped = appendGroupedTasks(rowsForDate, {
+                    module: info.module,
+                    sourceModule: moduleDefForBucket.sourceModule,
+                    uploadType: moduleDefForBucket.uploadType,
+                    businessDate: rowDate,
+                    sourcePrefix: info.sourcePrefix,
+                    titlePrefix: info.titlePrefix,
+                    taskType: info.taskType,
+                    descriptionTaskType: info.taskType,
+                    column: info.column || bucket.zoneKey,
+                    dueDate,
+                    responsibilityZone: moduleDefForBucket.responsibilityZone,
+                    specialMap,
+                    forceTareGrouping,
+                    forceHighPriority,
+                    tags,
+                });
+                groupedTareCount += grouped.groupedTareCount;
+                specialCount += grouped.specialCount;
+                tasks = tasks.concat(grouped.tasks);
+                if (info.countKey && counts[info.countKey] !== undefined) counts[info.countKey] = (counts[info.countKey] || 0) + grouped.tasks.length;
+            });
         });
 
         return {
@@ -16736,8 +16906,7 @@
         const rows = survivors.filter((row) => {
             const decided = decidedByRow.get(row);
             const offsetDays = decided ? decided.uploadOffsetDays : 0;
-            const targetDate = addDays(businessDate, -offsetDays);
-            if (parseDateTime(row.status_at).date !== targetDate) { dateFilteredOut += 1; return false; }
+            if (!rowDateAdmittedForOffset(parseDateTime(row.status_at).date, offsetDays, businessDate)) { dateFilteredOut += 1; return false; }
             return true;
         });
 
@@ -16749,14 +16918,14 @@
             seen.add(row.product);
             const decided = decidedByRow.get(row);
             const deadlineDays = decided && Number.isFinite(decided.taskDeadlineDays) ? decided.taskDeadlineDays : 1;
-            const offsetDays = decided ? decided.uploadOffsetDays : 0;
-            const dueDate = addDays(addDays(businessDate, -offsetDays), deadlineDays);
+            const dueDate = addDays(businessDate, deadlineDays);
+            const rowDate = parseDateTime(row.status_at).date || businessDate;
             tasks.push(taskRecord({
                 module: "after_sale_movement",
                 sourceModule: def.sourceModule,
                 uploadType: def.uploadType,
-                businessDate,
-                sourceId: "after_sale:shk:" + row.product + "|" + businessDate,
+                businessDate: rowDate,
+                sourceId: "after_sale:shk:" + row.product + "|" + rowDate,
                 title: taskTitleForShk(row.product),
                 taskType: def.taskType,
                 descriptionTaskType: def.taskTypeLabel,
@@ -19096,10 +19265,18 @@
             summary.after_sale_dedupe_dropped_tasks = prepared.stats.droppedTaskCount;
             summary.after_sale_dedupe_trimmed_tasks = prepared.stats.trimmedTaskCount;
         }
+        // Задачи теперь могут нести СВОЮ собственную дату (окно шире
+        // одного дня, см. rowDateAdmittedForOffset) -- effective_date/
+        // business_date остаются якорем "сегодня" (для unique-индекса и
+        // чтобы "уже выгружено?" продолжало работать как раньше), а
+        // реально покрытый диапазон дат фиксируем отдельно.
+        const taskDates = payloadTasks.map((task) => task.upload_effective_date).filter(Boolean).sort();
         const run = {
             upload_date: state.today,
             effective_date: businessDate,
             business_date: businessDate,
+            window_start_date: taskDates.length ? taskDates[0] : businessDate,
+            window_end_date: taskDates.length ? taskDates[taskDates.length - 1] : businessDate,
             source_module: def.sourceModule,
             upload_type: def.uploadType,
             status: "completed",
@@ -19186,7 +19363,12 @@
 
     function masterDatePlan() {
         const dates = {};
-        MASTER_MODULES.forEach((module) => { dates[module] = uploadDateForModule(module); });
+        // anchorDateForModule, не uploadDateForModule напрямую -- для
+        // форматов с ненулевым offset (Упаковка/RWP) businessDate,
+        // передаваемая в buildPreviewForModule, теперь якорь "сегодня"
+        // (см. buildPackagingPreview), а не сдвинутая дата: иначе здесь
+        // сдвиг применился бы дважды (к дате, которая уже сдвинута).
+        MASTER_MODULES.forEach((module) => { dates[module] = anchorDateForModule(module); });
         return dates;
     }
 
