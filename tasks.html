@@ -2383,10 +2383,6 @@
         </div>
         <div id="workInstruction" class="instruction"></div>
         <div id="fileControls" class="file-row"></div>
-        <div id="pmCarrierConfirmRow" class="file-row hidden">
-            <label class="btn btn-outline" for="pmCarrierConfirmFile">Проверить передачи на отгрузку</label>
-            <input id="pmCarrierConfirmFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
-        </div>
         <div id="workStatus" class="status-line">Выберите файл.</div>
         <div id="previewGrid" class="preview-grid"></div>
         <div id="sampleWrap" class="sample-table-wrap"></div>
@@ -2395,6 +2391,27 @@
             <button id="repeatUpload" class="btn btn-outline" type="button">Выгрузить повторно</button>
         </div>
         <div id="doneBox" class="done-box"></div>
+    </div>
+</section>
+
+<section id="pmCarrierModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card task-small-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Проверить передачи на отгрузку</h3>
+                <p class="work-subtitle">Среди сохранённых задач есть ПМ/Почта. Скопируйте номера передач, найдите их в отчёте отгрузки, выгрузите результат и загрузите файл сюда -- совпавшие передачи перейдут в "Завершено".</p>
+            </div>
+            <button id="closePmCarrierModal" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <p id="pmCarrierTransferCount" class="work-subtitle"></p>
+        <div class="file-row">
+            <button id="copyPmCarrierTransfers" class="btn btn-outline" type="button">Скопировать номера передач</button>
+        </div>
+        <div class="file-row">
+            <label class="btn btn-outline" for="pmCarrierConfirmFile">Загрузить проверку отгрузки</label>
+            <input id="pmCarrierConfirmFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+        </div>
+        <div id="pmCarrierModalStatus" class="status-line"></div>
     </div>
 </section>
 

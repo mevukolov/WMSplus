@@ -591,6 +591,7 @@
         activeModule: "",
         activeDate: "",
         repeatUploadUnlocked: false,
+        pmCarrierTransfers: [],
         files: {},
         rows: {},
         preview: null,
@@ -15007,7 +15008,6 @@
         $("workTitle").textContent = def.label;
         $("workSubtitle").textContent = subtitleDate + ". Дата списания считается по статусу каждого ШК.";
         $("workInstruction").innerHTML = instructionHtml(module, window);
-        $("pmCarrierConfirmRow").classList.toggle("hidden", module !== "general");
         $("doneBox").classList.remove("visible");
         $("saveUpload").disabled = true;
         $("saveUpload").classList.remove("hidden");
@@ -15086,20 +15086,29 @@
     // Отдельное пост-сохранное действие (не часть загрузки/предпросмотра):
     // оператор загружает тот же файл-отчёт проверки отгрузки ПОСЛЕ того,
     // как задачи ПМ/Почта уже созданы, и совпавшие по номеру передачи
-    // переводятся в "Завершено".
+    // переводятся в "Завершено". Модалка открывается сама СРАЗУ после
+    // сохранения типовой выгрузки -- но только если среди сохранённых
+    // задач реально есть ПМ/Почта (см. openPmCarrierModalIfRelevant).
+    function setPmCarrierModalStatus(text, kind) {
+        const el = $("pmCarrierModalStatus");
+        if (!el) return;
+        el.textContent = text;
+        el.className = "status-line" + (kind ? " " + kind : "");
+    }
+
     async function confirmPmCarrierShipments(file) {
-        setStatus("Читаю проверку отгрузки...");
+        setPmCarrierModalStatus("Читаю проверку отгрузки...");
         const rows = await readWorkbookRows(file, "pmCarrier");
         const transfers = Array.from(new Set(rows.map((row) => row.transfer).filter(Boolean)));
-        if (!transfers.length) { setStatus("В файле не найдено номеров передач.", "error"); return; }
+        if (!transfers.length) { setPmCarrierModalStatus("В файле не найдено номеров передач.", "error"); return; }
         const db = supabaseDb();
-        if (!db) { setStatus("Нет подключения к базе.", "error"); return; }
+        if (!db) { setPmCarrierModalStatus("Нет подключения к базе.", "error"); return; }
         try {
             const { data, error } = await db.rpc("wms_confirm_pm_carrier_shipments", { p_transfers: transfers });
             if (error) throw error;
-            setStatus("Готово. Передач в файле: " + (data.transfer_count || 0) + ", завершено задач: " + (data.matched_count || 0) + ".", "good");
+            setPmCarrierModalStatus("Готово. Передач в файле: " + (data.transfer_count || 0) + ", завершено задач: " + (data.matched_count || 0) + ".", "good");
         } catch (error) {
-            setStatus("Не удалось проверить отгрузку: " + (error && error.message ? error.message : String(error)), "error");
+            setPmCarrierModalStatus("Не удалось проверить отгрузку: " + (error && error.message ? error.message : String(error)), "error");
         }
     }
 
@@ -15110,8 +15119,36 @@
             const file = input.files && input.files[0];
             if (!file) return;
             input.value = "";
-            confirmPmCarrierShipments(file).catch((error) => setStatus(error && error.message ? error.message : String(error), "error"));
+            confirmPmCarrierShipments(file).catch((error) => setPmCarrierModalStatus(error && error.message ? error.message : String(error), "error"));
         });
+        const copyBtn = $("copyPmCarrierTransfers");
+        if (copyBtn) {
+            copyBtn.addEventListener("click", async () => {
+                const copied = await copyText((state.pmCarrierTransfers || []).join("\n"));
+                setPmCarrierModalStatus(copied ? "Номера передач скопированы." : "Браузер заблокировал копирование.", copied ? "good" : "error");
+            });
+        }
+        const closeBtn = $("closePmCarrierModal");
+        if (closeBtn) closeBtn.addEventListener("click", () => setFlowModalOpen("pmCarrierModal", false));
+    }
+
+    // ПМ/Почта -- единственные зоны typовой выгрузки, идентифицируемые по
+    // номеру передачи (source_tare_id), а не по физической таре -- см.
+    // buildGeneralPreview. Открываем модалку только если среди РЕАЛЬНО
+    // сохранённых задач такие есть; иначе она просто не появляется.
+    const PM_CARRIER_TASK_TYPES = new Set(["Разбор ОПП // ПМ", "Разбор ОПП // Почта"]);
+    function openPmCarrierModalIfRelevant(tasks) {
+        const transfers = Array.from(new Set(
+            (tasks || [])
+                .filter((task) => PM_CARRIER_TASK_TYPES.has(task.task_type))
+                .map((task) => normalizeText(task.source_tare_id))
+                .filter(Boolean)
+        ));
+        if (!transfers.length) return;
+        state.pmCarrierTransfers = transfers;
+        $("pmCarrierTransferCount").textContent = "Передач: " + transfers.length + ".";
+        setPmCarrierModalStatus("");
+        setFlowModalOpen("pmCarrierModal", true);
     }
 
     async function readWorkbookRows(file, kind) {
@@ -19131,6 +19168,7 @@
             $("doneBox").classList.add("visible");
             $("doneBox").textContent = "Выгрузка завершена. Создано/обновлено задач: " + (response.upserted_count || state.preview.tasks.length) + ".";
             setStatus("Готово. Данные сохранены в WMS+.", "good");
+            if (module === "general") openPmCarrierModalIfRelevant(state.preview.tasks);
         } catch (error) {
             $("saveUpload").disabled = false;
             setStatus(error && error.message ? error.message : String(error), "error");
@@ -20079,6 +20117,7 @@
         $("staffStatsModal").addEventListener("click", (event) => { if (event.target === $("staffStatsModal")) closeStaffStatsModal(); });
         $("writeoffTermsModal").addEventListener("click", (event) => { if (event.target === $("writeoffTermsModal")) closeWriteoffTermsModal(); });
         $("routingRulesModal").addEventListener("click", (event) => { if (event.target === $("routingRulesModal")) closeRoutingRulesModal(); });
+        $("pmCarrierModal").addEventListener("click", (event) => { if (event.target === $("pmCarrierModal")) setFlowModalOpen("pmCarrierModal", false); });
         $("moduleSettingsModal").addEventListener("click", (event) => { if (event.target === $("moduleSettingsModal")) closeModuleSettingsModal(); });
         $("reviewZonesModal").addEventListener("click", (event) => { if (event.target === $("reviewZonesModal")) closeReviewZonesModal(); });
         $("moduleChooser").addEventListener("click", (event) => { if (event.target === $("moduleChooser")) setFlowModalOpen("moduleChooser", false); });
