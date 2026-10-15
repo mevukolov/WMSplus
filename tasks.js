@@ -1410,12 +1410,19 @@
     // (нужен как fallback-отступ для строк, не попавших ни под одно
     // правило, напр. Упаковка без RWP-правила). min(), т.к. более
     // отрицательное число означает "смотреть дальше в прошлое".
+    // Статический offsetDays модуля (DEFAULT_MODULES) участвует ТОЛЬКО
+    // когда для формата вообще нет активных zone-правил -- аварийный
+    // резерв, а не постоянный пол/потолок рядом с реальными правилами.
+    // Правила сейчас активно меняются (офсеты -1..-7 на момент
+    // написания) -- жёстко подмешанный фолбэк (раньше 0 для general)
+    // иначе застревал бы в расчёте и переставал отражать реальный
+    // активный набор правил, стоило бы всем правилам сместиться с 0.
     function deepestOffsetDaysForModule(module) {
         const def = moduleDef(module);
-        const fallback = Number(def.offsetDays || 0) || 0;
         const fmt = sourceFormatForModule(module);
         const ruleMin = state.sourceFormatDepth && state.sourceFormatDepth.map ? state.sourceFormatDepth.map[fmt] : undefined;
-        return Math.min(0, fallback, Number.isFinite(ruleMin) ? ruleMin : 0);
+        if (Number.isFinite(ruleMin)) return Math.min(0, ruleMin);
+        return Math.min(0, Number(def.offsetDays || 0) || 0);
     }
 
     // Самый МЕЛКИЙ (ближе к нулю) offset среди активных правил формата --
@@ -1430,10 +1437,10 @@
     // "сегодня" без изменений.
     function shallowestOffsetDaysForModule(module) {
         const def = moduleDef(module);
-        const fallback = Number(def.offsetDays || 0) || 0;
         const fmt = sourceFormatForModule(module);
         const ruleMax = state.sourceFormatDepth && state.sourceFormatDepth.maxMap ? state.sourceFormatDepth.maxMap[fmt] : undefined;
-        return Math.min(0, Math.max(fallback, Number.isFinite(ruleMax) ? ruleMax : fallback));
+        if (Number.isFinite(ruleMax)) return Math.min(0, ruleMax);
+        return Math.min(0, Number(def.offsetDays || 0) || 0);
     }
 
     async function ensureSourceFormatDepthLoaded(force) {
@@ -14953,6 +14960,12 @@
         setFlowModalOpen("masterWork", false);
         setFlowModalOpen("moduleChooser", true);
         renderModuleChooser();
+        // Офсеты правил меняются в отдельной вкладке/другим человеком в
+        // любой момент -- при каждом открытии чекера досасываем свежий
+        // набор активных правил (не раз на всю загрузку страницы),
+        // чтобы запрашиваемое окно всегда отражало текущие офсеты, а не
+        // те, что были при открытии страницы.
+        ensureSourceFormatDepthLoaded(true).then(() => renderModuleChooser());
     }
 
     function openBackfillChooser() {
