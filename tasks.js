@@ -240,7 +240,7 @@
     const DEFAULT_MODULES = [
         {
             module: "general",
-            label: "Типовая выгрузка (В заказе)",
+            label: "Товары без движения (В заказе)",
             sourceModule: "manual_general_upload",
             uploadType: "general",
             offsetDays: 0,
@@ -254,7 +254,7 @@
         },
         {
             module: "packaging",
-            label: "Упаковка / RWP",
+            label: "Утерянные и обездвиженные товары",
             sourceModule: "manual_packaging_opp",
             uploadType: "packaging",
             offsetDays: -7,
@@ -340,7 +340,7 @@
         },
         {
             module: "no_order",
-            label: "Без заказа",
+            label: "Товары без движения (Без заказа)",
             sourceModule: "manual_no_order",
             uploadType: "no_order",
             offsetDays: 0,
@@ -12473,9 +12473,9 @@
     }
 
     const SOURCE_FORMAT_OPTIONS = [
-        { value: "general", label: "Типовая выгрузка -- В заказе (ПМ/Предсортировка/Маркетплейс+ПЦ/WMI)" },
-        { value: "no_order", label: "Без заказа (USD/TMM/остальное)" },
-        { value: "packaging", label: "Упаковка / RWP" },
+        { value: "general", label: "Товары без движения (В заказе) -- ПМ/Предсортировка/Маркетплейс+ПЦ/WMI" },
+        { value: "no_order", label: "Товары без движения (Без заказа) -- USD/TMM/остальное" },
+        { value: "packaging", label: "Утерянные и обездвиженные товары -- Упаковка/RWP" },
         { value: "after_sale_movement", label: "Движение после продажи" },
     ];
 
@@ -15037,7 +15037,7 @@
             const rangeNote = window.start !== window.end
                 ? "<li>Нужны данные за " + uploadWindowLabel(window) + " -- если отчёт умеет выгружать только один день за раз, выгрузите несколько файлов за эти даты и загрузите их по очереди (каждая выгрузка добавляется, не затирает предыдущую).</li>"
                 : "<li>Укажите дату " + formatRuDate(date) + ".</li>";
-            return "<strong>Выгрузить Упаковку / RWP</strong>"
+            return "<strong>Выгрузить Утерянные и обездвиженные товары</strong>"
                 + "<ol>"
                 + "<li>Откройте отчет <a href='https://reports.wbwh.tech/reports/lost-and-non-movable-goods' target='_blank' rel='noopener'>Утерянные и обездвиженные товары</a>.</li>"
                 + "<li>Укажите склад \"СЦ Нижний Новгород Ларина\".</li>"
@@ -15047,8 +15047,8 @@
                 + "</ol>";
         }
         if (module === "after_sale_movement") return "<strong>Выгрузить Движение после продажи</strong><ol><li>Загрузите отдельную таблицу.</li><li>WMS+ возьмет строки за " + formatRuDate(date) + " по дате статуса.</li></ol>";
-        if (module === "no_order") return "<strong>Выгрузить Без заказа</strong><ol><li>Загрузите основной файл, экспортированный с фильтром \"Без заказа\".</li><li>Это отдельная выгрузка -- WMS+ не умеет определить \"без заказа\" по статусу строки, только по тому, что вы загрузили именно сюда. WMS+ применит правила USD/TMM и фильтры за " + formatRuDate(date) + ".</li></ol>";
-        return "<strong>Выгрузить типовую выгрузку (В заказе)</strong><ol><li>Загрузите основной файл \"Товары без движения - В заказе\".</li><li>WMS+ сам решит по правилам, в какой участок положить каждый ШК (включая ПМ/Почту -- второй файл проверки отгрузки теперь отдельное действие), и применит фильтры за " + formatRuDate(date) + ".</li></ol>";
+        if (module === "no_order") return "<strong>Выгрузить Товары без движения (Без заказа)</strong><ol><li>Загрузите основной файл, экспортированный с фильтром \"Без заказа\".</li><li>Это отдельная выгрузка -- WMS+ не умеет определить \"без заказа\" по статусу строки, только по тому, что вы загрузили именно сюда. WMS+ применит правила USD/TMM и фильтры за " + formatRuDate(date) + ".</li></ol>";
+        return "<strong>Выгрузить Товары без движения (В заказе)</strong><ol><li>Загрузите основной файл \"Товары без движения - В заказе\".</li><li>WMS+ сам решит по правилам, в какой участок положить каждый ШК (включая ПМ/Почту -- второй файл проверки отгрузки теперь отдельное действие), и применит фильтры за " + formatRuDate(date) + ".</li></ol>";
     }
 
     function renderFileControls(module) {
