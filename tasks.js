@@ -560,13 +560,6 @@
             loading: false,
             map: {},
         },
-        moduleSettings: {
-            rows: [],
-            loading: false,
-            saving: false,
-            loaded: false,
-            error: "",
-        },
         reviewZones: {
             rows: [],
             loading: false,
@@ -13291,39 +13284,6 @@
         }
     }
 
-    async function loadModuleSettings(force) {
-        if (state.moduleSettings.loaded && !force) return true;
-        const db = supabaseDb();
-        state.moduleSettings.loading = true;
-        state.moduleSettings.error = "";
-        renderModuleSettingsModal();
-        if (!db) {
-            state.moduleSettings.loading = false;
-            state.moduleSettings.error = "Supabase SDK недоступен.";
-            renderModuleSettingsModal();
-            return false;
-        }
-        try {
-            const { data, error } = await db
-                .from("wms_module_settings")
-                .select("*")
-                .order("module", { ascending: true })
-                .order("setting_key", { ascending: true });
-            if (error) throw error;
-            state.moduleSettings.rows = data || [];
-            state.moduleSettings.loaded = true;
-            return true;
-        } catch (error) {
-            state.moduleSettings.rows = [];
-            state.moduleSettings.error = "Не удалось загрузить параметры: " + (error && error.message ? error.message : String(error));
-            console.warn("module settings load skipped:", error);
-            return false;
-        } finally {
-            state.moduleSettings.loading = false;
-            renderModuleSettingsModal();
-        }
-    }
-
     async function loadReviewZones(force) {
         if (state.reviewZones.loaded && !force) return true;
         const db = supabaseDb();
@@ -13350,70 +13310,6 @@
             state.reviewZones.loading = false;
             renderReviewZonesModal();
         }
-    }
-
-    function moduleSettingRowHtml(row) {
-        const valueText = row.value !== undefined && row.value !== null ? JSON.stringify(row.value) : "";
-        return "<div class='writeoff-term-row' data-module-setting-row data-setting-module='" + escapeHtml(row.module || "") + "' data-setting-key-original='" + escapeHtml(row.setting_key || "") + "'>"
-            + "<input data-setting-module type='text' value='" + escapeHtml(row.module || "") + "' placeholder='Модуль, например no_order'>"
-            + "<input data-setting-key type='text' value='" + escapeHtml(row.setting_key || "") + "' placeholder='Ключ, например cheap_row_threshold_rub'>"
-            + "<input data-setting-value type='text' value='" + escapeHtml(valueText) + "' placeholder='Значение в JSON: число пишите как есть (2000), текст -- в кавычках (\"corrugated\")'>"
-            + "<button type='button' class='btn btn-square' data-setting-remove aria-label='Удалить'>×</button>"
-            + "</div>";
-    }
-
-    function renderModuleSettingsModal() {
-        const target = $("moduleSettingsWrap");
-        if (!target) return;
-        const rows = state.moduleSettings.rows || [];
-        target.innerHTML = (state.moduleSettings.error ? "<div class='status-line error'>" + escapeHtml(state.moduleSettings.error) + "</div>" : "")
-            + (state.moduleSettings.loading ? "<div class='status-line'>Загружаю параметры...</div>" : "")
-            + "<div class='writeoff-term-head'><span>Модуль (участок выгрузки)</span><span>Ключ (название параметра)</span><span>Значение (JSON -- число без кавычек, текст в кавычках)</span></div>"
-            + "<div class='writeoff-term-list'>" + rows.map(moduleSettingRowHtml).join("") + "</div>";
-        target.querySelectorAll("[data-setting-remove]").forEach((button) => {
-            button.addEventListener("click", () => removeModuleSettingRow(button.closest("[data-module-setting-row]")));
-        });
-    }
-
-    async function removeModuleSettingRow(rowEl) {
-        if (!rowEl) return;
-        const module = rowEl.getAttribute("data-setting-module");
-        const settingKey = rowEl.getAttribute("data-setting-key-original");
-        if (module && settingKey) {
-            const db = supabaseDb();
-            if (db) {
-                try {
-                    const { error } = await db.from("wms_module_settings").delete().eq("module", module).eq("setting_key", settingKey);
-                    if (error) throw error;
-                } catch (error) {
-                    toast("Не удалось удалить параметр: " + (error && error.message ? error.message : String(error)), "error");
-                    return;
-                }
-            }
-        }
-        rowEl.remove();
-    }
-
-    function addModuleSettingDraft() {
-        const rows = state.moduleSettings.rows || [];
-        state.moduleSettings.rows = rows.concat({ module: "", setting_key: "", value: null });
-        renderModuleSettingsModal();
-    }
-
-    function moduleSettingInputRows() {
-        return Array.from(document.querySelectorAll("[data-module-setting-row]")).map((row) => {
-            const module = normalizeText(row.querySelector("[data-setting-module]") && row.querySelector("[data-setting-module]").value);
-            const settingKey = normalizeText(row.querySelector("[data-setting-key]") && row.querySelector("[data-setting-key]").value);
-            const rawValue = normalizeText(row.querySelector("[data-setting-value]") && row.querySelector("[data-setting-value]").value);
-            if (!module || !settingKey || !rawValue) return null;
-            let value;
-            try {
-                value = JSON.parse(rawValue);
-            } catch (error) {
-                return null;
-            }
-            return { module, setting_key: settingKey, value, updated_at: new Date().toISOString() };
-        }).filter(Boolean);
     }
 
     function reviewZoneRowHtml(row) {
@@ -13517,51 +13413,6 @@
             if (status) status.textContent = state.reviewZones.error;
         } finally {
             state.reviewZones.saving = false;
-            if (button) button.disabled = false;
-        }
-    }
-
-    async function openModuleSettingsModal() {
-        if (!ensureDevelopmentAccess("Параметры модулей")) return;
-        closeFlowModals();
-        setFlowModalOpen("moduleSettingsModal", true);
-        renderModuleSettingsModal();
-        await loadModuleSettings(true);
-    }
-
-    function closeModuleSettingsModal() {
-        setFlowModalOpen("moduleSettingsModal", false);
-    }
-
-    async function saveModuleSettingsFromModal() {
-        const db = supabaseDb();
-        const status = $("moduleSettingsStatus");
-        const button = $("saveModuleSettings");
-        const rows = moduleSettingInputRows();
-        if (!rows.length) {
-            if (status) status.textContent = "Нет строк для сохранения (проверь, что значение -- валидный JSON).";
-            return;
-        }
-        if (!db) {
-            if (status) status.textContent = "Supabase недоступен.";
-            return;
-        }
-        if (button) button.disabled = true;
-        state.moduleSettings.saving = true;
-        if (status) status.textContent = "Сохраняю параметры...";
-        try {
-            const { error } = await db.from("wms_module_settings").upsert(rows, { onConflict: "module,setting_key" });
-            if (error) throw error;
-            state.moduleSettings.loaded = false;
-            await loadModuleSettings(true);
-            if (status) status.textContent = "Параметры сохранены.";
-            toast("Параметры модулей сохранены.", "success");
-        } catch (error) {
-            const message = error && error.message ? error.message : String(error);
-            state.moduleSettings.error = "Не удалось сохранить параметры: " + message;
-            if (status) status.textContent = state.moduleSettings.error;
-        } finally {
-            state.moduleSettings.saving = false;
             if (button) button.disabled = false;
         }
     }
@@ -19982,7 +19833,6 @@
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
         $("openWriteoffTerms").addEventListener("click", () => { void openWriteoffTermsModal(); });
         $("openRoutingRules").addEventListener("click", () => { void openRoutingRulesModal(); });
-        $("openModuleSettings").addEventListener("click", () => { void openModuleSettingsModal(); });
         $("openReviewZones").addEventListener("click", () => { void openReviewZonesModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
@@ -20043,14 +19893,10 @@
         $("routingRuleTestFile").addEventListener("change", () => { void reparseRoutingRuleTestFile(); });
         $("routingRuleTestModule").addEventListener("change", () => { void reparseRoutingRuleTestFile(); });
         $("runRoutingRuleTest").addEventListener("click", () => { void runRoutingRuleTest(); });
-        $("closeModuleSettings").addEventListener("click", closeModuleSettingsModal);
         $("closeReviewZones").addEventListener("click", closeReviewZonesModal);
         $("addReviewZone").addEventListener("click", addReviewZoneDraft);
         $("saveReviewZones").addEventListener("click", () => { void saveReviewZonesFromModal(); });
         $("reloadReviewZones").addEventListener("click", () => { void loadReviewZones(true); });
-        $("addModuleSetting").addEventListener("click", addModuleSettingDraft);
-        $("saveModuleSettings").addEventListener("click", () => { void saveModuleSettingsFromModal(); });
-        $("reloadModuleSettings").addEventListener("click", () => { void loadModuleSettings(true); });
         $("saveWriteoffTerms").addEventListener("click", () => { void saveWriteoffTermsFromModal(); });
         $("reloadWriteoffTerms").addEventListener("click", () => { void loadWriteoffTerms(true); });
         $("recalculateWriteoffDates").addEventListener("click", () => { void recalculateWriteoffDatesFromModal(); });
@@ -20222,7 +20068,6 @@
         $("writeoffTermsModal").addEventListener("click", (event) => { if (event.target === $("writeoffTermsModal")) closeWriteoffTermsModal(); });
         $("routingRulesModal").addEventListener("click", (event) => { if (event.target === $("routingRulesModal")) closeRoutingRulesModal(); });
         $("pmCarrierModal").addEventListener("click", (event) => { if (event.target === $("pmCarrierModal")) setFlowModalOpen("pmCarrierModal", false); });
-        $("moduleSettingsModal").addEventListener("click", (event) => { if (event.target === $("moduleSettingsModal")) closeModuleSettingsModal(); });
         $("reviewZonesModal").addEventListener("click", (event) => { if (event.target === $("reviewZonesModal")) closeReviewZonesModal(); });
         $("moduleChooser").addEventListener("click", (event) => { if (event.target === $("moduleChooser")) setFlowModalOpen("moduleChooser", false); });
         $("uploadWork").addEventListener("click", (event) => { if (event.target === $("uploadWork")) openChooser(state.manualDate); });

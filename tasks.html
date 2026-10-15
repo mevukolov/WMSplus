@@ -2045,11 +2045,6 @@
                     <h2 class="tasks-action-title">Правила маршрутизации</h2>
                     <p class="tasks-action-text">Куда класть осиротевшие ШК по статусу/таре после актуализации Superset -- без правки кода.</p>
                 </button>
-                <button id="openModuleSettings" class="tasks-action-card" type="button" data-dev-only>
-                    <span class="tasks-action-icon">⚙️</span>
-                    <h2 class="tasks-action-title">Параметры модулей</h2>
-                    <p class="tasks-action-text">Нестатичные параметры выгрузки (пороги, сдвиги дат и т.п.) без правки кода.</p>
-                </button>
                 <button id="openReviewZones" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">🗂️</span>
                     <h2 class="tasks-action-title">Участки разбора</h2>
@@ -2969,26 +2964,6 @@
             <button id="runRoutingRuleTest" class="btn btn-rect" type="button">Запустить</button>
         </div>
         <div id="routingRuleTestResult"></div>
-    </div>
-</section>
-
-<section id="moduleSettingsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card tasks-flow-card-wide">
-        <div class="work-head">
-            <div>
-                <h3 class="work-title">Параметры модулей</h3>
-                <p class="work-subtitle">Пары модуль/ключ/значение -- задел под будущие настройки конкретных участков выгрузки: например, с какой суммы ШК вообще стоит заводить в задачу, через сколько дней участок должен быть разобран, по какому полю группировать в тару. Пишутся как есть, без условий (не "если-то", а просто цифра/текст на модуль).</p>
-                <p class="work-subtitle"><strong>Сейчас эти значения ничем в системе не используются</strong> -- ни один модуль выгрузки их ещё не читает. Можно заполнить заранее, эффекта на сам разбор это пока не даст.</p>
-            </div>
-            <button id="closeModuleSettings" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
-        </div>
-        <div id="moduleSettingsWrap" class="writeoff-terms-wrap"></div>
-        <div class="file-row">
-            <button id="addModuleSetting" class="btn btn-outline" type="button">Добавить параметр</button>
-            <button id="saveModuleSettings" class="btn btn-rect" type="button">Сохранить параметры</button>
-            <button id="reloadModuleSettings" class="btn btn-outline" type="button">Обновить из Supabase</button>
-        </div>
-        <div id="moduleSettingsStatus" class="review-status"></div>
     </div>
 </section>
 
