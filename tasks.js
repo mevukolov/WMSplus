@@ -12473,9 +12473,9 @@
     }
 
     const SOURCE_FORMAT_OPTIONS = [
-        { value: "general", label: "Товары без движения (В заказе) -- ПМ/Предсортировка/Маркетплейс+ПЦ/WMI" },
-        { value: "no_order", label: "Товары без движения (Без заказа) -- USD/TMM/остальное" },
-        { value: "packaging", label: "Утерянные и обездвиженные товары -- Упаковка/RWP" },
+        { value: "general", label: "Товары без движения (В заказе)" },
+        { value: "no_order", label: "Товары без движения (Без заказа)" },
+        { value: "packaging", label: "Утерянные и обездвиженные товары" },
         { value: "after_sale_movement", label: "Движение после продажи" },
     ];
 
@@ -14912,11 +14912,18 @@
         if (deepestOffsetDaysForModule(module) !== 0) {
             const anchor = anchorDateForModule(module);
             const window = uploadWindowForModule(module);
+            // label -- про ОКНО (window.end может быть раньше anchor, см.
+            // shallowestOffsetDaysForModule), а не про сам якорь "сегодня"
+            // (anchor используется для due date/admission и "уже
+            // выгружено?", это разные вещи -- раньше здесь по ошибке была
+            // подставлена anchor, из-за чего однодневное окно (когда
+            // start===end) всегда показывало "сегодня", даже если
+            // реальный window.end был раньше).
             return {
                 date: anchor,
                 label: window.start !== window.end
                     ? "За " + formatRuDate(window.start) + " -- " + formatRuDate(window.end)
-                    : "За " + formatRuDate(anchor),
+                    : "За " + formatRuDate(window.end),
                 hasGap: false,
                 gapLabel: "",
                 run: runForUpload(module, anchor),
@@ -14992,7 +14999,7 @@
         const window = uploadWindowForModule(module);
         const subtitleDate = window.start !== window.end
             ? "Выгрузка за период с " + formatRuDate(window.start) + " по " + formatRuDate(window.end)
-            : "Выгрузка за " + formatRuDate(state.activeDate);
+            : "Выгрузка за " + formatRuDate(window.end);
         $("workTitle").textContent = def.label;
         $("workSubtitle").textContent = subtitleDate + ". Дата списания считается по статусу каждого ШК.";
         $("workInstruction").innerHTML = instructionHtml(module, window);
