@@ -615,7 +615,13 @@
            cards underneath showed through where the dropdown should render. */
         .intake-search-filter-collapse.is-open .intake-search-filter-collapse-inner { overflow: visible; }
         .intake-search-filter-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding-bottom: 14px; }
-        .intake-search-filter-row .review-filter-panel { flex: 1; grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)); gap: 8px; }
+        .intake-search-filter-row .review-filter-panel { flex: 1; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+        /* Период показывает диапазон дат ("ДД.ММ.ГГГГ -- ДД.ММ.ГГГГ"),
+           заметно длиннее остальных ("Выбраны все") -- одной колонки не
+           хватает, текст резался многоточием. Фиксированный span вместо
+           min-width: тот боролся с auto-fit за ширину трека и не всегда
+           побеждал. */
+        .intake-search-filter-row .review-filter-block:has(.intake-daterange-trigger) { grid-column: span 2; }
         .intake-search-filter-row .review-filter-trigger { min-height: 32px; padding: 6px 10px; font-size: 12px; border-radius: 10px; box-shadow: none; }
         .intake-search-filter-row .review-filter-title { font-size: 11px; margin-bottom: 3px; }
         .intake-search-filter-row #intakeSearchResetBtn { flex: 0 0 auto; margin-left: auto; }
@@ -1220,11 +1226,17 @@
            don't look pinned to the top of a tall 3-line Наименование row. */
         .review-data-table-5col { table-layout: fixed; width: 100%; }
         .review-data-table-5col th:nth-child(1), .review-data-table-5col td:nth-child(1) { width: 22%; }
-        .review-data-table-5col th:nth-child(2), .review-data-table-5col td:nth-child(2) { width: 36%; }
+        .review-data-table-5col th:nth-child(2), .review-data-table-5col td:nth-child(2) { width: 34%; }
         .review-data-table-5col th:nth-child(3), .review-data-table-5col td:nth-child(3) { width: 12%; }
-        .review-data-table-5col th:nth-child(4), .review-data-table-5col td:nth-child(4) { width: 16%; }
+        .review-data-table-5col th:nth-child(4), .review-data-table-5col td:nth-child(4) { width: 18%; }
         .review-data-table-5col th:nth-child(5), .review-data-table-5col td:nth-child(5) { width: 14%; }
         .review-data-table-5col td.review-wrap-cell { min-width: 0; max-width: none; }
+        /* Статус несёт и статус-пилл, и спец-теги (напр. "Пустая упаковка")
+           рядом -- вместе они легко шире фиксированной колонки; без wrap
+           они раньше просто наезжали текстом на соседний "Последний
+           вердикт" (ничего не клипается в этой таблице). */
+        .review-data-table-5col td:nth-child(4) { white-space: normal; }
+        .review-data-table-5col td:nth-child(4) .review-pill { margin-right: 4px; }
         .review-data-table-5col td:nth-child(2), .review-data-table-5col td:nth-child(3), .review-data-table-5col td:nth-child(4), .review-data-table-5col td:nth-child(5) { vertical-align: middle; }
         .review-click-row { cursor: pointer; }
         .review-click-row:hover td { background: #f8fafc; }
@@ -1246,7 +1258,7 @@
         .review-sort-btn { border: 0; background: transparent; padding: 0; color: inherit; font: inherit; font-weight: 900; cursor: pointer; }
         .review-sort-btn:hover { color: var(--accent); }
         .review-filter-dropdown { position: relative; z-index: 30; border-bottom: 1px solid #e2e8f0; background: #fff; padding: 12px 14px; }
-        .review-filter-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: start; }
+        .review-filter-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; align-items: start; }
         .review-filter-block { position: relative; min-width: 0; }
         .review-filter-title { display: block; margin: 0 0 5px; color: #475569; font-size: 12px; font-weight: 850; }
         .review-filter-trigger { width: 100%; min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 0; border-radius: 14px; background: var(--accent); color: #fff; padding: 9px 12px; font: inherit; font-weight: 1000; cursor: pointer; box-shadow: 0 10px 24px rgba(98,60,234,.18); transition: transform .14s ease, box-shadow .14s ease, filter .14s ease; }
@@ -1297,6 +1309,13 @@
         .task-detail-countdown.is-overdue { color: #7f1d1d; background: #fee2e2; }
         .task-detail-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
         .task-detail-body { padding: 18px; overflow: auto; }
+        /* Вердикт-попап раскрывается вверх от кнопки внизу истории
+           (task-verdict-popup: bottom: calc(100% + 8px)) -- при overflow:auto
+           на task-detail-body верх попапа обрезался краем этого скролл-
+           контейнера, выглядело как "уехал под шапку". Пока попап открыт,
+           снимаем клип целиком -- он всё равно виден только поверх уже
+           отрисованного контента. */
+        .task-detail-body:has(.task-verdict-picker.is-open) { overflow: visible; }
         .task-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
         .task-info-item { border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px 12px; background: #fff; }
         .task-info-item.copyable { cursor: copy; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }

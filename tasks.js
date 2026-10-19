@@ -6595,6 +6595,14 @@
         return normalizeText(row && row.last_human_verdict) || "Не выбран";
     }
 
+    // "Не выбран" stays the plain grey pill (no tone) -- VERDICT_TONE has
+    // no entry for it anyway, this just makes that explicit.
+    function verdictPillHtml(verdict) {
+        const value = normalizeText(verdict) || "Не выбран";
+        const tone = value === "Не выбран" ? "" : (VERDICT_TONE[value] || "");
+        return "<span class='review-pill" + (tone ? " tone-" + tone : "") + "'>" + escapeHtml(value) + "</span>";
+    }
+
     function sortedUnique(values) {
         return Array.from(new Set((values || []).map(normalizeText).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ru", { numeric: true, sensitivity: "base" }));
     }
@@ -7464,7 +7472,7 @@
             + "<td class='review-wrap-cell review-name-cell'><div class='review-name-clamp'>" + escapeHtml(truncateReviewName(taskItemName(row), 150) || "-") + "</div></td>"
             + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
             + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + specialTagPillsHtml(row) + "</td>"
-            + "<td>" + escapeHtml(taskVerdictFilterValue(row)) + "</td>";
+            + "<td>" + verdictPillHtml(taskVerdictFilterValue(row)) + "</td>";
     }
 
     function renderReviewTable(grouped) {
@@ -7714,7 +7722,7 @@
                 + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + "</div></td>"
                 + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
                 + "<td><span class='review-pill'>" + escapeHtml(status) + "</span></td>"
-                + "<td>" + escapeHtml(taskVerdictFilterValue(row)) + "</td>"
+                + "<td>" + verdictPillHtml(taskVerdictFilterValue(row)) + "</td>"
                 + "</tr>";
         }).join("");
         const previousSort = state.review.sort;
