@@ -5,7 +5,7 @@
     const RUNS_TABLE = "wms_manual_upload_runs";
     const SETTINGS_TABLE = "wms_manual_upload_settings";
     const WMS_TASKS_TABLE = "wms_tasks";
-    const WMS_TASK_SELECT_COLUMNS = "id,source_module,source_id,source_row_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,has_pending_no_shk_match";
+    const WMS_TASK_SELECT_COLUMNS = "id,source_module,source_id,source_row_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,last_human_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,has_pending_no_shk_match";
     // Same as WMS_TASK_SELECT_COLUMNS but source_payload replaced with just
     // the small precomputed fields Review/Requests table rendering and
     // filtering actually read (see taskItemName/taskStatusCodeLabel/
@@ -14,7 +14,7 @@
     // Task detail, actualization, quick-no-shk eligibility, and Flow
     // scoring all need the real task_items and fetch it separately (see
     // ensureFullActiveTasksLoaded / openTaskDetail).
-    const WMS_TASK_LIST_COLUMNS = "id,source_module,source_id,source_row_id,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,has_pending_no_shk_match,item_name:source_payload->>item_name,entity_type:source_payload->>entity_type,status_code_label:source_payload->>status_code_label,movement_status_options:source_payload->movement_status_options,route_label:source_payload->>route_label,route_label_camel:source_payload->>routeLabel,parking:source_payload->>parking,place:source_payload->>place";
+    const WMS_TASK_LIST_COLUMNS = "id,source_module,source_id,source_row_id,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,last_human_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,has_pending_no_shk_match,item_name:source_payload->>item_name,entity_type:source_payload->>entity_type,status_code_label:source_payload->>status_code_label,movement_status_options:source_payload->movement_status_options,route_label:source_payload->>route_label,route_label_camel:source_payload->>routeLabel,parking:source_payload->>parking,place:source_payload->>place";
     // Achievement counting only ever reads a handful of flat fields plus the
     // actor's id/name (buried in source_payload.wms_review). The full
     // WMS_TASK_SELECT_COLUMNS row -- source_payload especially, which carries
@@ -6587,8 +6587,12 @@
         return displayTaskStatus(row) || "Не начато";
     }
 
+    // last_human_verdict -- снэпшот из wms_task_history (см. миграцию
+    // wms_last_human_verdict), не сам opp_verdict: тот сбрасывается в "Не
+    // выбран" при автопереоткрытии задачи, а снэпшот должен пережить
+    // переоткрытие и показывать, что человек решил в последний раз.
     function taskVerdictFilterValue(row) {
-        return normalizeText(row && row.opp_verdict) || "Не выбран";
+        return normalizeText(row && row.last_human_verdict) || "Не выбран";
     }
 
     function sortedUnique(values) {
@@ -7772,7 +7776,7 @@
         if (key === "price") return reviewPrice(row);
         if (key === "dueDate") return normalizeText(row && row.due_date);
         if (key === "status") return displayTaskStatus(row) + " " + (normalizeText(row && row.opp_verdict) || "");
-        if (key === "verdict") return normalizeText(row && row.opp_verdict) || "Не выбран";
+        if (key === "verdict") return taskVerdictFilterValue(row);
         if (key === "sourceIds") return reviewSourceIds(row);
         if (key === "priority") return normalizeText(row && row.priority_label) || "Без приоритета";
         if (key === "tags") return reviewTags(row).join(", ");
