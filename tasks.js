@@ -1706,6 +1706,25 @@
         return state.runs.find((run) => normalizeText(run.effective_date || run.business_date || run.upload_date) === date && normalizeText(run.upload_type || run.source_module) === type) || null;
     }
 
+    // Для модулей со скользящим окном (offset != 0, напр. Упаковка/RWP)
+    // ран всегда пишется под effective_date="сегодня", а реально
+    // охваченный диапазон дат лежит в window_start_date/window_end_date --
+    // runForUpload (точное совпадение даты) здесь не подходит и всегда
+    // показывает такие дни как "не сделано", даже если они покрыты окном
+    // другого рана. Для offset=0 модулей поведение не меняется (там
+    // effective_date и есть сам день).
+    function dayCoveredForModule(module, isoDate) {
+        if (deepestOffsetDaysForModule(module) === 0) return Boolean(runForUpload(module, isoDate));
+        return (state.runs || []).some((run) => {
+            if (!runMatchesModuleBranch(run, module)) return false;
+            const fallback = normalizeText(run.effective_date || run.business_date || run.upload_date);
+            const start = normalizeText(run.window_start_date) || fallback;
+            const end = normalizeText(run.window_end_date) || fallback;
+            if (!start || !end) return false;
+            return isoDate >= start && isoDate <= end;
+        });
+    }
+
     function visibleDefs() {
         return VISIBLE_MODULES.map(moduleDef);
     }
@@ -1726,7 +1745,7 @@
         const missing = [];
         const done = [];
         requiredVisibleDefs().forEach((def) => {
-            if (runForUpload(def.module, isoDate)) done.push(def.label);
+            if (dayCoveredForModule(def.module, isoDate)) done.push(def.label);
             else missing.push(def.label);
         });
         const lines = missing.map((label) => "<span class='tooltip-line missing'><span class='tooltip-dot'></span>" + escapeHtml(label) + "</span>")
@@ -1741,7 +1760,7 @@
         const required = requiredVisibleDefs();
         const html = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => "<div class='weekday'>" + day + "</div>").join("")
             + datesBetween(range.start, range.end).map((isoDate) => {
-                const doneCount = required.filter((def) => runForUpload(def.module, isoDate)).length;
+                const doneCount = required.filter((def) => dayCoveredForModule(def.module, isoDate)).length;
                 return "<button type='button' class='calendar-day " + dayStatusClass(doneCount) + "'>"
                     + "<span class='day-number'>" + Number(isoDate.slice(8, 10)) + "</span>"
                     + "<span class='day-progress'>" + doneCount + "/" + required.length + "</span>"
@@ -1757,7 +1776,7 @@
         const required = requiredVisibleDefs();
         const html = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => "<div class='weekday'>" + day + "</div>").join("")
             + datesBetween(range.start, range.end).map((isoDate) => {
-                const doneCount = required.filter((def) => runForUpload(def.module, isoDate)).length;
+                const doneCount = required.filter((def) => dayCoveredForModule(def.module, isoDate)).length;
                 const disabled = isoDate > state.today;
                 return "<button type='button' class='backfill-day " + dayStatusClass(doneCount) + "' data-date='" + escapeHtml(isoDate) + "' " + (disabled ? "disabled" : "") + ">"
                     + "<span class='day-number'>" + Number(isoDate.slice(8, 10)) + "</span>"
