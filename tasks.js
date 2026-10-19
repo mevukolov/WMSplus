@@ -828,6 +828,7 @@
             movementStatuses: new Set(),
             entityTypes: new Set(),
             taskStatuses: new Set(),
+            verdicts: new Set(),
             specialTags: new Set(),
             sectionNames: new Set(),
             openKey: "",
@@ -6550,7 +6551,7 @@
     function hasActiveFilters(mode) {
         const filters = sectionFilterState(mode);
         if (filters.date) return true;
-        return ["movementStatuses", "entityTypes", "taskStatuses", "specialTags"].some((key) => filters[key] && filters[key].size > 0);
+        return ["movementStatuses", "entityTypes", "taskStatuses", "verdicts", "specialTags"].some((key) => filters[key] && filters[key].size > 0);
     }
 
     function taskFilterDate(row) {
@@ -6584,6 +6585,10 @@
 
     function taskStatusFilterValue(row) {
         return displayTaskStatus(row) || "Не начато";
+    }
+
+    function taskVerdictFilterValue(row) {
+        return normalizeText(row && row.opp_verdict) || "Не выбран";
     }
 
     function sortedUnique(values) {
@@ -6640,6 +6645,7 @@
             if (filters.movementStatuses.size && !movementOptions.some((value) => filters.movementStatuses.has(value))) return false;
             if (!filterMatchesSet(taskEntityFilterValue(row), filters.entityTypes)) return false;
             if (!filterMatchesSet(taskStatusFilterValue(row), filters.taskStatuses)) return false;
+            if (!filterMatchesSet(taskVerdictFilterValue(row), filters.verdicts)) return false;
             if (filters.specialTags.size) {
                 const rowTags = taskSpecialTagFilterValues(row);
                 if (filters.specialTags.has(FILTER_NONE)) return false;
@@ -6654,6 +6660,7 @@
             movementStatuses: sortedUnique((rows || []).flatMap(taskMovementStatusOptions)),
             entityTypes: ["shk", "tare"].filter((value) => (rows || []).some((row) => taskEntityFilterValue(row) === value)),
             taskStatuses: sortedUnique((rows || []).map(taskStatusFilterValue)),
+            verdicts: sortedUnique((rows || []).map(taskVerdictFilterValue)),
             specialTags: SPECIAL_TAG_ORDER.filter((tag) => (rows || []).some((row) => taskSpecialTagFilterValues(row).includes(tag))),
             sectionNames: activeReviewZones().filter((section) => (rows || []).some((row) => taskSectionName(row) === section)),
         };
@@ -6720,7 +6727,8 @@
             + control("date", "Дата", dateSummary, "<div class='review-filter-options'><label class='review-filter-check'><input type='checkbox' data-review-filter-date-all='1' " + (!filters.date ? "checked" : "") + "> Выбрать всё</label></div>" + renderFilterCalendar(mode, baseRows))
             + control("movementStatuses", "Статус последнего движения", filterSummaryText(mode, "movementStatuses", options.movementStatuses), renderFilterCheckboxes(mode, "movementStatuses", options.movementStatuses))
             + control("entityTypes", "Тип задачи", filterSummaryText(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel), renderFilterCheckboxes(mode, "entityTypes", options.entityTypes, taskEntityFilterLabel))
-            + control("taskStatuses", "Статус", filterSummaryText(mode, "taskStatuses", options.taskStatuses), renderFilterCheckboxes(mode, "taskStatuses", options.taskStatuses) + "<div class='review-filter-empty-note' style='margin-top:8px'>Показано: " + escapeHtml(filteredRows.length) + " из " + escapeHtml(baseRows.length) + "</div>")
+            + control("taskStatuses", "Статус", filterSummaryText(mode, "taskStatuses", options.taskStatuses), renderFilterCheckboxes(mode, "taskStatuses", options.taskStatuses))
+            + control("verdicts", "Последний вердикт", filterSummaryText(mode, "verdicts", options.verdicts), renderFilterCheckboxes(mode, "verdicts", options.verdicts) + "<div class='review-filter-empty-note' style='margin-top:8px'>Показано: " + escapeHtml(filteredRows.length) + " из " + escapeHtml(baseRows.length) + "</div>")
             + control("specialTags", "Спец-теги", filterSummaryText(mode, "specialTags", options.specialTags), renderFilterCheckboxes(mode, "specialTags", options.specialTags))
             + "</div></div>";
     }
@@ -7443,16 +7451,6 @@
         return value.slice(0, maxLen).trimEnd() + "…";
     }
 
-    // Second status pill: only for a verdict the employee actually picked --
-    // system autoverdicts (Движение/Дубль/итд) never show here, and a plain
-    // defer with no verdict is already fully conveyed by the status pill.
-    function manualVerdictPillHtml(row) {
-        const verdict = normalizeText(row && row.opp_verdict);
-        if (!verdict || verdict === "Не выбран" || SYSTEM_VERDICT_SET.has(verdict)) return "";
-        const tone = VERDICT_TONE[verdict] || "";
-        return " <span class='review-pill" + (tone ? " tone-" + tone : "") + "'>" + escapeHtml(verdict) + "</span>";
-    }
-
     function reviewRowCellsHtml(row, options) {
         const opts = options || {};
         const status = displayTaskStatus(row);
@@ -7461,7 +7459,8 @@
         return "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(taskSub) + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
             + "<td class='review-wrap-cell review-name-cell'><div class='review-name-clamp'>" + escapeHtml(truncateReviewName(taskItemName(row), 150) || "-") + "</div></td>"
             + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
-            + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + manualVerdictPillHtml(row) + specialTagPillsHtml(row) + "</td>";
+            + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + specialTagPillsHtml(row) + "</td>"
+            + "<td>" + escapeHtml(taskVerdictFilterValue(row)) + "</td>";
     }
 
     function renderReviewTable(grouped) {
@@ -7483,11 +7482,12 @@
             return;
         }
         const body = rows.map((row) => "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>" + reviewRowCellsHtml(row) + "</tr>").join("");
-        target.innerHTML = rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-4col'><thead><tr>"
+        target.innerHTML = rows.length ? "<div class='review-table-scroll'><table class='review-data-table review-data-table-5col'><thead><tr>"
             + reviewSortHead("title", "Задача")
             + reviewSortHead("name", "Наименование")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
+            + reviewSortHead("verdict", "Последний вердикт")
             + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>";
         if (filtersTarget) {
             if (state.review.filtersOpen) {
@@ -7706,11 +7706,11 @@
         }
         const body = rows.map((row) => {
             const status = displayTaskStatus(row);
-            const verdict = normalizeText(row.opp_verdict);
             return "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>"
                 + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + "</div></td>"
                 + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
-                + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + (verdict && verdict !== "Не выбран" ? "<div class='review-task-sub'>Вердикт: " + escapeHtml(verdict) + "</div>" : "") + "</td>"
+                + "<td><span class='review-pill'>" + escapeHtml(status) + "</span></td>"
+                + "<td>" + escapeHtml(taskVerdictFilterValue(row)) + "</td>"
                 + "</tr>";
         }).join("");
         const previousSort = state.review.sort;
@@ -7719,6 +7719,7 @@
             + reviewSortHead("title", "Задача")
             + reviewSortHead("price", "Стоимость")
             + reviewSortHead("status", "Статус")
+            + reviewSortHead("verdict", "Последний вердикт")
             + "</tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>По выбранным фильтрам задач нет.</div>";
         state.review.sort = previousSort;
         if (filtersTarget) {
@@ -8224,8 +8225,8 @@
     }
 
     // SYSTEM_MOVEMENT_VERDICT is excluded from VERDICT_TONE (it's a system
-    // autoverdict, never manually picked -- see manualVerdictPillHtml), but
-    // an actualization-closed task still deserves the same green "handled,
+    // autoverdict, never manually picked), but an actualization-closed
+    // task still deserves the same green "handled,
     // nothing to do" signal a manual green verdict gets, in search and in
     // the closed-tasks list specifically.
     function isAutoActualizedTask(row) {

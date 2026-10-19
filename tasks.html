@@ -1212,19 +1212,20 @@
         .review-data-table td.review-wrap-cell { white-space: normal; min-width: 220px; max-width: 360px; line-height: 1.3; }
         .review-data-row { cursor: pointer; transition: background .12s ease; }
         .review-data-row:hover td { background: #f8fafc; }
-        /* review-data-table-4col: Разбор Участки/Полотно specifically (Задача,
-           Наименование, Стоимость, Статус) -- fixed % widths instead of
-           content-driven auto-sizing, so columns stay put row to row and
-           section to section instead of jumping around; Стоимость/Статус are
-           vertical-centered so they don't look pinned to the top of a tall
-           3-line Наименование row. */
-        .review-data-table-4col { table-layout: fixed; width: 100%; }
-        .review-data-table-4col th:nth-child(1), .review-data-table-4col td:nth-child(1) { width: 26%; }
-        .review-data-table-4col th:nth-child(2), .review-data-table-4col td:nth-child(2) { width: 42%; }
-        .review-data-table-4col th:nth-child(3), .review-data-table-4col td:nth-child(3) { width: 14%; }
-        .review-data-table-4col th:nth-child(4), .review-data-table-4col td:nth-child(4) { width: 18%; }
-        .review-data-table-4col td.review-wrap-cell { min-width: 0; max-width: none; }
-        .review-data-table-4col td:nth-child(2), .review-data-table-4col td:nth-child(3), .review-data-table-4col td:nth-child(4) { vertical-align: middle; }
+        /* review-data-table-5col: Разбор Участки/Полотно specifically (Задача,
+           Наименование, Стоимость, Статус, Последний вердикт) -- fixed %
+           widths instead of content-driven auto-sizing, so columns stay put
+           row to row and section to section instead of jumping around;
+           Стоимость/Статус/Последний вердикт are vertical-centered so they
+           don't look pinned to the top of a tall 3-line Наименование row. */
+        .review-data-table-5col { table-layout: fixed; width: 100%; }
+        .review-data-table-5col th:nth-child(1), .review-data-table-5col td:nth-child(1) { width: 22%; }
+        .review-data-table-5col th:nth-child(2), .review-data-table-5col td:nth-child(2) { width: 36%; }
+        .review-data-table-5col th:nth-child(3), .review-data-table-5col td:nth-child(3) { width: 12%; }
+        .review-data-table-5col th:nth-child(4), .review-data-table-5col td:nth-child(4) { width: 16%; }
+        .review-data-table-5col th:nth-child(5), .review-data-table-5col td:nth-child(5) { width: 14%; }
+        .review-data-table-5col td.review-wrap-cell { min-width: 0; max-width: none; }
+        .review-data-table-5col td:nth-child(2), .review-data-table-5col td:nth-child(3), .review-data-table-5col td:nth-child(4), .review-data-table-5col td:nth-child(5) { vertical-align: middle; }
         .review-click-row { cursor: pointer; }
         .review-click-row:hover td { background: #f8fafc; }
         .review-click-row.tone-green td { background: #dcfce7; }
