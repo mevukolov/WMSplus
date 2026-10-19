@@ -3517,7 +3517,7 @@
 
     function activeTaskShkList() {
         const shks = new Set();
-        (state.review.rows || []).filter((row) => isActiveReviewTask(row) && canSystemActualizeMovement(row)).forEach((row) => {
+        (state.review.rows || []).filter(isActiveReviewTask).forEach((row) => {
             taskItems(row).forEach((item) => {
                 const shk = normalizeIdentifier(item.shk);
                 if (shk) shks.add(shk);
@@ -3819,15 +3819,21 @@
     function buildMovementCandidates(supersetRows, afterSaleIndex) {
         const byShk = latestSupersetByShk(supersetRows);
         const candidates = [];
-        (state.review.rows || []).filter((row) => isActiveReviewTask(row) && canSystemActualizeMovement(row)).forEach((row) => {
+        (state.review.rows || []).filter(isActiveReviewTask).forEach((row) => {
             const items = taskItems(row);
             const byItem = new Map();
+            const isAfterSale = isAfterSaleMovementTask(row);
             items.forEach((item) => {
                 const shk = normalizeIdentifier(item.shk);
                 const superset = byShk.get(shk) || null;
+                if (isAfterSale) {
+                    const resolveReason = afterSaleMovementResolveReason(superset);
+                    if (resolveReason) byItem.set(shk, { row, item, superset, reason: "after_sale_movement_resolved", resolveReason });
+                    return;
+                }
                 if (hasConfirmedMovement(row, item, superset)) byItem.set(shk, { row, item, superset, reason: "superset_movement" });
             });
-            if (afterSaleIndex && afterSaleIndex.size) {
+            if (!isAfterSale && afterSaleIndex && afterSaleIndex.size) {
                 items.forEach((item) => {
                     const shk = normalizeIdentifier(item.shk);
                     if (!shk || byItem.has(shk)) return;
@@ -4148,13 +4154,15 @@
         if (!stats) return "";
         const movedCount = (candidates || []).reduce((sum, candidate) => sum + (candidate.moved || []).length, 0);
         const dedupeCount = (candidates || []).reduce((sum, candidate) => sum + (candidate.moved || []).filter((entry) => entry.reason === "after_sale_duplicate").length, 0);
-        const movementCount = Math.max(movedCount - dedupeCount, 0);
+        const resolvedCount = (candidates || []).reduce((sum, candidate) => sum + (candidate.moved || []).filter((entry) => entry.reason === "after_sale_movement_resolved").length, 0);
+        const movementCount = Math.max(movedCount - dedupeCount - resolvedCount, 0);
         const partialCount = (candidates || []).filter((candidate) => candidate.type === "tare_partial").length;
         return "<div class='actualize-summary'>"
             + "<div><strong>" + escapeHtml(String(stats.rows)) + "</strong><span>строк проверено</span></div>"
             + "<div><strong>" + escapeHtml(String(stats.matched_active)) + "</strong><span>активных ШК найдено</span></div>"
             + "<div><strong>" + escapeHtml(String(movementCount)) + "</strong><span>ШК с движением +10 мин</span></div>"
             + "<div><strong>" + escapeHtml(String(dedupeCount)) + "</strong><span>дублей ORS</span></div>"
+            + "<div><strong>" + escapeHtml(String(resolvedCount)) + "</strong><span>Движение после продажи решено</span></div>"
             + "<div><strong>" + escapeHtml(String(partialCount)) + "</strong><span>частичных тар</span></div>"
             + "</div>";
     }
@@ -4169,14 +4177,19 @@
         const shk = normalizeIdentifier(entry.item.shk);
         const removed = state.actualize.removedShks.has(shk);
         const isAfterSaleDuplicate = entry.reason === "after_sale_duplicate";
-        const changes = isAfterSaleDuplicate ? [] : movementChangeList(entry.row, entry.item, entry.superset);
+        const isAfterSaleResolved = entry.reason === "after_sale_movement_resolved";
+        const changes = (isAfterSaleDuplicate || isAfterSaleResolved) ? [] : movementChangeList(entry.row, entry.item, entry.superset);
         const changeHtml = changes.length
             ? changes.map((change) => "<div class='movement-change'><span>" + escapeHtml(change.label) + "</span><strong>" + escapeHtml(change.before) + " → " + escapeHtml(change.after) + "</strong></div>").join("")
             : isAfterSaleDuplicate
                 ? "<div class='movement-change'><span>Схлопывание</span><strong>Уже есть задача “Движение после продажи” за " + escapeHtml(formatRuDate(entry.afterSaleDate)) + "</strong></div>"
+            : isAfterSaleResolved
+                ? "<div class='movement-change'><span>Движение после продажи</span><strong>" + (entry.resolveReason === "office" ? "Офис сменился: " + escapeHtml((entry.superset && entry.superset.last_office) || "-") : "Статус WRR") + "</strong></div>"
             : "<div class='movement-change'><span>Изменение</span><strong>Не определено</strong></div>";
         const meta = isAfterSaleDuplicate
             ? "ORS-задача: " + (entry.afterSaleTask && entry.afterSaleTask.title ? entry.afterSaleTask.title : "-")
+            : isAfterSaleResolved
+                ? "Статус Superset: " + ((entry.superset && entry.superset.last_status) || "-")
             : "МХ по Superset: " + ((entry.superset && entry.superset.last_mx) || "-");
         return "<div class='movement-row" + (removed ? " removed" : "") + "'>"
             + "<div class='movement-main'>" + escapeHtml(shk) + "<div class='movement-change-list'>" + changeHtml + "</div><div class='movement-meta'>" + escapeHtml(meta) + "</div></div>"
@@ -4190,7 +4203,7 @@
         const candidates = state.actualize.candidates || [];
         const statsLine = actualizeStatsLine();
         if (!candidates.length) {
-            target.innerHTML = actualizeSummaryHtml(candidates) + "<div class='empty-state'>Активных задач с движением минимум на 10 минут позже исходных данных или дублем с “Движением после продажи” не найдено. " + escapeHtml(statsLine) + "</div>";
+            target.innerHTML = actualizeSummaryHtml(candidates) + "<div class='empty-state'>Активных задач с движением минимум на 10 минут позже исходных данных, дублем с “Движением после продажи” или решённым “Движением после продажи” (офис/WRR) не найдено. " + escapeHtml(statsLine) + "</div>";
             setActualizeStatus("Superset прочитан. Кандидатов на закрытие нет.", "good");
             return;
         }
@@ -4212,7 +4225,7 @@
                 + movementActionButton(candidate.row.id, "split_remaining", "Создать задачи на оставшиеся ШК", action)
                 + "</div></div>";
         }).join("");
-        target.innerHTML = "<div class='status-line good'>Проверьте движения: в список попали ШК, где время Superset минимум на 10 минут позже исходного времени задачи, и ШК, которые уже есть в “Движении после продажи” за ту же дату.</div>"
+        target.innerHTML = "<div class='status-line good'>Проверьте движения: в список попали ШК, где время Superset минимум на 10 минут позже исходного времени задачи, ШК, которые уже есть в “Движении после продажи” за ту же дату, и ШК “Движения после продажи”, у которых офис в Superset сменился или появился статус WRR.</div>"
             + actualizeSummaryHtml(candidates)
             + (fullHtml ? "<h4>Полное закрытие</h4>" + fullHtml : "")
             + (partialHtml ? "<h4>Частичное движение по тарам</h4>" + partialHtml : "")
@@ -4247,11 +4260,15 @@
         const selected = entries || [];
         const shks = selected.map((entry) => normalizeIdentifier(entry.item && entry.item.shk)).filter(Boolean);
         const afterSale = selected.filter((entry) => entry.reason === "after_sale_duplicate");
-        const superset = selected.length - afterSale.length;
+        const resolved = selected.filter((entry) => entry.reason === "after_sale_movement_resolved");
+        const superset = selected.length - afterSale.length - resolved.length;
         const parts = [];
         if (superset) parts.push(prefix + ": " + shks.join(", "));
         if (afterSale.length) {
             parts.push("Схлопнуто с задачей Движение после продажи: " + afterSale.map((entry) => normalizeIdentifier(entry.item && entry.item.shk)).filter(Boolean).join(", "));
+        }
+        if (resolved.length) {
+            parts.push("Движение после продажи решено (офис/WRR): " + resolved.map((entry) => normalizeIdentifier(entry.item && entry.item.shk)).filter(Boolean).join(", "));
         }
         return parts.join(". ") || prefix + ": " + shks.join(", ");
     }
@@ -6452,8 +6469,20 @@
         return combined.includes("after_sale_movement") || combined.includes("движение после продажи") || /\bors\b/.test(combined);
     }
 
-    function canSystemActualizeMovement(row) {
-        return !isAfterSaleMovementTask(row);
+    // Разбор ОПП // Движение после продажи закрывается НЕ по общему правилу
+    // "статус в Superset минимум на 10 минут позже исходного времени
+    // задачи" (movementTimeInfo) -- у этой зоны нет осмысленного "времени
+    // движения" для сравнения, задача создаётся по одному факту движения
+    // после реализации. Закрывается по двум отдельным условиям из того же
+    // Superset-отчёта: ШК ушёл с этого склада (last_office != WH_ID), или
+    // получил статус WRR. Возвращает причину ("office"/"wrr") или "" если
+    // ни одно условие не выполнено (и строку не трогаем).
+    function afterSaleMovementResolveReason(supersetRow) {
+        if (!supersetRow) return "";
+        const office = normalizeIdentifier(supersetRow.last_office);
+        if (office && office !== WH_ID) return "office";
+        if (latinStatusCode(supersetRow.last_status) === "WRR") return "wrr";
+        return "";
     }
 
     function afterSaleDedupeDateForItem(row, item) {
