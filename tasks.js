@@ -15121,13 +15121,25 @@
 
     function wireActualizePmCarrierButton() {
         const input = $("actualizePmCarrierFile");
-        if (!input) return;
-        input.addEventListener("change", () => {
-            const file = input.files && input.files[0];
-            if (!file) return;
-            input.value = "";
-            confirmPmCarrierShipments(file, setActualizePmCarrierStatus).catch((error) => setActualizePmCarrierStatus(error && error.message ? error.message : String(error), "error"));
-        });
+        if (input) {
+            input.addEventListener("change", () => {
+                const file = input.files && input.files[0];
+                if (!file) return;
+                input.value = "";
+                confirmPmCarrierShipments(file, setActualizePmCarrierStatus).catch((error) => setActualizePmCarrierStatus(error && error.message ? error.message : String(error), "error"));
+            });
+        }
+        const copyBtn = $("copyActualizePmCarrierTransfers");
+        if (copyBtn) {
+            copyBtn.addEventListener("click", async () => {
+                if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
+                await ensureFullActiveTasksLoaded();
+                const transfers = activePmCarrierTransferList();
+                if (!transfers.length) { setActualizePmCarrierStatus("Активных передач ПМ/Почта не нашел.", "error"); return; }
+                const copied = await copyText(transfers.join("\n"));
+                setActualizePmCarrierStatus(copied ? "Скопировано передач: " + transfers.length + "." : "Браузер заблокировал копирование.", copied ? "good" : "error");
+            });
+        }
     }
 
     // ПМ/Почта -- единственные зоны typовой выгрузки, идентифицируемые по
@@ -15135,6 +15147,22 @@
     // buildGeneralPreview. Открываем модалку только если среди РЕАЛЬНО
     // сохранённых задач такие есть; иначе она просто не появляется.
     const PM_CARRIER_TASK_TYPES = new Set(["Разбор ОПП // ПМ", "Разбор ОПП // Почта"]);
+
+    // Для кнопки "Скопировать номера передач" внутри Актуализации -- в
+    // отличие от openPmCarrierModalIfRelevant (скоуп -- только что
+    // сохранённая выгрузка), тут берём ВСЕ текущие активные ПМ/Почта
+    // задачи, как и остальная Актуализация (см. activeTaskShkList).
+    function activePmCarrierTransferList() {
+        const transfers = new Set();
+        (state.review.rows || [])
+            .filter((row) => isActiveReviewTask(row) && PM_CARRIER_TASK_TYPES.has(row.task_type))
+            .forEach((row) => {
+                const transfer = normalizeText(row.source_tare_id);
+                if (transfer) transfers.add(transfer);
+            });
+        return Array.from(transfers).sort((a, b) => a.localeCompare(b, "ru", { numeric: true }));
+    }
+
     function openPmCarrierModalIfRelevant(tasks) {
         const transfers = Array.from(new Set(
             (tasks || [])
