@@ -1472,25 +1472,42 @@
         return addDays(state.today, deepestOffsetDaysForModule(module));
     }
 
-    function moduleRunDates(module) {
-        return (state.runs || [])
-            .filter((run) => runMatchesModuleBranch(run, module))
-            .map((run) => normalizeText(run.effective_date || run.business_date || run.upload_date))
-            .filter(Boolean)
-            .sort();
+    // Горизонт поиска "самого старого незакрытого дня" назад -- без этой
+    // защиты скан уходит в доисторический период до того, как для формата
+    // вообще появились активные правила/выгрузки (напр. у
+    // manual_general_upload первый ран вообще только 15.10 -- более ранние
+    // "незакрытые" дни это не реальная дыра, модуля ещё не было). Поэтому
+    // пол также не опускается ниже самого старого известного рана модуля.
+    const GAP_SEARCH_HORIZON_DAYS = 21;
+
+    function earliestKnownRunDateForModule(module) {
+        let earliest = "";
+        (state.runs || []).forEach((run) => {
+            if (!runMatchesModuleBranch(run, module)) return;
+            const date = normalizeText(run.window_start_date) || normalizeText(run.effective_date || run.business_date || run.upload_date);
+            if (date && (!earliest || date < earliest)) earliest = date;
+        });
+        return earliest;
     }
 
+    // Самый старый день (вплоть до targetDate), ещё не закрытый для этого
+    // модуля. "Закрыт" проверяется через dayCoveredForModule (попадание в
+    // окно любого прошлого рана), а не точным совпадением effective_date --
+    // иначе дыры старше последнего рана никогда не находились (старая
+    // версия шла только ВПЕРЁД от последнего известного рана). Один и тот
+    // же принцип для всех модулей: у всех активных правил сегодня ненулевой
+    // upload_offset_days (см. обсуждение), разницы "offset=0 vs не 0" на
+    // практике больше нет.
     function firstMissingUploadDate(module, targetDate) {
         const target = normalizeText(targetDate);
         if (!target) return "";
-        const dates = Array.from(new Set(moduleRunDates(module)));
-        const latestAny = dates.length ? dates[dates.length - 1] : "";
-        if (!latestAny || latestAny > target) return target;
-        const beforeTarget = dates.filter((date) => date <= target);
-        if (!beforeTarget.length) return target;
-        let cursor = addDays(beforeTarget[beforeTarget.length - 1], 1);
+        const earliest = earliestKnownRunDateForModule(module);
+        if (!earliest) return target;
+        const horizonFloor = addDays(target, -GAP_SEARCH_HORIZON_DAYS);
+        const floor = earliest > horizonFloor ? earliest : horizonFloor;
+        let cursor = floor;
         while (cursor && cursor <= target) {
-            if (!runForUpload(module, cursor)) return cursor;
+            if (!dayCoveredForModule(module, cursor)) return cursor;
             cursor = addDays(cursor, 1);
         }
         return target;
@@ -1498,17 +1515,8 @@
 
     function uploadDateForModule(module) {
         if (state.manualDate) return state.manualDate;
-        const target = configuredUploadDateForModule(module);
-        // Формат с ненулевым offset (напр. Упаковка/RWP, -7/-4) требует
-        // каждый раз заново охватывать весь период "N дней назад -- сегодня"
-        // целиком -- строки ЕЖЕДНЕВНО "дозревают" до порога (вчера строке
-        // было 3 дня, сегодня уже 4), так что это не разовый пропуск,
-        // догонять по одному дню здесь не нужно и не имеет смысла -- окно
-        // просто просят целиком, каждый раз. firstMissingUploadDate
-        // (пошаговая догонка пропущенных дней) остаётся только для
-        // offset=0 форматов, где только СЕГОДНЯШНИЙ снимок осмыслен.
-        if (target !== state.today) return target;
-        return firstMissingUploadDate(module, target);
+        const end = addDays(state.today, shallowestOffsetDaysForModule(module));
+        return firstMissingUploadDate(module, end);
     }
 
     function uploadWindowForModule(module) {
@@ -1516,20 +1524,20 @@
         // строки "не свежее N дней", без верхней границы, значит строки
         // новее, чем нужно самому мелкому (ближе к нулю) активному
         // правилу формата, не нужны ВООБЩЕ НИКОМУ -- они ещё не дозрели
-        // даже для самого нетерпеливого правила. Для offset=0 правил
-        // (general/no_order/after_sale) это всегда сворачивается обратно
-        // в "сегодня" (shallowest=0), без изменений.
+        // даже для самого нетерпеливого правила. Начало окна -- самый
+        // старый незакрытый день (firstMissingUploadDate), чтобы
+        // рекомендованный для выгрузки из ВБ период не обрезал реально
+        // ещё актуальные старые случаи.
         const end = state.manualDate || addDays(state.today, shallowestOffsetDaysForModule(module));
         const start = uploadDateForModule(module);
         return { start: start || end, end: end || start };
     }
 
-    // businessDate/activeDate для форматов с offset=0 продолжает решать
-    // старая пошаговая догонка пропусков (uploadDateForModule) -- без
-    // изменений. Для форматов с ненулевым offset (Упаковка/RWP) это
-    // больше не "целевая дата файла" -- весь нужный диапазон теперь
-    // определяет uploadWindowForModule, а якорем для due date и
-    // построчного porога остаётся обычное "сегодня".
+    // Якорь для порога "протухания" (и для due date) -- ВСЕГДА реальное
+    // сегодня (или явная ручная дата): порог считается от реального
+    // сегодня, сдвиг назад делает его только строже, а не "шире" -- см.
+    // обсуждение. Старый незакрытый день влияет только на РЕКОМЕНДОВАННЫЙ
+    // при выгрузке период (uploadWindowForModule), не на сам якорь.
     function anchorDateForModule(module) {
         if (state.manualDate) return state.manualDate;
         return deepestOffsetDaysForModule(module) === 0 ? uploadDateForModule(module) : state.today;
@@ -14873,6 +14881,12 @@
         if (deepestOffsetDaysForModule(module) !== 0) {
             const anchor = anchorDateForModule(module);
             const window = uploadWindowForModule(module);
+            // Обычный (без накопленной дыры) старт окна -- today+deepestOffset.
+            // Если firstMissingUploadDate внутри uploadWindowForModule нашёл
+            // более старый незакрытый день, значит есть реальный разрыв --
+            // операнду стоит выбрать более широкий период при выгрузке из ВБ.
+            const normalStart = configuredUploadDateForModule(module);
+            const hasGap = Boolean(window.start && normalStart && window.start < normalStart);
             // label -- про ОКНО (window.end может быть раньше anchor, см.
             // shallowestOffsetDaysForModule), а не про сам якорь "сегодня"
             // (anchor используется для due date/admission и "уже
@@ -14885,8 +14899,8 @@
                 label: window.start !== window.end
                     ? "За " + formatRuDate(window.start) + " -- " + formatRuDate(window.end)
                     : "За " + formatRuDate(window.end),
-                hasGap: false,
-                gapLabel: "",
+                hasGap,
+                gapLabel: hasGap ? "Есть незакрытый разрыв с " + formatRuDate(window.start) + " -- выбери такой же широкий период при выгрузке из ВБ." : "",
                 run: runForUpload(module, anchor),
             };
         }
