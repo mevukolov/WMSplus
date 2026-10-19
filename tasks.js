@@ -15301,7 +15301,13 @@
                 realized_at: normalizeText(row[8]),
                 status_id: "",
                 status: normalizeText(row[3]),
-                status_at: normalizeText(row[2]),
+                // normalizeText(row[2]) просто stringify'ил сырое число --
+                // XLSX читается с cellDates:false, дата приходит Excel-
+                // серийным числом (напр. 46306.021...), не строкой. parseDateTime
+                // ниже (buildAfterSaleMovementPreview) это число распознаёт,
+                // а вот строку "46306.021..." -- уже нет, ни одна дата не
+                // проходила admission. v2StatusAt уже всё распарсил выше.
+                status_at: v2StatusAt.date,
                 mx: [office, block].filter(Boolean).join(" / "),
                 tare: normalizeIdentifier(row[6]),
                 employee_id: normalizeIdentifier(row[7]),
