@@ -17154,6 +17154,10 @@
             preview.specialMatchedCount = 0;
             state.specialCheck = null;
             renderPreview(preview);
+            // Без этого верхняя статус-строка так и оставалась на "Читаю
+            // файл..." навсегда, если итог выгрузки -- 0 задач (ids.length=0
+            // -- этот ранний выход никогда раньше сюда не доходил).
+            setStatus((context || "Предпросмотр готов.") + "\n" + specialStatusText(preview), preview.tasks.length ? "good" : "");
             return;
         }
         preview.specialStatus = "checking";
