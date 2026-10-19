@@ -15066,19 +15066,24 @@
         el.className = "status-line" + (kind ? " " + kind : "");
     }
 
-    async function confirmPmCarrierShipments(file) {
-        setPmCarrierModalStatus("Читаю проверку отгрузки...");
+    // setStatus параметризован: та же сверка нужна в двух местах --
+    // модалке сразу после выгрузки (scoped на свежие передачи) и кнопке
+    // внутри "Актуализации" (без привязки к конкретной выгрузке, по
+    // любым активным ПМ/Почта задачам -- см. wireActualizePmCarrierButton).
+    async function confirmPmCarrierShipments(file, setStatus) {
+        setStatus = setStatus || setPmCarrierModalStatus;
+        setStatus("Читаю проверку отгрузки...");
         const rows = await readWorkbookRows(file, "pmCarrier");
         const transfers = Array.from(new Set(rows.map((row) => row.transfer).filter(Boolean)));
-        if (!transfers.length) { setPmCarrierModalStatus("В файле не найдено номеров передач.", "error"); return; }
+        if (!transfers.length) { setStatus("В файле не найдено номеров передач.", "error"); return; }
         const db = supabaseDb();
-        if (!db) { setPmCarrierModalStatus("Нет подключения к базе.", "error"); return; }
+        if (!db) { setStatus("Нет подключения к базе.", "error"); return; }
         try {
             const { data, error } = await db.rpc("wms_confirm_pm_carrier_shipments", { p_transfers: transfers });
             if (error) throw error;
-            setPmCarrierModalStatus("Готово. Передач в файле: " + (data.transfer_count || 0) + ", завершено задач: " + (data.matched_count || 0) + ".", "good");
+            setStatus("Готово. Передач в файле: " + (data.transfer_count || 0) + ", завершено задач: " + (data.matched_count || 0) + ".", "good");
         } catch (error) {
-            setPmCarrierModalStatus("Не удалось проверить отгрузку: " + (error && error.message ? error.message : String(error)), "error");
+            setStatus("Не удалось проверить отгрузку: " + (error && error.message ? error.message : String(error)), "error");
         }
     }
 
@@ -15100,6 +15105,29 @@
         }
         const closeBtn = $("closePmCarrierModal");
         if (closeBtn) closeBtn.addEventListener("click", () => setFlowModalOpen("pmCarrierModal", false));
+    }
+
+    // Постоянная точка входа внутри "Актуализации" -- в отличие от модалки
+    // выше (которая открывается один раз, сразу после конкретной выгрузки,
+    // и живёт только на время той сессии), эта кнопка доступна в любой
+    // момент и сверяет файл против ВСЕХ текущих активных задач ПМ/Почта,
+    // а не только только что созданных.
+    function setActualizePmCarrierStatus(message, type) {
+        const el = $("actualizePmCarrierStatus");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = "status-line" + (type ? " " + type : "");
+    }
+
+    function wireActualizePmCarrierButton() {
+        const input = $("actualizePmCarrierFile");
+        if (!input) return;
+        input.addEventListener("change", () => {
+            const file = input.files && input.files[0];
+            if (!file) return;
+            input.value = "";
+            confirmPmCarrierShipments(file, setActualizePmCarrierStatus).catch((error) => setActualizePmCarrierStatus(error && error.message ? error.message : String(error), "error"));
+        });
     }
 
     // ПМ/Почта -- единственные зоны typовой выгрузки, идентифицируемые по
@@ -17145,9 +17173,6 @@
         renderPreview(state.preview);
         $("saveUpload").disabled = !state.preview.tasks.length;
         startSpecialBackground(module, rows, [], state.activeDate, state.preview.tasks.length ? "Предпросмотр готов. К сохранению: " + state.preview.tasks.length + "." : "Нет задач по текущим правилам.");
-        // До сохранения, не после -- чтобы модалка появлялась независимо
-        // от того, пройдёт ли реальное сохранение без ошибок.
-        if (module === "general") openPmCarrierModalIfRelevant(state.preview.tasks);
     }
 
     async function copyText(text) {
@@ -19141,6 +19166,10 @@
             $("doneBox").classList.add("visible");
             $("doneBox").textContent = "Выгрузка завершена. Создано/обновлено задач: " + (response.upserted_count || state.preview.tasks.length) + ".";
             setStatus("Готово. Данные сохранены в WMS+.", "good");
+            // После реального сохранения, не до -- иначе сверка идёт по ещё
+            // не сохранённым (preview) задачам и RPC находит 0 совпадений в
+            // базе, даже если передачи реально есть в файле проверки.
+            if (module === "general") openPmCarrierModalIfRelevant(state.preview.tasks);
         } catch (error) {
             $("saveUpload").disabled = false;
             setStatus(error && error.message ? error.message : String(error), "error");
@@ -19949,6 +19978,7 @@
         $("saveUpload").addEventListener("click", () => { void saveCurrentUpload(); });
         $("repeatUpload").addEventListener("click", resetCurrentUpload);
         wirePmCarrierConfirmButton();
+        wireActualizePmCarrierButton();
         $("closeMaster").addEventListener("click", () => setFlowModalOpen("masterWork", false));
         $("closeBackfillCalendar").addEventListener("click", () => setFlowModalOpen("backfillCalendarModal", false));
         $("reviewTabInactive").addEventListener("click", () => setReviewTab(REVIEW_TAB_INACTIVE));
