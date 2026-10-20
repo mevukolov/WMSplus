@@ -1016,7 +1016,19 @@ git push origin main
 
 ### Task 12: Удалить хардкод-предикаты классификации
 
-**Files:**
+**❌ ОТМЕНЕНА (Step 1 нашёл живого потребителя).** Проверка показала:
+предикаты используются не только в build-функциях (уже переключены на
+словарь, Task 7-8), но и в `testUploadIsModuleCandidate` (tasks.js
+~13628) -- диагностика внутри "Протестировать выгрузку"
+(`openRoutingRuleTestModal`), которая НАМЕРЕННО сравнивает текущее
+поведение правил с тем, что хотел бы исходный хардкод ("Whether the
+module's OWN hardcode would ever have wanted this row, independent of
+any rule" -- комментарий в коде), плюс ещё несколько мест того же
+тестового экрана (~20374-20427). Это не мёртвый код, а осознанная
+тестовая инфраструктура -- удалять нельзя. Предикаты остаются
+постоянно, не как переходный мостик.
+
+**Files (не изменяются):**
 - Modify: `tasks.js:16217-16241` (`isPresortStatus`/`isLabelingStatus`/`isMarketplaceStatus`/`isPcStatus`/`isWmiMpPcStatus`/`isNoOrderUsdStatus`/`isNoOrderTmmStatus`/`isPmBufferStatus`)
 - Modify: `tasks.js:16174` (`isRwpStatus`)
 
