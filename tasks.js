@@ -1814,7 +1814,20 @@
     // дней) никогда не смогли бы "закрыть" последние 4 дня ни при каком
     // раскладе, и день считался бы незакрытым вечно, даже если всё
     // работает идеально.
+    // Самый мелкий (ближе к нулю) потолок среди ОБЯЗАТЕЛЬНЫХ зон -- если
+    // ДАЖЕ самая быстро дозревающая зона ещё не достигла своего порога
+    // для isoDate, проверять вообще нечего: все шесть окажутся
+    // "exempt" разом, и .every() тривиально вернёт true для ЛЮБОГО
+    // будущего дня (баг, который и привёл к тому, что "В заказе"
+    // показывался закрытым даже на дни, которых ещё не было).
+    function generalZonesShallowestOffsetDays() {
+        const offsets = GENERAL_ZONE_TASK_TYPES.map(generalZoneOffsetDays).filter((value) => Number.isFinite(value));
+        return offsets.length ? Math.max(...offsets) : shallowestOffsetDaysForModule("general");
+    }
+
     function dayCoveredForGeneralZones(isoDate) {
+        const earliestCeiling = addDays(state.today, generalZonesShallowestOffsetDays());
+        if (earliestCeiling && isoDate > earliestCeiling) return false;
         const dates = state.generalZoneCoverage.dates;
         if (!dates) return false;
         return GENERAL_ZONE_TASK_TYPES.every((taskType) => {
