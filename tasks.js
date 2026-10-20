@@ -442,9 +442,14 @@
     // Зоны, которые кнопка "В заказе" (source_format=general) реально
     // создаёт -- см. zoneTaskTypeMap в buildGeneralPreview (ПМ/Почта туда
     // не входят, у них свой путь). Используется dayCoveredForModule, чтобы
-    // день считался закрытым только когда закрыты ВСЕ семь участков, а не
+    // день считался закрытым только когда закрыты ВСЕ эти участки, а не
     // когда хоть один из них получил дату (см. обсуждение про "Предсортировка
-    // за 18 число").
+    // за 18 число"). "Разбор ОПП // Оклейка" сюда сознательно НЕ входит --
+    // это "скрытая ветка предсортировки для LGR" (её же комментарий в
+    // buildGeneralPreview), редкая и низкообъёмная: требовать от неё
+    // задачу КАЖДЫЙ день означало бы, что окно почти никогда не сможет
+    // закрыться -- у этой зоны и так нет отдельной кнопки, оператор не
+    // может "довыгрузить только Оклейку" целенаправленно.
     const GENERAL_ZONE_TASK_TYPES = [
         "Разбор ОПП // ПМ",
         "Разбор ОПП // Почта",
@@ -452,8 +457,22 @@
         "Разбор ОПП // Маркетплейс",
         "Разбор ОПП // ПЦ",
         "Разбор ОПП // WMI (МП + ПЦ)",
-        "Разбор ОПП // Оклейка",
     ];
+    // wms_routing_rules.target_task_type (короткое имя зоны правила) ->
+    // реальный task_type создаваемых задач. "Другие задачи" -- таргет
+    // ЕДИНСТВЕННОГО сегодня general-правила с этим именем (LGR), которое
+    // JS-сторона (effectiveZoneKey/isLabelingStatus) всегда досылает в
+    // "Разбор ОПП // Оклейка" -- если позже появится ВТОРОЕ general-правило
+    // с таргетом "Другие задачи" не про LGR, этот маппинг придётся уточнить.
+    const GENERAL_ZONE_TASK_TYPE_BY_RULE_TARGET = {
+        "ПМ": "Разбор ОПП // ПМ",
+        "Почта": "Разбор ОПП // Почта",
+        "Предсортировка": "Разбор ОПП // Предсортировка",
+        "Маркетплейс": "Разбор ОПП // Маркетплейс",
+        "ПЦ": "Разбор ОПП // ПЦ",
+        "WMI (МП + ПЦ)": "Разбор ОПП // WMI (МП + ПЦ)",
+        "Другие задачи": "Разбор ОПП // Оклейка",
+    };
     const REVIEW_SECTIONS = [
         "Упаковка",
         "RWP",
@@ -585,6 +604,16 @@
             loaded: false,
             loading: false,
             dates: null,
+        },
+        // Порог "протухания" у каждой из семи зон general СВОЙ (ПМ/Почта/
+        // Предсортировка/WMI -- 2 дня, Маркетплейс/ПЦ -- 5, Оклейка -- 1) --
+        // без этого dayCoveredForGeneralZones требовал бы задачу Маркетплейса
+        // за ВЧЕРА, что физически невозможно ни при какой диагностике (он
+        // просто ещё не дозрел), и день навсегда считался бы "не закрыт".
+        zoneOffsetDepth: {
+            loaded: false,
+            loading: false,
+            map: {},
         },
         reviewZones: {
             rows: [],
@@ -1766,19 +1795,64 @@
         });
     }
 
+    // Свой порог "протухания" для конкретной зоны general (Маркетплейс/ПЦ
+    // -- 5 дней, большинство остальных -- 2, Оклейка -- 1) -- живые данные
+    // из zoneOffsetDepth.map (короткое имя правила), с фоллбэком на
+    // shallowest формата целиком, если для зоны ничего не нашлось.
+    function generalZoneOffsetDays(taskType) {
+        const zoneKey = Object.keys(GENERAL_ZONE_TASK_TYPE_BY_RULE_TARGET).find((key) => GENERAL_ZONE_TASK_TYPE_BY_RULE_TARGET[key] === taskType);
+        const raw = zoneKey ? state.zoneOffsetDepth.map[zoneKey] : undefined;
+        return Number.isFinite(raw) ? Math.min(0, raw) : shallowestOffsetDaysForModule("general");
+    }
+
     // Источник правды -- сами задачи (task_type + upload_effective_date),
     // а не окно рана: ран может перечислить дни любого из семи участков
     // вперемешку, по отдельности их не отличить. День закрыт для general
-    // только когда закрыты ВСЕ участки из GENERAL_ZONE_TASK_TYPES --
-    // "Другие задачи" (редкий fallback-таргет произвольного правила) в
-    // список не входит, его нельзя требовать ежедневно.
+    // только когда закрыты ВСЕ участки из GENERAL_ZONE_TASK_TYPES, но
+    // каждая зона требуется только начиная с СВОЕГО дня дозревания
+    // (today + generalZoneOffsetDays) -- иначе Маркетплейс/ПЦ (порог 5
+    // дней) никогда не смогли бы "закрыть" последние 4 дня ни при каком
+    // раскладе, и день считался бы незакрытым вечно, даже если всё
+    // работает идеально.
     function dayCoveredForGeneralZones(isoDate) {
         const dates = state.generalZoneCoverage.dates;
         if (!dates) return false;
         return GENERAL_ZONE_TASK_TYPES.every((taskType) => {
+            const ceiling = addDays(state.today, generalZoneOffsetDays(taskType));
+            if (ceiling && isoDate > ceiling) return true;
             const set = dates.get(taskType);
             return Boolean(set && set.has(isoDate));
         });
+    }
+
+    async function ensureGeneralZoneOffsetLoaded(force) {
+        if (state.zoneOffsetDepth.loaded && !force) return state.zoneOffsetDepth.map;
+        const db = supabaseDb();
+        if (!db) return state.zoneOffsetDepth.map;
+        state.zoneOffsetDepth.loading = true;
+        try {
+            const { data, error } = await db
+                .from("wms_routing_rules")
+                .select("target_task_type, upload_offset_days")
+                .eq("output_key", "zone")
+                .eq("is_active", true)
+                .eq("source_format", "general");
+            if (error) throw error;
+            const map = {};
+            (data || []).forEach((row) => {
+                const zone = normalizeText(row.target_task_type);
+                const val = Number(row.upload_offset_days) || 0;
+                if (!zone) return;
+                if (!(zone in map) || val < map[zone]) map[zone] = val;
+            });
+            state.zoneOffsetDepth.map = map;
+            state.zoneOffsetDepth.loaded = true;
+        } catch (error) {
+            console.warn("general zone offset depth load skipped:", error);
+        } finally {
+            state.zoneOffsetDepth.loading = false;
+        }
+        return state.zoneOffsetDepth.map;
     }
 
     async function ensureGeneralZoneCoverageLoaded(force) {
@@ -12615,6 +12689,7 @@
                 readOptionalRows(db, RUNS_TABLE, (query) => query.select("*").gte("effective_date", range.start).lte("effective_date", range.end).order("effective_date", { ascending: false })),
                 ensureSourceFormatDepthLoaded(),
                 ensureGeneralZoneCoverageLoaded(),
+                ensureGeneralZoneOffsetLoaded(),
             ]);
             await loadWriteoffTerms();
             if (wmsSettings.rows.length) applySettings(wmsSettings.rows);
@@ -15070,7 +15145,7 @@
         // те, что были при открытии страницы. Покрытие по участкам
         // general -- по той же причине (другой оператор мог закрыть
         // участок с другой вкладки/устройства).
-        Promise.all([ensureSourceFormatDepthLoaded(true), ensureGeneralZoneCoverageLoaded(true)]).then(() => renderModuleChooser());
+        Promise.all([ensureSourceFormatDepthLoaded(true), ensureGeneralZoneCoverageLoaded(true), ensureGeneralZoneOffsetLoaded(true)]).then(() => renderModuleChooser());
     }
 
     function openBackfillChooser() {
