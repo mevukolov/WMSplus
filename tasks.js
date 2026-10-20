@@ -439,6 +439,21 @@
     ];
 
     const VISIBLE_MODULES = ["general", "no_order", "packaging", "after_sale_movement"];
+    // Зоны, которые кнопка "В заказе" (source_format=general) реально
+    // создаёт -- см. zoneTaskTypeMap в buildGeneralPreview (ПМ/Почта туда
+    // не входят, у них свой путь). Используется dayCoveredForModule, чтобы
+    // день считался закрытым только когда закрыты ВСЕ семь участков, а не
+    // когда хоть один из них получил дату (см. обсуждение про "Предсортировка
+    // за 18 число").
+    const GENERAL_ZONE_TASK_TYPES = [
+        "Разбор ОПП // ПМ",
+        "Разбор ОПП // Почта",
+        "Разбор ОПП // Предсортировка",
+        "Разбор ОПП // Маркетплейс",
+        "Разбор ОПП // ПЦ",
+        "Разбор ОПП // WMI (МП + ПЦ)",
+        "Разбор ОПП // Оклейка",
+    ];
     const REVIEW_SECTIONS = [
         "Упаковка",
         "RWP",
@@ -559,6 +574,17 @@
             loaded: false,
             loading: false,
             map: {},
+        },
+        // "general" (В заказе) создаёт задачи сразу в несколько участков
+        // (ПМ/Почта/Предсортировка/Маркетплейс/ПЦ/WMI/Оклейка) из ОДНОЙ
+        // выгрузки -- dayCoveredForModule для этого формата не может
+        // опираться на окно рана целиком (один ран мог закрыть только
+        // ОДИН из семи участков в этот день, а не все) и смотрит сюда,
+        // по task_type отдельно. См. ensureGeneralZoneCoverageLoaded.
+        generalZoneCoverage: {
+            loaded: false,
+            loading: false,
+            dates: null,
         },
         reviewZones: {
             rows: [],
@@ -1723,6 +1749,12 @@
     // другого рана. Для offset=0 модулей поведение не меняется (там
     // effective_date и есть сам день).
     function dayCoveredForModule(module, isoDate) {
+        // "general" создаёт задачи сразу в 7 разных участков из одной
+        // выгрузки -- один ран (и его window_start/end_date, посчитанные
+        // по ВСЕМ попавшим в него строкам сразу) может честно закрыть
+        // только часть из них в этот день. Окно рана тут ничего не
+        // говорит про остальные участки -- see GENERAL_ZONE_TASK_TYPES.
+        if (module === "general") return dayCoveredForGeneralZones(isoDate);
         if (deepestOffsetDaysForModule(module) === 0) return Boolean(runForUpload(module, isoDate));
         return (state.runs || []).some((run) => {
             if (!runMatchesModuleBranch(run, module)) return false;
@@ -1732,6 +1764,52 @@
             if (!start || !end) return false;
             return isoDate >= start && isoDate <= end;
         });
+    }
+
+    // Источник правды -- сами задачи (task_type + upload_effective_date),
+    // а не окно рана: ран может перечислить дни любого из семи участков
+    // вперемешку, по отдельности их не отличить. День закрыт для general
+    // только когда закрыты ВСЕ участки из GENERAL_ZONE_TASK_TYPES --
+    // "Другие задачи" (редкий fallback-таргет произвольного правила) в
+    // список не входит, его нельзя требовать ежедневно.
+    function dayCoveredForGeneralZones(isoDate) {
+        const dates = state.generalZoneCoverage.dates;
+        if (!dates) return false;
+        return GENERAL_ZONE_TASK_TYPES.every((taskType) => {
+            const set = dates.get(taskType);
+            return Boolean(set && set.has(isoDate));
+        });
+    }
+
+    async function ensureGeneralZoneCoverageLoaded(force) {
+        if (state.generalZoneCoverage.loaded && !force) return state.generalZoneCoverage.dates;
+        const db = supabaseDb();
+        if (!db) return state.generalZoneCoverage.dates;
+        state.generalZoneCoverage.loading = true;
+        try {
+            const floor = addDays(state.today, -GAP_SEARCH_HORIZON_DAYS);
+            const { data, error } = await db
+                .from(WMS_TASKS_TABLE)
+                .select("task_type, upload_effective_date")
+                .in("task_type", GENERAL_ZONE_TASK_TYPES)
+                .gte("upload_effective_date", floor);
+            if (error) throw error;
+            const map = new Map();
+            (data || []).forEach((row) => {
+                const taskType = normalizeText(row.task_type);
+                const date = normalizeText(row.upload_effective_date);
+                if (!taskType || !date) return;
+                if (!map.has(taskType)) map.set(taskType, new Set());
+                map.get(taskType).add(date);
+            });
+            state.generalZoneCoverage.dates = map;
+            state.generalZoneCoverage.loaded = true;
+        } catch (error) {
+            console.warn("general zone coverage load skipped:", error);
+        } finally {
+            state.generalZoneCoverage.loading = false;
+        }
+        return state.generalZoneCoverage.dates;
     }
 
     function visibleDefs() {
@@ -12536,6 +12614,7 @@
                 readOptionalRows(db, SETTINGS_TABLE, (query) => query.select("*").order("sort_order", { ascending: true })),
                 readOptionalRows(db, RUNS_TABLE, (query) => query.select("*").gte("effective_date", range.start).lte("effective_date", range.end).order("effective_date", { ascending: false })),
                 ensureSourceFormatDepthLoaded(),
+                ensureGeneralZoneCoverageLoaded(),
             ]);
             await loadWriteoffTerms();
             if (wmsSettings.rows.length) applySettings(wmsSettings.rows);
@@ -14988,8 +15067,10 @@
         // любой момент -- при каждом открытии чекера досасываем свежий
         // набор активных правил (не раз на всю загрузку страницы),
         // чтобы запрашиваемое окно всегда отражало текущие офсеты, а не
-        // те, что были при открытии страницы.
-        ensureSourceFormatDepthLoaded(true).then(() => renderModuleChooser());
+        // те, что были при открытии страницы. Покрытие по участкам
+        // general -- по той же причине (другой оператор мог закрыть
+        // участок с другой вкладки/устройства).
+        Promise.all([ensureSourceFormatDepthLoaded(true), ensureGeneralZoneCoverageLoaded(true)]).then(() => renderModuleChooser());
     }
 
     function openBackfillChooser() {
