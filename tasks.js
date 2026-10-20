@@ -17100,7 +17100,9 @@
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         function isRwpRow(row) {
             const decided = decidedByRow.get(row);
-            return decided ? decided.zone === "RWP" : isRwpStatus(row.last_status);
+            if (decided) return decided.zone === "RWP";
+            const entry = statusDictionaryEntry("packaging", sourceStatusCode(row.last_status).toUpperCase());
+            return Boolean(entry && entry.default_task_type === "Разбор ОПП // RWP");
         }
 
         function offsetDaysForRow(row, defForRow) {
@@ -17634,20 +17636,32 @@
         const dated = [];
         survivors.forEach((row) => {
             const decided = decidedByRow.get(row);
-            const offsetDays = decided ? decided.uploadOffsetDays : 0;
+            const fallbackEntry = decided ? null : (statusDictionaryEntry("no_order", sourceRowStatus(row).toUpperCase()) || statusDictionaryCatchAll("no_order"));
+            const offsetDays = decided ? decided.uploadOffsetDays : (fallbackEntry ? Number(fallbackEntry.default_upload_offset_days) || 0 : 0);
             if (!rowDateAdmittedForOffset(parseDateTime(row.created_at).date, offsetDays, businessDate)) { dateFilteredOut += 1; return; }
             dated.push(row);
         });
 
         // "Другие задачи" -- тот же коллизионный зона-ключ, что и в
         // buildGeneralPreview: USD/TMM-правила целятся именно туда, но
-        // их нужно различать по статусу, а не только по зоне.
+        // их нужно различать по статусу, а не только по зоне. Фоллбэк
+        // (decided отсутствует) теперь берёт default_task_type из
+        // словаря (USD/TMM уже разрешены в полный task_type там, не
+        // нужен промежуточный ключ "Другие задачи" на этом шаге) и
+        // переводит его в короткий ключ zoneTaskTypeMap ниже.
         function effectiveKey(row, decided) {
-            const zone = decided ? decided.zone : (isNoOrderUsdStatus(row) || isNoOrderTmmStatus(row) ? "Другие задачи" : "Без заказа");
-            if (zone !== "Другие задачи") return zone;
-            if (isNoOrderUsdStatus(row)) return "usd_in_other";
-            if (isNoOrderTmmStatus(row)) return "tmm_in_other";
-            return "Другие задачи";
+            if (decided) {
+                const zone = decided.zone;
+                if (zone !== "Другие задачи") return zone;
+                if (isNoOrderUsdStatus(row)) return "usd_in_other";
+                if (isNoOrderTmmStatus(row)) return "tmm_in_other";
+                return "Другие задачи";
+            }
+            const entry = statusDictionaryEntry("no_order", sourceRowStatus(row).toUpperCase()) || statusDictionaryCatchAll("no_order");
+            const taskType = entry ? entry.default_task_type : null;
+            if (taskType === "Разбор ОПП // USD") return "usd_in_other";
+            if (taskType === "Разбор ОПП // TMM") return "tmm_in_other";
+            return "Без заказа";
         }
         function ruleSettingsFingerprint(decided) {
             if (!decided) return "";
