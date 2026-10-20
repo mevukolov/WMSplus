@@ -1874,7 +1874,15 @@
         if (!db) return state.generalZoneCoverage.dates;
         state.generalZoneCoverage.loading = true;
         try {
-            const floor = addDays(state.today, -GAP_SEARCH_HORIZON_DAYS);
+            // Пол -- начало диапазона САМОГО календаря (28 дней до начала
+            // этой недели), а не GAP_SEARCH_HORIZON_DAYS (21 день, тот
+            // предназначен для поиска дыры при выгрузке, не для того, что
+            // калeндарь физически может показать) -- иначе даты календаря
+            // старше горизонта просто не подгружались и показывались
+            // "не выгружено", хотя реально были закрыты.
+            const calendarRange = state.calendarRange || buildCalendarRange();
+            const horizonFloor = addDays(state.today, -GAP_SEARCH_HORIZON_DAYS);
+            const floor = calendarRange.start && calendarRange.start < horizonFloor ? calendarRange.start : horizonFloor;
             const { data, error } = await db
                 .from(WMS_TASKS_TABLE)
                 .select("task_type, upload_effective_date")
