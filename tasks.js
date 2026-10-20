@@ -473,6 +473,15 @@
         "WMI (МП + ПЦ)": "Разбор ОПП // WMI (МП + ПЦ)",
         "Другие задачи": "Разбор ОПП // Оклейка",
     };
+    // Обратное направление -- нужно, когда источник уже даёт ПОЛНЫЙ
+    // task_type (напр. wms_status_dictionary.default_task_type), а
+    // код general-веток (zone === "ПМ"/"Почта", zoneTaskTypeMap) ждёт
+    // короткое имя. Если полного значения нет в карте -- не general-
+    // зона (или новая, ещё не внесённая) -- возвращаем как есть, тогда
+    // zoneTaskTypeInfo() использует его и как ключ, и как сам taskType.
+    const GENERAL_ZONE_TASK_TYPE_TO_RULE_TARGET = Object.fromEntries(
+        Object.entries(GENERAL_ZONE_TASK_TYPE_BY_RULE_TARGET).map(([key, value]) => [value, key])
+    );
     const REVIEW_SECTIONS = [
         "Упаковка",
         "RWP",
@@ -17345,26 +17354,25 @@
         const decidedByRow = new Map();
         survivors.forEach((row, index) => { decidedByRow.set(row, zoneDecisions[index]); });
 
-        // Хардкод-фоллбэк зоны для строк без совпавшего правила -- точная
-        // копия сегодняшней логики (один if-chain вместо пяти раздельных
-        // функций, тот же порядок предпочтения, что и в текущих
-        // build-функциях: presort/labeling -> marketplace/pc -> wmi ->
-        // pm/mail). Без заказа/USD/TMM сюда НЕ входят -- это другой
-        // формат (source_format='no_order', buildNoOrderPreview), т.к.
-        // "без заказа"-принадлежность определяется внешним фильтром
+        // Фоллбэк зоны для строк без совпавшего правила -- раньше был
+        // if-chain хардкод-предикатов (isPresortStatus и т.д.), теперь
+        // источник -- словарь статусов (wms_status_dictionary). Без
+        // заказа/USD/TMM сюда НЕ входят -- это другой формат
+        // (source_format='no_order', buildNoOrderPreview), т.к. "без
+        // заказа"-принадлежность определяется внешним фильтром
         // WB-экспорта, а не статусом строки (см. buildNoOrderPreview).
-        // Строка, не подошедшая НИ ПОД ОДНО правило и НИ ПОД ОДИН из этих
-        // хардкод-признаков, не создаёт задачу вообще -- null, а не
-        // default-зона (раньше, до этого фикса, тут ошибочно стояло
-        // "Без заказа").
+        // Строка, не подошедшая НИ ПОД ОДНО правило и у которой нет
+        // строки в словаре (и нет catch-all '*' для general -- на
+        // сегодня его и нет, см. живой аудит), не создаёт задачу вообще
+        // -- null, а не default-зона.
+        // default_task_type в словаре -- ПОЛНЫЙ task_type, а эта функция
+        // (и всё, что от неё ниже -- zone === "ПМ"/"Почта",
+        // zoneTaskTypeMap) ждёт КОРОТКОЕ имя -- канонизация обратно
+        // через GENERAL_ZONE_TASK_TYPE_TO_RULE_TARGET.
         function hardcodeZoneFor(row) {
-            if (isPresortStatus(row)) return "Предсортировка";
-            if (isLabelingStatus(row)) return "Другие задачи";
-            if (isMarketplaceStatus(row) && !mxHasBuffer(row)) return "Маркетплейс";
-            if (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row)) return "ПЦ";
-            if (isWmiMpPcStatus(row)) return "WMI (МП + ПЦ)";
-            if (isPmBufferStatus(row.product_status)) return isMailRoute(routeNumberFromMx(row.mx)) ? "Почта" : "ПМ";
-            return null;
+            const entry = statusDictionaryEntry("general", sourceRowStatus(row).toUpperCase()) || statusDictionaryCatchAll("general");
+            if (!entry || !entry.default_task_type) return null;
+            return GENERAL_ZONE_TASK_TYPE_TO_RULE_TARGET[entry.default_task_type] || entry.default_task_type;
         }
 
         // "Другие задачи" сегодня также цель правила "Оклейка" --
@@ -17380,7 +17388,8 @@
         const dated = [];
         survivors.forEach((row) => {
             const decided = decidedByRow.get(row);
-            const offsetDays = decided ? decided.uploadOffsetDays : 0;
+            const fallbackEntry = decided ? null : (statusDictionaryEntry("general", sourceRowStatus(row).toUpperCase()) || statusDictionaryCatchAll("general"));
+            const offsetDays = decided ? decided.uploadOffsetDays : (fallbackEntry ? Number(fallbackEntry.default_upload_offset_days) || 0 : 0);
             if (!rowDateAdmittedForOffset(parseDateTime(row.created_at).date, offsetDays, businessDate)) { dateFilteredOut += 1; return; }
             dated.push(row);
         });
