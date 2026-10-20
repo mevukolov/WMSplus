@@ -8372,6 +8372,7 @@
     }
 
     function closeTaskDetail() {
+        closeTaskVerdictPicker();
         if (state.taskDetail && state.taskDetail.countdownTimer) {
             clearInterval(state.taskDetail.countdownTimer);
             state.taskDetail.countdownTimer = null;
@@ -10404,6 +10405,12 @@
     function renderTaskDetail(row) {
         const target = $("taskDetailWrap");
         if (!target) return;
+        // Если задачу переключили прямо при открытом вердикт-пикере,
+        // innerHTML ниже заменит содержимое target, но попап мог быть
+        // перенесён (portalTaskVerdictPopup) в document.body и остался бы
+        // там "осиротевшим" -- на новый рендер его нужно убрать явно.
+        const stalePopup = document.getElementById("taskVerdictPopup");
+        if (stalePopup && stalePopup.parentNode === document.body) stalePopup.remove();
         const savedReview = taskReviewPayload(row);
         const readOnly = state.taskDetail.source === "inactive" || isCompletedTask(row) || isWaitingReopenTask(row);
         const incomingFlow = isIncomingFlowRequestTask(row);
@@ -10591,20 +10598,70 @@
         return (options || []).map((option) => "<button type='button' class='task-verdict-option" + (option === selected ? " is-selected" : "") + "' data-value='" + escapeHtml(option) + "'>" + escapeHtml(option) + "</button>").join("");
     }
 
+    // Попап раскрывается вверх от кнопки внизу истории -- внутри
+    // прокручиваемого .task-detail-body он обрезался краем скролл-
+    // контейнера ("уехал под шапку"). Вместо снятия overflow с самого
+    // контейнера (что сбрасывало scrollTop и подкидывало длинную историю
+    // наверх при каждом открытии) переносим попап-элемент напрямую в
+    // document.body с position:fixed на время, пока он открыт -- он
+    // больше не ограничен ничьим overflow, а скролл контейнера вообще
+    // не трогается. closeTaskVerdictPicker всегда возвращает его на
+    // место, renderTaskDetail подчищает "осиротевший" попап на случай,
+    // если задачу переключили прямо при открытом пикере.
+    function portalTaskVerdictPopup() {
+        const popup = $("taskVerdictPopup");
+        const trigger = $("taskVerdictTrigger");
+        if (!popup || !trigger || popup.classList.contains("is-portaled")) return;
+        state.taskVerdictPopupHome = { parent: popup.parentNode, next: popup.nextSibling };
+        document.body.appendChild(popup);
+        popup.classList.add("is-portaled");
+        const rect = trigger.getBoundingClientRect();
+        popup.style.left = Math.max(8, rect.left) + "px";
+        popup.style.bottom = (window.innerHeight - rect.top + 8) + "px";
+    }
+
+    function unportalTaskVerdictPopup() {
+        const popup = $("taskVerdictPopup");
+        if (!popup || !popup.classList.contains("is-portaled")) return;
+        popup.classList.remove("is-portaled");
+        popup.style.left = "";
+        popup.style.bottom = "";
+        const home = state.taskVerdictPopupHome;
+        state.taskVerdictPopupHome = null;
+        if (home && home.parent) home.parent.insertBefore(popup, home.next);
+    }
+
+    function closeTaskVerdictPickerOnScroll() {
+        closeTaskVerdictPicker();
+    }
+
     function openTaskVerdictPicker() {
         const picker = $("taskVerdictPicker");
+        const popup = $("taskVerdictPopup");
         if (picker) picker.classList.add("is-open");
+        portalTaskVerdictPopup();
+        if (popup) popup.classList.add("is-open");
+        const body = document.querySelector(".task-detail-body");
+        if (body) body.addEventListener("scroll", closeTaskVerdictPickerOnScroll, { passive: true, once: true });
     }
 
     function closeTaskVerdictPicker() {
         const picker = $("taskVerdictPicker");
+        const popup = $("taskVerdictPopup");
         if (picker) picker.classList.remove("is-open");
+        if (popup) popup.classList.remove("is-open");
+        unportalTaskVerdictPopup();
+        const body = document.querySelector(".task-detail-body");
+        if (body) body.removeEventListener("scroll", closeTaskVerdictPickerOnScroll);
     }
 
     function taskVerdictOutsideClick(event) {
         const picker = $("taskVerdictPicker");
         if (!picker || !picker.classList.contains("is-open")) return;
-        if (!picker.contains(event.target)) closeTaskVerdictPicker();
+        const popup = $("taskVerdictPopup");
+        if (picker.contains(event.target)) return;
+        if (popup && popup.contains(event.target)) return;
+        closeTaskVerdictPicker();
     }
 
     function selectTaskVerdictOption(value) {

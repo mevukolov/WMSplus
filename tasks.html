@@ -1309,13 +1309,6 @@
         .task-detail-countdown.is-overdue { color: #7f1d1d; background: #fee2e2; }
         .task-detail-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
         .task-detail-body { padding: 18px; overflow: auto; }
-        /* Вердикт-попап раскрывается вверх от кнопки внизу истории
-           (task-verdict-popup: bottom: calc(100% + 8px)) -- при overflow:auto
-           на task-detail-body верх попапа обрезался краем этого скролл-
-           контейнера, выглядело как "уехал под шапку". Пока попап открыт,
-           снимаем клип целиком -- он всё равно виден только поверх уже
-           отрисованного контента. */
-        .task-detail-body:has(.task-verdict-picker.is-open) { overflow: visible; }
         .task-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
         .task-info-item { border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px 12px; background: #fff; }
         .task-info-item.copyable { cursor: copy; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
@@ -1485,7 +1478,19 @@
         @keyframes taskVerdictPop { 0% { transform: scale(1); } 40% { transform: scale(1.08); } 100% { transform: scale(1); } }
         .task-verdict-trigger.is-pop { animation: taskVerdictPop .3s cubic-bezier(.3,1.5,.4,1.1); }
         .task-verdict-popup { position: absolute; left: 0; bottom: calc(100% + 8px); min-width: 240px; max-width: 300px; display: grid; gap: 3px; padding: 8px; border-radius: 16px; background: #fff; border: 1px solid #e2e8f0; box-shadow: var(--shadow-md); opacity: 0; pointer-events: none; transform: scale(.94) translateY(6px); transform-origin: bottom left; transition: opacity .15s ease, transform .15s cubic-bezier(.22,1.3,.32,1.05); z-index: 20; }
-        .task-verdict-picker.is-open .task-verdict-popup { opacity: 1; pointer-events: auto; transform: scale(1) translateY(0); }
+        /* .is-portaled -- JS (openTaskVerdictPicker) переносит попап в
+           document.body с position:fixed и считает координаты от
+           getBoundingClientRect() кнопки, вместо absolute-позиционирования
+           внутри прокручиваемого .task-detail-body. Раньше вместо этого
+           снимался overflow с самого task-detail-body на время открытия --
+           но overflow:visible сбрасывает scrollTop скролл-контейнера
+           (у элемента без overflow нет скролл-бокса), и в длинной задаче
+           открытие попапа просто подкидывало историю наверх. Portal решает
+           и исходную проблему (попап больше не обрезается краем контейнера),
+           и не трогает scroll вообще. */
+        .task-verdict-popup.is-portaled { position: fixed; bottom: auto; }
+        .task-verdict-picker.is-open .task-verdict-popup,
+        .task-verdict-popup.is-open { opacity: 1; pointer-events: auto; transform: scale(1) translateY(0); }
         .task-verdict-option { border: 0; border-radius: 12px; padding: 9px 12px; background: transparent; color: #334155; font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease, transform .1s ease; }
         .task-verdict-option:hover { background: #f1f5f9; }
         .task-verdict-option.is-selected { background: color-mix(in srgb, var(--accent) 14%, white); color: var(--accent); }
