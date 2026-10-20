@@ -1684,6 +1684,19 @@
         state.writeoffTerms.rows = Array.from(byKey.values()).sort(writeoffTermSort);
     }
 
+    // Словарь (wms_status_dictionary) первичен, но НЕ единственный
+    // источник: он scoped на статусы 4 форматов выгрузки (общие zone-
+    // правила), а wms_writeoff_terms исторически покрывает ЛЮБой статус
+    // системы, включая те, что никогда не идут через эти 4 формата --
+    // напр. "Чистые списания" (SGR/TTB и другие, подтверждено живым
+    // запросом: SGR -- 32к+ строк wms_task_items, TTB -- 15к+, оба без
+    // единого активного правила в wms_routing_rules). Полная замена
+    // сломала бы срок списания для них. map строится из wms_writeoff_terms
+    // как базы, затем словарь ПЕРЕЗАПИСЫВАЕТ значения для статусов,
+    // которые у него явно настроены -- таким образом правки через новый
+    // экран "Статусы" сразу видны, а всё остальное продолжает работать
+    // через старый источник до отдельного решения по объединению охвата
+    // (см. риски в спеке/плане перед Task 13).
     function activeWriteoffStatusTerms() {
         const map = new Map();
         (state.writeoffTerms.rows || []).forEach((row) => {
@@ -1691,6 +1704,13 @@
             const key = normalizeWriteoffTermKey(row.term_key, "status");
             if (!key) return;
             map.set(key, row);
+        });
+        (state.statusDictionary.rows || []).forEach((row) => {
+            if (row.status_code === "*" || row.is_active === false) return;
+            if (row.writeoff_days === null || row.writeoff_days === undefined) return;
+            const key = normalizeWriteoffTermKey(row.status_code, "status");
+            if (!key) return;
+            map.set(key, { label: row.label || row.status_code, days_without_movement: row.writeoff_days });
         });
         return map;
     }
@@ -12851,6 +12871,7 @@
                 ensureZoneOffsetDepthLoaded(),
             ]);
             await loadWriteoffTerms();
+            await loadStatusDictionary();
             if (wmsSettings.rows.length) applySettings(wmsSettings.rows);
             if (!wmsRuns.ok) throw wmsRuns.error || new Error("Не удалось прочитать журналы выгрузок.");
             state.runs = mergeUploadRuns(wmsRuns.rows || []);
@@ -20887,6 +20908,7 @@
         void loadShiftState();
         void loadAchievements();
         void loadWriteoffTerms();
+        void loadStatusDictionary();
         void loadReviewZones();
         void loadPrintAlertState();
         setInterval(() => { void loadPrintAlertState(); }, 120000);
