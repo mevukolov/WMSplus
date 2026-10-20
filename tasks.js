@@ -584,6 +584,7 @@
             loaded: false,
             error: "",
             editingIndex: null,
+            statusFilter: null,
         },
         statusDictionary: {
             rows: [],
@@ -13271,11 +13272,37 @@
             + "</div>";
     }
 
+    // Листовое условие {attribute:'status', operator, value} -- только
+    // 'in' (массив) и 'eq' (одно значение) дают определимое членство
+    // (живой аудит активных правил подтвердил: это единственные
+    // операторы, реально используемые на статусе). contains/not_contains/
+    // числовые на status -- неопределимо статически, правило просто не
+    // связывается ни с одним конкретным статусом (видно только в "все
+    // правила").
+    function ruleReferencesStatus(conditions, statusCode) {
+        const code = normalizeText(statusCode).toUpperCase();
+        return (Array.isArray(conditions) ? conditions : []).some((condition) => {
+            if (!condition || condition.attribute !== "status") return false;
+            if (condition.operator === "in") return Array.isArray(condition.value) && condition.value.map((v) => normalizeText(v).toUpperCase()).includes(code);
+            if (condition.operator === "eq") return normalizeText(condition.value).toUpperCase() === code;
+            return false;
+        });
+    }
+
+    function rulesForStatus(sourceFormat, statusCode) {
+        return (state.routingRules.rows || [])
+            .map((row, index) => ({ row, index }))
+            .filter((item) => item.row.source_format === sourceFormat && item.row.is_active !== false && ruleReferencesStatus(item.row.conditions, statusCode));
+    }
+
     function renderRoutingRulesModal() {
         const target = $("routingRulesWrap");
         if (!target) return;
-        const rows = state.routingRules.rows || [];
-        const indexed = rows.map((row, index) => ({ row, index }));
+        const allRows = state.routingRules.rows || [];
+        const filter = state.routingRules.statusFilter;
+        const rows = filter ? rulesForStatus(filter.sourceFormat, filter.statusCode).map((item) => item.row) : allRows;
+        const indexAmongAll = (row) => allRows.indexOf(row);
+        const indexed = rows.map((row) => ({ row, index: indexAmongAll(row) }));
         const byPriority = (a, b) => (Number(a.row.priority) || 0) - (Number(b.row.priority) || 0);
         const filterRows = indexed.filter((item) => item.row.output_key === "filter").sort(byPriority);
         const zoneRows = indexed.filter((item) => item.row.output_key !== "filter").sort(byPriority);
@@ -13283,11 +13310,17 @@
             + "<div class='routing-rule-section-heading'>" + escapeHtml(title) + "</div>"
             + "<div class='routing-rule-summary-list'>" + items.map((item) => routingRuleSummaryRowHtml(item.row, item.index)).join("") + "</div>"
             + "</div>";
-        target.innerHTML = (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
+        const toggleHtml = filter
+            ? "<div class='routing-rule-status-filter'>Статус <strong>" + escapeHtml(filter.statusCode === "*" ? "Прочее" : filter.statusCode) + "</strong> (" + escapeHtml(sourceFormatLabel(filter.sourceFormat)) + ") <button type='button' class='btn btn-outline' data-clear-status-filter>Показать все правила</button></div>"
+            : "";
+        target.innerHTML = toggleHtml
+            + (state.routingRules.error ? "<div class='status-line error'>" + escapeHtml(state.routingRules.error) + "</div>" : "")
             + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
-            + (!rows.length && !state.routingRules.loading ? "<div class='empty-state'>Правил пока нет. Нажмите \"Добавить правило\".</div>" : "")
+            + (!rows.length && !state.routingRules.loading ? "<div class='empty-state'>" + (filter ? "У этого статуса нет правил." : "Правил пока нет. Нажмите \"Добавить правило\".") + "</div>" : "")
             + section("Правила (" + zoneRows.length + ")", zoneRows)
             + section("Фильтры (" + filterRows.length + ")", filterRows);
+        const clearButton = target.querySelector("[data-clear-status-filter]");
+        if (clearButton) clearButton.addEventListener("click", () => { state.routingRules.statusFilter = null; renderRoutingRulesModal(); });
         target.querySelectorAll("[data-rule-summary-row]").forEach((rowEl) => {
             const open = () => openRoutingRuleEditModal(Number(rowEl.getAttribute("data-rule-index")));
             rowEl.addEventListener("click", (event) => { if (!event.target.closest("[data-rule-summary-remove]")) open(); });
@@ -13514,10 +13547,11 @@
         };
     }
 
-    async function openRoutingRulesModal() {
+    async function openRoutingRulesModal(statusFilter) {
         if (!ensureDevelopmentAccess("Правила маршрутизации")) return;
         closeFlowModals();
         state.routingRules.editingIndex = null;
+        state.routingRules.statusFilter = statusFilter || null;
         setFlowModalOpen("routingRulesModal", true);
         renderRoutingRulesModal();
         await loadRoutingRules(true);
