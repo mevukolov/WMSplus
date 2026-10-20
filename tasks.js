@@ -585,6 +585,12 @@
             error: "",
             editingIndex: null,
         },
+        statusDictionary: {
+            rows: [],
+            loading: false,
+            loaded: false,
+            error: "",
+        },
         routingRuleTest: {
             rows: null,
             module: null,
@@ -12866,6 +12872,45 @@
             console.warn("optional table read failed:", table, error);
             return { ok: false, rows: [], error };
         }
+    }
+
+    async function loadStatusDictionary(force) {
+        if (state.statusDictionary.loaded && !force) return true;
+        const db = supabaseDb();
+        state.statusDictionary.loading = true;
+        state.statusDictionary.error = "";
+        if (!db) {
+            state.statusDictionary.loading = false;
+            state.statusDictionary.error = "Supabase SDK недоступен.";
+            return false;
+        }
+        try {
+            const { data, error } = await db
+                .from("wms_status_dictionary")
+                .select("*")
+                .order("source_format", { ascending: true })
+                .order("sort_order", { ascending: true });
+            if (error) throw error;
+            state.statusDictionary.rows = data || [];
+            state.statusDictionary.loaded = true;
+            return true;
+        } catch (error) {
+            state.statusDictionary.rows = [];
+            state.statusDictionary.error = "Не удалось загрузить словарь статусов: " + (error && error.message ? error.message : String(error));
+            console.warn("status dictionary load skipped:", error);
+            return false;
+        } finally {
+            state.statusDictionary.loading = false;
+        }
+    }
+
+    function statusDictionaryEntry(sourceFormat, statusCode) {
+        const code = normalizeText(statusCode).toUpperCase();
+        return (state.statusDictionary.rows || []).find((row) => row.source_format === sourceFormat && row.status_code === code && row.is_active !== false) || null;
+    }
+
+    function statusDictionaryCatchAll(sourceFormat) {
+        return (state.statusDictionary.rows || []).find((row) => row.source_format === sourceFormat && row.status_code === "*" && row.is_active !== false) || null;
     }
 
     async function loadRoutingRules(force) {
