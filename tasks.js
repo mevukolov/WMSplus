@@ -28,7 +28,6 @@
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
     const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
-    const WMS_WRITEOFF_TERMS_TABLE = "wms_writeoff_terms";
     const FLOW_SETTINGS_TABLE = "wms_flow_score_settings";
     const FLOW_HISTORY_TABLE = "wms_task_history";
     const SUPABASE_FUNCTIONS_BASE_URL = ((typeof window !== "undefined" && window.SUPABASE_URL) || "https://bgphllmzmlwurfnbagho.supabase.co").replace(/\/$/, "") + "/functions/v1";
@@ -575,11 +574,6 @@
         settings: new Map(DEFAULT_MODULES.map((item) => [item.module, { ...item }])),
         runs: [],
         writeoffTerms: {
-            rows: DEFAULT_WRITEOFF_TERMS.map((item) => ({ ...item, is_active: true })),
-            loaded: false,
-            loading: false,
-            saving: false,
-            error: "",
             recommendations: {
                 loading: false,
                 rows: [],
@@ -1633,10 +1627,6 @@
         return addDays(plannedUploadDateForBusinessDate(module, businessDate), deadlineDays);
     }
 
-    function defaultWriteoffTerms() {
-        return DEFAULT_WRITEOFF_TERMS.map((item) => ({ ...item, is_active: item.is_active !== false }));
-    }
-
     function normalizeWriteoffTermType(value) {
         const normalized = normalizeForMatch(value);
         return normalized === "lr" || normalized === "26lr" ? "lr" : "status";
@@ -1650,42 +1640,6 @@
             return code || raw.replace(/\s+/g, "_");
         }
         return raw.replace(/\s+/g, "");
-    }
-
-    function writeoffTermSort(a, b) {
-        const aType = normalizeWriteoffTermType(a && a.term_type);
-        const bType = normalizeWriteoffTermType(b && b.term_type);
-        if (aType !== bType) return aType === "status" ? -1 : 1;
-        const aOrder = Number(a && a.sort_order) || 999;
-        const bOrder = Number(b && b.sort_order) || 999;
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        return normalizeText(a && a.term_key).localeCompare(normalizeText(b && b.term_key), "ru");
-    }
-
-    function applyWriteoffTerms(rows) {
-        const byKey = new Map();
-        defaultWriteoffTerms().forEach((item) => {
-            byKey.set(item.term_type + "|" + item.term_key, item);
-        });
-        (rows || []).forEach((row) => {
-            const termType = normalizeWriteoffTermType(row && row.term_type);
-            const termKey = normalizeWriteoffTermKey(row && (row.term_key || row.status_code), termType);
-            if (!termKey) return;
-            const current = byKey.get(termType + "|" + termKey) || {};
-            byKey.set(termType + "|" + termKey, {
-                ...current,
-                id: row.id || current.id,
-                wh_id: normalizeText(row.wh_id) || WH_ID,
-                term_type: termType,
-                term_key: termKey,
-                label: normalizeText(row.label || row.status_label) || current.label || termKey,
-                days_without_movement: settingNumber(row.days_without_movement, current.days_without_movement ?? 0),
-                is_active: row.is_active !== false,
-                sort_order: Number(row.sort_order) || current.sort_order || 999,
-                updated_at: normalizeText(row.updated_at || current.updated_at),
-            });
-        });
-        state.writeoffTerms.rows = Array.from(byKey.values()).sort(writeoffTermSort);
     }
 
     // Источник -- wms_status_dictionary целиком (не только 4 формата
@@ -12811,7 +12765,6 @@
                 loadStatusDictionary(),
                 loadRoutingRules(),
             ]);
-            await loadWriteoffTerms();
             if (wmsSettings.rows.length) applySettings(wmsSettings.rows);
             if (!wmsRuns.ok) throw wmsRuns.error || new Error("Не удалось прочитать журналы выгрузок.");
             state.runs = mergeUploadRuns(wmsRuns.rows || []);
@@ -14039,78 +13992,6 @@
         }
     }
 
-    async function loadWriteoffTerms(force) {
-        if (state.writeoffTerms.loaded && !force) return true;
-        const db = supabaseDb();
-        state.writeoffTerms.loading = true;
-        state.writeoffTerms.error = "";
-        renderWriteoffTermsModal();
-        if (!db) {
-            state.writeoffTerms.loading = false;
-            state.writeoffTerms.error = "Supabase SDK недоступен. Использую дефолтные сроки на этой странице.";
-            applyWriteoffTerms([]);
-            renderWriteoffTermsModal();
-            return false;
-        }
-        try {
-            const read = await readOptionalRows(db, WMS_WRITEOFF_TERMS_TABLE, (query) => query
-                .select("*")
-                .eq("wh_id", WH_ID)
-                .order("term_type", { ascending: true })
-                .order("sort_order", { ascending: true })
-                .order("term_key", { ascending: true }));
-            if (!read.ok) throw read.error || new Error("Не удалось прочитать сроки списания.");
-            applyWriteoffTerms(read.rows);
-            state.writeoffTerms.loaded = true;
-            return true;
-        } catch (error) {
-            applyWriteoffTerms([]);
-            state.writeoffTerms.error = "Не удалось загрузить сроки из Supabase. Проверь миграцию wms_writeoff_terms. Сейчас используются дефолты.";
-            console.warn("writeoff terms load skipped:", error);
-            return false;
-        } finally {
-            state.writeoffTerms.loading = false;
-            renderWriteoffTermsModal();
-        }
-    }
-
-    function writeoffTermInputRows() {
-        return Array.from(document.querySelectorAll("[data-writeoff-term-row]")).map((row, index) => {
-            const typeInput = row.querySelector("[data-writeoff-term-type]");
-            const keyInput = row.querySelector("[data-writeoff-term-key]");
-            const labelInput = row.querySelector("[data-writeoff-term-label]");
-            const daysInput = row.querySelector("[data-writeoff-term-days]");
-            const activeInput = row.querySelector("[data-writeoff-term-active]");
-            const termType = normalizeWriteoffTermType(typeInput && typeInput.value);
-            const termKey = normalizeWriteoffTermKey(keyInput && keyInput.value, termType);
-            if (!termKey) return null;
-            return {
-                wh_id: WH_ID,
-                term_type: termType,
-                term_key: termKey,
-                label: normalizeText(labelInput && labelInput.value) || termKey,
-                days_without_movement: Math.max(0, Math.trunc(settingNumber(daysInput && daysInput.value, 0))),
-                is_active: activeInput ? activeInput.checked : true,
-                sort_order: index + 1,
-                updated_by: normalizeText(currentWmsUser().id) || null,
-                updated_at: new Date().toISOString(),
-            };
-        }).filter(Boolean);
-    }
-
-    function writeoffTermRowHtml(row, lockedType) {
-        const type = normalizeWriteoffTermType(row && row.term_type);
-        const key = normalizeWriteoffTermKey(row && row.term_key, type);
-        const days = row && row.days_without_movement !== undefined && row.days_without_movement !== null ? row.days_without_movement : 0;
-        return "<div class='writeoff-term-row' data-writeoff-term-row>"
-            + "<input data-writeoff-term-type type='hidden' value='" + escapeHtml(type) + "'>"
-            + "<input data-writeoff-term-key type='text' value='" + escapeHtml(key) + "' placeholder='Статус' " + (lockedType ? "" : "") + ">"
-            + "<input data-writeoff-term-label type='text' value='" + escapeHtml(row && row.label || key) + "' placeholder='Название'>"
-            + "<input data-writeoff-term-days type='number' min='0' step='1' value='" + escapeHtml(days) + "'>"
-            + "<label class='writeoff-term-active'><input data-writeoff-term-active type='checkbox' " + (row && row.is_active === false ? "" : "checked") + "> активен</label>"
-            + "</div>";
-    }
-
     function renderWriteoffRecommendationsHtml() {
         const reco = state.writeoffTerms.recommendations || {};
         const summary = reco.summary || {};
@@ -14169,53 +14050,17 @@
             + "</section>";
     }
 
+    // Редактирование сроков списания переехало в экран "Статусы"
+    // (wms_status_dictionary, source_format='other' покрывает статусы
+    // вне 4 выгрузок). Эта модалка теперь только показывает блок
+    // рекомендаций -- отдельная, независимая аналитика (нагрузка/
+    // возраст по участкам), читающая сроки через activeWriteoffStatusTerms()
+    // (уже на словаре), без собственного состояния редактирования.
     function renderWriteoffTermsModal() {
         const target = $("writeoffTermsWrap");
         if (!target) return;
-        const rows = state.writeoffTerms.rows || defaultWriteoffTerms();
-        const statusRows = rows.filter((row) => normalizeWriteoffTermType(row.term_type) === "status");
-        const lrRows = rows.filter((row) => normalizeWriteoffTermType(row.term_type) === "lr");
-        const statusHtml = statusRows.map((row) => writeoffTermRowHtml(row, true)).join("");
-        const lrHtml = lrRows.map((row) => writeoffTermRowHtml(row, true)).join("");
-        target.innerHTML = (state.writeoffTerms.error ? "<div class='status-line error'>" + escapeHtml(state.writeoffTerms.error) + "</div>" : "")
-            + (state.writeoffTerms.loading ? "<div class='status-line'>Загружаю сроки списания...</div>" : "")
-            + "<section class='writeoff-term-section'><h4>Статусы WMS</h4><p>Дата списания = дата последнего движения ШК + срок статуса. Для тары берется самая ранняя дата списания среди ШК.</p>"
-            + "<div class='writeoff-term-head'><span>Код</span><span>Название</span><span>Дней</span><span>Вкл.</span></div>"
-            + "<div class='writeoff-term-list'>" + statusHtml + "</div></section>"
-            + "<section class='writeoff-term-section'><h4>Дополнительно</h4><p>Срок 26LR пока просто хранится здесь, без влияния на задачи.</p>"
-            + "<div class='writeoff-term-head'><span>Ключ</span><span>Название</span><span>Дней</span><span>Вкл.</span></div>"
-            + "<div class='writeoff-term-list'>" + (lrHtml || writeoffTermRowHtml({ term_type: "lr", term_key: "26LR", label: "26LR", days_without_movement: 0, is_active: true }, true)) + "</div></section>"
-            + "<section class='writeoff-term-section'><h4>Добавить статус</h4>"
-            + "<div class='writeoff-term-add'><input id='newWriteoffStatusKey' type='text' placeholder='Например: ABC'><input id='newWriteoffStatusDays' type='number' min='0' step='1' placeholder='Дней'><button id='addWriteoffStatus' class='btn btn-outline' type='button'>Добавить</button></div></section>"
+        target.innerHTML = "<div class='work-subtitle'>Сроки списания по статусам редактируются в экране \"Статусы\" -- здесь только расчёт рекомендаций по срезам выгрузки.</div>"
             + renderWriteoffRecommendationsHtml();
-        const add = $("addWriteoffStatus");
-        if (add) add.addEventListener("click", addWriteoffStatusDraft);
-    }
-
-    function addWriteoffStatusDraft() {
-        const keyInput = $("newWriteoffStatusKey");
-        const daysInput = $("newWriteoffStatusDays");
-        const key = normalizeWriteoffTermKey(keyInput && keyInput.value, "status");
-        if (!key) {
-            toast("Укажите код статуса.", "error");
-            return;
-        }
-        const rows = writeoffTermInputRows();
-        const exists = rows.some((row) => row.term_type === "status" && row.term_key === key);
-        if (exists) {
-            toast("Такой статус уже есть в списке.", "error");
-            return;
-        }
-        state.writeoffTerms.rows = rows.concat({
-            wh_id: WH_ID,
-            term_type: "status",
-            term_key: key,
-            label: key,
-            days_without_movement: Math.max(0, Math.trunc(settingNumber(daysInput && daysInput.value, 0))),
-            is_active: true,
-            sort_order: rows.length + 1,
-        }).sort(writeoffTermSort);
-        renderWriteoffTermsModal();
     }
 
     async function openStatusPilotModal() {
@@ -14668,11 +14513,11 @@
     }
 
     async function openWriteoffTermsModal() {
-        if (!ensureDevelopmentAccess("Сроки списания")) return;
+        if (!ensureDevelopmentAccess("Рекомендации по срезам")) return;
         closeFlowModals();
         setFlowModalOpen("writeoffTermsModal", true);
         renderWriteoffTermsModal();
-        await loadWriteoffTerms(true);
+        await loadStatusDictionary();
         if (!state.writeoffTerms.recommendations.summary && !state.writeoffTerms.recommendations.loading) {
             void refreshWriteoffRecommendations();
         }
@@ -14680,49 +14525,6 @@
 
     function closeWriteoffTermsModal() {
         setFlowModalOpen("writeoffTermsModal", false);
-    }
-
-    async function saveWriteoffTermsFromModal() {
-        const db = supabaseDb();
-        const status = $("writeoffTermsStatus");
-        const button = $("saveWriteoffTerms");
-        const rows = writeoffTermInputRows();
-        if (!rows.length) {
-            if (status) status.textContent = "Нет строк для сохранения.";
-            return;
-        }
-        state.writeoffTerms.rows = rows.sort(writeoffTermSort);
-        if (!db) {
-            if (status) status.textContent = "Supabase недоступен. На этой странице сроки применены, но не сохранены.";
-            return;
-        }
-        if (button) button.disabled = true;
-        state.writeoffTerms.saving = true;
-        if (status) status.textContent = "Сохраняю сроки списания...";
-        try {
-            const { error } = await db
-                .from(WMS_WRITEOFF_TERMS_TABLE)
-                .upsert(rows, { onConflict: "wh_id,term_type,term_key" });
-            if (error) throw error;
-            state.writeoffTerms.loaded = true;
-            state.writeoffTerms.error = "";
-            state.writeoffTerms.recommendations.rows = [];
-            state.writeoffTerms.recommendations.capacityRows = [];
-            state.writeoffTerms.recommendations.problemSections = [];
-            state.writeoffTerms.recommendations.statusPriorities = [];
-            state.writeoffTerms.recommendations.summary = null;
-            state.writeoffTerms.recommendations.generatedAt = "";
-            if (status) status.textContent = "Сроки сохранены. Новые выгрузки будут считать дату списания по этим значениям.";
-            toast("Сроки списания сохранены.", "success");
-        } catch (error) {
-            const message = error && error.message ? error.message : String(error);
-            state.writeoffTerms.error = "Не удалось сохранить сроки: " + message;
-            if (status) status.textContent = state.writeoffTerms.error;
-        } finally {
-            state.writeoffTerms.saving = false;
-            if (button) button.disabled = false;
-            renderWriteoffTermsModal();
-        }
     }
 
     async function recalculateWriteoffDatesFromModal() {
@@ -15268,8 +15070,6 @@
         const button = $("refreshWriteoffRecommendations");
         const status = $("writeoffTermsStatus");
         const applyButton = $("applyWriteoffRecommendations");
-        const inputRows = writeoffTermInputRows();
-        if (inputRows.length) state.writeoffTerms.rows = inputRows.sort(writeoffTermSort);
         reco.loading = true;
         reco.error = "";
         reco.rows = [];
@@ -17804,14 +17604,14 @@
         state.files.primary = file;
         $("fileName").textContent = "Файл выбран: " + file.name;
         setStatus("Читаю файл...");
-        // loadWriteoffTerms() without force only fetches once per session
-        // (state.writeoffTerms.loaded guard), so a long-lived open upload tab
-        // kept computing due_date from whatever terms it first loaded --
-        // stale as soon as someone edits days_without_movement in the Сроки
-        // списания modal. Force a fresh pull right before every upload so
+        // loadStatusDictionary() without force only fetches once per session
+        // (state.statusDictionary.loaded guard), so a long-lived open upload
+        // tab kept computing due_date from whatever срок it first loaded --
+        // stale as soon as someone edits writeoff_days in the "Статусы"
+        // экране. Force a fresh pull right before every upload so
         // writeoffDateInfoForRows() below always sees current terms, same as
         // the recalculate_wms_task_writeoff_dates RPC does.
-        const [rows] = await Promise.all([readWorkbookRows(file, kind), loadWriteoffTerms(true)]);
+        const [rows] = await Promise.all([readWorkbookRows(file, kind), loadStatusDictionary(true)]);
         state.rows.primary = rows;
         state.specialCheck = null;
         state.preview = await buildPreviewForModule(module, rows, [], state.activeDate);
@@ -20613,8 +20413,7 @@
         $("addReviewZone").addEventListener("click", addReviewZoneDraft);
         $("saveReviewZones").addEventListener("click", () => { void saveReviewZonesFromModal(); });
         $("reloadReviewZones").addEventListener("click", () => { void loadReviewZones(true); });
-        $("saveWriteoffTerms").addEventListener("click", () => { void saveWriteoffTermsFromModal(); });
-        $("reloadWriteoffTerms").addEventListener("click", () => { void loadWriteoffTerms(true); });
+        $("reloadWriteoffTerms").addEventListener("click", () => { void loadStatusDictionary(true).then(() => renderWriteoffTermsModal()); });
         $("recalculateWriteoffDates").addEventListener("click", () => { void recalculateWriteoffDatesFromModal(); });
         $("refreshWriteoffRecommendations").addEventListener("click", () => { void refreshWriteoffRecommendations(); });
         $("applyWriteoffRecommendations").addEventListener("click", () => { void applyWriteoffRecommendationsFromModal(); });
@@ -20859,7 +20658,6 @@
         void refreshPrespisokLeaderboard();
         void loadShiftState();
         void loadAchievements();
-        void loadWriteoffTerms();
         void loadStatusDictionary();
         void loadReviewZones();
         void loadPrintAlertState();

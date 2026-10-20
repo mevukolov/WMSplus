@@ -2063,8 +2063,8 @@
                 </button>
                 <button id="openWriteoffTerms" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">⌛</span>
-                    <h2 class="tasks-action-title">Сроки списания</h2>
-                    <p class="tasks-action-text">Статусы WMS, дни без движения до списания и отдельная настройка 26LR.</p>
+                    <h2 class="tasks-action-title">Рекомендации по срезам</h2>
+                    <p class="tasks-action-text">Рекомендации по срезам выгрузки на основе нагрузки участков. Сроки списания -- в экране "Статусы".</p>
                 </button>
                 <button id="openRoutingRules" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">🧭</span>
@@ -2931,14 +2931,13 @@
     <div class="tasks-flow-card tasks-flow-card-wide">
         <div class="work-head">
             <div>
-                <h3 class="work-title">Сроки списания</h3>
-                <p class="work-subtitle">Эти значения используются при создании новых задач: дата списания = последнее движение + срок статуса.</p>
+                <h3 class="work-title">Рекомендации по срезам</h3>
+                <p class="work-subtitle">Сроки списания по статусам редактируются в экране "Статусы" -- здесь расчёт рекомендаций по срезам выгрузки на основе нагрузки участков.</p>
             </div>
             <button id="closeWriteoffTerms" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
         <div id="writeoffTermsWrap" class="writeoff-terms-wrap"></div>
         <div class="file-row">
-            <button id="saveWriteoffTerms" class="btn btn-rect" type="button">Сохранить сроки</button>
             <button id="reloadWriteoffTerms" class="btn btn-outline" type="button">Обновить из Supabase</button>
             <button id="recalculateWriteoffDates" class="btn btn-outline" type="button">Пересчитать активные задачи</button>
             <button id="refreshWriteoffRecommendations" class="btn btn-outline" type="button">Рассчитать рекомендации</button>
