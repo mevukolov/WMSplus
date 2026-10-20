@@ -10608,6 +10608,18 @@
     // не трогается. closeTaskVerdictPicker всегда возвращает его на
     // место, renderTaskDetail подчищает "осиротевший" попап на случай,
     // если задачу переключили прямо при открытом пикере.
+    // z-index попапа (20) достаточен только ПОКА он живёт внутри модалки,
+    // соревнуясь с её собственными детьми. Запорталенный в document.body
+    // попап становится СОСЕДОМ самой модалки (#taskDetailModal,
+    // z-index:4300) на верхнем уровне стекинга -- без явного z-index выше
+    // этого модалка перехватывает клики поверх попапа (сам попап при этом
+    // может быть виден сквозь полупрозрачный фон модалки, но не кликабелен
+    // -- отсюда "кнопка не работает", хотя визуально всё на месте).
+    // 4800 -- выше любого модального z-index в tasks.html (максимум
+    // #intakeSearchPhotoModal:4780), чтобы попап не проигрывал НИ ОДНОЙ
+    // модалке, которая теоретически может быть открыта поверх/рядом.
+    const TASK_VERDICT_POPUP_Z_INDEX = "4800";
+
     function portalTaskVerdictPopup() {
         const popup = $("taskVerdictPopup");
         const trigger = $("taskVerdictTrigger");
@@ -10615,6 +10627,7 @@
         state.taskVerdictPopupHome = { parent: popup.parentNode, next: popup.nextSibling };
         document.body.appendChild(popup);
         popup.classList.add("is-portaled");
+        popup.style.zIndex = TASK_VERDICT_POPUP_Z_INDEX;
         const rect = trigger.getBoundingClientRect();
         popup.style.left = Math.max(8, rect.left) + "px";
         popup.style.bottom = (window.innerHeight - rect.top + 8) + "px";
@@ -10626,6 +10639,7 @@
         popup.classList.remove("is-portaled");
         popup.style.left = "";
         popup.style.bottom = "";
+        popup.style.zIndex = "";
         const home = state.taskVerdictPopupHome;
         state.taskVerdictPopupHome = null;
         if (home && home.parent) home.parent.insertBefore(popup, home.next);
