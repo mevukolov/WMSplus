@@ -136,7 +136,6 @@
         401,402,403,404,405,406,407,408,409,410,411,412,413,414,415,
     ]);
     const PM_BUFFER_STATUSES = new Set(["sms", "swt"]);
-    const PRESORT_EXCLUDED_MX_PARTS = ["пред сортировка мп", "сортировка в сетки"];
     const MASTER_MAIN_MODULES = ["pm", "presort", "marketplace", "pc", "wmi_mp_pc"];
     const MASTER_PACKAGING_MODULES = ["packaging", "rwp"];
     const MASTER_MODULES = ["pm", "presort", "marketplace", "pc", "marketplace_pc", "wmi_mp_pc", "no_order", "packaging", "rwp", "after_sale_movement"];
@@ -463,6 +462,31 @@
     const GENERAL_ZONE_TASK_TYPE_TO_RULE_TARGET = Object.fromEntries(
         Object.entries(GENERAL_ZONE_TASK_TYPE_BY_RULE_TARGET).map(([key, value]) => [value, key])
     );
+
+    // Общий фоллбэк-источник (когда ни одно активное правило не
+    // сработало) для general-формата -- словарь статусов, вместо
+    // прежних хардкод-предикатов (isPresortStatus и т.д., удалены).
+    // Вынесена на верхний уровень (была локальной внутри
+    // buildGeneralPreview) -- используется ТАМ ЖЕ и ещё в трёх местах
+    // диагностики (testUploadIsModuleCandidate, buildMasterDateRejects,
+    // buildMasterConditionRejects), которым раньше были нужны прямые
+    // вызовы тех же предикатов как "независимая от правил" точка
+    // сравнения. default_task_type в словаре -- ПОЛНЫЙ task_type,
+    // вызывающий код (zone === "ПМ"/"Почта", zoneTaskTypeMap) ждёт
+    // короткое имя -- канонизация обратно через
+    // GENERAL_ZONE_TASK_TYPE_TO_RULE_TARGET.
+    function generalFallbackZoneKey(row) {
+        const entry = statusDictionaryEntry("general", sourceRowStatus(row).toUpperCase()) || statusDictionaryCatchAll("general");
+        if (!entry || !entry.default_task_type) return null;
+        return GENERAL_ZONE_TASK_TYPE_TO_RULE_TARGET[entry.default_task_type] || entry.default_task_type;
+    }
+
+    // Тот же принцип для packaging -- "является ли статус RWP", когда
+    // ни одно правило не сработало. Вынесена аналогично general-версии.
+    function packagingFallbackIsRwp(statusValue) {
+        const entry = statusDictionaryEntry("packaging", sourceStatusCode(statusValue).toUpperCase());
+        return Boolean(entry && entry.default_task_type === "Разбор ОПП // RWP");
+    }
     const REVIEW_SECTIONS = [
         "Упаковка",
         "RWP",
@@ -13621,17 +13645,21 @@
         return (module === "packaging" || module === "rwp") ? "last_status" : "product_status";
     }
 
-    // Whether the module's OWN hardcode would ever have wanted this row,
-    // independent of any rule. Used to tell "this row belongs here but got
-    // filtered out somewhere" apart from "this row is from a completely
-    // different module and was never a candidate in the first place".
+    // Whether the module's OWN fallback (словарь статусов,
+    // generalFallbackZoneKey/packagingFallbackIsRwp -- то же самое
+    // "независимо от правила" сравнение, что раньше давали хардкод-
+    // предикаты) would ever have wanted this row. Used to tell "this
+    // row belongs here but got filtered out somewhere" apart from
+    // "this row is from a completely different module and was never a
+    // candidate in the first place".
     function testUploadIsModuleCandidate(module, row) {
-        if (module === "marketplace_pc") return (isMarketplaceStatus(row) && !mxHasBuffer(row)) || (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row));
-        if (module === "presort") return isPresortStatus(row) || isLabelingStatus(row);
-        if (module === "wmi_mp_pc") return isWmiMpPcStatus(row);
-        if (module === "packaging") return !isRwpStatus(row.last_status);
-        if (module === "rwp") return isRwpStatus(row.last_status);
-        if (module === "pm") return isPmBufferStatus(row.product_status);
+        if (module === "packaging") return !packagingFallbackIsRwp(row.last_status);
+        if (module === "rwp") return packagingFallbackIsRwp(row.last_status);
+        const zoneKey = generalFallbackZoneKey(row);
+        if (module === "marketplace_pc") return zoneKey === "Маркетплейс" || zoneKey === "ПЦ";
+        if (module === "presort") return zoneKey === "Предсортировка" || zoneKey === "Другие задачи";
+        if (module === "wmi_mp_pc") return zoneKey === "WMI (МП + ПЦ)";
+        if (module === "pm") return zoneKey === "ПМ" || zoneKey === "Почта";
         return true;
     }
 
@@ -13726,7 +13754,7 @@
         // is a real way for eligible ШК to vanish, in the test tool AND
         // in a real upload.
         if (module === "pm") {
-            const ungroupableCount = dateRows.filter((row) => !mxHasBoxes(row) && isPmBufferStatus(row.product_status) && !isGroupableIdentifier(row.transfer)).length;
+            const ungroupableCount = dateRows.filter((row) => !mxHasBoxes(row) && generalFallbackZoneKey(row) === "ПМ" && !isGroupableIdentifier(row.transfer)).length;
             if (ungroupableCount > 0) {
                 diagnostics.push({ label: "Нет группируемой \"Передачи\" (пусто или \"0\") -- потерялась бы и при обычной загрузке (строк)", count: ungroupableCount });
             }
@@ -16411,9 +16439,7 @@
 
     function sourceStatusCode(value) { return latinStatusCode(value).toLowerCase() || normalizeForMatch(value); }
     function sourceRowStatus(row) { return sourceStatusCode(row && row.product_status); }
-    function isRwpStatus(value) { return sourceStatusCode(value) === "rwp" || normalizeForMatch(value) === normalizeForMatch(RWP_STATUS); }
     function isPmBufferStatus(value) { return PM_BUFFER_STATUSES.has(sourceStatusCode(value)); }
-    function mxHasPresortExclusion(mx) { const normalized = normalizeForMatch(mx); return PRESORT_EXCLUDED_MX_PARTS.some((part) => normalized.includes(part)); }
     function mxIncludes(row, part) { return normalizeForMatch(row && row.mx).includes(normalizeForMatch(part)); }
     function mxHasBuffer(row) { return normalizeForMatch(row && row.mx).includes("буфер"); }
 
@@ -16468,14 +16494,13 @@
     }
     async function evaluateZoneRulesBatch(sourceFormat, rows) { return evaluateRuleBatchForOutputKey("zone", sourceFormat, rows); }
     async function evaluateFilterRulesBatch(sourceFormat, rows) { return evaluateRuleBatchForOutputKey("filter", sourceFormat, rows); }
-    function isPresortStatus(row) {
-        const status = sourceRowStatus(row);
-        if (status === "sps") return true;
-        if (status === "pwt") return !mxHasBuffer(row) && !mxHasPresortExclusion(row && row.mx);
-        if ((status === "gws" || status === "wmi") && !mxHasPresortExclusion(row && row.mx)) return true;
-        return false;
-    }
     function isLabelingStatus(row) { return sourceRowStatus(row) === "lgr"; }
+    // isMarketplaceStatus/isPcStatus остаются -- используются ТОЛЬКО для
+    // диагностики "эта строка выглядела бы Маркетплейс/ПЦ по MX-паттерну,
+    // но буфер-исключение её отсекло" (buildMasterConditionRejects), не
+    // как источник классификации -- см. generalFallbackZoneKey для
+    // этого. isPresortStatus/isWmiMpPcStatus удалены (были нужны только
+    // как классификационный фоллбэк, полностью заменены словарём).
     function isMarketplaceStatus(row) {
         const status = sourceRowStatus(row);
         if (status === "pap") return true;
@@ -16485,10 +16510,6 @@
         const status = sourceRowStatus(row);
         if (status === "smc") return true;
         return (status === "gws" || status === "pwt") && mxIncludes(row, "Сортировка в сетки");
-    }
-    function isWmiMpPcStatus(row) {
-        const status = sourceRowStatus(row);
-        return status === "wmi" && (mxIncludes(row, "Пред сортировка МП") || mxIncludes(row, "Сортировка в сетки"));
     }
     function isNoOrderUsdStatus(row) { return sourceRowStatus(row) === "usd"; }
     function isNoOrderTmmStatus(row) { return sourceRowStatus(row) === "tmm"; }
@@ -17022,9 +17043,7 @@
         rows.forEach((row, index) => { decidedByRow.set(row, decisions[index]); });
         function isRwpRow(row) {
             const decided = decidedByRow.get(row);
-            if (decided) return decided.zone === "RWP";
-            const entry = statusDictionaryEntry("packaging", sourceStatusCode(row.last_status).toUpperCase());
-            return Boolean(entry && entry.default_task_type === "Разбор ОПП // RWP");
+            return decided ? decided.zone === "RWP" : packagingFallbackIsRwp(row.last_status);
         }
 
         function offsetDaysForRow(row, defForRow) {
@@ -17278,26 +17297,13 @@
         const decidedByRow = new Map();
         survivors.forEach((row, index) => { decidedByRow.set(row, zoneDecisions[index]); });
 
-        // Фоллбэк зоны для строк без совпавшего правила -- раньше был
-        // if-chain хардкод-предикатов (isPresortStatus и т.д.), теперь
-        // источник -- словарь статусов (wms_status_dictionary). Без
-        // заказа/USD/TMM сюда НЕ входят -- это другой формат
-        // (source_format='no_order', buildNoOrderPreview), т.к. "без
-        // заказа"-принадлежность определяется внешним фильтром
-        // WB-экспорта, а не статусом строки (см. buildNoOrderPreview).
-        // Строка, не подошедшая НИ ПОД ОДНО правило и у которой нет
-        // строки в словаре (и нет catch-all '*' для general -- на
-        // сегодня его и нет, см. живой аудит), не создаёт задачу вообще
-        // -- null, а не default-зона.
-        // default_task_type в словаре -- ПОЛНЫЙ task_type, а эта функция
-        // (и всё, что от неё ниже -- zone === "ПМ"/"Почта",
-        // zoneTaskTypeMap) ждёт КОРОТКОЕ имя -- канонизация обратно
-        // через GENERAL_ZONE_TASK_TYPE_TO_RULE_TARGET.
-        function hardcodeZoneFor(row) {
-            const entry = statusDictionaryEntry("general", sourceRowStatus(row).toUpperCase()) || statusDictionaryCatchAll("general");
-            if (!entry || !entry.default_task_type) return null;
-            return GENERAL_ZONE_TASK_TYPE_TO_RULE_TARGET[entry.default_task_type] || entry.default_task_type;
-        }
+        // Фоллбэк зоны для строк без совпавшего правила -- generalFallbackZoneKey
+        // (словарь статусов). Без заказа/USD/TMM сюда НЕ входят -- это
+        // другой формат (source_format='no_order', buildNoOrderPreview),
+        // т.к. "без заказа"-принадлежность определяется внешним фильтром
+        // WB-экспорта, а не статусом строки. Строка, не подошедшая НИ ПОД
+        // ОДНО правило и у которой нет строки в словаре, не создаёт
+        // задачу вообще -- null, а не default-зона.
 
         // "Другие задачи" сегодня также цель правила "Оклейка" --
         // различаем по статусу строки, а не по зоне, независимо от того,
@@ -17326,7 +17332,7 @@
         const generalRows = [];
         dated.forEach((row) => {
             const decided = decidedByRow.get(row);
-            const zone = decided ? decided.zone : hardcodeZoneFor(row);
+            const zone = decided ? decided.zone : generalFallbackZoneKey(row);
             if (zone === null || zone === undefined) { unmatchedCount += 1; return; }
             if (zone === "ПМ" || zone === "Почта") pmRows.push(row);
             else generalRows.push({ row, key: effectiveZoneKey(row, zone), decided });
@@ -20371,12 +20377,13 @@
         rows.main.forEach((row) => {
             const date = rowDate(row);
             const decided = mainDecidedByRow.get(row);
-            const isPresort = decided ? decided.zone === presortDef.column : isPresortStatus(row);
-            const isLabeling = decided ? decided.zone === labelingDef.column : isLabelingStatus(row);
-            const isMarketplace = decided ? decided.zone === marketplaceDef.column : (isMarketplaceStatus(row) && !mxHasBuffer(row));
-            const isPc = decided ? decided.zone === pcDef.column : (isPcStatus(row) && !isMarketplaceStatus(row) && !mxHasBuffer(row));
-            const isWmi = decided ? decided.zone === wmiDef.column : isWmiMpPcStatus(row);
-            if (isPmBufferStatus(row.product_status) && date !== dates.pm) pushReject(list, "pm", row, "Нужна дата " + formatRuDate(dates.pm), date, "pm");
+            const zoneKey = decided ? decided.zone : generalFallbackZoneKey(row);
+            const isPresort = zoneKey === presortDef.column;
+            const isLabeling = zoneKey === labelingDef.column;
+            const isMarketplace = zoneKey === marketplaceDef.column;
+            const isPc = zoneKey === pcDef.column;
+            const isWmi = zoneKey === wmiDef.column;
+            if ((zoneKey === "ПМ" || zoneKey === "Почта") && date !== dates.pm) pushReject(list, "pm", row, "Нужна дата " + formatRuDate(dates.pm), date, "pm");
             if ((isPresort || isLabeling) && date !== dates.presort) pushReject(list, "presort", row, "Нужна дата " + formatRuDate(dates.presort), date, "presort");
             if (isMarketplace && date !== dates.marketplace) pushReject(list, "marketplace_pc", row, "Нужна дата Маркетплейса " + formatRuDate(dates.marketplace), date, "marketplace");
             if (isPc && date !== dates.pc) pushReject(list, "marketplace_pc", row, "Нужна дата ПЦ " + formatRuDate(dates.pc), date, "pc");
@@ -20389,7 +20396,7 @@
         rows.packaging.forEach((row) => {
             const date = packDate(row);
             const decided = packagingDecidedByRow.get(row);
-            const isRwp = decided ? decided.zone === "RWP" : isRwpStatus(row.last_status);
+            const isRwp = decided ? decided.zone === "RWP" : packagingFallbackIsRwp(row.last_status);
             if (!isRwp && date !== dates.packaging) pushReject(list, "packaging", row, "Нужна дата " + formatRuDate(dates.packaging), date, "packaging");
             if (isRwp && date !== dates.rwp) pushReject(list, "rwp", row, "Нужна дата " + formatRuDate(dates.rwp), date, "rwp");
         });
@@ -20409,21 +20416,23 @@
             const date = rowDate(row);
             if (!mainTargetDates.has(date)) return;
             const decided = mainDecidedByRow.get(row);
-            // "matches" answers "does ANY active rule (or the hardcode
-            // fallback) claim this row" -- true the moment a rule fired,
-            // regardless of which one, so a future admin-added rule is
-            // correctly recognized here too.
-            const matches = decided
-                ? true
-                : (isPmBufferStatus(row.product_status) || isPresortStatus(row) || isLabelingStatus(row) || isMarketplaceStatus(row) || isPcStatus(row) || isWmiMpPcStatus(row));
+            // "matches" answers "does ANY active rule (or словарь-фоллбэк
+            // generalFallbackZoneKey) claim this row" -- true the moment
+            // a rule fired, regardless of which one, so a future
+            // admin-added rule is correctly recognized here too.
+            const matches = decided ? true : generalFallbackZoneKey(row) !== null;
             if (!matches) pushReject(list, "pm", row, "Дата подходит, но статус/МХ не подошли ни под одну выгрузку. Статус: " + (row.product_status || "-") + "; МХ: " + (row.mx || "-"), date, "pm");
             if (isPmBufferStatus(row.product_status) && mxHasBoxes(row)) pushReject(list, "pm", row, "МХ содержит слово \"коробки\", строка исключена из ПМ/Почты", date, "pm");
-            // Row looks like a marketplace/pc candidate by raw status, its
-            // MX has buffer, and it is NOT actually routed to Маркетплейс/
-            // ПЦ right now -- report buffer as the reason only while that
-            // holds. If an admin ever removes "не содержит буфер" from the
-            // rule, decided flips to Маркетплейс/ПЦ and this stops firing,
-            // instead of lying that a row is excluded when it isn't.
+            // Row looks like a marketplace/pc candidate by raw status+MX
+            // (isMarketplaceStatus/isPcStatus сохранены именно для этой
+            // проверки -- они смотрят на MX-паттерн независимо от буфер-
+            // исключения, то, что словарь не умеет: у него один дефолт
+            // на статус без учёта MX), её MX содержит буфер, и она НЕ
+            // реально маршрутизирована в Маркетплейс/ПЦ сейчас -- report
+            // buffer as the reason only while that holds. If an admin
+            // ever removes "не содержит буфер" from the rule, decided
+            // flips to Маркетплейс/ПЦ and this stops firing, instead of
+            // lying that a row is excluded when it isn't.
             const looksMarketplaceOrPc = isMarketplaceStatus(row) || isPcStatus(row);
             const routedToMarketplaceOrPc = decided && (decided.zone === marketplaceDef.column || decided.zone === pcDef.column);
             if (looksMarketplaceOrPc && mxHasBuffer(row) && !routedToMarketplaceOrPc) pushReject(list, "marketplace_pc", row, "МХ содержит Буфер, строка исключена", date, "marketplace_pc");
