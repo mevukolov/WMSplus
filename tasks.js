@@ -1688,27 +1688,12 @@
         state.writeoffTerms.rows = Array.from(byKey.values()).sort(writeoffTermSort);
     }
 
-    // Словарь (wms_status_dictionary) первичен, но НЕ единственный
-    // источник: он scoped на статусы 4 форматов выгрузки (общие zone-
-    // правила), а wms_writeoff_terms исторически покрывает ЛЮБой статус
-    // системы, включая те, что никогда не идут через эти 4 формата --
-    // напр. "Чистые списания" (SGR/TTB и другие, подтверждено живым
-    // запросом: SGR -- 32к+ строк wms_task_items, TTB -- 15к+, оба без
-    // единого активного правила в wms_routing_rules). Полная замена
-    // сломала бы срок списания для них. map строится из wms_writeoff_terms
-    // как базы, затем словарь ПЕРЕЗАПИСЫВАЕТ значения для статусов,
-    // которые у него явно настроены -- таким образом правки через новый
-    // экран "Статусы" сразу видны, а всё остальное продолжает работать
-    // через старый источник до отдельного решения по объединению охвата
-    // (см. риски в спеке/плане перед Task 13).
+    // Источник -- wms_status_dictionary целиком (не только 4 формата
+    // выгрузки): source_format='other' покрывает статусы вне этих
+    // форматов (напр. "Чистые списания" -- SGR/TTB и т.д., см. миграцию
+    // 202610200009). wms_writeoff_terms выведена из эксплуатации.
     function activeWriteoffStatusTerms() {
         const map = new Map();
-        (state.writeoffTerms.rows || []).forEach((row) => {
-            if (normalizeWriteoffTermType(row.term_type) !== "status" || row.is_active === false) return;
-            const key = normalizeWriteoffTermKey(row.term_key, "status");
-            if (!key) return;
-            map.set(key, row);
-        });
         (state.statusDictionary.rows || []).forEach((row) => {
             if (row.status_code === "*" || row.is_active === false) return;
             if (row.writeoff_days === null || row.writeoff_days === undefined) return;
@@ -12900,8 +12885,8 @@
             + "<label class='writeoff-term-active'><input data-status-dict-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активен</label>"
             + "</div>"
             + "<div class='routing-rule-section'>"
-            + "<select data-status-dict-format>" + sourceFormatOptionsHtml(sourceFormat) + "</select>"
-            + "<p class='work-subtitle' style='margin:4px 0 0'>В какой выгрузке (по формату файла) встречается этот статус.</p>"
+            + "<select data-status-dict-format>" + statusDictionaryFormatOptionsHtml(sourceFormat) + "</select>"
+            + "<p class='work-subtitle' style='margin:4px 0 0'>В какой выгрузке (по формату файла) встречается этот статус -- или \"Прочее\", если статус не относится ни к одной из 4 выгрузок (существует только ради срока списания).</p>"
             + "</div>"
             + "<div class='routing-rule-settings-grid'>"
             + "<label class='routing-rule-settings-field'><span>Срок списания, дней</span><input data-status-dict-writeoff type='number' min='0' step='1' value='" + escapeHtml(row.writeoff_days === null || row.writeoff_days === undefined ? "" : row.writeoff_days) + "' placeholder='пусто = не списывается'></label>"
@@ -12942,7 +12927,7 @@
         target.innerHTML = (state.statusDictionary.error ? "<div class='status-line error'>" + escapeHtml(state.statusDictionary.error) + "</div>" : "")
             + (state.statusDictionary.loading ? "<div class='status-line'>Загружаю словарь...</div>" : "")
             + (!rows.length && !state.statusDictionary.loading ? "<div class='empty-state'>Словарь пуст. Нажмите \"Добавить статус\".</div>" : "")
-            + SOURCE_FORMAT_OPTIONS.map((opt) => {
+            + [...SOURCE_FORMAT_OPTIONS, ...STATUS_DICTIONARY_EXTRA_FORMATS].map((opt) => {
                 const group = byFormat.get(opt.value) || [];
                 if (!group.length) return "";
                 return "<div class='routing-rule-section-group'>"
@@ -13163,6 +13148,19 @@
         ).join("");
     }
 
+    // Отдельный список форматов для словаря статусов -- не для формы
+    // правил маршрутизации (там 'other' бессмысленнен, правило не может
+    // ни на что маршрутизировать вне 4 реальных выгрузок). 'other' --
+    // статусы системы вне 4 форматов (напр. Чистые списания), существуют
+    // в словаре только ради срока списания.
+    const STATUS_DICTIONARY_EXTRA_FORMATS = [{ value: "other", label: "Прочее (вне выгрузок)" }];
+
+    function statusDictionaryFormatOptionsHtml(selectedValue) {
+        return [...SOURCE_FORMAT_OPTIONS, ...STATUS_DICTIONARY_EXTRA_FORMATS].map((opt) =>
+            "<option value='" + opt.value + "'" + (selectedValue === opt.value ? " selected" : "") + ">" + escapeHtml(opt.label) + "</option>"
+        ).join("");
+    }
+
     function routingRuleTargetOptionsHtml(selectedValue) {
         const options = activeReviewZones().map((section) => ({ value: section, label: section }));
         return options.map((opt) =>
@@ -13225,7 +13223,7 @@
     }
 
     function sourceFormatLabel(sourceFormat) {
-        const opt = SOURCE_FORMAT_OPTIONS.find((o) => o.value === sourceFormat);
+        const opt = [...SOURCE_FORMAT_OPTIONS, ...STATUS_DICTIONARY_EXTRA_FORMATS].find((o) => o.value === sourceFormat);
         return opt ? opt.label : (sourceFormat || "general");
     }
 
