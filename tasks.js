@@ -15768,14 +15768,28 @@
         }
     }
 
+    // Баг: "duplicate key value violates unique constraint
+    // wms_task_items_task_id_shk_key" при больших "В заказе" выгрузках
+    // (407 задач), не воспроизводился ни одним чистым прогоном той же
+    // выгрузки против живых данных -- значит не детерминированный баг
+    // merge-логики save_wms_manual_upload, а гонка на уровне ретраев.
+    // "statement timeout"/"57014"/"canceling statement" -- САМ ПОСТГРЕС
+    // отменил и откатил транзакцию, повтор безопасен. А вот
+    // "failed to fetch"/"networkerror"/голый "request timeout" -- это
+    // обрыв СЕТИ на стороне браузера, который НЕ гарантирует, что сервер
+    // не успел принять и закоммитить исходный запрос -- он мог просто
+    // не донести ответ обратно. saveRpcChunkAdaptive на такой "таймаут"
+    // делит чанк и шлёт его же ПОВТОРНО, не проверяя, не прошёл ли уже
+    // оригинал -- если прошёл, это две параллельные конкурентные
+    // save_wms_manual_upload по пересекающимся ШК, и проигравшая падает
+    // ровно на этот constraint (merge-логика не идемпотентна при
+    // настоящей конкурентности, в отличие от последовательных вызовов).
+    // Ретраим только то, за что сервер сам поручился как за откаченное.
     function isRetryableSaveTimeout(error) {
         const text = errorText(error).toLowerCase();
         return text.includes("statement timeout")
             || text.includes("canceling statement")
-            || text.includes("57014")
-            || text.includes("request timeout")
-            || text.includes("networkerror")
-            || text.includes("failed to fetch");
+            || text.includes("57014");
     }
 
     function compactTaskItemForSave(item) {
