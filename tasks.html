@@ -2052,8 +2052,8 @@
             <div class="tasks-actions">
                 <button id="openStatusPilotUploads" class="tasks-action-card status-pilot-home-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">◈</span>
-                    <h2 class="tasks-action-title">Статусный штурман</h2>
-                    <p class="tasks-action-text">Новый контур выгрузок: тянем отдельные статусы по своим датам, а уже потом собираем их в участки.</p>
+                    <h2 class="tasks-action-title">Статусы</h2>
+                    <p class="tasks-action-text">Словарь статусов: название, срок списания, срок разбора, участок по умолчанию -- единая точка правды для выгрузок и журнала покрытия.</p>
                 </button>
                 <button id="openFlow" class="tasks-action-card flow-home-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">▶</span>
@@ -2567,30 +2567,30 @@
     <div class="tasks-flow-card tasks-flow-card-wide">
         <div class="work-head">
             <div>
-                <h3 class="work-title">Статусный штурман</h3>
-                <p class="work-subtitle">Новый экспериментальный контур выгрузок: сначала выбираем статусы и даты, потом WMS+ сам собирает задачи в участки.</p>
+                <h3 class="work-title">Статусы</h3>
+                <p class="work-subtitle">Словарь статусов: название, срок списания, срок разбора, участок по умолчанию -- единая точка правды для выгрузок, маршрутизации и журнала покрытия.</p>
             </div>
             <button id="closeStatusPilot" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="status-pilot-grid">
-            <div class="status-pilot-card">
-                <strong>1. Читаем отчет как набор статусов</strong>
-                <span>Не “выгрузка Предсортировки целиком”, а отдельные статусы: например WMI за одну дату, SPS за другую, PWT за третью.</span>
-            </div>
-            <div class="status-pilot-card">
-                <strong>2. У каждого статуса свой срез</strong>
-                <span>Срез считается от сроков списания и рекомендаций контроллера, чтобы не тащить лишнее и не оставлять опасные хвосты.</span>
-            </div>
-            <div class="status-pilot-card">
-                <strong>3. Потом собираем в участки</strong>
-                <span>После отбора строки группируются в привычные зоны: Предсортировка, ПЦ, Маркетплейс, RWP и другие.</span>
-            </div>
-            <div class="status-pilot-card">
-                <strong>4. Боевой контур не трогаем</strong>
-                <span>Это отдельная логика и отдельный журнал. Существующие выгрузки продолжают работать как раньше, пока мы не решим мигрировать.</span>
-            </div>
+        <div id="statusDictionaryWrap" class="writeoff-terms-wrap"></div>
+        <div class="file-row">
+            <button id="addStatusDictionaryRow" class="btn btn-outline" type="button">Добавить статус</button>
+            <button id="saveStatusDictionary" class="btn btn-rect" type="button">Сохранить словарь</button>
         </div>
-        <div class="status-pilot-note">Пока это концепт-кнопка под новый режим. Следующий шаг: описать матрицу “статус → участок → дата среза → группировка → правила исключений”.</div>
+        <div id="statusDictionaryStatus" class="review-status"></div>
+    </div>
+</section>
+
+<section id="statusDictionaryEditModal" class="tasks-flow-modal upload-work" aria-hidden="true" style="z-index:4200;">
+    <div class="tasks-flow-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Статус</h3>
+                <p class="work-subtitle">Изменения применятся после "Сохранить словарь" в предыдущем окне.</p>
+            </div>
+            <button id="closeStatusDictionaryEdit" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="statusDictionaryEditWrap"></div>
     </div>
 </section>
 

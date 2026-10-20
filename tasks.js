@@ -590,6 +590,7 @@
             loading: false,
             loaded: false,
             error: "",
+            editingIndex: null,
         },
         routingRuleTest: {
             rows: null,
@@ -12913,6 +12914,196 @@
         return (state.statusDictionary.rows || []).find((row) => row.source_format === sourceFormat && row.status_code === "*" && row.is_active !== false) || null;
     }
 
+    function statusDictionaryRowHtml(row) {
+        const sourceFormat = row.source_format || "general";
+        return "<div class='routing-rule-card' data-status-dict-row data-row-id='" + escapeHtml(row.id || "") + "'>"
+            + "<div class='routing-rule-head'>"
+            + "<input data-status-dict-code type='text' value='" + escapeHtml(row.status_code || "") + "' placeholder='Статус (3 буквы, или * для \"прочее\")' maxlength='32'>"
+            + "<input data-status-dict-label type='text' value='" + escapeHtml(row.label || "") + "' placeholder='Название'>"
+            + "<label class='writeoff-term-active'><input data-status-dict-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активен</label>"
+            + "</div>"
+            + "<div class='routing-rule-section'>"
+            + "<select data-status-dict-format>" + sourceFormatOptionsHtml(sourceFormat) + "</select>"
+            + "<p class='work-subtitle' style='margin:4px 0 0'>В какой выгрузке (по формату файла) встречается этот статус.</p>"
+            + "</div>"
+            + "<div class='routing-rule-settings-grid'>"
+            + "<label class='routing-rule-settings-field'><span>Срок списания, дней</span><input data-status-dict-writeoff type='number' min='0' step='1' value='" + escapeHtml(row.writeoff_days === null || row.writeoff_days === undefined ? "" : row.writeoff_days) + "' placeholder='пусто = не списывается'></label>"
+            + "<label class='routing-rule-settings-field'><span>Срок разбора, дней</span><input data-status-dict-offset type='number' step='1' value='" + escapeHtml(row.default_upload_offset_days || 0) + "' placeholder='0 = сегодня'></label>"
+            + "<label class='routing-rule-settings-field'><span>Участок по умолчанию (task_type)</span><input data-status-dict-task-type type='text' value='" + escapeHtml(row.default_task_type || "") + "' placeholder='напр. Разбор ОПП // Предсортировка'></label>"
+            + "</div>"
+            + "<label class='writeoff-term-active'><input data-status-dict-required type='checkbox' " + (row.is_required_for_coverage === false ? "" : "checked") + "> обязателен для журнала покрытия</label>"
+            + "<p class='work-subtitle' style='margin:4px 0 0'>Срок разбора действует, когда у статуса 0 или 1 активных правил маршрутизации -- при 2+ правилах у каждого свой срок (кнопка \"Правила\" в списке).</p>"
+            + "</div>";
+    }
+
+    function statusDictionarySummaryRowHtml(row, index) {
+        const required = row.is_required_for_coverage !== false;
+        const active = row.is_active !== false;
+        return "<div class='routing-rule-summary-row" + (active ? "" : " inactive") + "' data-status-dict-summary-row data-status-dict-index='" + index + "' tabindex='0' role='button'>"
+            + "<span class='routing-rule-summary-name'>" + escapeHtml(row.status_code === "*" ? "Прочее" : row.status_code) + "</span>"
+            + "<span class='routing-rule-summary-meta'>" + escapeHtml(row.label || "-") + "</span>"
+            + "<span class='routing-rule-summary-target'>→ " + escapeHtml(row.default_task_type || "по правилам") + "</span>"
+            + "<span class='routing-rule-summary-meta'>списание: " + (row.writeoff_days === null || row.writeoff_days === undefined ? "-" : row.writeoff_days + "д") + "</span>"
+            + "<span class='routing-rule-summary-meta'>разбор: " + (row.default_upload_offset_days || 0) + "д</span>"
+            + "<span class='routing-rule-summary-status'>" + (required ? "обязателен" : "необязателен") + "</span>"
+            + "<button type='button' class='btn btn-outline' data-status-dict-rules>Правила</button>"
+            + "<button type='button' class='btn btn-square' data-status-dict-remove aria-label='Удалить статус'>×</button>"
+            + "</div>";
+    }
+
+    function renderStatusDictionaryModal() {
+        const target = $("statusDictionaryWrap");
+        if (!target) return;
+        const rows = state.statusDictionary.rows || [];
+        const byFormat = new Map();
+        rows.forEach((row, index) => {
+            const key = row.source_format || "general";
+            const group = byFormat.get(key) || [];
+            group.push({ row, index });
+            byFormat.set(key, group);
+        });
+        target.innerHTML = (state.statusDictionary.error ? "<div class='status-line error'>" + escapeHtml(state.statusDictionary.error) + "</div>" : "")
+            + (state.statusDictionary.loading ? "<div class='status-line'>Загружаю словарь...</div>" : "")
+            + (!rows.length && !state.statusDictionary.loading ? "<div class='empty-state'>Словарь пуст. Нажмите \"Добавить статус\".</div>" : "")
+            + SOURCE_FORMAT_OPTIONS.map((opt) => {
+                const group = byFormat.get(opt.value) || [];
+                if (!group.length) return "";
+                return "<div class='routing-rule-section-group'>"
+                    + "<div class='routing-rule-section-heading'>" + escapeHtml(opt.label) + " (" + group.length + ")</div>"
+                    + "<div class='routing-rule-summary-list'>" + group.map((item) => statusDictionarySummaryRowHtml(item.row, item.index)).join("") + "</div>"
+                    + "</div>";
+            }).join("");
+        target.querySelectorAll("[data-status-dict-summary-row]").forEach((rowEl) => {
+            const open = () => openStatusDictionaryEditModal(Number(rowEl.getAttribute("data-status-dict-index")));
+            rowEl.addEventListener("click", (event) => { if (!event.target.closest("[data-status-dict-remove]") && !event.target.closest("[data-status-dict-rules]")) open(); });
+            rowEl.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+        });
+        target.querySelectorAll("[data-status-dict-remove]").forEach((button) => {
+            button.addEventListener("click", (event) => {
+                event.stopPropagation();
+                const index = Number(button.closest("[data-status-dict-summary-row]").getAttribute("data-status-dict-index"));
+                removeStatusDictionaryRow(index);
+            });
+        });
+        target.querySelectorAll("[data-status-dict-rules]").forEach((button) => {
+            button.addEventListener("click", (event) => {
+                event.stopPropagation();
+                const index = Number(button.closest("[data-status-dict-summary-row]").getAttribute("data-status-dict-index"));
+                const row = rows[index];
+                if (row) void openRoutingRulesModal({ sourceFormat: row.source_format, statusCode: row.status_code });
+            });
+        });
+    }
+
+    function openStatusDictionaryEditModal(index) {
+        const row = (state.statusDictionary.rows || [])[index];
+        if (!row) return;
+        state.statusDictionary.editingIndex = index;
+        const wrap = $("statusDictionaryEditWrap");
+        if (wrap) wrap.innerHTML = statusDictionaryRowHtml(row);
+        setFlowModalOpen("statusDictionaryEditModal", true);
+    }
+
+    function readStatusDictionaryFormValues(cardEl, existingRow) {
+        const statusCode = normalizeText(cardEl.querySelector("[data-status-dict-code]") && cardEl.querySelector("[data-status-dict-code]").value).toUpperCase();
+        if (!statusCode) return null;
+        const label = normalizeText(cardEl.querySelector("[data-status-dict-label]") && cardEl.querySelector("[data-status-dict-label]").value);
+        const isActive = cardEl.querySelector("[data-status-dict-active]").checked;
+        const sourceFormatEl = cardEl.querySelector("[data-status-dict-format]");
+        const sourceFormat = sourceFormatEl ? sourceFormatEl.value : "general";
+        const writeoffRaw = cardEl.querySelector("[data-status-dict-writeoff]") && cardEl.querySelector("[data-status-dict-writeoff]").value;
+        const writeoffDays = normalizeText(writeoffRaw) === "" ? null : Math.max(0, Math.trunc(settingNumber(writeoffRaw, 0)));
+        const offsetRaw = cardEl.querySelector("[data-status-dict-offset]") && cardEl.querySelector("[data-status-dict-offset]").value;
+        const offsetDays = Math.trunc(settingNumber(offsetRaw, 0));
+        const taskType = normalizeText(cardEl.querySelector("[data-status-dict-task-type]") && cardEl.querySelector("[data-status-dict-task-type]").value) || null;
+        const required = Boolean(cardEl.querySelector("[data-status-dict-required]") && cardEl.querySelector("[data-status-dict-required]").checked);
+        return {
+            ...(existingRow || {}),
+            status_code: statusCode,
+            label,
+            is_active: isActive,
+            source_format: sourceFormat,
+            writeoff_days: writeoffDays,
+            default_upload_offset_days: offsetDays,
+            default_task_type: taskType,
+            is_required_for_coverage: required,
+        };
+    }
+
+    function closeStatusDictionaryEditModal() {
+        const index = state.statusDictionary.editingIndex;
+        const wrap = $("statusDictionaryEditWrap");
+        const cardEl = wrap && wrap.querySelector("[data-status-dict-row]");
+        if (cardEl && index !== null && index !== undefined && state.statusDictionary.rows[index]) {
+            const updated = readStatusDictionaryFormValues(cardEl, state.statusDictionary.rows[index]);
+            if (updated) state.statusDictionary.rows[index] = updated;
+        }
+        state.statusDictionary.editingIndex = null;
+        setFlowModalOpen("statusDictionaryEditModal", false);
+        renderStatusDictionaryModal();
+    }
+
+    function addStatusDictionaryDraft() {
+        const rows = state.statusDictionary.rows || [];
+        state.statusDictionary.rows = rows.concat({
+            id: uuidValue(),
+            status_code: "",
+            label: "",
+            is_active: true,
+            source_format: "general",
+            writeoff_days: null,
+            default_upload_offset_days: 0,
+            default_task_type: null,
+            is_required_for_coverage: true,
+        });
+        renderStatusDictionaryModal();
+        openStatusDictionaryEditModal(state.statusDictionary.rows.length - 1);
+    }
+
+    function removeStatusDictionaryRow(index) {
+        const row = (state.statusDictionary.rows || [])[index];
+        if (!row) return;
+        const label = row.status_code === "*" ? "Прочее" : (row.status_code || "без названия");
+        if (!window.confirm("Удалить статус \"" + label + "\" из словаря? Это необратимо после сохранения словаря.")) return;
+        state.statusDictionary.rows = (state.statusDictionary.rows || []).filter((_, i) => i !== index);
+        renderStatusDictionaryModal();
+    }
+
+    async function saveStatusDictionaryFromModal() {
+        const db = supabaseDb();
+        const status = $("statusDictionaryStatus");
+        const button = $("saveStatusDictionary");
+        const nowIso = new Date().toISOString();
+        const rows = (state.statusDictionary.rows || [])
+            .filter((row) => row.status_code && row.source_format)
+            .map((row) => ({ ...row, id: row.id || uuidValue(), created_at: row.created_at || nowIso, updated_at: nowIso }));
+        if (!rows.length) {
+            if (status) status.textContent = "Нет строк для сохранения.";
+            return;
+        }
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен.";
+            return;
+        }
+        if (button) button.disabled = true;
+        if (status) status.textContent = "Сохраняю словарь...";
+        try {
+            const { error } = await db.from("wms_status_dictionary").upsert(rows, { onConflict: "source_format,status_code" });
+            if (error) throw error;
+            state.statusDictionary.loaded = false;
+            await loadStatusDictionary(true);
+            renderStatusDictionaryModal();
+            if (status) status.textContent = "Словарь сохранён.";
+            toast("Словарь статусов сохранён.", "success");
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            state.statusDictionary.error = "Не удалось сохранить словарь: " + message;
+            if (status) status.textContent = state.statusDictionary.error;
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
     async function loadRoutingRules(force) {
         if (state.routingRules.loaded && !force) return true;
         const db = supabaseDb();
@@ -14015,13 +14206,17 @@
         renderWriteoffTermsModal();
     }
 
-    function openStatusPilotModal() {
-        if (!ensureDevelopmentAccess("Статусный штурман")) return;
+    async function openStatusPilotModal() {
+        if (!ensureDevelopmentAccess("Статусы")) return;
         closeFlowModals();
         setFlowModalOpen("statusPilotModal", true);
+        renderStatusDictionaryModal();
+        await loadStatusDictionary(true);
+        renderStatusDictionaryModal();
     }
 
     function closeStatusPilotModal() {
+        setFlowModalOpen("statusDictionaryEditModal", false);
         setFlowModalOpen("statusPilotModal", false);
     }
 
@@ -20384,6 +20579,10 @@
         $("saveFlowSettings").addEventListener("click", () => { void saveFlowSettingsFromModal(); });
         $("resetFlowSettings").addEventListener("click", resetFlowSettingsFromModal);
         $("closeStatusPilot").addEventListener("click", closeStatusPilotModal);
+        $("addStatusDictionaryRow").addEventListener("click", addStatusDictionaryDraft);
+        $("saveStatusDictionary").addEventListener("click", () => { void saveStatusDictionaryFromModal(); });
+        $("closeStatusDictionaryEdit").addEventListener("click", closeStatusDictionaryEditModal);
+        $("statusDictionaryEditModal").addEventListener("click", (event) => { if (event.target === $("statusDictionaryEditModal")) closeStatusDictionaryEditModal(); });
         $("closeStaffStats").addEventListener("click", closeStaffStatsModal);
         $("reloadStaffStats").addEventListener("click", () => { void loadStaffStats(); });
         $("staffStatsDate").addEventListener("change", () => {
