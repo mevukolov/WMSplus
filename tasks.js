@@ -14096,12 +14096,12 @@
     function renderWriteoffTermsModal() {
         const target = $("writeoffTermsWrap");
         if (!target) return;
-        target.innerHTML = "<div class='work-subtitle'>Сроки списания по статусам редактируются в экране \"Статусы\" -- здесь только расчёт рекомендаций по срезам выгрузки.</div>"
+        target.innerHTML = "<div class='work-subtitle'>Сроки списания по статусам редактируются в экране \"Маршрутизатор\" -- здесь только расчёт рекомендаций по срезам выгрузки.</div>"
             + renderWriteoffRecommendationsHtml();
     }
 
     async function openStatusPilotModal() {
-        if (!ensureDevelopmentAccess("Статусы")) return;
+        if (!ensureDevelopmentAccess("Маршрутизатор")) return;
         closeFlowModals();
         setFlowModalOpen("statusPilotModal", true);
         renderStatusDictionaryModal();
@@ -20411,7 +20411,7 @@
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
         $("openWriteoffTerms").addEventListener("click", () => { void openWriteoffTermsModal(); });
-        $("openReviewZones").addEventListener("click", () => { void openReviewZonesModal(); });
+        $("openReviewZonesFromStatus").addEventListener("click", () => { void openReviewZonesModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
             if ((state.taskSearch.rows || []).length) setTaskSearchResultsVisible(true);

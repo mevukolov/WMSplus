@@ -2053,7 +2053,7 @@
             <div class="tasks-actions">
                 <button id="openStatusPilotUploads" class="tasks-action-card status-pilot-home-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">◈</span>
-                    <h2 class="tasks-action-title">Статусы</h2>
+                    <h2 class="tasks-action-title">Маршрутизатор</h2>
                     <p class="tasks-action-text">Словарь статусов: название, срок списания, срок разбора, участок по умолчанию -- единая точка правды для выгрузок и журнала покрытия.</p>
                 </button>
                 <button id="openFlow" class="tasks-action-card flow-home-card" type="button" data-dev-only>
@@ -2064,12 +2064,7 @@
                 <button id="openWriteoffTerms" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">⌛</span>
                     <h2 class="tasks-action-title">Рекомендации по срезам</h2>
-                    <p class="tasks-action-text">Рекомендации по срезам выгрузки на основе нагрузки участков. Сроки списания -- в экране "Статусы".</p>
-                </button>
-                <button id="openReviewZones" class="tasks-action-card" type="button" data-dev-only>
-                    <span class="tasks-action-icon">🗂️</span>
-                    <h2 class="tasks-action-title">Участки разбора</h2>
-                    <p class="tasks-action-text">Список участков Предразбора (Упаковка, RWP, ПЦ и т.д.) -- без правки кода.</p>
+                    <p class="tasks-action-text">Рекомендации по срезам выгрузки на основе нагрузки участков. Сроки списания -- в экране "Маршрутизатор".</p>
                 </button>
                 <button id="openDebugSandbox" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">🛠</span>
@@ -2563,7 +2558,7 @@
     <div class="tasks-flow-card tasks-flow-card-wide">
         <div class="work-head">
             <div>
-                <h3 class="work-title">Статусы</h3>
+                <h3 class="work-title">Маршрутизатор</h3>
                 <p class="work-subtitle">Словарь статусов: название, срок списания, срок разбора, участок по умолчанию -- единая точка правды для выгрузок, маршрутизации и журнала покрытия.</p>
             </div>
             <button id="closeStatusPilot" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
@@ -2572,6 +2567,7 @@
         <div class="file-row">
             <button id="addStatusDictionaryRow" class="btn btn-outline" type="button">Добавить статус</button>
             <button id="saveStatusDictionary" class="btn btn-rect" type="button">Сохранить словарь</button>
+            <button id="openReviewZonesFromStatus" class="btn btn-outline" type="button">Участки разбора</button>
         </div>
         <div id="statusDictionaryStatus" class="review-status"></div>
     </div>
@@ -2927,7 +2923,7 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Рекомендации по срезам</h3>
-                <p class="work-subtitle">Сроки списания по статусам редактируются в экране "Статусы" -- здесь расчёт рекомендаций по срезам выгрузки на основе нагрузки участков.</p>
+                <p class="work-subtitle">Сроки списания по статусам редактируются в экране "Маршрутизатор" -- здесь расчёт рекомендаций по срезам выгрузки на основе нагрузки участков.</p>
             </div>
             <button id="closeWriteoffTerms" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
