@@ -1142,6 +1142,11 @@
         .review-view-tab.active { background: #fff; color: var(--accent-dark); box-shadow: var(--shadow-sm); }
         .review-view-tab.has-alert::after { content: ''; position: absolute; top: 3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 2; }
         .review-view-tabs-5 .review-view-tab-icon { font-size: 18px; padding: 5px 2px; }
+        .status-pilot-view-tabs { position: relative; }
+        .status-pilot-view-tabs .review-view-tab { position: relative; z-index: 1; }
+        .status-pilot-view-tabs .review-view-tab.active { background: transparent; box-shadow: none; }
+        #statusPilotModal .tasks-flow-card.status-pilot-card { height: 82vh; max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
+        .status-pilot-scroll { flex: 1; min-height: 0; overflow: auto; margin-top: 10px; }
         .review-pager-viewport { contain: inline-size; clip-path: inset(-64px); }
         .review-pager-track { display: flex; gap: 96px; width: calc(5 * var(--pager-panel-w, 20%) + 384px); transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 var(--pager-panel-w, 100%); min-width: 0; }
@@ -2557,7 +2562,7 @@
 </section>
 
 <section id="statusPilotModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card tasks-flow-card-wide">
+    <div class="tasks-flow-card tasks-flow-card-wide status-pilot-card">
         <div class="work-head">
             <div>
                 <h3 class="work-title">Маршрутизатор</h3>
@@ -2565,12 +2570,15 @@
             </div>
             <button id="closeStatusPilot" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
-        <div class="review-view-tabs" style="margin-top:14px;">
+        <div class="review-view-tabs status-pilot-view-tabs" style="margin-top:14px;">
+            <span id="statusViewThumb" class="review-view-thumb" aria-hidden="true"></span>
             <button type="button" class="review-view-tab" data-status-view="uploads">Выгрузки</button>
             <button type="button" class="review-view-tab" data-status-view="zones">Участки</button>
         </div>
-        <div id="statusDictionaryWrap" class="writeoff-terms-wrap"></div>
-        <div id="statusZonesWrap" class="writeoff-terms-wrap hidden"></div>
+        <div class="status-pilot-scroll">
+            <div id="statusDictionaryWrap" class="writeoff-terms-wrap"></div>
+            <div id="statusZonesWrap" class="writeoff-terms-wrap hidden"></div>
+        </div>
         <div class="file-row" data-status-uploads-only>
             <button id="addStatusDictionaryRow" class="btn btn-outline" type="button">Добавить статус</button>
             <button id="saveStatusDictionary" class="btn btn-rect" type="button">Сохранить словарь</button>

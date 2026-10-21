@@ -12950,7 +12950,7 @@
     // "Участки" (новый, см. renderStatusZonesScreen). Кнопки
     // "Добавить статус"/"Сохранить словарь" имеют смысл только в
     // "Выгрузки" -- прячем их во втором виде, а не дублируем логику.
-    function renderStatusPilotScreen() {
+    function renderStatusPilotScreen(instant) {
         const uploadsWrap = $("statusDictionaryWrap");
         const zonesWrap = $("statusZonesWrap");
         const isZones = state.statusDictionary.viewMode === "zones";
@@ -12962,6 +12962,26 @@
         if (zonesWrap) zonesWrap.classList.toggle("hidden", !isZones);
         if (isZones) renderStatusZonesScreen();
         else renderStatusDictionaryModal();
+        updateStatusViewThumb(instant);
+    }
+
+    // Та же JS-измеренная плавающая "таблетка", что и у остальных
+    // переключателей вида в приложении (updateBufferModeThumb/
+    // updatePickerThumb) -- offsetLeft/offsetWidth активной кнопки,
+    // плавный translateX/width через CSS-transition на .review-view-thumb.
+    // instant=true пропускает анимацию на первом рендере (иначе таблетка
+    // влетает от нулевой ширины до первой реальной отрисовки).
+    function updateStatusViewThumb(instant) {
+        const thumb = $("statusViewThumb");
+        const active = document.querySelector(".status-pilot-view-tabs .review-view-tab.active");
+        if (!thumb || !active) return;
+        if (instant) thumb.style.transition = "none";
+        thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
+        thumb.style.width = active.offsetWidth + "px";
+        if (instant) {
+            void thumb.offsetWidth;
+            thumb.style.transition = "";
+        }
     }
 
     function renderStatusZonesScreen() {
@@ -12971,15 +12991,19 @@
         else renderStatusZonesGrid(target);
     }
 
+    // Та же сетка карточек, что и в Предразборе (review-sections-grid/
+    // review-section-card) -- пользователь явно попросил визуально
+    // совпадать по форме/размеру/расположению, а не просто быть похожей
+    // на вид. Переиспользуем классы буквально, не копируем их заново.
     function renderStatusZonesGrid(target) {
         const zones = activeReviewZones();
-        target.innerHTML = "<div class='routing-rule-summary-list'>" + zones.map((zone) => {
+        target.innerHTML = "<div class='review-sections-grid'>" + zones.map((zone) => {
             const dictCount = zoneDictionaryItems(zone).length;
             const ruleCount = zoneRoutingRuleItems(zone).length;
-            return "<button type='button' class='routing-rule-summary-row' data-status-zone-card='" + escapeHtml(zone) + "'>"
-                + "<span class='routing-rule-summary-name'>" + escapeHtml(zone) + "</span>"
-                + "<span class='routing-rule-summary-meta'>статусов: " + dictCount + "</span>"
-                + "<span class='routing-rule-summary-meta'>правил: " + ruleCount + "</span>"
+            const empty = (dictCount + ruleCount) === 0 ? " is-empty" : "";
+            return "<button type='button' class='review-section-card" + empty + "' data-status-zone-card='" + escapeHtml(zone) + "'>"
+                + "<div class='review-section-name'><span>" + escapeHtml(zone) + "</span><strong>" + (dictCount + ruleCount) + "</strong></div>"
+                + "<div class='review-section-meta'>статусов: " + dictCount + " · правил: " + ruleCount + "</div>"
                 + "</button>";
         }).join("") + "</div>"
             + "<div class='file-row'><button type='button' class='btn btn-outline' id='addStatusZoneBtn'>Добавить участок</button></div>";
@@ -14236,13 +14260,13 @@
         if (!ensureDevelopmentAccess("Маршрутизатор")) return;
         closeFlowModals();
         setFlowModalOpen("statusPilotModal", true);
-        renderStatusPilotScreen();
+        renderStatusPilotScreen(true);
         // Правила грузим сразу вместе со словарём -- нужны для вида
         // "Участки" (счётчики на карточках участков, детальный список),
         // даже если пользователь откроется в виде "Выгрузки" и переключит
         // позже.
         await Promise.all([loadStatusDictionary(true), loadRoutingRules(true)]);
-        renderStatusPilotScreen();
+        renderStatusPilotScreen(true);
     }
 
     function closeStatusPilotModal() {
