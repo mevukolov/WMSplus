@@ -12970,6 +12970,13 @@
             default_upload_offset_days: 0,
             default_task_type: null,
             is_required_for_coverage: true,
+            // Без этого поля сохранение всего словаря разом (batch upsert)
+            // шлёт для новой строки явный null вместо того, чтобы положиться
+            // на дефолт колонки в БД -- остальные строки уже несут
+            // sort_order, и клиент выравнивает набор колонок по всему
+            // батчу, так что null тут реально перебивает DB-дефолт и падает
+            // на not-null constraint.
+            sort_order: 999,
         });
         renderStatusDictionaryModal();
         openStatusDictionaryEditModal(state.statusDictionary.rows.length - 1);
