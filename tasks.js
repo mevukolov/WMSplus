@@ -817,6 +817,7 @@
             items: [],
             index: 0,
             actions: [],
+            submitting: false,
             debugMode: false,
             excludedCount: 0,
             fileName: "",
@@ -19371,18 +19372,39 @@
     }
 
     async function applyPrespisokAction(actionKey, extraValue) {
-        if (!state.prespisok.debugMode) await syncPrespisokRunActions();
-        const item = currentPrespisokItem();
-        if (!item) return;
-        const itemKey = prespisokItemKey(item);
-        if ((state.prespisok.actions || []).some((action) => action.item_key === itemKey)) {
-            toast("Эту цель уже разобрали. Переключаю дальше.", "info");
-            renderPrespisokPlay();
-            return;
-        }
-        const status = $("prespisokActionStatus");
+        // Блокировка кнопки стояла ПОСЛЕ syncPrespisokRunActions() -- а это
+        // два сетевых запроса подряд. Пока они летят, кнопка ещё активна --
+        // быстрый повторный клик (а тут буквально "комбо", т.е. быстро
+        // кликать -- это и есть сценарий использования) успевает запустить
+        // ВТОРОЙ параллельный applyPrespisokTaskOutcome для ТОЙ ЖЕ цели,
+        // прежде чем первый успеет её отметить разобранной -- отсюда
+        // duplicate key на wms_task_items при гонке двух одновременных
+        // save_wms_manual_upload по одному и тому же ШК. Флаг state-уровня
+        // (не завязан на DOM) ставим и проверяем первым делом, до всякого
+        // await.
+        if (state.prespisok.submitting) return;
+        state.prespisok.submitting = true;
         const submit = $("submitPrespisokAction");
         if (submit) submit.disabled = true;
+        try {
+            if (!state.prespisok.debugMode) await syncPrespisokRunActions();
+            const item = currentPrespisokItem();
+            if (!item) return;
+            const itemKey = prespisokItemKey(item);
+            if ((state.prespisok.actions || []).some((action) => action.item_key === itemKey)) {
+                toast("Эту цель уже разобрали. Переключаю дальше.", "info");
+                renderPrespisokPlay();
+                return;
+            }
+            await applyPrespisokActionInner(actionKey, extraValue, item, itemKey);
+        } finally {
+            state.prespisok.submitting = false;
+        }
+    }
+
+    async function applyPrespisokActionInner(actionKey, extraValue, item, itemKey) {
+        const status = $("prespisokActionStatus");
+        const submit = $("submitPrespisokAction");
         const label = prespisokActionLabel(actionKey, item);
         const itemElapsed = prespisokItemElapsedMs();
         if (status) status.textContent = "Фиксирую решение на задаче: " + label + ".";
