@@ -1998,34 +1998,6 @@
         return items;
     }
 
-    // .calendar-tooltip -- position:fixed, реально меряем доступное место
-    // вместо CSS-эвристики по номеру колонки/строки (та не справлялась с
-    // длинным тултипом -- календарь покрытия статусов, 16+ строк:
-    // разворот вниз у первой строки перекрывал несколько следующих рядов
-    // сетки). Считаем естественную высоту/ширину тултипа (он уже
-    // display:block к этому моменту, см. вызов из mouseover-делегата
-    // ниже), пробуем над ячейкой, если не влезает -- под ней, и
-    // подрезаем по горизонтали в границы окна.
-    function positionCalendarTooltip(cell) {
-        const tooltip = cell.querySelector(".calendar-tooltip");
-        if (!tooltip) return;
-        const margin = 8;
-        const cellRect = cell.getBoundingClientRect();
-        tooltip.style.left = "0px";
-        tooltip.style.top = "0px";
-        const tipRect = tooltip.getBoundingClientRect();
-        let top = cellRect.top - tipRect.height - margin;
-        if (top < margin) {
-            const below = cellRect.bottom + margin;
-            top = (below + tipRect.height <= window.innerHeight - margin) ? below : margin;
-        }
-        let left = cellRect.left + cellRect.width / 2 - tipRect.width / 2;
-        if (left < margin) left = margin;
-        if (left + tipRect.width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - tipRect.width - margin);
-        tooltip.style.top = top + "px";
-        tooltip.style.left = left + "px";
-    }
-
     function statusCoverageDayStatusClass(doneCount, total) {
         const required = Math.max(total || 1, 1);
         if (doneCount <= 0) return "status-gray";
@@ -19932,14 +19904,6 @@
     }
 
     function initEvents() {
-        // Делегированный, не per-кнопка -- сетки календарей (.calendar-day/
-        // .backfill-day) перерисовываются целиком при каждом рендере,
-        // навешивать заново на каждую ячейку не нужно. mouseover (не
-        // mouseenter) specifically -- он всплывает, mouseenter нет.
-        document.addEventListener("mouseover", (event) => {
-            const cell = event.target.closest(".calendar-day, .backfill-day");
-            if (cell) positionCalendarTooltip(cell);
-        });
         $("openStatusPilotUploads").addEventListener("click", openStatusPilotModal);
         $("openDebugSandbox").addEventListener("click", openDebugSandboxModal);
         $("closeDebugSandbox").addEventListener("click", closeDebugSandboxModal);
