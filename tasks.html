@@ -316,8 +316,19 @@
         .calendar-day.status-green, .backfill-day.status-green { background: #bbf7d0; }
         .day-number { display: block; font-size: 18px; font-weight: 900; color: #242038; }
         .day-progress { display: block; margin-top: 6px; font-size: 12px; color: #475569; }
-        .calendar-tooltip { display: none; position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 20; width: 240px; padding: 10px; border-radius: 12px; background: #242038; color: #fff; box-shadow: var(--shadow-md); font-size: 12px; }
+        .calendar-tooltip { display: none; position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 20; width: 240px; max-height: min(320px, 70vh); overflow-y: auto; padding: 10px; border-radius: 12px; background: #242038; color: #fff; box-shadow: var(--shadow-md); font-size: 12px; }
         .calendar-day:hover .calendar-tooltip, .backfill-day:hover .calendar-tooltip { display: block; }
+        /* Давнишний баг: тултип всегда центрировался над ячейкой без учёта
+           края экрана -- у крайних колонок обрезался слева/справа, а у
+           верхней строки мог уходить за верх видимой области. Раньше
+           почти не было заметно (4 строки, основной календарь), но у
+           календаря покрытия статусов (16+ строк) стало критично. */
+        .calendar-grid .calendar-day:nth-child(7n+1) .calendar-tooltip,
+        .calendar-grid .backfill-day:nth-child(7n+1) .calendar-tooltip { left: 0; transform: none; }
+        .calendar-grid .calendar-day:nth-child(7n) .calendar-tooltip,
+        .calendar-grid .backfill-day:nth-child(7n) .calendar-tooltip { left: auto; right: 0; transform: none; }
+        .calendar-grid .calendar-day:nth-child(-n+14) .calendar-tooltip,
+        .calendar-grid .backfill-day:nth-child(-n+14) .calendar-tooltip { bottom: auto; top: calc(100% + 8px); }
         .tooltip-title { display: block; margin-bottom: 6px; font-weight: 900; }
         .tooltip-line { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
         .tooltip-dot { width: 8px; height: 8px; border-radius: 99px; background: #ef4444; flex: 0 0 auto; }
