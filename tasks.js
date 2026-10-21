@@ -600,6 +600,8 @@
             loaded: false,
             error: "",
             editingIndex: null,
+            viewMode: "uploads",
+            activeZone: null,
         },
         routingRuleTest: {
             rows: null,
@@ -12889,6 +12891,17 @@
                     + "<div class='routing-rule-summary-list'>" + group.map((item) => statusDictionarySummaryRowHtml(item.row, item.index)).join("") + "</div>"
                     + "</div>";
             }).join("");
+        wireStatusDictionarySummaryRows(target);
+    }
+
+    // Общая проводка кликов для строк словаря -- переиспользуется и
+    // обычным видом "Выгрузки" (все строки), и деталями участка в виде
+    // "Участки" (отфильтрованное подмножество тех же строк). index
+    // всегда глобальный (в state.statusDictionary.rows), а не по
+    // отфильтрованному списку -- так один и тот же data-status-dict-index
+    // корректно бьёт в openStatusDictionaryEditModal/removeStatusDictionaryRow
+    // независимо от того, откуда отрисован DOM-узел.
+    function wireStatusDictionarySummaryRows(target) {
         target.querySelectorAll("[data-status-dict-summary-row]").forEach((rowEl) => {
             const open = () => openStatusDictionaryEditModal(Number(rowEl.getAttribute("data-status-dict-index")));
             rowEl.addEventListener("click", (event) => { if (!event.target.closest("[data-status-dict-remove]") && !event.target.closest("[data-status-dict-rules]")) open(); });
@@ -12905,10 +12918,114 @@
             button.addEventListener("click", (event) => {
                 event.stopPropagation();
                 const index = Number(button.closest("[data-status-dict-summary-row]").getAttribute("data-status-dict-index"));
-                const row = rows[index];
+                const row = (state.statusDictionary.rows || [])[index];
                 if (row) void openRoutingRulesModal({ sourceFormat: row.source_format, statusCode: row.status_code });
             });
         });
+    }
+
+    // Участок сейчас хранится либо полным именем ("Разбор ОПП //
+    // Упаковка"), либо коротким ("RWP") -- несогласованность, с которой
+    // живёт система. Сравнение по чистому вхождению подстроки ломается
+    // на "ПЦ" ⊂ "WMI (МП + ПЦ)", поэтому сверяем точным совпадением
+    // ПОСЛЕ отсечения общего префикса.
+    function canonicalZoneTarget(value) {
+        return normalizeText(value).replace(/^Разбор ОПП \/\/\s*/, "").trim();
+    }
+
+    function zoneDictionaryItems(zoneName) {
+        return (state.statusDictionary.rows || [])
+            .map((row, index) => ({ row, index }))
+            .filter((item) => canonicalZoneTarget(item.row.default_task_type) === zoneName);
+    }
+
+    function zoneRoutingRuleItems(zoneName) {
+        return (state.routingRules.rows || [])
+            .map((row, index) => ({ row, index }))
+            .filter((item) => canonicalZoneTarget(item.row.target_task_type) === zoneName);
+    }
+
+    // Верхний диспетчер модалки Маршрутизатора -- переключает видимость
+    // между видом "Выгрузки" (старый список по source_format) и
+    // "Участки" (новый, см. renderStatusZonesScreen). Кнопки
+    // "Добавить статус"/"Сохранить словарь" имеют смысл только в
+    // "Выгрузки" -- прячем их во втором виде, а не дублируем логику.
+    function renderStatusPilotScreen() {
+        const uploadsWrap = $("statusDictionaryWrap");
+        const zonesWrap = $("statusZonesWrap");
+        const isZones = state.statusDictionary.viewMode === "zones";
+        document.querySelectorAll("[data-status-view]").forEach((button) => {
+            button.classList.toggle("active", button.dataset.statusView === state.statusDictionary.viewMode);
+        });
+        if (uploadsWrap) uploadsWrap.classList.toggle("hidden", isZones);
+        document.querySelectorAll("[data-status-uploads-only]").forEach((el) => el.classList.toggle("hidden", isZones));
+        if (zonesWrap) zonesWrap.classList.toggle("hidden", !isZones);
+        if (isZones) renderStatusZonesScreen();
+        else renderStatusDictionaryModal();
+    }
+
+    function renderStatusZonesScreen() {
+        const target = $("statusZonesWrap");
+        if (!target) return;
+        if (state.statusDictionary.activeZone) renderStatusZoneDetail(target, state.statusDictionary.activeZone);
+        else renderStatusZonesGrid(target);
+    }
+
+    function renderStatusZonesGrid(target) {
+        const zones = activeReviewZones();
+        target.innerHTML = "<div class='routing-rule-summary-list'>" + zones.map((zone) => {
+            const dictCount = zoneDictionaryItems(zone).length;
+            const ruleCount = zoneRoutingRuleItems(zone).length;
+            return "<button type='button' class='routing-rule-summary-row' data-status-zone-card='" + escapeHtml(zone) + "'>"
+                + "<span class='routing-rule-summary-name'>" + escapeHtml(zone) + "</span>"
+                + "<span class='routing-rule-summary-meta'>статусов: " + dictCount + "</span>"
+                + "<span class='routing-rule-summary-meta'>правил: " + ruleCount + "</span>"
+                + "</button>";
+        }).join("") + "</div>"
+            + "<div class='file-row'><button type='button' class='btn btn-outline' id='addStatusZoneBtn'>Добавить участок</button></div>";
+        target.querySelectorAll("[data-status-zone-card]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.statusDictionary.activeZone = button.getAttribute("data-status-zone-card");
+                renderStatusZonesScreen();
+            });
+        });
+        const addButton = $("addStatusZoneBtn");
+        if (addButton) addButton.addEventListener("click", () => void openReviewZonesModal());
+    }
+
+    function renderStatusZoneDetail(target, zoneName) {
+        const dictItems = zoneDictionaryItems(zoneName);
+        const byFormat = new Map();
+        dictItems.forEach((item) => {
+            const key = item.row.source_format || "general";
+            const group = byFormat.get(key) || [];
+            group.push(item);
+            byFormat.set(key, group);
+        });
+        const dictHtml = [...SOURCE_FORMAT_OPTIONS, ...STATUS_DICTIONARY_EXTRA_FORMATS].map((opt) => {
+            const group = byFormat.get(opt.value) || [];
+            if (!group.length) return "";
+            return "<div class='routing-rule-section-group'>"
+                + "<div class='routing-rule-section-heading'>" + escapeHtml(opt.label) + " (" + group.length + ")</div>"
+                + "<div class='routing-rule-summary-list'>" + group.map((item) => statusDictionarySummaryRowHtml(item.row, item.index)).join("") + "</div>"
+                + "</div>";
+        }).join("");
+        const ruleItems = zoneRoutingRuleItems(zoneName);
+        const rulesHtml = !ruleItems.length ? "" : "<div class='routing-rule-section-group'>"
+            + "<div class='routing-rule-section-heading'>Правила (" + ruleItems.length + ")</div>"
+            + "<div class='routing-rule-summary-list'>" + ruleItems.map((item) => routingRuleSummaryRowHtml(item.row, item.index)).join("") + "</div>"
+            + "</div>";
+        target.innerHTML = "<div class='routing-rule-status-filter'>Участок <strong>" + escapeHtml(zoneName) + "</strong>"
+            + " <button type='button' class='btn btn-outline' id='backToStatusZonesBtn'>← Назад к участкам</button>"
+            + " <button type='button' class='btn btn-outline' id='editStatusZoneBtn'>Редактировать участок</button></div>"
+            + (!dictItems.length && !ruleItems.length ? "<div class='empty-state'>У этого участка пока нет ни статусов, ни правил.</div>" : "")
+            + dictHtml + rulesHtml;
+        const back = $("backToStatusZonesBtn");
+        if (back) back.addEventListener("click", () => { state.statusDictionary.activeZone = null; renderStatusZonesScreen(); });
+        const edit = $("editStatusZoneBtn");
+        if (edit) edit.addEventListener("click", () => void openReviewZonesModal());
+        wireStatusDictionarySummaryRows(target);
+        wireRoutingRuleSummaryRows(target);
     }
 
     function openStatusDictionaryEditModal(index) {
@@ -12957,6 +13074,10 @@
         state.statusDictionary.editingIndex = null;
         setFlowModalOpen("statusDictionaryEditModal", false);
         renderStatusDictionaryModal();
+        // Та же строка могла быть открыта на редактирование из детали
+        // участка (вид "Участки") -- обновляем и её, иначе там останутся
+        // устаревшие данные до следующего захода.
+        if (state.statusDictionary.viewMode === "zones" && state.statusDictionary.activeZone) renderStatusZonesScreen();
     }
 
     function addStatusDictionaryDraft() {
@@ -13266,6 +13387,14 @@
             + section("Фильтры (" + filterRows.length + ")", filterRows);
         const clearButton = target.querySelector("[data-clear-status-filter]");
         if (clearButton) clearButton.addEventListener("click", () => { state.routingRules.statusFilter = null; renderRoutingRulesModal(); });
+        wireRoutingRuleSummaryRows(target);
+    }
+
+    // Общая проводка кликов для строк правил -- переиспользуется видом
+    // "Все правила"/фильтром по статусу в renderRoutingRulesModal И
+    // деталями участка в Маршрутизаторе (renderStatusZoneDetail). index
+    // всегда глобальный (в state.routingRules.rows).
+    function wireRoutingRuleSummaryRows(target) {
         target.querySelectorAll("[data-rule-summary-row]").forEach((rowEl) => {
             const open = () => openRoutingRuleEditModal(Number(rowEl.getAttribute("data-rule-index")));
             rowEl.addEventListener("click", (event) => { if (!event.target.closest("[data-rule-summary-remove]")) open(); });
@@ -13320,6 +13449,9 @@
         state.routingRules.editingIndex = null;
         setFlowModalOpen("routingRuleEditModal", false);
         renderRoutingRulesModal();
+        // Правило могло быть открыто из детали участка (вид "Участки"
+        // Маршрутизатора) -- обновляем и её тем же резоном, что и выше.
+        if (state.statusDictionary.viewMode === "zones" && state.statusDictionary.activeZone) renderStatusZonesScreen();
     }
 
     function addRoutingRuleCondition(cardEl) {
@@ -14104,9 +14236,13 @@
         if (!ensureDevelopmentAccess("Маршрутизатор")) return;
         closeFlowModals();
         setFlowModalOpen("statusPilotModal", true);
-        renderStatusDictionaryModal();
-        await loadStatusDictionary(true);
-        renderStatusDictionaryModal();
+        renderStatusPilotScreen();
+        // Правила грузим сразу вместе со словарём -- нужны для вида
+        // "Участки" (счётчики на карточках участков, детальный список),
+        // даже если пользователь откроется в виде "Выгрузки" и переключит
+        // позже.
+        await Promise.all([loadStatusDictionary(true), loadRoutingRules(true)]);
+        renderStatusPilotScreen();
     }
 
     function closeStatusPilotModal() {
@@ -20452,6 +20588,14 @@
         $("saveFlowSettings").addEventListener("click", () => { void saveFlowSettingsFromModal(); });
         $("resetFlowSettings").addEventListener("click", resetFlowSettingsFromModal);
         $("closeStatusPilot").addEventListener("click", closeStatusPilotModal);
+        document.querySelectorAll("#statusPilotModal [data-status-view]").forEach((button) => {
+            button.addEventListener("click", () => {
+                if (state.statusDictionary.viewMode === button.dataset.statusView) return;
+                state.statusDictionary.viewMode = button.dataset.statusView;
+                state.statusDictionary.activeZone = null;
+                renderStatusPilotScreen();
+            });
+        });
         $("addStatusDictionaryRow").addEventListener("click", addStatusDictionaryDraft);
         $("saveStatusDictionary").addEventListener("click", () => { void saveStatusDictionaryFromModal(); });
         $("closeStatusDictionaryEdit").addEventListener("click", closeStatusDictionaryEditModal);

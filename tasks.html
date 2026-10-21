@@ -2565,13 +2565,18 @@
             </div>
             <button id="closeStatusPilot" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
+        <div class="review-view-tabs" style="margin-top:14px;">
+            <button type="button" class="review-view-tab" data-status-view="uploads">Выгрузки</button>
+            <button type="button" class="review-view-tab" data-status-view="zones">Участки</button>
+        </div>
         <div id="statusDictionaryWrap" class="writeoff-terms-wrap"></div>
-        <div class="file-row">
+        <div id="statusZonesWrap" class="writeoff-terms-wrap hidden"></div>
+        <div class="file-row" data-status-uploads-only>
             <button id="addStatusDictionaryRow" class="btn btn-outline" type="button">Добавить статус</button>
             <button id="saveStatusDictionary" class="btn btn-rect" type="button">Сохранить словарь</button>
             <button id="openReviewZonesFromStatus" class="btn btn-outline" type="button">Участки разбора</button>
         </div>
-        <div id="statusDictionaryStatus" class="review-status"></div>
+        <div id="statusDictionaryStatus" class="review-status" data-status-uploads-only></div>
     </div>
 </section>
 
