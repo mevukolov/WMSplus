@@ -573,18 +573,6 @@
         today: todayIsoInMoscow(),
         settings: new Map(DEFAULT_MODULES.map((item) => [item.module, { ...item }])),
         runs: [],
-        writeoffTerms: {
-            recommendations: {
-                loading: false,
-                rows: [],
-                capacityRows: [],
-                problemSections: [],
-                statusPriorities: [],
-                summary: null,
-                error: "",
-                generatedAt: "",
-            },
-        },
         routingRules: {
             rows: [],
             loading: false,
@@ -1645,10 +1633,30 @@
         return raw.replace(/\s+/g, "");
     }
 
+    // Зеркалит SQL-функцию wms_source_format_for_module (миграция
+    // 202610210002) -- тот же код статуса может легально существовать в
+    // разных форматах с разными сроками (WMI уже в general, SGR теперь и
+    // в other, и в packaging), так что срок списания нужно искать по
+    // паре (формат, код), а не по голому коду -- иначе один перебивает
+    // другой в зависимости от порядка перебора.
+    function sourceFormatFromSourceModule(sourceModule) {
+        const value = normalizeForMatch(sourceModule);
+        if (value.includes("manual_packaging") || value.includes("manual_rwp")) return "packaging";
+        if (value.includes("manual_after_sale")) return "after_sale_movement";
+        if (value.includes("manual_no_order")) return "no_order";
+        if (value.includes("manual_general") || value.includes("manual_pm") || value.includes("manual_presort") || value.includes("manual_marketplace") || value.includes("manual_wmi")) return "general";
+        return "other";
+    }
+
+    function writeoffTermMapKey(sourceFormat, statusKey) {
+        return (sourceFormat || "other") + "::" + statusKey;
+    }
+
     // Источник -- wms_status_dictionary целиком (не только 4 формата
     // выгрузки): source_format='other' покрывает статусы вне этих
     // форматов (напр. "Чистые списания" -- SGR/TTB и т.д., см. миграцию
     // 202610200009). wms_writeoff_terms выведена из эксплуатации.
+    // Ключ карты -- (формат, код), см. sourceFormatFromSourceModule выше.
     function activeWriteoffStatusTerms() {
         const map = new Map();
         (state.statusDictionary.rows || []).forEach((row) => {
@@ -1656,9 +1664,16 @@
             if (row.writeoff_days === null || row.writeoff_days === undefined) return;
             const key = normalizeWriteoffTermKey(row.status_code, "status");
             if (!key) return;
-            map.set(key, { label: row.label || row.status_code, days_without_movement: row.writeoff_days });
+            map.set(writeoffTermMapKey(row.source_format, key), { label: row.label || row.status_code, days_without_movement: row.writeoff_days });
         });
         return map;
+    }
+
+    // Точное совпадение по формату задачи, с фоллбэком на 'other' --
+    // тот же принцип, что и в recalculate_wms_task_writeoff_dates.
+    function writeoffTermForStatus(termMap, statusKey, sourceFormat) {
+        if (!statusKey) return null;
+        return termMap.get(writeoffTermMapKey(sourceFormat, statusKey)) || termMap.get(writeoffTermMapKey("other", statusKey)) || null;
     }
 
     function rowStatusForWriteoff(row) {
@@ -1669,11 +1684,11 @@
         return normalizeText(row && (row.last_movement || row.created_at || row.status_at));
     }
 
-    function writeoffDateInfoForRow(row, termMap) {
+    function writeoffDateInfoForRow(row, termMap, sourceFormat) {
         const movement = parseDateTime(rowMovementForWriteoff(row));
         const statusText = rowStatusForWriteoff(row);
         const statusKey = normalizeWriteoffTermKey(statusText, "status");
-        const term = statusKey ? (termMap || activeWriteoffStatusTerms()).get(statusKey) : null;
+        const term = writeoffTermForStatus(termMap || activeWriteoffStatusTerms(), statusKey, sourceFormat);
         const days = term ? settingNumber(term.days_without_movement, null) : null;
         if (!movement.date || !term || !Number.isFinite(days)) return null;
         return {
@@ -1688,9 +1703,9 @@
         };
     }
 
-    function writeoffDateInfoForRows(rows, fallbackDate) {
+    function writeoffDateInfoForRows(rows, fallbackDate, sourceFormat) {
         const termMap = activeWriteoffStatusTerms();
-        const candidates = (rows || []).map((row) => writeoffDateInfoForRow(row, termMap)).filter((item) => item && item.date);
+        const candidates = (rows || []).map((row) => writeoffDateInfoForRow(row, termMap, sourceFormat)).filter((item) => item && item.date);
         if (!candidates.length) {
             return {
                 date: fallbackDate || "",
@@ -2028,7 +2043,6 @@
         setFlowModalOpen("flowSettingsModal", false);
         setFlowModalOpen("statusPilotModal", false);
         setFlowModalOpen("staffStatsModal", false);
-        setFlowModalOpen("writeoffTermsModal", false);
         setFlowModalOpen("editTareTaskModal", false);
         setFlowModalOpen("deferTaskModal", false);
         setFlowModalOpen("rememberShkModal", false);
@@ -9948,12 +9962,13 @@
     // countdown pill.
     function predictedWriteoffTs(row) {
         const termMap = activeWriteoffStatusTerms();
+        const sourceFormat = sourceFormatFromSourceModule(row && row.source_module);
         let best = null;
         taskItems(row).forEach((item) => {
             const parsed = parseDateTime(item.movement);
             if (!parsed.iso) return;
             const statusKey = normalizeWriteoffTermKey(item.status, "status");
-            const term = statusKey ? termMap.get(statusKey) : null;
+            const term = writeoffTermForStatus(termMap, statusKey, sourceFormat);
             const days = term ? settingNumber(term.days_without_movement, null) : null;
             if (!term || !Number.isFinite(days)) return;
             const predictedIso = addDaysToTimestamp(parsed.iso, days);
@@ -14185,77 +14200,6 @@
         }
     }
 
-    function renderWriteoffRecommendationsHtml() {
-        const reco = state.writeoffTerms.recommendations || {};
-        const summary = reco.summary || {};
-        const rows = Array.isArray(reco.rows) ? reco.rows : [];
-        const capacityRows = Array.isArray(reco.capacityRows) ? reco.capacityRows : [];
-        const problemSections = Array.isArray(reco.problemSections) ? reco.problemSections : [];
-        const statusPriorities = Array.isArray(reco.statusPriorities) ? reco.statusPriorities : [];
-        const summaryHtml = summary.activeTasks !== undefined
-            ? "<div class='writeoff-reco-summary'>"
-                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.priorityStatusCount || 0) + "</strong><span>Приоритетных статусов</span></div>"
-                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.ruleCount) + "</strong><span>Правил в расчете</span></div>"
-                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.moveOnlineCount) + "</strong><span>Можно вернуть ближе к онлайну</span></div>"
-                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.deferCount) + "</strong><span>Стоит отодвинуть из-за нагрузки</span></div>"
-                + "<div class='writeoff-reco-card'><strong>" + escapeHtml(summary.riskCount) + "</strong><span>Есть риск по безопасному окну</span></div>"
-            + "</div>"
-            : "";
-        const capacityHtml = capacityRows.length
-            ? "<div class='writeoff-reco-capacity'>" + capacityRows.map((row) => {
-                const source = row.source === "history" ? "среднее" : "оценка";
-                return "<span class='writeoff-reco-pill'>" + escapeHtml(row.moduleLabel) + ": " + escapeHtml(row.capacity) + " ШК/день, " + escapeHtml(source) + "</span>";
-            }).join("") + "</div>"
-            : "";
-        const statusHtml = statusPriorities.length
-            ? "<div class='writeoff-reco-statuses'>" + statusPriorities.slice(0, 12).map((row) => "<article class='writeoff-reco-status " + escapeHtml(row.tierClass || "") + "'>"
-                + "<strong>#" + escapeHtml(row.rank) + " " + escapeHtml(row.status) + " · " + escapeHtml(row.tierLabel) + "</strong>"
-                + "<span>" + escapeHtml(row.reason) + "</span>"
-                + "<span>Где лежит: " + escapeHtml((row.moduleLabels || []).join("; ") || "участки не выделены") + "</span>"
-            + "</article>").join("") + "</div>"
-            : "";
-        const tableHtml = rows.length
-            ? "<div class='writeoff-reco-table-wrap'><table class='writeoff-reco-table'><thead><tr>"
-                + "<th>Участок</th><th>Статус</th><th>Списание</th><th>Сейчас</th><th>Рекомендую</th><th>Сегодня брать дату</th><th>Нагрузка</th><th>Упор</th><th>Причина</th>"
-            + "</tr></thead><tbody>"
-            + rows.map((row) => "<tr class='" + (row.risk ? "writeoff-reco-row-risk" : "") + "'>"
-                + "<td><strong>" + escapeHtml(row.moduleLabel) + "</strong></td>"
-                + "<td>" + escapeHtml(row.driverStatus || "Без статуса") + "</td>"
-                + "<td>" + escapeHtml(row.writeoffTermLabel) + "</td>"
-                + "<td>" + escapeHtml(row.currentLabel) + "</td>"
-                + "<td><strong>" + escapeHtml(row.recommendedLabel) + "</strong><br><span class='writeoff-reco-note'>" + escapeHtml(row.changeLabel) + "</span></td>"
-                + "<td>" + escapeHtml(formatRuDate(row.recommendedBusinessDate)) + (row.gapLabel ? "<span class='writeoff-reco-gap'>" + escapeHtml(row.gapLabel) + "</span>" : "") + "</td>"
-                + "<td>" + escapeHtml(row.loadLabel) + "</td>"
-                + "<td class='writeoff-reco-focus'>" + escapeHtml(row.focusLabel || "Без отдельного упора") + "</td>"
-                + "<td class='writeoff-reco-note'>" + escapeHtml(row.note) + "</td>"
-            + "</tr>").join("")
-            + "</tbody></table></div>"
-            : reco.loading ? "" : "<div class='status-line'>" + (summary.activeTasks !== undefined ? "Нет активных задач для планирования." : "Рекомендации еще не рассчитаны. Нажмите “Рассчитать рекомендации”.") + "</div>";
-        return "<section class='writeoff-term-section'><h4>Рекомендованные сроки выгрузок</h4>"
-            + "<p>Это не план разбора уже созданных задач. Это подсказка, какой срез данных брать сегодня: ближе к онлайну в спокойные дни и глубже в прошлое, если участок перегружен или есть риск списания.</p>"
-            + (reco.loading ? "<div class='status-line'>Считаю рекомендации по текущим срокам, хвостам задач, журналу выгрузок и ручной мощности за последние 14 дней...</div>" : "")
-            + (reco.error ? "<div class='status-line error'>" + escapeHtml(reco.error) + "</div>" : "")
-            + summaryHtml
-            + capacityHtml
-            + statusHtml
-            + tableHtml
-            + (reco.generatedAt ? "<p>Обновлено: " + escapeHtml(formatRuDateTime(reco.generatedAt)) + "</p>" : "")
-            + "</section>";
-    }
-
-    // Редактирование сроков списания переехало в экран "Статусы"
-    // (wms_status_dictionary, source_format='other' покрывает статусы
-    // вне 4 выгрузок). Эта модалка теперь только показывает блок
-    // рекомендаций -- отдельная, независимая аналитика (нагрузка/
-    // возраст по участкам), читающая сроки через activeWriteoffStatusTerms()
-    // (уже на словаре), без собственного состояния редактирования.
-    function renderWriteoffTermsModal() {
-        const target = $("writeoffTermsWrap");
-        if (!target) return;
-        target.innerHTML = "<div class='work-subtitle'>Сроки списания по статусам редактируются в экране \"Маршрутизатор\" -- здесь только расчёт рекомендаций по срезам выгрузки.</div>"
-            + renderWriteoffRecommendationsHtml();
-    }
-
     async function openStatusPilotModal() {
         if (!ensureDevelopmentAccess("Маршрутизатор")) return;
         closeFlowModals();
@@ -14707,712 +14651,6 @@
 
     function closeStaffStatsModal() {
         setFlowModalOpen("staffStatsModal", false);
-    }
-
-    async function openWriteoffTermsModal() {
-        if (!ensureDevelopmentAccess("Рекомендации по срезам")) return;
-        closeFlowModals();
-        setFlowModalOpen("writeoffTermsModal", true);
-        renderWriteoffTermsModal();
-        await loadStatusDictionary();
-        if (!state.writeoffTerms.recommendations.summary && !state.writeoffTerms.recommendations.loading) {
-            void refreshWriteoffRecommendations();
-        }
-    }
-
-    function closeWriteoffTermsModal() {
-        setFlowModalOpen("writeoffTermsModal", false);
-    }
-
-    async function recalculateWriteoffDatesFromModal() {
-        const db = supabaseDb();
-        const status = $("writeoffTermsStatus");
-        const button = $("recalculateWriteoffDates");
-        if (!db) {
-            if (status) status.textContent = "Supabase недоступен, пересчитать активные задачи не получится.";
-            return;
-        }
-        if (button) button.disabled = true;
-        if (status) status.textContent = "Пересчитываю даты списания у активных задач...";
-        try {
-            const { data, error } = await db.rpc("recalculate_wms_task_writeoff_dates", { p_wh_id: WH_ID });
-            if (error) throw error;
-            const updated = Number(data && data.updated_count) || 0;
-            if (status) status.textContent = "Пересчет готов. Обновлено активных задач: " + updated + ".";
-            toast("Даты списания пересчитаны: " + updated + ".", "success");
-            state.review.loaded = false;
-            await loadReviewTasks();
-        } catch (error) {
-            const message = error && error.message ? error.message : String(error);
-            if (status) status.textContent = "Не удалось пересчитать: " + message;
-        } finally {
-            if (button) button.disabled = false;
-        }
-    }
-
-    function planningTaskItemsCount(row) {
-        const items = taskItems(row);
-        const sourceIds = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
-        return Math.max(1, items.length, sourceIds.length);
-    }
-
-    function planningWriteoffInfo(row) {
-        const items = taskItems(row);
-        const computed = items.length
-            ? writeoffDateInfoForRows(items.map((item) => ({
-                product: item.shk,
-                status: item.status,
-                last_movement: item.movement,
-                status_at: item.movement,
-            })), "")
-            : null;
-        if (computed && computed.date) return computed;
-        const payload = taskPayload(row);
-        const payloadDate = normalizeText(payload.writeoff_date || row && row.due_date);
-        const parsed = parseDateTime(payloadDate);
-        return {
-            date: parsed.date || payloadDate || "",
-            source: payload.writeoff_date ? "stored" : "fallback",
-            basis: payload.writeoff_date_basis || null,
-            candidates: Array.isArray(payload.writeoff_date_candidates) ? payload.writeoff_date_candidates : [],
-        };
-    }
-
-    function planningTaskStatus(row, writeoffInfo) {
-        const basis = writeoffInfo && writeoffInfo.basis;
-        const fromBasis = normalizeWriteoffTermKey(basis && (basis.status_key || basis.status_raw || basis.status_label), "status");
-        if (fromBasis) return fromBasis;
-        const fromItems = taskItems(row).map((item) => normalizeWriteoffTermKey(item.status, "status")).filter(Boolean);
-        if (fromItems.length) return fromItems[0];
-        const fromPayload = normalizeWriteoffTermKey(taskPayload(row).status || taskPayload(row).last_status, "status");
-        return fromPayload || "Без статуса";
-    }
-
-    function planningTaskSection(row) {
-        return requestSectionName(row) || taskSectionName(row);
-    }
-
-    function planningModuleKey(row) {
-        if (!row || requestSectionName(row) || isPrespisokTask(row)) return "";
-        const sourceModule = normalizeForMatch(row.source_module);
-        const uploadType = normalizeForMatch(row.upload_type);
-        const taskType = normalizeForMatch(row.task_type);
-        if (sourceModule.includes("manual_packaging") || uploadType === "packaging") return taskType.includes("rwp") ? "rwp" : "packaging";
-        if (sourceModule.includes("manual_rwp") || uploadType === "rwp") return "rwp";
-        if (sourceModule.includes("manual_pm") || uploadType === "pm_buffer") return "pm";
-        if (sourceModule.includes("manual_presort") || uploadType === "presort") return taskType.includes("оклейка") ? "labeling" : "presort";
-        if (sourceModule.includes("manual_wmi") || uploadType === "wmi_mp_pc") return "wmi_mp_pc";
-        if (sourceModule.includes("manual_marketplace") || uploadType === "marketplace_pc") {
-            if (taskType.includes("пц")) return "pc";
-            if (taskType.includes("маркетплейс")) return "marketplace";
-            return "marketplace_pc";
-        }
-        if (sourceModule.includes("manual_no_order") || uploadType === "no_order") {
-            if (taskType.includes("usd")) return "usd";
-            if (taskType.includes("tmm")) return "tmm";
-            return "no_order";
-        }
-        if (sourceModule.includes("manual_after_sale") || uploadType === "after_sale_movement") return "after_sale_movement";
-        return "";
-    }
-
-    function uploadAgeFromOffset(offsetDays) {
-        return Math.max(0, Math.trunc(-settingNumber(offsetDays, 0)));
-    }
-
-    function uploadOffsetFromAge(ageDays) {
-        return -Math.max(0, Math.trunc(settingNumber(ageDays, 0)));
-    }
-
-    function uploadAgeLabel(ageDays, offsetDays) {
-        const age = Math.max(0, Math.trunc(settingNumber(ageDays, 0)));
-        const offset = uploadOffsetFromAge(age);
-        return "на " + age + "-й день без движения (" + offset + ")";
-    }
-
-    function branchSummaryCount(run, module) {
-        const summary = run && run.summary && typeof run.summary === "object" && !Array.isArray(run.summary) ? run.summary : parseJsonSafe(run && run.summary, {});
-        const tasksCount = Number(run && run.tasks_count) || 0;
-        const byModule = {
-            packaging: tasksCount,
-            rwp: tasksCount,
-            pm: tasksCount,
-            presort: Number(summary.presortTasks) || 0,
-            labeling: Number(summary.labelingTasks) || 0,
-            marketplace: Number(summary.marketplaceTasks) || 0,
-            pc: Number(summary.pcTasks) || 0,
-            marketplace_pc: tasksCount,
-            wmi_mp_pc: Number(summary.wmiTasks) || 0,
-            no_order: Number(summary.noOrderTasks) || 0,
-            usd: Number(summary.usdTasks) || 0,
-            tmm: Number(summary.tmmTasks) || 0,
-            after_sale_movement: Number(summary.afterSaleMovementTasks) || tasksCount,
-        };
-        return Number(byModule[module]) || 0;
-    }
-
-    function runMatchesModuleBranch(run, module) {
-        const def = moduleDef(module);
-        if (!def) return false;
-        return normalizeText(run && run.source_module) === normalizeText(def.sourceModule)
-            && normalizeText(run && run.upload_type) === normalizeText(def.uploadType);
-    }
-
-    function averageRunTasksForModule(module) {
-        const since = addDays(state.today, -21);
-        const matched = (state.runs || []).filter((run) => normalizeText(run.effective_date) >= since && runMatchesModuleBranch(run, module));
-        const counts = matched.map((run) => branchSummaryCount(run, module)).filter((value) => Number.isFinite(value) && value > 0);
-        if (!counts.length) return { average: 0, runs: 0, source: "none" };
-        const sum = counts.reduce((acc, value) => acc + value, 0);
-        return { average: Math.ceil(sum / counts.length), runs: counts.length, source: "history" };
-    }
-
-    async function fetchManualCompletedTasksForPlanning() {
-        const db = supabaseDb();
-        if (!db) return [];
-        const sinceDate = addDays(state.today, -14);
-        try {
-            const { data, error } = await db
-                .from(WMS_TASKS_TABLE)
-                .select(WMS_TASK_SELECT_COLUMNS)
-                .eq("task_status", "Завершено")
-                .gte("completed_at", sinceDate + "T00:00:00+03:00")
-                .order("completed_at", { ascending: false, nullsFirst: false })
-                .limit(10000);
-            if (error) throw error;
-            return (data || []).filter(isManualAchievementTask);
-        } catch (error) {
-            console.warn("writeoff recommendation completed tasks query skipped:", error);
-            return [];
-        }
-    }
-
-    function buildPlanningCapacityRows(activePlanningRows, completedRows, modules) {
-        const activeByModule = new Map();
-        const completedByModule = new Map();
-        activePlanningRows.forEach((row) => {
-            const current = activeByModule.get(row.module) || 0;
-            activeByModule.set(row.module, current + row.shkCount);
-        });
-        (completedRows || []).forEach((row) => {
-            const module = planningModuleKey(row);
-            if (!module) return;
-            const current = completedByModule.get(module) || 0;
-            completedByModule.set(module, current + planningTaskItemsCount(row));
-        });
-        return Array.from(modules || []).map((module) => {
-            const activeCount = activeByModule.get(module) || 0;
-            const completedCount = completedByModule.get(module) || 0;
-            const historicalAverage = Math.ceil(completedCount / 14);
-            const fallbackCapacity = Math.max(20, Math.min(90, Math.ceil(activeCount / 3)));
-            const hasEnoughHistory = completedCount >= 14;
-            const capacity = hasEnoughHistory ? Math.max(1, historicalAverage) : fallbackCapacity;
-            return {
-                module,
-                moduleLabel: moduleDef(module).label || module,
-                activeCount,
-                completedCount,
-                historicalAverage,
-                capacity,
-                source: hasEnoughHistory ? "history" : "fallback",
-            };
-        }).sort((a, b) => a.moduleLabel.localeCompare(b.moduleLabel, "ru"));
-    }
-
-    function buildWriteoffRecommendations(activeRows, completedRows) {
-        const statusTerms = activeWriteoffStatusTerms();
-        const planningRows = (activeRows || []).map((row) => {
-            const module = planningModuleKey(row);
-            const info = planningWriteoffInfo(row);
-            const writeoffDate = normalizeText(info && info.date);
-            return {
-                row,
-                module,
-                section: planningTaskSection(row),
-                status: planningTaskStatus(row, info),
-                shkCount: planningTaskItemsCount(row),
-                price: reviewPrice(row),
-                writeoffDate,
-                safeReviewDate: writeoffDate ? addDays(writeoffDate, -2) : "",
-            };
-        }).filter((row) => row.module);
-        const moduleSet = new Set(["packaging", "rwp", "pm", "presort", "marketplace", "pc", "wmi_mp_pc", "no_order", "after_sale_movement"]);
-        planningRows.forEach((row) => moduleSet.add(row.module));
-        const capacityRows = buildPlanningCapacityRows(planningRows, completedRows, moduleSet);
-        const capacityByModule = new Map(capacityRows.map((row) => [row.module, row]));
-        const activeByModule = new Map();
-        planningRows.forEach((row) => {
-            const current = activeByModule.get(row.module) || { rows: [], byStatus: new Map(), activeTasks: 0, activeShk: 0, priceSum: 0, overdueSafe: 0 };
-            current.rows.push(row);
-            current.activeTasks += 1;
-            current.activeShk += row.shkCount;
-            current.priceSum += row.price;
-            if (row.safeReviewDate && row.safeReviewDate < state.today) current.overdueSafe += 1;
-            const status = row.status || "Без статуса";
-            const statusCurrent = current.byStatus.get(status) || { status, taskCount: 0, shkCount: 0, priceSum: 0, overdueSafeTasks: 0, overdueSafeShk: 0, minWriteoffDate: "", maxSafeAge: null, termDays: null, missingTerm: false };
-            statusCurrent.taskCount += 1;
-            statusCurrent.shkCount += row.shkCount;
-            statusCurrent.priceSum += row.price;
-            if (row.safeReviewDate && row.safeReviewDate < state.today) {
-                statusCurrent.overdueSafeTasks += 1;
-                statusCurrent.overdueSafeShk += row.shkCount;
-            }
-            if (row.writeoffDate && (!statusCurrent.minWriteoffDate || row.writeoffDate < statusCurrent.minWriteoffDate)) {
-                statusCurrent.minWriteoffDate = row.writeoffDate;
-            }
-            const term = statusTerms.get(status);
-            const termDays = term ? Math.max(0, Math.trunc(settingNumber(term.days_without_movement, 0))) : null;
-            statusCurrent.termDays = termDays;
-            statusCurrent.maxSafeAge = termDays === null ? null : Math.max(0, termDays - 2);
-            statusCurrent.missingTerm = !term;
-            current.byStatus.set(status, statusCurrent);
-            activeByModule.set(row.module, current);
-        });
-        const statusPlanMap = new Map();
-        planningRows.forEach((row) => {
-            const status = row.status || "Без статуса";
-            const term = statusTerms.get(status);
-            const termDays = term ? Math.max(0, Math.trunc(settingNumber(term.days_without_movement, 0))) : null;
-            const maxSafeAge = termDays === null ? null : Math.max(0, termDays - 2);
-            const current = statusPlanMap.get(status) || {
-                status,
-                termDays,
-                maxSafeAge,
-                missingTerm: !term,
-                taskCount: 0,
-                shkCount: 0,
-                priceSum: 0,
-                overdueSafeTasks: 0,
-                overdueSafeShk: 0,
-                minWriteoffDate: "",
-                modules: new Map(),
-            };
-            current.taskCount += 1;
-            current.shkCount += row.shkCount;
-            current.priceSum += row.price;
-            if (row.safeReviewDate && row.safeReviewDate < state.today) {
-                current.overdueSafeTasks += 1;
-                current.overdueSafeShk += row.shkCount;
-            }
-            if (row.writeoffDate && (!current.minWriteoffDate || row.writeoffDate < current.minWriteoffDate)) {
-                current.minWriteoffDate = row.writeoffDate;
-            }
-            const moduleRow = current.modules.get(row.module) || { module: row.module, shkCount: 0, taskCount: 0 };
-            moduleRow.shkCount += row.shkCount;
-            moduleRow.taskCount += 1;
-            current.modules.set(row.module, moduleRow);
-            statusPlanMap.set(status, current);
-        });
-        const statusTier = (plan) => {
-            if (plan.missingTerm || plan.overdueSafeShk > 0) return { label: "Критично", cls: "critical" };
-            if (Number.isFinite(plan.maxSafeAge) && plan.maxSafeAge <= 2) return { label: "Срочно", cls: "critical" };
-            if (Number.isFinite(plan.maxSafeAge) && plan.maxSafeAge <= 7) return { label: "Высоко", cls: "high" };
-            if (plan.shkCount >= 100) return { label: "Средне", cls: "medium" };
-            return { label: "Наблюдать", cls: "" };
-        };
-        const statusPriorities = Array.from(statusPlanMap.values()).sort((a, b) => {
-            if (a.missingTerm !== b.missingTerm) return a.missingTerm ? -1 : 1;
-            if (Boolean(a.overdueSafeShk) !== Boolean(b.overdueSafeShk)) return a.overdueSafeShk ? -1 : 1;
-            const aSafe = Number.isFinite(a.maxSafeAge) ? a.maxSafeAge : 999;
-            const bSafe = Number.isFinite(b.maxSafeAge) ? b.maxSafeAge : 999;
-            if (aSafe !== bSafe) return aSafe - bSafe;
-            if (a.overdueSafeShk !== b.overdueSafeShk) return b.overdueSafeShk - a.overdueSafeShk;
-            if (a.shkCount !== b.shkCount) return b.shkCount - a.shkCount;
-            return normalizeText(a.status).localeCompare(normalizeText(b.status), "ru");
-        }).map((plan, index) => {
-            const tier = statusTier(plan);
-            const moduleLabels = Array.from(plan.modules.values())
-                .sort((a, b) => b.shkCount - a.shkCount)
-                .slice(0, 4)
-                .map((row) => (moduleDef(row.module).label || row.module) + " — " + row.shkCount + " ШК");
-            const safeText = plan.missingTerm
-                ? "срок списания не задан"
-                : "безопасный максимум " + plan.maxSafeAge + " дн.";
-            const overdueText = plan.overdueSafeShk > 0 ? ", за безопасным окном " + plan.overdueSafeShk + " ШК" : "";
-            return {
-                ...plan,
-                rank: index + 1,
-                tierLabel: tier.label,
-                tierClass: tier.cls,
-                moduleLabels,
-                reason: safeText + "; хвост " + plan.shkCount + " ШК" + overdueText + ".",
-            };
-        });
-        const statusPriorityRank = new Map(statusPriorities.map((row) => [row.status, row.rank]));
-        const statusPriorityByStatus = new Map(statusPriorities.map((row) => [row.status, row]));
-        const modulePlans = new Map();
-        Array.from(moduleSet).forEach((module) => {
-            const def = moduleDef(module);
-            const currentAge = uploadAgeFromOffset(def.offsetDays);
-            const active = activeByModule.get(module) || { rows: [], byStatus: new Map(), activeTasks: 0, activeShk: 0, priceSum: 0, overdueSafe: 0 };
-            const statuses = Array.from(active.byStatus.values()).sort((a, b) => {
-                const aRank = statusPriorityRank.get(a.status) || 9999;
-                const bRank = statusPriorityRank.get(b.status) || 9999;
-                if (aRank !== bRank) return aRank - bRank;
-                const aSafe = a.maxSafeAge === null ? 999 : a.maxSafeAge;
-                const bSafe = b.maxSafeAge === null ? 999 : b.maxSafeAge;
-                if (aSafe !== bSafe) return aSafe - bSafe;
-                return b.shkCount - a.shkCount;
-            });
-            const runAverage = averageRunTasksForModule(module);
-            const capacity = capacityByModule.get(module) || { capacity: Math.max(20, Math.ceil(active.activeShk / 3)), source: "fallback" };
-            const expectedNew = runAverage.average || Math.max(0, Math.ceil(active.activeShk / 3));
-            const pressure = (active.activeShk + expectedNew) / Math.max(1, capacity.capacity);
-            const isProblem = Boolean(active.overdueSafe > 0 || pressure >= 1.5 || active.activeShk >= capacity.capacity);
-            const topStatusLabels = statuses
-                .slice(0, 3)
-                .map((row) => row.status + " — " + row.shkCount + " ШК")
-                .filter(Boolean);
-            const severity = (active.overdueSafe * 1000) + (pressure * 100) + active.activeShk;
-            const reason = active.overdueSafe > 0
-                ? "Есть задачи за безопасным окном: " + active.overdueSafe + ". Хвост: " + active.activeShk + " ШК; мощность: " + capacity.capacity + " ШК/день."
-                : pressure >= 1.5
-                    ? "Хвост + средняя выгрузка выше мощности в " + Math.round(pressure * 10) / 10 + " раза. Хвост: " + active.activeShk + " ШК; ожидается еще ~" + expectedNew + "."
-                    : active.activeShk >= capacity.capacity
-                        ? "Хвост уже равен или выше дневной мощности. Хвост: " + active.activeShk + " ШК; мощность: " + capacity.capacity + " ШК/день."
-                        : "Участок в рабочем режиме.";
-            modulePlans.set(module, {
-                module,
-                moduleLabel: def.label || module,
-                def,
-                currentAge,
-                active,
-                statuses,
-                focusStatusRow: statuses[0] || null,
-                runAverage,
-                capacity,
-                expectedNew,
-                pressure,
-                isProblem,
-                severity,
-                reason,
-                topStatusLabels,
-            });
-        });
-        const problemSections = Array.from(modulePlans.values())
-            .filter((plan) => plan.isProblem)
-            .sort((a, b) => b.severity - a.severity)
-            .slice(0, 6)
-            .map((plan) => ({
-                module: plan.module,
-                moduleLabel: plan.moduleLabel,
-                activeShk: plan.active.activeShk,
-                expectedNew: plan.expectedNew,
-                capacity: plan.capacity.capacity,
-                pressure: plan.pressure,
-                overdueSafe: plan.active.overdueSafe,
-                reason: plan.reason,
-                topStatusLabels: plan.topStatusLabels,
-            }));
-        const hasProblemOutsideModule = (module) => problemSections.some((target) => target.module !== module);
-        const recommendedAgeForStatusFocus = (plan, statusRow) => {
-            if (!statusRow) {
-                if (hasProblemOutsideModule(plan.module)) return Math.min(30, plan.currentAge + 1);
-                return plan.currentAge > 0 && plan.pressure <= 0.75 ? Math.max(0, plan.currentAge - 1) : plan.currentAge;
-            }
-            const maxSafeAge = Number.isFinite(statusRow.maxSafeAge) ? statusRow.maxSafeAge : Math.max(0, plan.currentAge);
-            const priority = statusPriorityByStatus.get(statusRow.status);
-            if (statusRow.missingTerm) return 0;
-            if (plan.currentAge > maxSafeAge) return maxSafeAge;
-            if (statusRow.overdueSafeShk > 0 || statusRow.overdueSafeTasks > 0) return maxSafeAge;
-            if (plan.isProblem && plan.pressure >= 2.4) return Math.min(maxSafeAge, Math.max(plan.currentAge, Math.ceil(maxSafeAge * 0.75), 1));
-            if (plan.isProblem || (priority && priority.rank <= 5)) return Math.min(maxSafeAge, Math.max(plan.currentAge, Math.ceil(maxSafeAge * 0.55), 1));
-            if (hasProblemOutsideModule(plan.module) && plan.pressure <= 1.1 && plan.currentAge < maxSafeAge) return Math.min(maxSafeAge, plan.currentAge + 1);
-            if (plan.pressure <= 0.75 && plan.currentAge > 0) return Math.max(0, plan.currentAge - 1);
-            return plan.currentAge;
-        };
-        const rows = [];
-        Array.from(moduleSet).forEach((module) => {
-            const plan = modulePlans.get(module);
-            const def = plan.def;
-            const currentAge = plan.currentAge;
-            const active = plan.active;
-            const statuses = plan.statuses;
-            const capacity = plan.capacity;
-            const expectedNew = plan.expectedNew;
-            const pressure = plan.pressure;
-            const focusStatusRow = plan.focusStatusRow;
-            const focusPriority = focusStatusRow ? statusPriorityByStatus.get(focusStatusRow.status) : null;
-            const focusRecommendedAge = recommendedAgeForStatusFocus(plan, focusStatusRow);
-            const rowsForModule = statuses.length ? statuses : [null];
-            rowsForModule.forEach((statusRow) => {
-                const hasStatus = Boolean(statusRow);
-                const maxSafeAge = hasStatus && Number.isFinite(statusRow.maxSafeAge) ? statusRow.maxSafeAge : Math.max(0, currentAge);
-                const missingTerm = hasStatus && statusRow.missingTerm;
-                const controlsDate = Boolean(hasStatus && focusStatusRow && normalizeText(statusRow.status) === normalizeText(focusStatusRow.status));
-                let recommendedAge = hasStatus ? focusRecommendedAge : recommendedAgeForStatusFocus(plan, null);
-                let note = "Оставить текущий срок: нагрузка похожа на нормальную.";
-                let risk = Boolean(controlsDate && (missingTerm || currentAge > maxSafeAge || statusRow.overdueSafeShk > 0 || statusRow.overdueSafeTasks > 0));
-                if (hasStatus && !controlsDate) {
-                    const focusLabel = focusStatusRow ? focusStatusRow.status + " (#" + (focusPriority ? focusPriority.rank : "-") + ")" : "нет фокусного статуса";
-                    note = "Этот статус не задает дату выгрузки. Срок участка сейчас задает более приоритетный статус: " + focusLabel + ".";
-                } else if (!hasStatus) {
-                    const hasOtherProblem = hasProblemOutsideModule(module);
-                    note = currentAge > recommendedAge
-                        ? "Активного хвоста нет. Можно на день вернуть выгрузку ближе к онлайну."
-                        : hasOtherProblem && recommendedAge > currentAge
-                            ? "Активного хвоста нет. Временно не открываем свежий срез, чтобы смена ушла в проблемные участки."
-                            : "Активного хвоста нет. Срок можно не трогать.";
-                } else if (missingTerm) {
-                    risk = true;
-                    note = "По статусу нет срока списания. Пока безопаснее выгружать максимально близко к онлайну.";
-                } else if (currentAge > maxSafeAge) {
-                    risk = true;
-                    note = "Текущий срок оставляет меньше 2 дней до списания. Нужно подтянуть ближе к безопасному максимуму.";
-                } else if (statusRow.overdueSafeShk > 0 || statusRow.overdueSafeTasks > 0) {
-                    risk = true;
-                    note = "Фокусный статус уже за безопасным окном. Берем срез по нему и не даем длинным статусам перетянуть дату.";
-                } else if (plan.isProblem && pressure >= 1.5) {
-                    note = "Участок перегружен, но дату задает не участок целиком, а фокусный статус по глобальному рейтингу.";
-                } else if (hasProblemOutsideModule(module) && pressure <= 1.1 && recommendedAge > currentAge) {
-                    note = "Участок не в красной зоне. Временно притормаживаем свежую выгрузку, чтобы отдать смену проблемным участкам.";
-                } else if (pressure <= 0.75 && currentAge > 0) {
-                    note = "Нагрузка ниже мощности. Можно на день вернуться ближе к онлайну.";
-                } else if (currentAge === 0) {
-                    note = "Онлайн-режим выдерживается: сегодня берем сегодняшнюю дату.";
-                }
-                recommendedAge = Math.max(0, hasStatus && controlsDate ? Math.min(recommendedAge, maxSafeAge) : recommendedAge);
-                const recommendedOffset = uploadOffsetFromAge(recommendedAge);
-                const diff = recommendedAge - currentAge;
-                const changeLabel = diff === 0
-                    ? "без изменения"
-                    : diff > 0
-                        ? "отодвинуть на " + diff + " дн."
-                        : "вернуть ближе на " + Math.abs(diff) + " дн.";
-                const driverTerm = hasStatus && Number.isFinite(statusRow.termDays) ? statusRow.termDays : null;
-                rows.push({
-                    module,
-                    moduleLabel: def.label || module,
-                    driverStatus: hasStatus ? statusRow.status : "Нет активного хвоста",
-                    writeoffTermLabel: !hasStatus ? "нет активного статуса" : driverTerm === null ? "срок не задан" : driverTerm + " дн.; безопасный максимум " + maxSafeAge + " дн.",
-                    currentAge,
-                    currentOffset: uploadOffsetFromAge(currentAge),
-                    currentLabel: uploadAgeLabel(currentAge),
-                    recommendedAge,
-                    recommendedOffset,
-                    recommendedLabel: uploadAgeLabel(recommendedAge),
-                    changeLabel,
-                    recommendedBusinessDate: addDays(state.today, -recommendedAge),
-                    currentBusinessDate: addDays(state.today, -currentAge),
-                    activeTasks: hasStatus ? statusRow.taskCount : 0,
-                    activeShk: hasStatus ? statusRow.shkCount : 0,
-                    expectedNew,
-                    capacity: capacity.capacity,
-                    pressure,
-                    loadLabel: active.activeShk + " в хвосте + ~" + expectedNew + " из выгрузки / " + capacity.capacity + " ШК/день",
-                    problemModule: plan.isProblem,
-                    moduleProblemReason: plan.reason,
-                    moduleTopStatusLabels: plan.topStatusLabels,
-                    controlsDate,
-                    statusPriorityRank: hasStatus ? statusPriorityRank.get(statusRow.status) || null : null,
-                    statusPriorityLabel: hasStatus && statusPriorityByStatus.get(statusRow.status) ? statusPriorityByStatus.get(statusRow.status).tierLabel : "",
-                    focusDriverStatus: focusStatusRow ? focusStatusRow.status : "",
-                    focusPriorityRank: focusPriority ? focusPriority.rank : null,
-                    risk,
-                    note,
-                });
-            });
-        });
-        rows.sort((a, b) => {
-            if (a.risk !== b.risk) return a.risk ? -1 : 1;
-            const aRank = a.statusPriorityRank || 9999;
-            const bRank = b.statusPriorityRank || 9999;
-            if (aRank !== bRank) return aRank - bRank;
-            if (a.moduleLabel !== b.moduleLabel) return a.moduleLabel.localeCompare(b.moduleLabel, "ru");
-            if (a.controlsDate !== b.controlsDate) return a.controlsDate ? -1 : 1;
-            if (a.recommendedAge !== b.recommendedAge) return b.recommendedAge - a.recommendedAge;
-            return normalizeText(a.driverStatus).localeCompare(normalizeText(b.driverStatus), "ru");
-        });
-        const focusCandidates = statusPriorities.slice(0, 5);
-        const focusName = (row) => "#" + row.rank + " " + row.status;
-        rows.forEach((row) => {
-            const targets = focusCandidates.filter((target) => normalizeText(target.status) !== normalizeText(row.driverStatus)).slice(0, 3);
-            if (row.recommendedAge > row.currentAge) {
-                if (row.controlsDate) {
-                    row.focusLabel = "Дату участка задает статус #" + (row.statusPriorityRank || "-") + " " + row.driverStatus + ".";
-                } else {
-                    row.focusLabel = "Не рулит датой: участок следует статусу #" + (row.focusPriorityRank || "-") + " " + (row.focusDriverStatus || "-") + ".";
-                }
-            } else if (row.recommendedAge < row.currentAge) {
-                row.focusLabel = targets.length
-                    ? "Возвращаем ближе к онлайну: это не мешает статусам " + targets.map(focusName).join("; ") + "."
-                    : "Возвращаем ближе к онлайну: кризисного упора рядом нет.";
-            } else if (targets.length) {
-                row.focusLabel = row.controlsDate
-                    ? "Статус держим в фокусе: #" + (row.statusPriorityRank || "-") + " " + row.driverStatus + "."
-                    : "Срок задает #" + (row.focusPriorityRank || "-") + " " + (row.focusDriverStatus || "-") + ".";
-            } else {
-                row.focusLabel = "Отдельного кризисного упора нет.";
-            }
-            const gapDate = firstMissingUploadDate(row.module, row.recommendedBusinessDate);
-            row.effectiveRecommendedBusinessDate = gapDate || row.recommendedBusinessDate;
-            row.gapLabel = gapDate && gapDate !== row.recommendedBusinessDate
-                ? "Сначала догоняем разрыв: " + formatRuDate(gapDate)
-                : "";
-        });
-        const summary = {
-            activeTasks: planningRows.length,
-            ruleCount: rows.length,
-            moveOnlineCount: rows.filter((row) => row.recommendedAge < row.currentAge).length,
-            deferCount: rows.filter((row) => row.recommendedAge > row.currentAge).length,
-            riskCount: rows.filter((row) => row.risk).length,
-            problemCount: problemSections.length,
-            priorityStatusCount: statusPriorities.length,
-        };
-        return { rows, capacityRows, problemSections, statusPriorities, summary };
-    }
-
-    async function refreshWriteoffRecommendations() {
-        const reco = state.writeoffTerms.recommendations;
-        const button = $("refreshWriteoffRecommendations");
-        const status = $("writeoffTermsStatus");
-        const applyButton = $("applyWriteoffRecommendations");
-        reco.loading = true;
-        reco.error = "";
-        reco.rows = [];
-        reco.capacityRows = [];
-        reco.problemSections = [];
-        reco.statusPriorities = [];
-        reco.summary = null;
-        if (button) button.disabled = true;
-        if (applyButton) applyButton.disabled = true;
-        if (status) status.textContent = "Считаю рекомендованные даты выгрузки и разбора...";
-        renderWriteoffTermsModal();
-        try {
-            await ensureReviewTasksLoaded();
-            const activeRows = (state.review.rows || []).filter(isActiveReviewTask);
-            const completedRows = await fetchManualCompletedTasksForPlanning();
-            const result = buildWriteoffRecommendations(activeRows, completedRows);
-            reco.rows = result.rows;
-            reco.capacityRows = result.capacityRows;
-            reco.problemSections = result.problemSections || [];
-            reco.statusPriorities = result.statusPriorities || [];
-            reco.summary = result.summary;
-            reco.generatedAt = new Date().toISOString();
-            if (status) status.textContent = "Рекомендации готовы. Это расчетный план: он ничего не меняет в задачах автоматически.";
-        } catch (error) {
-            const message = error && error.message ? error.message : String(error);
-            reco.error = "Не удалось рассчитать рекомендации: " + message;
-            if (status) status.textContent = reco.error;
-        } finally {
-            reco.loading = false;
-            if (button) button.disabled = false;
-            if (applyButton) applyButton.disabled = false;
-            renderWriteoffTermsModal();
-        }
-    }
-
-    function buildWriteoffRecommendationApplyRows() {
-        const recoRows = Array.isArray(state.writeoffTerms.recommendations.rows) ? state.writeoffTerms.recommendations.rows : [];
-        const byModule = new Map();
-        recoRows.forEach((row) => {
-            if (!row || !row.module) return;
-            const current = byModule.get(row.module);
-            const recommendedAge = Math.max(0, Math.trunc(settingNumber(row.recommendedAge, 0)));
-            const recommendedOffset = uploadOffsetFromAge(recommendedAge);
-            const candidate = {
-                module: row.module,
-                recommendedAge,
-                recommendedOffset,
-                rows: [row],
-            };
-            if (!current) {
-                byModule.set(row.module, candidate);
-                return;
-            }
-            current.rows.push(row);
-            if (recommendedAge < current.recommendedAge) {
-                current.recommendedAge = recommendedAge;
-                current.recommendedOffset = recommendedOffset;
-            }
-        });
-        return Array.from(byModule.values()).map((item) => {
-            const def = moduleDef(item.module);
-            const targetDate = addDays(state.today, item.recommendedOffset);
-            const effectiveDate = firstMissingUploadDate(item.module, targetDate);
-            const uniqueAges = Array.from(new Set(item.rows.map((row) => row.recommendedAge))).sort((a, b) => a - b);
-            return {
-                module: item.module,
-                label: def.label || item.module,
-                source_module: def.sourceModule || item.module,
-                upload_type: def.uploadType || item.module,
-                upload_offset_days: item.recommendedOffset,
-                task_deadline_days: settingNumber(def.taskDeadlineDays, 1),
-                is_required: def.required !== false,
-                responsibility_zone: def.responsibilityZone || "Исходящий поток",
-                description: def.description || "",
-                sort_order: Number(def.sortOrder) || DEFAULT_MODULES.findIndex((row) => row.module === item.module) + 1 || 100,
-                current_offset_days: Number(def.offsetDays || 0),
-                recommended_age: item.recommendedAge,
-                target_date: targetDate,
-                effective_date: effectiveDate,
-                has_gap: Boolean(effectiveDate && targetDate && effectiveDate !== targetDate),
-                status_conflict: uniqueAges.length > 1,
-                reason: item.rows.map((row) => row.focusLabel || row.note || "").filter(Boolean).slice(0, 3).join(" "),
-            };
-        }).filter((row) => row.upload_offset_days !== row.current_offset_days);
-    }
-
-    function applyUploadSettingsToState(rows) {
-        (rows || []).forEach((row) => {
-            const current = moduleDef(row.module);
-            state.settings.set(row.module, {
-                ...current,
-                module: row.module,
-                label: normalizeText(row.label) || current.label,
-                sourceModule: normalizeText(row.source_module) || current.sourceModule,
-                uploadType: normalizeText(row.upload_type) || current.uploadType,
-                offsetDays: settingNumber(row.upload_offset_days, current.offsetDays),
-                taskDeadlineDays: settingNumber(row.task_deadline_days, current.taskDeadlineDays),
-                required: row.is_required !== false,
-                responsibilityZone: normalizeText(row.responsibility_zone) || current.responsibilityZone,
-                description: normalizeText(row.description) || current.description,
-                sortOrder: Number(row.sort_order) || current.sortOrder || 100,
-            });
-        });
-    }
-
-    async function applyWriteoffRecommendationsFromModal() {
-        const status = $("writeoffTermsStatus");
-        const button = $("applyWriteoffRecommendations");
-        const reco = state.writeoffTerms.recommendations || {};
-        if (!Array.isArray(reco.rows) || !reco.rows.length) {
-            if (status) status.textContent = "Сначала рассчитайте рекомендации.";
-            return;
-        }
-        const rows = buildWriteoffRecommendationApplyRows();
-        if (!rows.length) {
-            if (status) status.textContent = "Применять нечего: настройки уже совпадают с рекомендациями.";
-            return;
-        }
-        const db = supabaseDb();
-        if (button) button.disabled = true;
-        if (status) status.textContent = "Применяю рекомендации: обновляю сроки выгрузок и пересчитываю даты мастера...";
-        try {
-            if (!db) throw new Error("Supabase SDK недоступен.");
-            const { error } = await db.rpc("apply_wms_upload_offsets", { p_rows: rows });
-            if (error) throw error;
-            applyUploadSettingsToState(rows);
-            state.manualDate = "";
-            renderCalendar();
-            renderModuleChooser();
-            if ($("masterWork") && $("masterWork").classList.contains("active")) {
-                renderMasterSlots();
-            }
-            const gaps = rows.filter((row) => row.has_gap);
-            const conflicts = rows.filter((row) => row.status_conflict);
-            if (status) {
-                status.textContent = "Применено: " + rows.length + " модулей. Мастер выгрузок теперь берет новые даты."
-                    + (gaps.length ? "\nЕсть догонка разрывов: " + gaps.map((row) => row.label + " сначала за " + formatRuDate(row.effective_date)).join("; ") + "." : "")
-                    + (conflicts.length ? "\nВнутри некоторых участков были разные рекомендации по статусам, применен самый безопасный срок: " + conflicts.map((row) => row.label).join(", ") + "." : "");
-            }
-            toast("Рекомендации применены. Мастер выгрузок уже смотрит на новые даты.", "good");
-        } catch (error) {
-            const message = error && error.message ? error.message : String(error);
-            if (status) status.textContent = "Не удалось применить рекомендации: " + message + "\nЕсли RPC еще не создана, примени новую SQL-миграцию apply_wms_upload_offsets.";
-        } finally {
-            if (button) button.disabled = false;
-        }
     }
 
     function mergeUploadRuns(rows) {
@@ -16939,7 +16177,7 @@
         const tags = mergeTags(options.tags || [], specialInfos);
         const taskItems = taskItemsFromSourceRows(options.rows);
         const itemName = itemNameFromRows(options.rows);
-        const writeoffInfo = writeoffDateInfoForRows(options.rows, options.dueDate);
+        const writeoffInfo = writeoffDateInfoForRows(options.rows, options.dueDate, sourceFormatFromSourceModule(options.sourceModule));
         // Precomputed so list views (Review/Requests table, filter
         // dropdowns) can be answered from a few bytes instead of needing
         // the full task_items array -- see taskStatusCodeLabel/
@@ -20570,7 +19808,6 @@
         $("openReview").addEventListener("click", showReviewPage);
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
-        $("openWriteoffTerms").addEventListener("click", () => { void openWriteoffTermsModal(); });
         $("openReviewZonesFromStatus").addEventListener("click", () => { void openReviewZonesModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
@@ -20631,7 +19868,6 @@
             state.staffStats.selectedKey = "";
             void loadStaffStats();
         });
-        $("closeWriteoffTerms").addEventListener("click", closeWriteoffTermsModal);
         $("closeRoutingRules").addEventListener("click", closeRoutingRulesModal);
         $("addRoutingRule").addEventListener("click", addRoutingRuleDraft);
         $("saveRoutingRules").addEventListener("click", () => { void saveRoutingRulesFromModal(); });
@@ -20647,10 +19883,6 @@
         $("addReviewZone").addEventListener("click", addReviewZoneDraft);
         $("saveReviewZones").addEventListener("click", () => { void saveReviewZonesFromModal(); });
         $("reloadReviewZones").addEventListener("click", () => { void loadReviewZones(true); });
-        $("reloadWriteoffTerms").addEventListener("click", () => { void loadStatusDictionary(true).then(() => renderWriteoffTermsModal()); });
-        $("recalculateWriteoffDates").addEventListener("click", () => { void recalculateWriteoffDatesFromModal(); });
-        $("refreshWriteoffRecommendations").addEventListener("click", () => { void refreshWriteoffRecommendations(); });
-        $("applyWriteoffRecommendations").addEventListener("click", () => { void applyWriteoffRecommendationsFromModal(); });
         $("closeFlowSkip").addEventListener("click", closeFlowSkipModal);
         $("cancelFlowSkip").addEventListener("click", closeFlowSkipModal);
         $("flowSkipReason").addEventListener("input", updateFlowSkipForm);
@@ -20815,7 +20047,6 @@
         $("flowSettingsModal").addEventListener("click", (event) => { if (event.target === $("flowSettingsModal")) closeFlowSettingsModal(); });
         $("statusPilotModal").addEventListener("click", (event) => { if (event.target === $("statusPilotModal")) closeStatusPilotModal(); });
         $("staffStatsModal").addEventListener("click", (event) => { if (event.target === $("staffStatsModal")) closeStaffStatsModal(); });
-        $("writeoffTermsModal").addEventListener("click", (event) => { if (event.target === $("writeoffTermsModal")) closeWriteoffTermsModal(); });
         $("routingRulesModal").addEventListener("click", (event) => { if (event.target === $("routingRulesModal")) closeRoutingRulesModal(); });
         $("pmCarrierModal").addEventListener("click", (event) => { if (event.target === $("pmCarrierModal")) setFlowModalOpen("pmCarrierModal", false); });
         $("reviewZonesModal").addEventListener("click", (event) => { if (event.target === $("reviewZonesModal")) closeReviewZonesModal(); });
@@ -20852,7 +20083,6 @@
                 || $("flowSkipModal").classList.contains("active")
                 || $("flowConflictModal").classList.contains("active")
                 || $("flowSettingsModal").classList.contains("active")
-                || $("writeoffTermsModal").classList.contains("active")
                 || $("editTareTaskModal").classList.contains("active")
                 || $("deferTaskModal").classList.contains("active")
                 || $("rememberShkModal").classList.contains("active")

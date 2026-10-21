@@ -2068,11 +2068,6 @@
                     <h2 class="tasks-action-title">Флоу</h2>
                     <p class="tasks-action-text">Единая умная очередь: WMS+ сам выбирает следующую задачу по риску, зоне и срочности.</p>
                 </button>
-                <button id="openWriteoffTerms" class="tasks-action-card" type="button" data-dev-only>
-                    <span class="tasks-action-icon">⌛</span>
-                    <h2 class="tasks-action-title">Рекомендации по срезам</h2>
-                    <p class="tasks-action-text">Рекомендации по срезам выгрузки на основе нагрузки участков. Сроки списания -- в экране "Маршрутизатор".</p>
-                </button>
                 <button id="openDebugSandbox" class="tasks-action-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">🛠</span>
                     <h2 class="tasks-action-title">Отладка</h2>
@@ -2933,25 +2928,6 @@
 
 <div id="noShkTooltip" class="no-shk-tooltip" role="tooltip"></div>
 
-<section id="writeoffTermsModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card tasks-flow-card-wide">
-        <div class="work-head">
-            <div>
-                <h3 class="work-title">Рекомендации по срезам</h3>
-                <p class="work-subtitle">Сроки списания по статусам редактируются в экране "Маршрутизатор" -- здесь расчёт рекомендаций по срезам выгрузки на основе нагрузки участков.</p>
-            </div>
-            <button id="closeWriteoffTerms" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
-        </div>
-        <div id="writeoffTermsWrap" class="writeoff-terms-wrap"></div>
-        <div class="file-row">
-            <button id="reloadWriteoffTerms" class="btn btn-outline" type="button">Обновить из Supabase</button>
-            <button id="recalculateWriteoffDates" class="btn btn-outline" type="button">Пересчитать активные задачи</button>
-            <button id="refreshWriteoffRecommendations" class="btn btn-outline" type="button">Рассчитать рекомендации</button>
-            <button id="applyWriteoffRecommendations" class="btn btn-rect" type="button">Применить рекомендации</button>
-        </div>
-        <div id="writeoffTermsStatus" class="review-status"></div>
-    </div>
-</section>
 
 <section id="routingRulesModal" class="tasks-flow-modal upload-work" aria-hidden="true">
     <div class="tasks-flow-card tasks-flow-card-wide">
