@@ -318,6 +318,13 @@
         .day-progress { display: block; margin-top: 6px; font-size: 12px; color: #475569; }
         .calendar-tooltip { display: none; position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 9999; width: 240px; max-height: min(320px, 70vh); overflow-y: auto; padding: 10px; border-radius: 12px; background: #242038; color: #fff; box-shadow: var(--shadow-md); font-size: 12px; }
         .calendar-day:hover .calendar-tooltip, .backfill-day:hover .calendar-tooltip { display: block; }
+        /* Чисто CSS, без JS/событий -- крайние колонки сетки (Пн/Вс)
+           прижимают тултип к своей стороне вместо центрирования, иначе
+           обрезается о край экрана. */
+        .calendar-grid .calendar-day:nth-child(7n+1) .calendar-tooltip,
+        .calendar-grid .backfill-day:nth-child(7n+1) .calendar-tooltip { left: 0; transform: none; }
+        .calendar-grid .calendar-day:nth-child(7n) .calendar-tooltip,
+        .calendar-grid .backfill-day:nth-child(7n) .calendar-tooltip { left: auto; right: 0; transform: none; }
         .tooltip-title { display: block; margin-bottom: 6px; font-weight: 900; }
         .tooltip-line { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
         .tooltip-dot { width: 8px; height: 8px; border-radius: 99px; background: #ef4444; flex: 0 0 auto; }
