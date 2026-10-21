@@ -1973,13 +1973,24 @@
         return "<span class='calendar-tooltip'><span class='tooltip-title'>" + formatRuDate(isoDate) + "</span>" + lines + "</span>";
     }
 
-    // Та же пара "класс по доле покрытых" + "тултип со списком" для
-    // календаря покрытия по статусам в Маршрутизаторе (вид "Выгрузки") --
-    // один календарь на source_format, считает по статусам этого
-    // формата, помеченным "обязателен" (is_required_for_coverage), а не
-    // по модулям, но переиспользует ВСЮ ту же визуальную механику
-    // (.calendar-grid/.calendar-day/.tooltip-*), что и основной календарь
-    // выше, по просьбе пользователя "один в один".
+    // Один календарь на ВСЕ обязательные статусы разом (across все
+    // source_format), на главном экране "Выгрузки", прямо под основным
+    // календарём -- та же визуальная механика (.calendar-grid/
+    // .calendar-day/.tooltip-*), что и у него, по просьбе пользователя
+    // "один в один". Каждая группа статуса несёт свой source_format --
+    // нужно для подписи в тултипе (один и тот же код статуса в принципе
+    // может встретиться в разных форматах).
+    function requiredCoverageStatusesAllFormats() {
+        const formats = [...SOURCE_FORMAT_OPTIONS, ...STATUS_DICTIONARY_EXTRA_FORMATS].map((opt) => opt.value);
+        const items = [];
+        formats.forEach((fmt) => {
+            requiredCoverageStatusesForFormat(fmt).forEach((group) => {
+                items.push({ sourceFormat: fmt, statusCode: group.statusCode, units: group.units });
+            });
+        });
+        return items;
+    }
+
     function statusCoverageDayStatusClass(doneCount, total) {
         const required = Math.max(total || 1, 1);
         if (doneCount <= 0) return "status-gray";
@@ -1992,7 +2003,8 @@
         const missing = [];
         const done = [];
         statuses.forEach((item) => {
-            const label = item.statusCode === "*" ? "Прочее" : item.statusCode;
+            const code = item.statusCode === "*" ? "Прочее" : item.statusCode;
+            const label = code + " (" + sourceFormatLabel(item.sourceFormat) + ")";
             if (statusCoveredForDay(item.units, isoDate)) done.push(label);
             else missing.push(label);
         });
@@ -2002,21 +2014,21 @@
         return "<span class='calendar-tooltip'><span class='tooltip-title'>" + formatRuDate(isoDate) + "</span>" + lines + "</span>";
     }
 
-    function statusCoverageCalendarHtml(fmt) {
-        const statuses = requiredCoverageStatusesForFormat(fmt);
-        if (!statuses.length) return "";
+    function renderStatusCoverageCalendar() {
+        const grid = $("statusCoverageCalendarGrid");
+        if (!grid) return;
+        const statuses = requiredCoverageStatusesAllFormats();
         const range = state.calendarRange || buildCalendarRange();
-        const weekdaysHtml = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => "<div class='weekday'>" + day + "</div>").join("");
-        const daysHtml = datesBetween(range.start, range.end).map((isoDate) => {
-            const doneCount = statuses.filter((item) => statusCoveredForDay(item.units, isoDate)).length;
-            return "<button type='button' class='calendar-day " + statusCoverageDayStatusClass(doneCount, statuses.length) + "'>"
-                + "<span class='day-number'>" + Number(isoDate.slice(8, 10)) + "</span>"
-                + "<span class='day-progress'>" + doneCount + "/" + statuses.length + "</span>"
-                + statusCoverageTooltipHtml(isoDate, statuses)
-                + "</button>";
-        }).join("");
-        return "<div class='routing-rule-section-heading' style='margin-top:14px;'>Покрытие статусов</div>"
-            + "<div class='calendar-grid'>" + weekdaysHtml + daysHtml + "</div>";
+        const html = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => "<div class='weekday'>" + day + "</div>").join("")
+            + datesBetween(range.start, range.end).map((isoDate) => {
+                const doneCount = statuses.filter((item) => statusCoveredForDay(item.units, isoDate)).length;
+                return "<button type='button' class='calendar-day " + statusCoverageDayStatusClass(doneCount, statuses.length) + "'>"
+                    + "<span class='day-number'>" + Number(isoDate.slice(8, 10)) + "</span>"
+                    + "<span class='day-progress'>" + doneCount + "/" + statuses.length + "</span>"
+                    + statusCoverageTooltipHtml(isoDate, statuses)
+                    + "</button>";
+            }).join("");
+        grid.innerHTML = html;
     }
 
     function renderCalendar() {
@@ -2033,6 +2045,7 @@
                     + "</button>";
             }).join("");
         $("calendarGrid").innerHTML = html;
+        renderStatusCoverageCalendar();
     }
 
     function renderBackfillCalendar() {
@@ -12988,7 +13001,6 @@
                 return "<div class='routing-rule-section-group'>"
                     + "<div class='routing-rule-section-heading'>" + escapeHtml(opt.label) + " (" + group.length + ")</div>"
                     + "<div class='routing-rule-summary-list'>" + group.map((item) => statusDictionarySummaryRowHtml(item.row, item.index)).join("") + "</div>"
-                    + statusCoverageCalendarHtml(opt.value)
                     + "</div>";
             }).join("");
         wireStatusDictionarySummaryRows(target);
