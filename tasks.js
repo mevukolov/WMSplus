@@ -13003,7 +13003,17 @@
         if (button) button.disabled = true;
         if (status) status.textContent = "Сохраняю словарь...";
         try {
-            const { error } = await db.from("wms_status_dictionary").upsert(rows, { onConflict: "source_format,status_code" });
+            // onConflict на id (не на source_format,status_code) -- иначе
+            // правка формата у СУЩЕСТВУЮЩЕЙ строки (тот же id, новая пара
+            // формат+код) не матчится ни с одной текущей строкой по старому
+            // ключу конфликта, апсерт пытается ВСТАВИТЬ новую строку с уже
+            // занятым id и падает на wms_status_dictionary_pkey. id у каждой
+            // строки уже есть/назначается выше -- конфликт по нему всегда
+            // корректно бьёт в ЭТУ ЖЕ строку, независимо от того, что в ней
+            // поменялось. Уникальность (формат,код) всё равно защищена
+            // отдельным constraint -- настоящий дубль всё ещё даст ошибку,
+            // просто без молчаливой подмены id чужой строки.
+            const { error } = await db.from("wms_status_dictionary").upsert(rows, { onConflict: "id" });
             if (error) throw error;
             state.statusDictionary.loaded = false;
             await loadStatusDictionary(true);
