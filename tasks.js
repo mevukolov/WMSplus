@@ -16881,9 +16881,18 @@
             return decided ? decided.zone === "RWP" : packagingFallbackIsRwp(row.last_status);
         }
 
+        // Приоритет: совпавшее правило -> словарная запись статуса
+        // (как у "В заказе"/"Без заказа") -> жёсткий дефолт модуля
+        // (Упаковка -7 / RWP -4), только если и статуса нет в словаре.
+        // Раньше словарь тут вообще не читался -- для простого случая
+        // (один срок на статус, без условий) приходилось обязательно
+        // заводить правило, хотя для остальных форматов хватало одной
+        // записи в словаре.
         function offsetDaysForRow(row, defForRow) {
             const decided = decidedByRow.get(row);
-            return decided && Number.isFinite(decided.uploadOffsetDays) ? decided.uploadOffsetDays : Number(defForRow.offsetDays || 0);
+            if (decided && Number.isFinite(decided.uploadOffsetDays)) return decided.uploadOffsetDays;
+            const fallbackEntry = statusDictionaryEntry("packaging", sourceStatusCode(row.last_status).toUpperCase()) || statusDictionaryCatchAll("packaging");
+            return fallbackEntry ? Number(fallbackEntry.default_upload_offset_days) || 0 : Number(defForRow.offsetDays || 0);
         }
 
         // businessDate -- якорь "сегодня" для этого запуска (не сдвинутая
