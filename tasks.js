@@ -19422,7 +19422,7 @@
             renderPrespisokPlay();
         } catch (error) {
             console.error("prespisok action failed:", error);
-            if (status) status.textContent = "Не удалось применить вердикт: " + (error && error.message ? error.message : String(error));
+            if (status) status.textContent = "Не удалось применить вердикт: " + errorText(error);
             if (submit) submit.disabled = false;
         }
     }
