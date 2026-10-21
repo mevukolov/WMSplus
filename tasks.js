@@ -1532,6 +1532,13 @@
     // пол также не опускается ниже самого старого известного рана модуля.
     const GAP_SEARCH_HORIZON_DAYS = 21;
 
+    function runMatchesModuleBranch(run, module) {
+        const def = moduleDef(module);
+        if (!def) return false;
+        return normalizeText(run && run.source_module) === normalizeText(def.sourceModule)
+            && normalizeText(run && run.upload_type) === normalizeText(def.uploadType);
+    }
+
     function earliestKnownRunDateForModule(module) {
         let earliest = "";
         (state.runs || []).forEach((run) => {
