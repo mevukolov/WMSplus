@@ -20411,7 +20411,6 @@
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
         $("openWriteoffTerms").addEventListener("click", () => { void openWriteoffTermsModal(); });
-        $("openRoutingRules").addEventListener("click", () => { void openRoutingRulesModal(); });
         $("openReviewZones").addEventListener("click", () => { void openReviewZonesModal(); });
         $("taskSearchInput").addEventListener("input", scheduleTaskSearch);
         $("taskSearchInput").addEventListener("focus", () => {
