@@ -1774,8 +1774,11 @@
     // любой другой, обрабатывается без особого случая. Только
     // output_key='zone' правила формата считаются -- filter-правила не
     // маршрутизируют и не несут самостоятельного срока разбора.
-    function requiredStatusUnitsForModule(module) {
-        const fmt = sourceFormatForModule(module);
+    // Единицы покрытия для ЦЕЛОГО формата -- requiredStatusUnitsForModule
+    // просто подставляет сюда sourceFormatForModule(module). Вынесена
+    // отдельно, т.к. календарю покрытия по статусам (Маршрутизатор,
+    // вид "Выгрузки") нужны единицы per-формат без привязки к модулю.
+    function requiredStatusUnitsForFormat(fmt) {
         const units = [];
         (state.statusDictionary.rows || []).forEach((entry) => {
             if (entry.source_format !== fmt || entry.is_required_for_coverage === false || entry.is_active === false) return;
@@ -1787,6 +1790,23 @@
             }
         });
         return units;
+    }
+
+    function requiredStatusUnitsForModule(module) {
+        return requiredStatusUnitsForFormat(sourceFormatForModule(module));
+    }
+
+    // Статусы этого формата, сгруппированные из requiredStatusUnitsForFormat
+    // (один статус может нести несколько единиц -- по одной на каждое
+    // активное правило). Источник для календаря покрытия по статусам.
+    function requiredCoverageStatusesForFormat(fmt) {
+        const byStatus = new Map();
+        requiredStatusUnitsForFormat(fmt).forEach((unit) => {
+            const group = byStatus.get(unit.statusCode) || { statusCode: unit.statusCode, units: [] };
+            group.units.push(unit);
+            byStatus.set(unit.statusCode, group);
+        });
+        return Array.from(byStatus.values());
     }
 
     // Самый мелкий (ближе к нулю) потолок среди единиц покрытия -- если
@@ -1808,10 +1828,15 @@
     // принцип для ВСЕХ модулей -- день закрыт, когда закрыты все
     // обязательные единицы покрытия формата, каждая начиная со своего
     // дня дозревания.
-    function dayCoveredForModule(module, isoDate) {
-        const units = requiredStatusUnitsForModule(module);
-        if (!units.length) return Boolean(runForUpload(module, isoDate));
-        const earliestCeiling = addDays(state.today, shallowestOffsetAmongUnits(units, module));
+    // Общее ядро "покрыт ли день этим набором единиц" -- используется и
+    // dayCoveredForModule (единицы всего формата, с фоллбэком на
+    // runForUpload при пустом наборе), и statusCoveredForDay (единицы
+    // ОДНОГО статуса, без модульного фоллбэка -- пустой набор туда не
+    // попадает, т.к. requiredCoverageStatusesForFormat уже выдаёт только
+    // статусы хотя бы с одной единицей).
+    function unitsCoveredForDay(units, isoDate) {
+        if (!units.length) return false;
+        const earliestCeiling = addDays(state.today, shallowestOffsetAmongUnits(units));
         if (earliestCeiling && isoDate > earliestCeiling) return false;
         const dates = state.coverageLog.dates;
         if (!dates) return false;
@@ -1822,6 +1847,19 @@
             const set = dates.get(key);
             return Boolean(set && set.has(isoDate));
         });
+    }
+
+    function dayCoveredForModule(module, isoDate) {
+        const units = requiredStatusUnitsForModule(module);
+        if (!units.length) return Boolean(runForUpload(module, isoDate));
+        return unitsCoveredForDay(units, isoDate);
+    }
+
+    // Один статус считается покрытым за день, когда покрыты ВСЕ его
+    // единицы (как и для модуля -- если у статуса 2+ активных правила,
+    // у каждого свой срок разбора, все должны закрыться).
+    function statusCoveredForDay(units, isoDate) {
+        return unitsCoveredForDay(units, isoDate);
     }
 
     // Журнал wms_upload_coverage_log -- заполняется в logUploadCoverage() при
@@ -1933,6 +1971,52 @@
             .concat(done.map((label) => "<span class='tooltip-line done'><span class='tooltip-dot'></span>" + escapeHtml(label) + "</span>"))
             .join("");
         return "<span class='calendar-tooltip'><span class='tooltip-title'>" + formatRuDate(isoDate) + "</span>" + lines + "</span>";
+    }
+
+    // Та же пара "класс по доле покрытых" + "тултип со списком" для
+    // календаря покрытия по статусам в Маршрутизаторе (вид "Выгрузки") --
+    // один календарь на source_format, считает по статусам этого
+    // формата, помеченным "обязателен" (is_required_for_coverage), а не
+    // по модулям, но переиспользует ВСЮ ту же визуальную механику
+    // (.calendar-grid/.calendar-day/.tooltip-*), что и основной календарь
+    // выше, по просьбе пользователя "один в один".
+    function statusCoverageDayStatusClass(doneCount, total) {
+        const required = Math.max(total || 1, 1);
+        if (doneCount <= 0) return "status-gray";
+        if (doneCount >= required) return "status-green";
+        if (doneCount >= required / 2) return "status-yellow";
+        return "status-red";
+    }
+
+    function statusCoverageTooltipHtml(isoDate, statuses) {
+        const missing = [];
+        const done = [];
+        statuses.forEach((item) => {
+            const label = item.statusCode === "*" ? "Прочее" : item.statusCode;
+            if (statusCoveredForDay(item.units, isoDate)) done.push(label);
+            else missing.push(label);
+        });
+        const lines = missing.map((label) => "<span class='tooltip-line missing'><span class='tooltip-dot'></span>" + escapeHtml(label) + "</span>")
+            .concat(done.map((label) => "<span class='tooltip-line done'><span class='tooltip-dot'></span>" + escapeHtml(label) + "</span>"))
+            .join("");
+        return "<span class='calendar-tooltip'><span class='tooltip-title'>" + formatRuDate(isoDate) + "</span>" + lines + "</span>";
+    }
+
+    function statusCoverageCalendarHtml(fmt) {
+        const statuses = requiredCoverageStatusesForFormat(fmt);
+        if (!statuses.length) return "";
+        const range = state.calendarRange || buildCalendarRange();
+        const weekdaysHtml = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => "<div class='weekday'>" + day + "</div>").join("");
+        const daysHtml = datesBetween(range.start, range.end).map((isoDate) => {
+            const doneCount = statuses.filter((item) => statusCoveredForDay(item.units, isoDate)).length;
+            return "<button type='button' class='calendar-day " + statusCoverageDayStatusClass(doneCount, statuses.length) + "'>"
+                + "<span class='day-number'>" + Number(isoDate.slice(8, 10)) + "</span>"
+                + "<span class='day-progress'>" + doneCount + "/" + statuses.length + "</span>"
+                + statusCoverageTooltipHtml(isoDate, statuses)
+                + "</button>";
+        }).join("");
+        return "<div class='routing-rule-section-heading' style='margin-top:14px;'>Покрытие статусов</div>"
+            + "<div class='calendar-grid'>" + weekdaysHtml + daysHtml + "</div>";
     }
 
     function renderCalendar() {
@@ -12904,6 +12988,7 @@
                 return "<div class='routing-rule-section-group'>"
                     + "<div class='routing-rule-section-heading'>" + escapeHtml(opt.label) + " (" + group.length + ")</div>"
                     + "<div class='routing-rule-summary-list'>" + group.map((item) => statusDictionarySummaryRowHtml(item.row, item.index)).join("") + "</div>"
+                    + statusCoverageCalendarHtml(opt.value)
                     + "</div>";
             }).join("");
         wireStatusDictionarySummaryRows(target);
@@ -14208,8 +14293,11 @@
         // Правила грузим сразу вместе со словарём -- нужны для вида
         // "Участки" (счётчики на карточках участков, детальный список),
         // даже если пользователь откроется в виде "Выгрузки" и переключит
-        // позже.
-        await Promise.all([loadStatusDictionary(true), loadRoutingRules(true)]);
+        // позже. Журнал покрытия (ensureCoverageLogLoaded, без force) --
+        // для календаря покрытия статусов в самом виде "Выгрузки"; обычно
+        // уже загружен при первом посещении главного экрана, но не
+        // полагаемся на это.
+        await Promise.all([loadStatusDictionary(true), loadRoutingRules(true), ensureCoverageLogLoaded()]);
         renderStatusPilotScreen(true);
     }
 
