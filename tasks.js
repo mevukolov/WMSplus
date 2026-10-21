@@ -13381,7 +13381,24 @@
 
     function addRoutingRuleDraft() {
         const rows = state.routingRules.rows || [];
-        const nextPriority = rows.reduce((max, row) => Math.max(max, Number(row.priority) || 0), 0) + 1;
+        // Открыли "Правила" со страницы конкретного статуса -- подставляем
+        // всё, что уже известно (формат, код статуса, зона/offset по
+        // умолчанию из словаря), чтобы не вбивать это заново руками.
+        const statusFilter = state.routingRules.statusFilter;
+        const sourceFormat = (statusFilter && statusFilter.sourceFormat) || "general";
+        const dictEntry = statusFilter ? statusDictionaryEntry(sourceFormat, statusFilter.statusCode) : null;
+        const formatZoneRows = rows.filter((row) => (row.source_format || "general") === sourceFormat && (row.output_key || "zone") === "zone");
+        // Приоритет считаем В РАМКАХ формата, а не по всем правилам сразу
+        // (иначе можно легко попасть ПОСЛЕ catch-all другого формата с
+        // более высоким числом и получить мёртвое правило). Если правило
+        // добавляется под конкретный статус -- ставим его ПЕРЕД всеми
+        // существующими правилами этого формата (min - 1), иначе любой
+        // существующий catch-all (вроде "Упаковка: status not_contains
+        // RWP") перехватит строку раньше, чем дойдёт до нашего более
+        // точного условия.
+        const nextPriority = statusFilter && formatZoneRows.length
+            ? Math.max(1, Math.min(...formatZoneRows.map((row) => Number(row.priority) || 0)) - 1)
+            : formatZoneRows.reduce((max, row) => Math.max(max, Number(row.priority) || 0), 0) + 1;
         state.routingRules.rows = rows.concat({
             // Явный id нужен уже здесь, а не только на сервере: весь
             // массив правил уходит ОДНИМ bulk-upsert вместе с уже
@@ -13391,12 +13408,14 @@
             // gen_random_uuid()" (отсюда "null value in column id").
             id: uuidValue(),
             priority: nextPriority,
-            name: "",
+            name: statusFilter ? (statusFilter.statusCode + " (" + sourceFormatLabel(sourceFormat) + ")") : "",
             is_active: true,
-            conditions: [{ attribute: "status", operator: "in", value: [] }],
+            conditions: statusFilter
+                ? [{ attribute: "status", operator: "in", value: [statusFilter.statusCode] }]
+                : [{ attribute: "status", operator: "in", value: [] }],
             output_key: "zone",
-            source_format: "general",
-            target_task_type: activeReviewZones()[0],
+            source_format: sourceFormat,
+            target_task_type: (dictEntry && dictEntry.default_task_type) || activeReviewZones()[0],
             grouping_attribute: null,
             from_zone: null,
             output_value: null,
@@ -13404,7 +13423,7 @@
             force_high_priority: false,
             tags: [],
             task_deadline_days: null,
-            upload_offset_days: 0,
+            upload_offset_days: dictEntry ? Number(dictEntry.default_upload_offset_days) || 0 : 0,
         });
         renderRoutingRulesModal();
         openRoutingRuleEditModal(state.routingRules.rows.length - 1);
