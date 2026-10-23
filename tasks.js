@@ -35,6 +35,8 @@
     const WMS_TASK_WRITEBACK_FUNCTION = "wms-task-writeback";
     const WMS_MATCH_SUGGESTIONS_TABLE = "wms_match_suggestions";
     const WMS_TASK_ITEMS_TABLE = "wms_task_items";
+    const WMS_VIOLATIONS_TABLE = "wms_violations";
+    const WMS_VIOLATION_TYPES_TABLE = "wms_violation_types";
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
@@ -616,6 +618,26 @@
             saving: false,
             loaded: false,
             error: "",
+        },
+        violationTypes: {
+            rows: [],
+            loading: false,
+            saving: false,
+            loaded: false,
+            error: "",
+        },
+        violations: {
+            rows: [],
+            loading: false,
+            loaded: false,
+            error: "",
+            view: "stats",
+        },
+        // Контекст всплывающей модалки "Нарушение", открытой поверх
+        // taskDetailModal сразу после сохранения вердикта -- не знает о
+        // конкретной задаче дольше одного открытия.
+        violationPrompt: {
+            pending: null,
         },
         staffStats: {
             date: todayIsoInMoscow(),
@@ -10107,6 +10129,19 @@
         return { id, name: normalizeText(raw.responsible) || employeeNameById(id) };
     }
 
+    // Тот же "кто последний раз пикнул товар", что в task_last_movement_status
+    // (synthesizeForecastHistoryEntries) -- нужен отдельно как авто-
+    // подстановка "виновника" в модалке "Нарушение".
+    function latestMovementEmployeeForRow(row) {
+        let lastMovement = null;
+        taskItems(row).forEach((item) => {
+            const parsed = parseDateTime(item.movement);
+            if (!parsed.iso) return;
+            if (!lastMovement || parsed.ts > lastMovement.ts) lastMovement = { ts: parsed.ts, raw: (item.raw && typeof item.raw === "object") ? item.raw : {} };
+        });
+        return lastMovement ? lastMovementStatusEmployee(lastMovement.raw) : { id: "", name: "" };
+    }
+
     // Not real history rows -- computed live from the task's current items
     // and the live writeoff terms. Rendered alongside real history in
     // chronological order like any other entry.
@@ -11833,6 +11868,13 @@
             setReviewStatus(isDeferred ? "ШК отложен до " + formatRuDateTime(reopenAfter) + "." : "ШК завершён.", "good");
             renderPureLosses();
             closeTaskDetail();
+            openViolationPrompt({
+                taskId: synthetic.__syntheticParentId,
+                shk: synthetic.__syntheticShk,
+                taskType: "Чистые списания",
+                zone: "Чистые списания",
+                verdict,
+            });
         } catch (error) {
             console.error("pure losses item complete failed:", error);
             const status = $("taskDetailStatus");
@@ -11974,7 +12016,21 @@
                 renderFlowPage();
             }
             if (!isDeferred && !state.flow.debugMode) void evaluateTaskCompletionAchievements(completedForAchievements, { source: "manual_task_complete" });
-            const afterCelebration = state.flow.embedded ? advanceFlowAfterResolution : closeTaskDetail;
+            // Открываем "Нарушение" ПОСЛЕ закрытия карточки/анимации
+            // вердикта -- иначе модалка всплывает поверх celebration-
+            // оверлея, который ещё играет.
+            const afterCelebration = () => {
+                (state.flow.embedded ? advanceFlowAfterResolution : closeTaskDetail)();
+                const culprit = latestMovementEmployeeForRow(row);
+                openViolationPrompt({
+                    taskId: row.id,
+                    taskType: row.task_type || "",
+                    zone: taskSectionName(row),
+                    verdict,
+                    employeeId: culprit.id || normalizeIdentifier(row.assignee_employee_id),
+                    employeeName: culprit.name || normalizeText(row.assignee_name),
+                });
+            };
             if (!incomingFlow && tone) void playTaskCompletionCelebration(tone).then(afterCelebration);
             else afterCelebration();
         } catch (error) {
@@ -14313,6 +14369,339 @@
             state.reviewZones.saving = false;
             if (button) button.disabled = false;
         }
+    }
+
+    // ---- Нарушения: справочник типов (точная копия паттерна участков
+    // разбора выше -- тот же CRUD-список name+sort_order+is_active) ----
+
+    async function loadViolationTypes(force) {
+        if (state.violationTypes.loaded && !force) return true;
+        const db = supabaseDb();
+        state.violationTypes.loading = true;
+        state.violationTypes.error = "";
+        if (!db) {
+            state.violationTypes.loading = false;
+            return false;
+        }
+        try {
+            const { data, error } = await db
+                .from(WMS_VIOLATION_TYPES_TABLE)
+                .select("*")
+                .order("sort_order", { ascending: true });
+            if (error) throw error;
+            state.violationTypes.rows = data || [];
+            state.violationTypes.loaded = true;
+            return true;
+        } catch (error) {
+            state.violationTypes.error = "Не удалось загрузить типы нарушений: " + (error && error.message ? error.message : String(error));
+            console.warn("violation types load skipped:", error);
+            return false;
+        } finally {
+            state.violationTypes.loading = false;
+            renderViolationsHubScreen();
+        }
+    }
+
+    function activeViolationTypes() {
+        const rows = (state.violationTypes.rows || []).filter((row) => row.is_active !== false).map((row) => row.label).filter(Boolean);
+        return rows.length ? rows : ["Прочее"];
+    }
+
+    function violationTypeRowHtml(row) {
+        return "<div class='writeoff-term-row' data-violation-type-row data-violation-type-original='" + escapeHtml(row.label || "") + "'>"
+            + "<input data-violation-type-sort type='number' min='1' step='1' value='" + escapeHtml(row.sort_order || "") + "' placeholder='Порядок'>"
+            + "<input data-violation-type-label type='text' value='" + escapeHtml(row.label || "") + "' placeholder='Название типа'>"
+            + "<label class='writeoff-term-active'><input data-violation-type-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активен</label>"
+            + "<button type='button' class='btn btn-square' data-violation-type-remove aria-label='Удалить'>×</button>"
+            + "</div>";
+    }
+
+    function renderViolationTypesEditor() {
+        const target = $("violationTypesWrap");
+        if (!target) return;
+        const rows = state.violationTypes.rows || [];
+        target.innerHTML = (state.violationTypes.error ? "<div class='status-line error'>" + escapeHtml(state.violationTypes.error) + "</div>" : "")
+            + (state.violationTypes.loading ? "<div class='status-line'>Загружаю типы...</div>" : "")
+            + "<div class='writeoff-term-head'><span>Порядок</span><span>Название</span><span>Вкл.</span></div>"
+            + "<div class='writeoff-term-list'>" + rows.map(violationTypeRowHtml).join("") + "</div>";
+        target.querySelectorAll("[data-violation-type-remove]").forEach((button) => {
+            button.addEventListener("click", () => removeViolationTypeRow(button.closest("[data-violation-type-row]")));
+        });
+    }
+
+    async function removeViolationTypeRow(rowEl) {
+        if (!rowEl) return;
+        const label = rowEl.getAttribute("data-violation-type-original");
+        if (label) {
+            const db = supabaseDb();
+            if (db) {
+                try {
+                    const { error } = await db.from(WMS_VIOLATION_TYPES_TABLE).delete().eq("label", label);
+                    if (error) throw error;
+                } catch (error) {
+                    toast("Не удалось удалить тип: " + (error && error.message ? error.message : String(error)), "error");
+                    return;
+                }
+            }
+        }
+        rowEl.remove();
+    }
+
+    function addViolationTypeDraft() {
+        const rows = state.violationTypes.rows || [];
+        const nextOrder = rows.reduce((max, row) => Math.max(max, Number(row.sort_order) || 0), 0) + 1;
+        state.violationTypes.rows = rows.concat({ label: "", sort_order: nextOrder, is_active: true });
+        renderViolationTypesEditor();
+    }
+
+    function violationTypeInputRows() {
+        return Array.from(document.querySelectorAll("[data-violation-type-row]")).map((row) => {
+            const label = normalizeText(row.querySelector("[data-violation-type-label]") && row.querySelector("[data-violation-type-label]").value);
+            if (!label) return null;
+            return {
+                label,
+                sort_order: Math.max(1, Math.trunc(settingNumber(row.querySelector("[data-violation-type-sort]") && row.querySelector("[data-violation-type-sort]").value, 1))),
+                is_active: row.querySelector("[data-violation-type-active]").checked,
+                updated_at: new Date().toISOString(),
+            };
+        }).filter(Boolean);
+    }
+
+    async function saveViolationTypesFromModal() {
+        const db = supabaseDb();
+        const status = $("violationTypesStatus");
+        const button = $("saveViolationTypes");
+        const rows = violationTypeInputRows();
+        if (!rows.length) {
+            if (status) status.textContent = "Нет строк для сохранения.";
+            return;
+        }
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен.";
+            return;
+        }
+        if (button) button.disabled = true;
+        state.violationTypes.saving = true;
+        if (status) status.textContent = "Сохраняю типы...";
+        try {
+            const { error } = await db.from(WMS_VIOLATION_TYPES_TABLE).upsert(rows, { onConflict: "label" });
+            if (error) throw error;
+            state.violationTypes.loaded = false;
+            await loadViolationTypes(true);
+            if (status) status.textContent = "Типы сохранены.";
+            toast("Типы нарушений сохранены.", "success");
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            state.violationTypes.error = "Не удалось сохранить типы: " + message;
+            if (status) status.textContent = state.violationTypes.error;
+        } finally {
+            state.violationTypes.saving = false;
+            if (button) button.disabled = false;
+        }
+    }
+
+    // ---- Нарушения: всплывающая модалка после сохранения вердикта ----
+
+    // Зона для подстановки -- для "Чистых списаний" (completePureLossesItemFromDetail)
+    // вызывающий код передаёт её явно (там нет обычного task_type), для
+    // всех остальных путей -- taskSectionName(row), та же функция, что
+    // красит карточки Предразбора по участкам.
+    function openViolationPrompt(context) {
+        const user = currentWmsUser();
+        state.violationPrompt.pending = {
+            taskId: context.taskId || "",
+            shk: context.shk || "",
+            taskType: context.taskType || "",
+            zone: context.zone || "Другие задачи",
+            verdict: context.verdict || "",
+            employeeId: context.employeeId || "",
+            employeeName: context.employeeName || "",
+            loggedById: user.id || "",
+            loggedByName: user.name || "",
+        };
+        renderViolationModal();
+        setFlowModalOpen("violationModal", true);
+        if (!state.violationTypes.loaded) void loadViolationTypes().then(renderViolationModal);
+    }
+
+    function violationZoneOptionsHtml(selectedZone) {
+        const zones = activeReviewZones().concat(["Чистые списания"]);
+        if (selectedZone && !zones.includes(selectedZone)) zones.push(selectedZone);
+        return zones.map((zone) => "<option value='" + escapeHtml(zone) + "'" + (zone === selectedZone ? " selected" : "") + ">" + escapeHtml(zone) + "</option>").join("");
+    }
+
+    function violationTypeOptionsHtml() {
+        return activeViolationTypes().map((label) => "<option value='" + escapeHtml(label) + "'>" + escapeHtml(label) + "</option>").join("");
+    }
+
+    function renderViolationModal() {
+        const pending = state.violationPrompt.pending;
+        const typeSelect = $("violationTypeInput");
+        const zoneSelect = $("violationZoneInput");
+        const employeeSelect = $("violationEmployeeInput");
+        const comment = $("violationCommentInput");
+        if (!pending) return;
+        if (typeSelect) typeSelect.innerHTML = violationTypeOptionsHtml();
+        if (zoneSelect) zoneSelect.innerHTML = violationZoneOptionsHtml(pending.zone);
+        if (employeeSelect) employeeSelect.innerHTML = shiftRosterEmployeeOptionsHtml(pending.employeeId);
+        if (comment) comment.value = "";
+        const hint = $("violationPromptHint");
+        if (hint) hint.textContent = pending.employeeId ? "" : "Виновник не определился автоматически -- выбери вручную.";
+    }
+
+    function closeViolationModal() {
+        state.violationPrompt.pending = null;
+        setFlowModalOpen("violationModal", false);
+    }
+
+    async function saveViolationFromModal() {
+        const pending = state.violationPrompt.pending;
+        if (!pending) return;
+        const db = supabaseDb();
+        const status = $("violationModalStatus");
+        const violationType = normalizeText($("violationTypeInput") && $("violationTypeInput").value);
+        const zone = normalizeText($("violationZoneInput") && $("violationZoneInput").value);
+        const employeeId = normalizeText($("violationEmployeeInput") && $("violationEmployeeInput").value);
+        const comment = normalizeText($("violationCommentInput") && $("violationCommentInput").value);
+        if (!violationType || !zone) {
+            if (status) status.textContent = "Укажи тип нарушения и участок.";
+            return;
+        }
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен.";
+            return;
+        }
+        const employee = employeeId ? employeeById(employeeId) : null;
+        const button = $("saveViolationBtn");
+        if (button) button.disabled = true;
+        if (status) status.textContent = "Сохраняю...";
+        try {
+            const { error } = await db.from(WMS_VIOLATIONS_TABLE).insert({
+                task_id: pending.taskId || null,
+                shk: pending.shk || null,
+                task_type: pending.taskType || null,
+                zone,
+                violation_type: violationType,
+                verdict: pending.verdict || null,
+                culprit_employee_id: employeeId || null,
+                culprit_name: employee ? normalizeText(employee.full_name) : (pending.employeeName || null),
+                comment: comment || null,
+                logged_by_id: pending.loggedById || null,
+                logged_by_name: pending.loggedByName || null,
+            });
+            if (error) throw error;
+            state.violations.loaded = false;
+            toast("Нарушение зафиксировано.", "success");
+            closeViolationModal();
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            if (status) status.textContent = "Не удалось сохранить: " + message;
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    // ---- Нарушения: справочник + статистика (единая модалка, тот же
+    // переключатель вида, что у Маршрутизатора -- Выгрузки/Участки там,
+    // Статистика/Типы здесь) ----
+
+    function updateViolationsViewThumb(instant) {
+        const thumb = $("violationsViewThumb");
+        const active = document.querySelector("#violationsViewTabs .review-view-tab.active");
+        if (!thumb || !active) return;
+        if (instant) thumb.style.transition = "none";
+        thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
+        thumb.style.width = active.offsetWidth + "px";
+        if (instant) {
+            void thumb.offsetWidth;
+            thumb.style.transition = "";
+        }
+    }
+
+    async function loadViolations(force) {
+        if (state.violations.loaded && !force) return true;
+        const db = supabaseDb();
+        state.violations.loading = true;
+        state.violations.error = "";
+        if (!db) {
+            state.violations.loading = false;
+            return false;
+        }
+        try {
+            const since = addDays(state.today, -30);
+            const { data, error } = await db
+                .from(WMS_VIOLATIONS_TABLE)
+                .select("*")
+                .gte("created_at", since)
+                .order("created_at", { ascending: false })
+                .limit(2000);
+            if (error) throw error;
+            state.violations.rows = data || [];
+            state.violations.loaded = true;
+            return true;
+        } catch (error) {
+            state.violations.error = "Не удалось загрузить нарушения: " + (error && error.message ? error.message : String(error));
+            console.warn("violations load skipped:", error);
+            return false;
+        } finally {
+            state.violations.loading = false;
+            renderViolationsHubScreen();
+        }
+    }
+
+    function violationStatsGroupHtml(title, rows, keyFn, labelFn) {
+        const counts = new Map();
+        rows.forEach((row) => {
+            const key = keyFn(row) || "-";
+            counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+        const body = sorted.length
+            ? sorted.map(([key, count]) => "<div class='violation-stat-row'><span>" + escapeHtml(labelFn ? labelFn(key) : key) + "</span><span>" + count + "</span></div>").join("")
+            : "<div class='status-line'>Нет данных за последние 30 дней.</div>";
+        return "<div class='violation-stat-group'><h4>" + escapeHtml(title) + "</h4>" + body + "</div>";
+    }
+
+    function renderViolationsStats() {
+        const target = $("violationsStatsWrap");
+        if (!target) return;
+        const rows = state.violations.rows || [];
+        target.innerHTML = (state.violations.error ? "<div class='status-line error'>" + escapeHtml(state.violations.error) + "</div>" : "")
+            + (state.violations.loading ? "<div class='status-line'>Загружаю...</div>" : "")
+            + "<div class='violation-stat-total'>Всего за 30 дней: " + rows.length + "</div>"
+            + "<div class='violation-stat-grid'>"
+            + violationStatsGroupHtml("По типам", rows, (row) => row.violation_type)
+            + violationStatsGroupHtml("По участкам", rows, (row) => row.zone)
+            + violationStatsGroupHtml("По сотрудникам", rows, (row) => row.culprit_employee_id, (id) => employeeNameById(id) || id)
+            + "</div>";
+    }
+
+    function renderViolationsHubScreen(instant) {
+        const statsWrap = $("violationsStatsScreen");
+        const typesWrap = $("violationTypesScreen");
+        if (!statsWrap || !typesWrap) return;
+        const view = state.violations.view || "stats";
+        statsWrap.classList.toggle("hidden", view !== "stats");
+        typesWrap.classList.toggle("hidden", view !== "types");
+        document.querySelectorAll("#violationsViewTabs .review-view-tab").forEach((tab) => {
+            tab.classList.toggle("active", tab.dataset.violationsView === view);
+        });
+        updateViolationsViewThumb(instant);
+        renderViolationsStats();
+        renderViolationTypesEditor();
+    }
+
+    async function openViolationsHubModal() {
+        if (!ensureDevelopmentAccess("Нарушения")) return;
+        closeFlowModals();
+        setFlowModalOpen("violationsHubModal", true);
+        renderViolationsHubScreen(true);
+        await Promise.all([loadViolationTypes(true), loadViolations(true)]);
+        renderViolationsHubScreen(true);
+    }
+
+    function closeViolationsHubModal() {
+        setFlowModalOpen("violationsHubModal", false);
     }
 
     async function openStatusPilotModal() {
@@ -19966,6 +20355,21 @@
         $("closeFlowSettings").addEventListener("click", closeFlowSettingsModal);
         $("saveFlowSettings").addEventListener("click", () => { void saveFlowSettingsFromModal(); });
         $("resetFlowSettings").addEventListener("click", resetFlowSettingsFromModal);
+        $("openViolationsHub").addEventListener("click", () => { void openViolationsHubModal(); });
+        $("closeViolationsHub").addEventListener("click", closeViolationsHubModal);
+        document.querySelectorAll("#violationsHubModal [data-violations-view]").forEach((button) => {
+            button.addEventListener("click", () => {
+                if (state.violations.view === button.dataset.violationsView) return;
+                state.violations.view = button.dataset.violationsView;
+                renderViolationsHubScreen();
+            });
+        });
+        $("addViolationType").addEventListener("click", addViolationTypeDraft);
+        $("saveViolationTypes").addEventListener("click", () => { void saveViolationTypesFromModal(); });
+        $("violationsHubModal").addEventListener("click", (event) => { if (event.target === $("violationsHubModal")) closeViolationsHubModal(); });
+        $("closeViolationModal").addEventListener("click", closeViolationModal);
+        $("skipViolationBtn").addEventListener("click", closeViolationModal);
+        $("saveViolationBtn").addEventListener("click", () => { void saveViolationFromModal(); });
         $("closeStatusPilot").addEventListener("click", closeStatusPilotModal);
         document.querySelectorAll("#statusPilotModal [data-status-view]").forEach((button) => {
             button.addEventListener("click", () => {

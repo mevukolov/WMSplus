@@ -1152,8 +1152,17 @@
         .status-pilot-view-tabs { position: relative; }
         .status-pilot-view-tabs .review-view-tab { position: relative; z-index: 1; }
         .status-pilot-view-tabs .review-view-tab.active { background: transparent; box-shadow: none; }
-        #statusPilotModal .tasks-flow-card.status-pilot-card { height: 82vh; max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
+        #statusPilotModal .tasks-flow-card.status-pilot-card, #violationsHubModal .tasks-flow-card.status-pilot-card { height: 82vh; max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
         .status-pilot-scroll { flex: 1; min-height: 0; overflow: auto; margin-top: 10px; }
+        .violation-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 10px; }
+        .violation-stat-group { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; }
+        .violation-stat-group h4 { margin: 0 0 8px; font-size: 12px; font-weight: 1000; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+        .violation-stat-row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-top: 1px solid #e2e8f0; font-weight: 700; }
+        .violation-stat-row:first-child { border-top: 0; }
+        .violation-stat-total { font-weight: 1000; font-size: 15px; margin-top: 6px; }
+        .violation-form { display: grid; gap: 12px; margin-top: 4px; }
+        .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
+        .violation-form-field select, .violation-form-field textarea { font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background: #fff; }
         .review-pager-viewport { contain: inline-size; clip-path: inset(-64px); }
         .review-pager-track { display: flex; gap: 96px; width: calc(5 * var(--pager-panel-w, 20%) + 384px); transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 var(--pager-panel-w, 100%); min-width: 0; }
@@ -2070,6 +2079,11 @@
                     <h2 class="tasks-action-title">Маршрутизатор</h2>
                     <p class="tasks-action-text">Словарь статусов: название, срок списания, срок разбора, участок по умолчанию -- единая точка правды для выгрузок и журнала покрытия.</p>
                 </button>
+                <button id="openViolationsHub" class="tasks-action-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">⚠</span>
+                    <h2 class="tasks-action-title">Нарушения</h2>
+                    <p class="tasks-action-text">Лог складских ошибок по вердиктам: тип, участок, виновник, статистика за 30 дней.</p>
+                </button>
                 <button id="openFlow" class="tasks-action-card flow-home-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">▶</span>
                     <h2 class="tasks-action-title">Флоу</h2>
@@ -2597,6 +2611,68 @@
             <button id="openReviewZonesFromStatus" class="btn btn-outline" type="button">Участки разбора</button>
         </div>
         <div id="statusDictionaryStatus" class="review-status" data-status-uploads-only></div>
+    </div>
+</section>
+
+<section id="violationsHubModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide status-pilot-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Нарушения</h3>
+                <p class="work-subtitle">Лог складских ошибок, заполняется после сохранения вердикта любой задачи. Статистика за последние 30 дней, типы -- редактируемый справочник.</p>
+            </div>
+            <button id="closeViolationsHub" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="violationsViewTabs" class="review-view-tabs status-pilot-view-tabs" style="margin-top:14px;">
+            <span id="violationsViewThumb" class="review-view-thumb" aria-hidden="true"></span>
+            <button type="button" class="review-view-tab active" data-violations-view="stats">Статистика</button>
+            <button type="button" class="review-view-tab" data-violations-view="types">Типы</button>
+        </div>
+        <div class="status-pilot-scroll">
+            <div id="violationsStatsScreen">
+                <div id="violationsStatsWrap"></div>
+            </div>
+            <div id="violationTypesScreen" class="hidden">
+                <div id="violationTypesWrap" class="writeoff-terms-wrap"></div>
+                <div class="file-row">
+                    <button id="addViolationType" class="btn btn-outline" type="button">Добавить тип</button>
+                    <button id="saveViolationTypes" class="btn btn-rect" type="button">Сохранить типы</button>
+                </div>
+                <div id="violationTypesStatus" class="review-status"></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="violationModal" class="tasks-flow-modal upload-work" aria-hidden="true" style="z-index:4300;">
+    <div class="tasks-flow-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Нарушение</h3>
+                <p class="work-subtitle">Если товар потерялся/ошибка в процессе -- зафиксируй тип, участок и виновника. Если всё в порядке -- просто пропусти.</p>
+            </div>
+            <button id="closeViolationModal" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="violation-form">
+            <label class="violation-form-field">Тип нарушения
+                <select id="violationTypeInput"></select>
+            </label>
+            <label class="violation-form-field">Участок
+                <select id="violationZoneInput"></select>
+            </label>
+            <label class="violation-form-field">Виновник
+                <select id="violationEmployeeInput"></select>
+            </label>
+            <p id="violationPromptHint" class="tasks-page-note"></p>
+            <label class="violation-form-field">Комментарий (необязательно)
+                <textarea id="violationCommentInput" rows="2" placeholder="Что произошло"></textarea>
+            </label>
+        </div>
+        <div class="file-row">
+            <button id="skipViolationBtn" class="btn btn-outline" type="button">Нет нарушения</button>
+            <button id="saveViolationBtn" class="btn btn-rect" type="button">Сохранить нарушение</button>
+        </div>
+        <div id="violationModalStatus" class="review-status"></div>
     </div>
 </section>
 
