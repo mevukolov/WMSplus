@@ -1911,6 +1911,15 @@
         return state.coverageLog.dates;
     }
 
+    // window.end считается по самому МЯГКОМУ (ближе к нулю) активному
+    // правилу формата -- для единиц с более глубоким offset эта дата ещё
+    // не дозрела, и писать по ней "проверено" было бы ложью (ровно баг,
+    // из-за которого 22-е число помечалось закрытым для SPS/WMI/SMS и
+    // т.п. с offset -2/-5, хотя ни одна их строка физически не могла
+    // пройти фильтр зрелости в этот день). Тот же потолок, что и в
+    // unitsCoveredForDay -- дата СТАРШЕ потолка своей единицы просто не
+    // попадает в запись, а не "экзампт=true" как при чтении (там это
+    // нормально, здесь это означало бы задним числом закрыть непроверенное).
     function uploadCoverageEntries(module) {
         const units = requiredStatusUnitsForModule(module);
         if (!units.length) return [];
@@ -1920,6 +1929,8 @@
         const entries = [];
         dates.forEach((date) => {
             units.forEach((unit) => {
+                const ceiling = addDays(state.today, Math.min(0, unit.offsetDays));
+                if (ceiling && date > ceiling) return;
                 entries.push({ business_date: date, source_format: fmt, status_code: unit.statusCode, rule_key: unit.ruleKey });
             });
         });
