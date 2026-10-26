@@ -14534,24 +14534,51 @@
         return activeViolationTypes().map((label) => "<option value='" + escapeHtml(label) + "'>" + escapeHtml(label) + "</option>").join("");
     }
 
+    // Виновник -- свободное текстовое поле (с подсказками из ростера), не
+    // жёсткий select: сотрудника, который реально стоял на участке в
+    // момент ошибки, не всегда можно найти по последнему движению ШК
+    // (другой человек мог его туда положить) -- оператор должен суметь
+    // вписать имя от руки, а не только выбрать из списка известных ID.
+    function violationEmployeeDatalistHtml() {
+        return (state.shift.employees || [])
+            .map((employee) => "<option value='" + escapeHtml(employee.full_name) + "'>").join("");
+    }
+
     function renderViolationModal() {
         const pending = state.violationPrompt.pending;
         const typeSelect = $("violationTypeInput");
         const zoneSelect = $("violationZoneInput");
-        const employeeSelect = $("violationEmployeeInput");
+        const employeeInput = $("violationEmployeeInput");
+        const employeeList = $("violationEmployeeList");
         const comment = $("violationCommentInput");
         if (!pending) return;
         if (typeSelect) typeSelect.innerHTML = violationTypeOptionsHtml();
         if (zoneSelect) zoneSelect.innerHTML = violationZoneOptionsHtml(pending.zone);
-        if (employeeSelect) employeeSelect.innerHTML = shiftRosterEmployeeOptionsHtml(pending.employeeId);
+        if (employeeList) employeeList.innerHTML = violationEmployeeDatalistHtml();
+        if (employeeInput) employeeInput.value = pending.employeeName || pending.employeeId || "";
         if (comment) comment.value = "";
         const hint = $("violationPromptHint");
-        if (hint) hint.textContent = pending.employeeId ? "" : "Виновник не определился автоматически -- выбери вручную.";
+        if (hint) hint.textContent = pending.employeeId ? "" : "Виновник не определился автоматически -- впиши вручную.";
     }
 
     function closeViolationModal() {
         state.violationPrompt.pending = null;
         setFlowModalOpen("violationModal", false);
+    }
+
+    // Свободный текст из поля "Виновник" -- если он совпадает с ФИО/ID
+    // известного сотрудника, записываем настоящий id (нужен для фильтра
+    // "по сотрудникам" в статистике); иначе просто сохраняем текст как
+    // есть, без id -- оператор вправе вписать кого угодно.
+    function resolveEmployeeFreeText(value) {
+        const text = normalizeText(value);
+        if (!text) return { id: "", name: "" };
+        const direct = employeeById(text);
+        if (direct) return { id: normalizeText(direct.id || direct.employee_id), name: normalizeText(direct.full_name) };
+        const key = normalizeForMatch(text);
+        const byName = (state.shift.employees || []).find((employee) => normalizeForMatch(employee.full_name) === key);
+        if (byName) return { id: normalizeText(byName.id || byName.employee_id), name: normalizeText(byName.full_name) };
+        return { id: "", name: text };
     }
 
     async function saveViolationFromModal() {
@@ -14561,7 +14588,7 @@
         const status = $("violationModalStatus");
         const violationType = normalizeText($("violationTypeInput") && $("violationTypeInput").value);
         const zone = normalizeText($("violationZoneInput") && $("violationZoneInput").value);
-        const employeeId = normalizeText($("violationEmployeeInput") && $("violationEmployeeInput").value);
+        const employee = resolveEmployeeFreeText($("violationEmployeeInput") && $("violationEmployeeInput").value);
         const comment = normalizeText($("violationCommentInput") && $("violationCommentInput").value);
         if (!violationType || !zone) {
             if (status) status.textContent = "Укажи тип нарушения и участок.";
@@ -14571,7 +14598,6 @@
             if (status) status.textContent = "Supabase недоступен.";
             return;
         }
-        const employee = employeeId ? employeeById(employeeId) : null;
         const button = $("saveViolationBtn");
         if (button) button.disabled = true;
         if (status) status.textContent = "Сохраняю...";
@@ -14583,8 +14609,8 @@
                 zone,
                 violation_type: violationType,
                 verdict: pending.verdict || null,
-                culprit_employee_id: employeeId || null,
-                culprit_name: employee ? normalizeText(employee.full_name) : (pending.employeeName || null),
+                culprit_employee_id: employee.id || null,
+                culprit_name: employee.name || null,
                 comment: comment || null,
                 logged_by_id: pending.loggedById || null,
                 logged_by_name: pending.loggedByName || null,
@@ -15413,12 +15439,23 @@
     // модалке сразу после выгрузки (scoped на свежие передачи) и кнопке
     // внутри "Актуализации" (без привязки к конкретной выгрузке, по
     // любым активным ПМ/Почта задачам -- см. wireActualizePmCarrierButton).
+    // Файл реально содержит И отгруженные, И неотгруженные передачи
+    // вперемешку (подтверждено пользователем) -- колонка "действие"
+    // различает их. Раньше (до миграции на новый экспорт, см. комментарий
+    // у normalizePmCarrierRow) простое присутствие в файле считалось
+    // "отгружено", что закрывало реально ещё не отгруженные передачи --
+    // восстанавливаем исходный фильтр по действию (действовал до того, как
+    // от него отказались из-за обрезки "Контура" на 1000 строк).
+    function isShippedCarrierAction(value) {
+        return normalizeForMatch(value).includes("отгрузка сторонним перевозчиком");
+    }
+
     async function confirmPmCarrierShipments(file, setStatus) {
         setStatus = setStatus || setPmCarrierModalStatus;
         setStatus("Читаю проверку отгрузки...");
         const rows = await readWorkbookRows(file, "pmCarrier");
-        const transfers = Array.from(new Set(rows.map((row) => row.transfer).filter(Boolean)));
-        if (!transfers.length) { setStatus("В файле не найдено номеров передач.", "error"); return; }
+        const transfers = Array.from(new Set(rows.filter((row) => isShippedCarrierAction(row.action)).map((row) => row.transfer).filter(Boolean)));
+        if (!transfers.length) { setStatus("В файле не найдено отгруженных передач (колонка «действие»).", "error"); return; }
         const db = supabaseDb();
         if (!db) { setStatus("Нет подключения к базе.", "error"); return; }
         try {
@@ -15604,13 +15641,13 @@
         };
     }
 
-    // "Контур" (old carrier-check export) truncated to 1000 rows, so any
-    // transfer past that cap silently never matched "отгрузка сторонним
-    // перевозчиком" and kept generating tasks for tares already shipped
-    // (confirmed against a real case, тара 5429124836). Its replacement is
-    // scoped per-transfer by the operator before export, so simple presence
-    // in this file -- regardless of the action in column E -- now means
-    // shipped; see buildPmPreview's excludedTransfers.
+    // Файл "проверка отгрузки" содержит вперемешку отгруженные и ещё НЕ
+    // отгруженные передачи -- колонка "действие" (row[4]) различает их,
+    // см. isShippedCarrierAction/confirmPmCarrierShipments. Было время,
+    // когда решили считать "просто присутствие в файле = отгружено" (из-за
+    // обрезки старого "Контур"-экспорта на 1000 строк, см. git-историю) --
+    // это закрывало реально ещё не отгруженные передачи без вердикта,
+    // откатили обратно на фильтр по действию.
     function normalizePmCarrierRow(row, rowNumber) {
         const transfer = normalizeIdentifier(row[1]);
         if (!transfer) return null;
@@ -17213,7 +17250,15 @@
                     sourceModule: pmDef.sourceModule,
                     uploadType: pmDef.uploadType,
                     businessDate,
-                    sourceId: (mail ? "mail" : "pm") + ":special:" + row.product + "|" + businessDate,
+                    // Без даты в ключе -- тара/ШК могут сидеть в буфере ПМ/
+                    // Почта несколько дней; businessDate тут всегда "сегодня"
+                    // (см. комментарий у dueDate ниже), так что дата в
+                    // sourceId меняется ежедневно и раньше создавала НОВУЮ
+                    // задачу на ту же тару/ШК каждый день вместо обновления
+                    // старой (подтверждено на реальном случае: ШК 55215265214,
+                    // тара 5572407563 -- 3 задачи за 3 дня, каждая без
+                    // вердикта и молча закрыта проверкой отгрузки).
+                    sourceId: (mail ? "mail" : "pm") + ":special:" + row.product,
                     title: taskTitleForShk(row.product),
                     taskType,
                     descriptionTaskType: taskType,
@@ -17246,7 +17291,8 @@
                 sourceModule: pmDef.sourceModule,
                 uploadType: pmDef.uploadType,
                 businessDate,
-                sourceId: (mail ? "mail" : "pm") + ":transfer:" + transfer + "|" + businessDate,
+                // Без даты в ключе -- см. комментарий у ":special:" выше.
+                sourceId: (mail ? "mail" : "pm") + ":transfer:" + transfer,
                 title: taskTitleForTare(transfer),
                 taskType,
                 descriptionTaskType: taskType,
@@ -20630,6 +20676,24 @@
         });
     }
 
+    // state.today считался ОДИН раз при загрузке страницы и никогда не
+    // обновлялся -- если вкладка остаётся открытой несколько дней (обычная
+    // практика у операторов), все date-зависимые решения (какая дата ещё
+    // "не дозрела" для offset-фильтра при выгрузке, окно календаря и т.д.)
+    // продолжали считать от дня загрузки страницы, а не от реального
+    // сегодня. На практике это выглядело как "почти ничего не выгружается"
+    // -- offset-фильтр при выгрузке Упаковки (-7 дней от устаревшего
+    // "сегодня") отбрасывал почти все свежие строки. Проверяем на
+    // интервале и при возврате фокуса на вкладку (самый частый момент,
+    // когда день успел смениться, пока вкладка была свёрнута).
+    function refreshTodayIfStale() {
+        const current = todayIsoInMoscow();
+        if (current === state.today) return;
+        state.today = current;
+        state.calendarRange = null;
+        renderCalendar();
+    }
+
     function init() {
         installAchievementDebugHelpers();
         initEvents();
@@ -20650,6 +20714,8 @@
         setInterval(() => { void loadPrintAlertState(); }, 120000);
         void refreshWritebackFailures();
         setInterval(() => { void refreshWritebackFailures(); }, 120000);
+        setInterval(refreshTodayIfStale, 120000);
+        document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshTodayIfStale(); });
     }
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

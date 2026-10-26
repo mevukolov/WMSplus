@@ -1162,7 +1162,7 @@
         .violation-stat-total { font-weight: 1000; font-size: 15px; margin-top: 6px; }
         .violation-form { display: grid; gap: 12px; margin-top: 4px; }
         .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
-        .violation-form-field select, .violation-form-field textarea { font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background: #fff; }
+        .violation-form-field select, .violation-form-field input, .violation-form-field textarea { font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background: #fff; }
         .review-pager-viewport { contain: inline-size; clip-path: inset(-64px); }
         .review-pager-track { display: flex; gap: 96px; width: calc(5 * var(--pager-panel-w, 20%) + 384px); transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 var(--pager-panel-w, 100%); min-width: 0; }
@@ -2661,7 +2661,8 @@
                 <select id="violationZoneInput"></select>
             </label>
             <label class="violation-form-field">Виновник
-                <select id="violationEmployeeInput"></select>
+                <input id="violationEmployeeInput" type="text" list="violationEmployeeList" placeholder="ФИО сотрудника (можно вписать вручную)" autocomplete="off">
+                <datalist id="violationEmployeeList"></datalist>
             </label>
             <p id="violationPromptHint" class="tasks-page-note"></p>
             <label class="violation-form-field">Комментарий (необязательно)
