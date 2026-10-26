@@ -19626,9 +19626,19 @@
             if (response && response.upload_run) mergeRun(response.upload_run);
             renderCalendar();
             renderModuleChooser();
+            const skipped = (response && response.skipped_items) || [];
             $("doneBox").classList.add("visible");
-            $("doneBox").textContent = "Выгрузка завершена. Создано/обновлено задач: " + (response.upserted_count || state.preview.tasks.length) + ".";
-            setStatus("Готово. Данные сохранены в WMS+.", "good");
+            $("doneBox").textContent = "Выгрузка завершена. Создано/обновлено задач: " + (response.upserted_count || state.preview.tasks.length) + "."
+                + (skipped.length ? " Пропущено: " + skipped.length + " (конфликт при сохранении, см. статус)." : "");
+            // Проблемные записи больше не роняют всю выгрузку -- остальное
+            // уже сохранено, но по пропущенным нужно разбираться отдельно
+            // (не прятать это за "Готово"), поэтому отдельный статус-тон.
+            if (skipped.length) {
+                console.warn("Пропущенные при сохранении записи:", skipped);
+                setStatus("Сохранено " + response.upserted_count + ", но " + skipped.length + " записей пропущено из-за конфликта (подробности в консоли браузера, F12). Остальное сохранено.", "error");
+            } else {
+                setStatus("Готово. Данные сохранены в WMS+.", "good");
+            }
             // После реального сохранения, не до -- иначе сверка идёт по ещё
             // не сохранённым (preview) задачам и RPC находит 0 совпадений в
             // базе, даже если передачи реально есть в файле проверки.
@@ -19702,6 +19712,7 @@
     async function saveRepairTasks(db, tasks, context) {
         const chunks = chunkArray(tasks || [], 3);
         let repaired = 0;
+        const skippedItems = [];
         for (let i = 0; i < chunks.length; i += 1) {
             if (context.onProgress) {
                 context.onProgress({
@@ -19724,10 +19735,19 @@
             const result = await saveRpcChunkAdaptive(db, chunks[i], {}, repairContext);
             context.physicalBatch = repairContext.physicalBatch;
             repaired += result.upserted;
+            skippedItems.push(...(result.skippedItems || []));
         }
-        return repaired;
+        return { repaired, skippedItems };
     }
 
+    // Раньше после 3 попыток сверки/дозаливки бросало исключение --
+    // ронявшее ВЕСЬ saveCurrentUpload целиком (уже сохранённые задачи
+    // оставались в базе, но оператор видел голую ошибку и не понимал,
+    // что реально сохранилось). Теперь это не единственный защитный
+    // механизм -- save_wms_manual_upload сама пропускает проблемную
+    // запись вместо падения всей пачки (см. миграцию 202610260001) --
+    // так что здесь просто возвращаем, что реально не нашлось, не
+    // прерывая остальной флоу: вызывающий код решает, как это показать.
     async function verifyAndRepairSavedTasks(db, payloadTasks, context) {
         const expected = new Map();
         (payloadTasks || []).forEach((task) => {
@@ -19735,8 +19755,9 @@
             const key = savedTaskKey(task);
             expected.set(key, task);
         });
-        if (!expected.size) return { expectedCount: 0, repairedCount: 0 };
+        if (!expected.size) return { expectedCount: 0, repairedCount: 0, stillMissing: [], skippedItems: [] };
         let repairedCount = 0;
+        const skippedItems = [];
         for (let attempt = 1; attempt <= 3; attempt += 1) {
             if (context.onProgress) {
                 context.onProgress({
@@ -19766,17 +19787,9 @@
                     return !(shkIds.length && shkIds.every((shk) => activeShks.has(normalizeIdentifier(shk))));
                 });
             }
-            if (!missing.length) return { expectedCount: expected.size, repairedCount };
+            if (!missing.length) return { expectedCount: expected.size, repairedCount, stillMissing: [], skippedItems };
             if (attempt >= 3) {
-                // Диагностика для разбора (ошибка плавающая, точную причину
-                // ещё не нашли) -- первые несколько реально пропавших задач:
-                // модуль/тип/sourceId/число ШК, чтобы было с чем разбираться
-                // в следующий раз, а не гадать вслепую.
-                const sample = missing.slice(0, 5).map((task) => {
-                    const shkIds = (task.source_shk_ids || []).filter(Boolean);
-                    return (task.source_module || "?") + "/" + (task.task_type || "?") + " id=" + (task.source_id || "?") + " шк=" + shkIds.length + (shkIds.length ? " [" + shkIds.slice(0, 3).join(",") + (shkIds.length > 3 ? ",..." : "") + "]" : "");
-                }).join(" | ");
-                throw new Error("После контрольной сверки не сохранилось задач: " + missing.length + ". Попробуйте повторить выгрузку; WMS+ не будет делать вид, что всё ок. Диагностика: " + sample);
+                return { expectedCount: expected.size, repairedCount, stillMissing: missing, skippedItems };
             }
             if (context.onProgress) {
                 context.onProgress({
@@ -19786,9 +19799,11 @@
                     totalTasks: context.totalTasks,
                 });
             }
-            repairedCount += await saveRepairTasks(db, missing, context);
+            const repairResult = await saveRepairTasks(db, missing, context);
+            repairedCount += repairResult.repaired;
+            skippedItems.push(...repairResult.skippedItems);
         }
-        return { expectedCount: expected.size, repairedCount };
+        return { expectedCount: expected.size, repairedCount, stillMissing: [], skippedItems };
     }
 
     async function prepareTasksForAfterSaleDedupe(db, module, tasks, meta, onProgress) {
@@ -19839,6 +19854,11 @@
             return {
                 upserted: rpcUpsertedCount(data, chunk.length),
                 uploadRun: data && data.upload_run ? data.upload_run : null,
+                // Проблемная запись в батче (напр. гонка на уникальном индексе
+                // при конкурентных/повторных сохранениях) больше не роняет весь
+                // чанк -- save_wms_manual_upload сама пропускает такую запись и
+                // продолжает остальные, возвращая их здесь для отображения.
+                skippedItems: data && Array.isArray(data.skipped_items) ? data.skipped_items : [],
             };
         }
         if (chunk.length > 1 && isRetryableSaveTimeout(error)) {
@@ -19862,6 +19882,7 @@
             return {
                 upserted: left.upserted + right.upserted,
                 uploadRun: right.uploadRun || left.uploadRun,
+                skippedItems: (left.skippedItems || []).concat(right.skippedItems || []),
             };
         }
         throw error;
@@ -19906,10 +19927,11 @@
         const chunks = chunkTasksForSave(module, payloadTasks);
         let totalUpserted = 0;
         let uploadRun = null;
+        const skippedItems = [];
         if (!chunks.length) {
             uploadRun = await saveUploadRunOnly(db, run);
             await logUploadCoverage(db, module);
-            return { ok: true, upserted_count: 0, upload_run: uploadRun, dedupe: prepared.stats };
+            return { ok: true, upserted_count: 0, upload_run: uploadRun, dedupe: prepared.stats, skipped_items: [] };
         }
         const progressContext = {
             onProgress,
@@ -19928,9 +19950,18 @@
             totalUpserted += result.upserted;
             progressContext.saved = totalUpserted;
             if (result.uploadRun) uploadRun = result.uploadRun;
+            skippedItems.push(...(result.skippedItems || []));
         }
         const verified = await verifyAndRepairSavedTasks(db, payloadTasks, progressContext);
-        const finalUpserted = Math.max(totalUpserted, verified.expectedCount || payloadTasks.length);
+        skippedItems.push(...(verified.skippedItems || []));
+        // stillMissing -- задачи, которых после 3 попыток сверки так и не
+        // нашлось в базе, но RPC их явно пропущенными не называла (напр.
+        // сетевой сбой между сохранением и проверкой) -- заносим в тот же
+        // список пропущенных, с понятной причиной вместо тишины.
+        (verified.stillMissing || []).forEach((task) => {
+            skippedItems.push({ source_id: task.source_id, task_type: task.task_type, title: task.title, error: "не нашлось в базе после 3 попыток сверки" });
+        });
+        const finalUpserted = totalUpserted + (verified.repairedCount || 0);
         if (uploadRun && uploadRun.id && Number(uploadRun.upserted_count) !== finalUpserted) {
             uploadRun = { ...uploadRun, upserted_count: finalUpserted };
             const { data, error } = await db
@@ -19942,7 +19973,7 @@
             if (!error && data) uploadRun = data;
         }
         await logUploadCoverage(db, module);
-        return { ok: true, upserted_count: finalUpserted, upload_run: uploadRun, dedupe: prepared.stats };
+        return { ok: true, upserted_count: finalUpserted, upload_run: uploadRun, dedupe: prepared.stats, skipped_items: skippedItems };
     }
 
     function mergeRun(run) {
@@ -20273,6 +20304,7 @@
         setMasterStatus("Сохраняю мастер-выгрузку в Supabase...");
         let total = 0;
         const results = [];
+        const allSkipped = [];
         try {
             await waitForMasterSpecialBackground();
             preview = state.master.preview;
@@ -20322,13 +20354,20 @@
                 total += Number(response.upserted_count || tasks.length) || 0;
                 if (response.upload_run) mergeRun(response.upload_run);
                 results.push(moduleDef(item.module).label + ": " + tasks.length);
+                allSkipped.push(...((response && response.skipped_items) || []));
             }
             renderCalendar();
             renderModuleChooser();
             $("masterDone").classList.add("visible");
-            $("masterDone").textContent = "Мастер-выгрузка завершена. Создано/обновлено задач: " + total + ". " + results.join("; ") + ".";
+            $("masterDone").textContent = "Мастер-выгрузка завершена. Создано/обновлено задач: " + total + ". " + results.join("; ") + "."
+                + (allSkipped.length ? " Пропущено: " + allSkipped.length + " (конфликт при сохранении)." : "");
             $("masterBottomActions").classList.add("hidden");
-            setMasterStatus("Готово. Данные сохранены в WMS+.", "good");
+            if (allSkipped.length) {
+                console.warn("Пропущенные при сохранении записи:", allSkipped);
+                setMasterStatus("Сохранено " + total + ", но " + allSkipped.length + " записей пропущено из-за конфликта (подробности в консоли браузера, F12).", "error");
+            } else {
+                setMasterStatus("Готово. Данные сохранены в WMS+.", "good");
+            }
         } catch (error) {
             $("saveMaster").disabled = false;
             setMasterStatus(error && error.message ? error.message : String(error), "error");
