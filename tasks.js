@@ -12091,8 +12091,13 @@
             const afterCelebration = () => {
                 (state.flow.embedded ? advanceFlowAfterResolution : closeTaskDetail)();
                 const culprit = latestMovementEmployeeForRow(row);
+                const sourceShkIds = (Array.isArray(row.source_shk_ids) ? row.source_shk_ids : []).map(normalizeIdentifier).filter(Boolean);
                 openViolationPrompt({
                     taskId: row.id,
+                    // Одна задача иногда несёт несколько ШК (тара) -- для
+                    // однозначного случая пишем сам ШК, для тары просто
+                    // список через запятую, лучше, чем совсем пусто.
+                    shk: sourceShkIds.join(", "),
                     taskType: row.task_type || "",
                     zone: taskSectionName(row),
                     verdict,
@@ -14851,11 +14856,13 @@
             "<tr>"
             + "<td>" + escapeHtml(row.shk || "-") + "</td>"
             + "<td>" + escapeHtml(formatRuDateTime(row.created_at)) + "</td>"
+            + "<td>" + escapeHtml(normalizeText(row.culprit_name) || "-") + "</td>"
+            + "<td>" + escapeHtml(normalizeText(row.logged_by_name) || "-") + "</td>"
             + "<td class='review-wrap-cell'>" + escapeHtml(row.comment || "-") + "</td>"
             + "</tr>"
         )).join("");
         target.innerHTML = rows.length
-            ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>ШК</th><th>Дата</th><th>Комментарий</th></tr></thead><tbody>" + body + "</tbody></table></div>"
+            ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>ШК</th><th>Дата</th><th>Сотрудник</th><th>Ответственный</th><th>Комментарий</th></tr></thead><tbody>" + body + "</tbody></table></div>"
             : "<div class='empty-state'>Пусто.</div>";
     }
 
