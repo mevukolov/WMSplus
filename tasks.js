@@ -632,6 +632,7 @@
             loaded: false,
             error: "",
             view: "stats",
+            statDimension: "type",
         },
         // Контекст всплывающей модалки "Нарушение", открытой поверх
         // taskDetailModal сразу после сохранения вердикта -- не знает о
@@ -14765,31 +14766,112 @@
         }
     }
 
-    function violationStatsGroupHtml(title, rows, keyFn, labelFn) {
-        const counts = new Map();
+    // Ключ группировки -- для "сотрудников" идём по employee_id, если он
+    // есть (резолвится по ростеру), иначе по самому тексту culprit_name
+    // (виновник теперь свободное поле -- то, что вписали вручную без
+    // совпадения с известным сотрудником, не должно схлопываться в одну
+    // общую "-" группу).
+    function violationGroupKey(row, dimension) {
+        if (dimension === "zone") return normalizeText(row.zone) || "-";
+        if (dimension === "employee") return normalizeText(row.culprit_employee_id) || normalizeText(row.culprit_name) || "-";
+        return normalizeText(row.violation_type) || "-";
+    }
+
+    function violationGroupLabel(dimension, key, groupRows) {
+        if (dimension === "employee") {
+            const byId = employeeNameById(key);
+            if (byId) return byId;
+            const sample = groupRows.find((row) => normalizeText(row.culprit_name));
+            return (sample && normalizeText(sample.culprit_name)) || key;
+        }
+        return key;
+    }
+
+    function violationStatGroups(dimension) {
+        const rows = state.violations.rows || [];
+        const groups = new Map();
         rows.forEach((row) => {
-            const key = keyFn(row) || "-";
-            counts.set(key, (counts.get(key) || 0) + 1);
+            const key = violationGroupKey(row, dimension);
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(row);
         });
-        const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-        const body = sorted.length
-            ? sorted.map(([key, count]) => "<div class='violation-stat-row'><span>" + escapeHtml(labelFn ? labelFn(key) : key) + "</span><span>" + count + "</span></div>").join("")
-            : "<div class='status-line'>Нет данных за последние 30 дней.</div>";
-        return "<div class='violation-stat-group'><h4>" + escapeHtml(title) + "</h4>" + body + "</div>";
+        return Array.from(groups.entries())
+            .map(([key, groupRows]) => ({ key, label: violationGroupLabel(dimension, key, groupRows), rows: groupRows }))
+            .sort((a, b) => b.rows.length - a.rows.length);
+    }
+
+    function updateViolationsStatDimThumb(instant) {
+        const thumb = $("violationsStatsDimThumb");
+        const active = document.querySelector("#violationsStatsDimTabs .review-view-tab.active");
+        if (!thumb || !active) return;
+        if (instant) thumb.style.transition = "none";
+        thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
+        thumb.style.width = active.offsetWidth + "px";
+        if (instant) {
+            void thumb.offsetWidth;
+            thumb.style.transition = "";
+        }
     }
 
     function renderViolationsStats() {
         const target = $("violationsStatsWrap");
         if (!target) return;
         const rows = state.violations.rows || [];
+        const dimension = state.violations.statDimension || "type";
+        document.querySelectorAll("#violationsStatsDimTabs .review-view-tab").forEach((tab) => {
+            tab.classList.toggle("active", tab.dataset.violationsStatDim === dimension);
+        });
+        const groups = violationStatGroups(dimension);
+        const body = groups.length
+            ? groups.map((group) => "<button type='button' class='violation-stat-row' data-violation-group='" + escapeHtml(group.key) + "'><span>" + escapeHtml(group.label) + "</span><span>" + group.rows.length + "</span></button>").join("")
+            : "<div class='status-line'>Нет данных за последние 30 дней.</div>";
         target.innerHTML = (state.violations.error ? "<div class='status-line error'>" + escapeHtml(state.violations.error) + "</div>" : "")
             + (state.violations.loading ? "<div class='status-line'>Загружаю...</div>" : "")
             + "<div class='violation-stat-total'>Всего за 30 дней: " + rows.length + "</div>"
-            + "<div class='violation-stat-grid'>"
-            + violationStatsGroupHtml("По типам", rows, (row) => row.violation_type)
-            + violationStatsGroupHtml("По участкам", rows, (row) => row.zone)
-            + violationStatsGroupHtml("По сотрудникам", rows, (row) => row.culprit_employee_id, (id) => employeeNameById(id) || id)
-            + "</div>";
+            + "<div class='violation-stat-list'>" + body + "</div>";
+        target.querySelectorAll("[data-violation-group]").forEach((button) => {
+            button.addEventListener("click", () => openViolationDetailModal(dimension, button.dataset.violationGroup));
+        });
+    }
+
+    // ---- Нарушения: детализация по группе (клик по строке в
+    // "Статистике") -- все отдельные нарушения этого типа/участка/
+    // сотрудника: ШК, дата, комментарий.
+    function violationDetailDimLabel(dimension) {
+        if (dimension === "zone") return "Участок";
+        if (dimension === "employee") return "Сотрудник";
+        return "Тип";
+    }
+
+    function renderViolationDetailTable(rows) {
+        const target = $("violationDetailWrap");
+        if (!target) return;
+        const sorted = rows.slice().sort((a, b) => (normalizeText(b.created_at)).localeCompare(normalizeText(a.created_at)));
+        const body = sorted.map((row) => (
+            "<tr>"
+            + "<td>" + escapeHtml(row.shk || "-") + "</td>"
+            + "<td>" + escapeHtml(formatRuDateTime(row.created_at)) + "</td>"
+            + "<td class='review-wrap-cell'>" + escapeHtml(row.comment || "-") + "</td>"
+            + "</tr>"
+        )).join("");
+        target.innerHTML = rows.length
+            ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>ШК</th><th>Дата</th><th>Комментарий</th></tr></thead><tbody>" + body + "</tbody></table></div>"
+            : "<div class='empty-state'>Пусто.</div>";
+    }
+
+    function openViolationDetailModal(dimension, key) {
+        const groups = violationStatGroups(dimension);
+        const group = groups.find((item) => item.key === key);
+        const rows = group ? group.rows : [];
+        const label = group ? group.label : key;
+        const title = $("violationDetailTitle");
+        if (title) title.textContent = violationDetailDimLabel(dimension) + ": " + label + " (" + rows.length + ")";
+        renderViolationDetailTable(rows);
+        setFlowModalOpen("violationDetailModal", true);
+    }
+
+    function closeViolationDetailModal() {
+        setFlowModalOpen("violationDetailModal", false);
     }
 
     function renderViolationsHubScreen(instant) {
@@ -14805,6 +14887,7 @@
         updateViolationsViewThumb(instant);
         renderViolationsStats();
         renderViolationTypesEditor();
+        if (view === "stats") updateViolationsStatDimThumb(instant);
     }
 
     async function openViolationsHubModal() {
@@ -20744,6 +20827,16 @@
                 renderViolationsHubScreen();
             });
         });
+        document.querySelectorAll("#violationsStatsDimTabs [data-violations-stat-dim]").forEach((button) => {
+            button.addEventListener("click", () => {
+                if (state.violations.statDimension === button.dataset.violationsStatDim) return;
+                state.violations.statDimension = button.dataset.violationsStatDim;
+                renderViolationsStats();
+                updateViolationsStatDimThumb();
+            });
+        });
+        $("closeViolationDetail").addEventListener("click", closeViolationDetailModal);
+        $("violationDetailModal").addEventListener("click", (event) => { if (event.target === $("violationDetailModal")) closeViolationDetailModal(); });
         $("addViolationType").addEventListener("click", addViolationTypeDraft);
         $("saveViolationTypes").addEventListener("click", () => { void saveViolationTypesFromModal(); });
         $("violationsHubModal").addEventListener("click", (event) => { if (event.target === $("violationsHubModal")) closeViolationsHubModal(); });

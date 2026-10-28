@@ -1154,11 +1154,10 @@
         .status-pilot-view-tabs .review-view-tab.active { background: transparent; box-shadow: none; }
         #statusPilotModal .tasks-flow-card.status-pilot-card, #violationsHubModal .tasks-flow-card.status-pilot-card { height: 82vh; max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
         .status-pilot-scroll { flex: 1; min-height: 0; overflow: auto; margin-top: 10px; }
-        .violation-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 10px; }
-        .violation-stat-group { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; }
-        .violation-stat-group h4 { margin: 0 0 8px; font-size: 12px; font-weight: 1000; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
-        .violation-stat-row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-top: 1px solid #e2e8f0; font-weight: 700; }
+        .violation-stat-list { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 0 12px; margin-top: 10px; }
+        .violation-stat-row { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 8px; padding: 11px 2px; border: 0; border-top: 1px solid #e2e8f0; background: transparent; font: inherit; font-weight: 700; color: inherit; text-align: left; cursor: pointer; }
         .violation-stat-row:first-child { border-top: 0; }
+        .violation-stat-row:hover { color: var(--accent-dark); }
         .violation-stat-total { font-weight: 1000; font-size: 15px; margin-top: 6px; }
         .violation-form { display: grid; gap: 12px; margin-top: 4px; }
         .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
@@ -2639,6 +2638,12 @@
         </div>
         <div class="status-pilot-scroll">
             <div id="violationsStatsScreen">
+                <div id="violationsStatsDimTabs" class="review-view-tabs status-pilot-view-tabs" style="margin-top:10px;">
+                    <span id="violationsStatsDimThumb" class="review-view-thumb" aria-hidden="true"></span>
+                    <button type="button" class="review-view-tab active" data-violations-stat-dim="type">По типам</button>
+                    <button type="button" class="review-view-tab" data-violations-stat-dim="zone">По участкам</button>
+                    <button type="button" class="review-view-tab" data-violations-stat-dim="employee">По сотрудникам</button>
+                </div>
                 <div id="violationsStatsWrap"></div>
             </div>
             <div id="violationTypesScreen" class="hidden">
@@ -2650,6 +2655,18 @@
                 <div id="violationTypesStatus" class="review-status"></div>
             </div>
         </div>
+    </div>
+</section>
+
+<section id="violationDetailModal" class="tasks-flow-modal upload-work" aria-hidden="true" style="z-index:4400;">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 id="violationDetailTitle" class="work-title">Нарушения</h3>
+            </div>
+            <button id="closeViolationDetail" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="violationDetailWrap" class="status-pilot-scroll"></div>
     </div>
 </section>
 
