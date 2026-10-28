@@ -14609,6 +14609,14 @@
             if (status) status.textContent = "Укажи тип нарушения и участок.";
             return;
         }
+        if (!employee.name) {
+            if (status) status.textContent = "Укажи ID/имя виновного -- поле обязательно.";
+            return;
+        }
+        if (normalizeForMatch(violationType) === normalizeForMatch("Другое") && !comment) {
+            if (status) status.textContent = "Для типа «Другое» комментарий обязателен.";
+            return;
+        }
         if (!db) {
             if (status) status.textContent = "Supabase недоступен.";
             return;
