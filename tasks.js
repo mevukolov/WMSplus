@@ -2928,6 +2928,16 @@
         }
     }
 
+    // Выгрузки сейчас открываются только из тулбара Разбора
+    // (openUploadsFromReview) -- hero back button ведёт обратно в Разбор,
+    // см. его обработчик в initEvents().
+    function setUploadsStatus(text) {
+        const el = $("uploadsStatus");
+        if (!el) return;
+        el.textContent = text || "";
+        el.style.display = text ? "" : "none";
+    }
+
     async function showUploads() {
         if (!state.shift.current) {
             toast("Сначала нужно открыть смену.", "error");
@@ -2936,13 +2946,13 @@
         }
         state.view = "uploads";
         closeFlowModals();
+        setHeroTitle("Выгрузки", { animate: true, hideSubtitle: true, showBack: true });
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
         $("uploadsPage").classList.add("active");
-        $("uploadsStatus").textContent = "Загружаю журнал и настройки...";
-        const ok = await loadUploadMeta();
-        if (ok) $("uploadsStatus").textContent = "Готово. Задачи сохраняются в WMS+ Supabase.";
+        setUploadsStatus("");
+        await loadUploadMeta();
     }
 
     function showReviewPage() {
@@ -12955,7 +12965,7 @@
         renderModuleChooser();
         const db = supabaseDb();
         if (!db) {
-            $("uploadsStatus").textContent = "Supabase SDK не загрузился.";
+            setUploadsStatus("Supabase SDK не загрузился.");
             state.loadingStatus = false;
             return false;
         }
@@ -12973,7 +12983,7 @@
             if (!wmsRuns.ok) throw wmsRuns.error || new Error("Не удалось прочитать журналы выгрузок.");
             state.runs = mergeUploadRuns(wmsRuns.rows || []);
         } catch (error) {
-            $("uploadsStatus").textContent = "Не удалось проверить журнал. Если это первый запуск, примени миграцию WMS tables. " + (error && error.message ? error.message : String(error));
+            setUploadsStatus("Не удалось проверить журнал. Если это первый запуск, примени миграцию WMS tables. " + (error && error.message ? error.message : String(error)));
             return false;
         } finally {
             state.loadingStatus = false;
@@ -20517,8 +20527,14 @@
         $("cancelFlowSkip").addEventListener("click", closeFlowSkipModal);
         $("flowSkipReason").addEventListener("input", updateFlowSkipForm);
         $("confirmFlowSkip").addEventListener("click", () => { void skipFlowTaskFromModal(); });
-        $("homeFromUploads").addEventListener("click", showHome);
-        $("homeFromReview").addEventListener("click", showHome);
+        // Выгрузки сейчас открываются только из тулбара Разбора -- общая
+        // hero-кнопка "назад" должна вернуть туда, а не на главный, когда
+        // мы на экране выгрузок; из остальных мест (сам Разбор и т.д.)
+        // поведение прежнее -- на главный.
+        $("homeFromReview").addEventListener("click", () => {
+            if (state.view === "uploads") { showReviewPage(); return; }
+            showHome();
+        });
         $("makeUpload").addEventListener("click", () => openChooser(""));
         $("backfillUpload").addEventListener("click", openBackfillChooser);
         $("makeMasterUpload").addEventListener("click", openMaster);
