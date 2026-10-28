@@ -16224,12 +16224,14 @@
                 const shk = normalizeIdentifier(row && row.shk);
                 if (!shk || seen.has(shk)) return;
                 seen.add(shk);
+                const lrNum = Number(row && row.lr);
                 rows.push({
                     shk,
                     nm: row.nm != null ? String(row.nm) : "",
                     name: row.decription || "",
                     price: Number(row.price) || 0,
                     date_lost: row.date_lost || "",
+                    lr: Number.isFinite(lrNum) ? lrNum : null,
                 });
             });
         };
