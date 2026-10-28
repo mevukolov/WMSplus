@@ -15768,8 +15768,19 @@
 
     async function readObjectWorkbookRows(file) {
         if (typeof window.XLSX === "undefined") throw new Error("Не загрузилась библиотека XLSX. Обновите страницу и попробуйте еще раз.");
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
+        // CSV-экспорты чистых списаний обычно без BOM -- без него SheetJS,
+        // получив сырой ArrayBuffer, не может угадать кодировку и читает
+        // байты как Latin-1, кириллица превращается в кракозябры (напр.
+        // "ШК" -> "Ð¨Ð"). Разделитель (;) при этом определяется верно --
+        // ломается только это. File.text() декодирует как UTF-8 всегда
+        // (спека File API), так что для .csv читаем именно так и отдаём
+        // SheetJS уже готовую JS-строку -- тогда гадать кодировку вообще
+        // не нужно. У .xlsx/.xls свой бинарный (zip) формат, их это не
+        // касается -- для них путь остаётся прежним.
+        const isCsv = /\.csv$/i.test(file.name || "");
+        const workbook = isCsv
+            ? XLSX.read(await file.text(), { type: "string", cellDates: false })
+            : XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false });
         const firstSheetName = workbook.SheetNames[0];
         if (!firstSheetName) throw new Error("В файле не найдено листов.");
         const sheet = workbook.Sheets[firstSheetName];
