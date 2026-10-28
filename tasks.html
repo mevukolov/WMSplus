@@ -329,7 +329,7 @@
         .tooltip-line { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
         .tooltip-dot { width: 8px; height: 8px; border-radius: 99px; background: #ef4444; flex: 0 0 auto; }
         .tooltip-line.done .tooltip-dot { background: #22c55e; }
-        .upload-toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+        .upload-toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
         .module-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
         .module-card { border: 1px solid #e2e8f0; border-radius: 16px; padding: 14px; background: #fff; text-align: left; cursor: pointer; transition: transform .14s ease, border-color .14s ease; }
         .module-card:hover { transform: translateY(-2px); border-color: rgba(98,60,234,.34); }
@@ -2129,10 +2129,14 @@
     <section id="uploadsPage" class="tasks-page">
         <p id="uploadsStatus" class="tasks-page-note" style="display:none"></p>
 
-        <section class="card calendar-shell">
-            <div class="calendar-top">
-                <div>
-                    <strong>Календарь выгрузок</strong>
+        <section class="card review-status-card">
+            <div class="review-status-bar">
+                <div class="review-status-bar-left">
+                    <div class="review-view-tabs status-pilot-view-tabs" aria-label="Вид календаря">
+                        <span id="uploadsCalendarViewThumb" class="review-view-thumb" aria-hidden="true"></span>
+                        <button type="button" class="review-view-tab active" data-uploads-calendar-view="uploads">Выгрузки</button>
+                        <button type="button" class="review-view-tab" data-uploads-calendar-view="statuses">Статусы</button>
+                    </div>
                 </div>
                 <div class="upload-toolbar">
                     <button id="makeUpload" class="btn btn-rect" type="button">Сделать выгрузку</button>
@@ -2140,17 +2144,11 @@
                     <button id="backfillUpload" class="btn btn-outline" type="button" title="Ручная догрузка за прошлую дату">✎</button>
                 </div>
             </div>
-            <div id="calendarGrid" class="calendar-grid"></div>
         </section>
 
         <section class="card calendar-shell">
-            <div class="calendar-top">
-                <div>
-                    <strong>Покрытие статусов</strong>
-                    <div class="tasks-page-note">Цвет показывает, сколько обязательных статусов (из Маршрутизатора) проверено за дату, независимо от формата выгрузки.</div>
-                </div>
-            </div>
-            <div id="statusCoverageCalendarGrid" class="calendar-grid"></div>
+            <div id="calendarGrid" class="calendar-grid"></div>
+            <div id="statusCoverageCalendarGrid" class="calendar-grid hidden"></div>
         </section>
     </section>
 

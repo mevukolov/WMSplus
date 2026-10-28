@@ -652,6 +652,7 @@
         },
         loadingStatus: false,
         calendarRange: null,
+        uploadsCalendarView: "uploads",
         manualDate: "",
         activeModule: "",
         activeDate: "",
@@ -2088,6 +2089,36 @@
         renderStatusCoverageCalendar();
     }
 
+    // Переключатель "Выгрузки/Статусы" над календарём -- оба грида уже
+    // считаются в renderCalendar()/renderStatusCoverageCalendar() разом
+    // (дешево, тот же range), здесь только показываем нужный и прячем
+    // другой, тот же паттерн таблетки-переключателя, что и у Маршрутизатора
+    // (updateStatusViewThumb) и Нарушений (updateViolationsViewThumb).
+    function renderUploadsCalendarView(instant) {
+        const isStatuses = state.uploadsCalendarView === "statuses";
+        document.querySelectorAll("[data-uploads-calendar-view]").forEach((button) => {
+            button.classList.toggle("active", button.dataset.uploadsCalendarView === state.uploadsCalendarView);
+        });
+        const uploadsGrid = $("calendarGrid");
+        const statusesGrid = $("statusCoverageCalendarGrid");
+        if (uploadsGrid) uploadsGrid.classList.toggle("hidden", isStatuses);
+        if (statusesGrid) statusesGrid.classList.toggle("hidden", !isStatuses);
+        updateUploadsCalendarViewThumb(instant);
+    }
+
+    function updateUploadsCalendarViewThumb(instant) {
+        const thumb = $("uploadsCalendarViewThumb");
+        const active = document.querySelector("#uploadsPage [data-uploads-calendar-view].active");
+        if (!thumb || !active) return;
+        if (instant) thumb.style.transition = "none";
+        thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
+        thumb.style.width = active.offsetWidth + "px";
+        if (instant) {
+            void thumb.offsetWidth;
+            thumb.style.transition = "";
+        }
+    }
+
     function renderBackfillCalendar() {
         const range = state.calendarRange || buildCalendarRange();
         state.calendarRange = range;
@@ -2953,6 +2984,7 @@
         $("uploadsPage").classList.add("active");
         setUploadsStatus("");
         await loadUploadMeta();
+        renderUploadsCalendarView(true);
     }
 
     function showReviewPage() {
@@ -20497,6 +20529,13 @@
                 renderStatusPilotScreen();
             });
         });
+        document.querySelectorAll("#uploadsPage [data-uploads-calendar-view]").forEach((button) => {
+            button.addEventListener("click", () => {
+                if (state.uploadsCalendarView === button.dataset.uploadsCalendarView) return;
+                state.uploadsCalendarView = button.dataset.uploadsCalendarView;
+                renderUploadsCalendarView();
+            });
+        });
         $("addStatusDictionaryRow").addEventListener("click", addStatusDictionaryDraft);
         $("saveStatusDictionary").addEventListener("click", () => { void saveStatusDictionaryFromModal(); });
         $("closeStatusDictionaryEdit").addEventListener("click", closeStatusDictionaryEditModal);
@@ -20565,6 +20604,7 @@
                 updateReviewViewThumb();
                 scheduleReviewTableMaxHeight();
             }
+            if (state.view === "uploads") updateUploadsCalendarViewThumb();
         });
         // Tables used a fixed vh max-height, which either left a big blank
         // "chin" under a short table on tall screens or, combined with
