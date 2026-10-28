@@ -16277,7 +16277,15 @@
                 p_actor_name: actor.name || null,
             });
             if (error) throw error;
-            return Array.isArray(data) ? data : [];
+            // RPC теперь изолирует ошибки построчно (миграция
+            // 202610280006) и возвращает {results, skipped_items} вместо
+            // голого массива -- конфликтующие ШК больше не валят всю
+            // пачку, но тут (фон открытия смены) по-прежнему best-effort,
+            // пропущенные просто не возвращаем наверх.
+            if (data && Array.isArray(data.skipped_items) && data.skipped_items.length) {
+                console.warn("absorb shks into pure losses zone: пропущено " + data.skipped_items.length + " ШК", data.skipped_items);
+            }
+            return data && Array.isArray(data.results) ? data.results : [];
         } catch (error) {
             console.warn("absorb shks into pure losses zone (shift opening) skipped:", error);
             return [];
@@ -16415,17 +16423,23 @@
                 p_actor_name: actor.name || null,
             });
             if (error) throw error;
-            const results = Array.isArray(data) ? data : [];
+            // RPC изолирует ошибки построчно (миграция 202610280006) --
+            // конфликтующий ШК (напр. уже активен под другой задачей)
+            // пропускается сам по себе, остальная пачка загружается.
+            const results = data && Array.isArray(data.results) ? data.results : [];
+            const skippedItems = data && Array.isArray(data.skipped_items) ? data.skipped_items : [];
             const createdCount = results.filter((item) => item && item.action === "created_new").length;
             const movedCount = results.filter((item) => item && item.action === "zoned_in_place").length;
-            const alreadyThere = rows.length - results.length;
+            const alreadyThere = rows.length - results.length - skippedItems.length;
             state.pureLosses.loaded = false;
+            if (skippedItems.length) console.warn("pure losses manual upload: пропущено по ошибке", skippedItems);
             setPureLossesUploadStatus(
                 "Готово. Новых задач: " + createdCount + ". Перенесено существующих: " + movedCount
-                    + (alreadyThere > 0 ? ". Уже были в «Чистые списания»: " + alreadyThere + "." : "."),
-                "good"
+                    + (alreadyThere > 0 ? ". Уже были в «Чистые списания»: " + alreadyThere + "." : ".")
+                    + (skippedItems.length ? " Пропущено из-за конфликта: " + skippedItems.length + " (см. консоль)." : ""),
+                skippedItems.length ? "error" : "good"
             );
-            toast("Чистые списания загружены: " + results.length + " ШК.", "success");
+            toast("Чистые списания загружены: " + results.length + " ШК." + (skippedItems.length ? " Пропущено: " + skippedItems.length + "." : ""), skippedItems.length ? "error" : "success");
         } catch (error) {
             console.error("pure losses manual upload failed:", error);
             setPureLossesUploadStatus("Не удалось загрузить: " + (error && error.message ? error.message : String(error)), "error");

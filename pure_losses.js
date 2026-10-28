@@ -5188,7 +5188,13 @@
                 p_actor_name: actorName || null,
             });
             if (error) throw error;
-            return Array.isArray(data) ? data : [];
+            // RPC теперь изолирует ошибки построчно (миграция
+            // 202610280006) и возвращает {results, skipped_items} вместо
+            // голого массива.
+            if (data && Array.isArray(data.skipped_items) && data.skipped_items.length) {
+                console.warn("absorb shks into pure losses zone: пропущено " + data.skipped_items.length + " ШК", data.skipped_items);
+            }
+            return data && Array.isArray(data.results) ? data.results : [];
         } catch (error) {
             console.warn("absorb shks into pure losses zone skipped:", error);
             return [];
