@@ -5489,12 +5489,6 @@
     }
 
     function isWaitingReopenTask(row) {
-        // "Аннулирование после списания" тоже технически "Отложено" с
-        // reopen_after в будущем (reopenAfterForVerdict), но смысл этого
-        // вердикта -- не отложить с глаз долой на пару дней, а сразу
-        // осесть в своей папке в "Задачах" и ждать там разбора. Поэтому
-        // не считаем его "спящим", даже пока reopen_after не наступил.
-        if (normalizeText(row && row.opp_verdict) === CANCELLATION_AFTER_WRITEOFF_VERDICT) return false;
         return taskStatus(row) === "Отложено" && reopenTime(row) > Date.now();
     }
 
