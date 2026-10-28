@@ -4666,6 +4666,17 @@
         const button = $("closeMovementTasks");
         if (button) button.disabled = true;
         setActualizeStatus("Готовлю пакет закрытия задач...");
+        // handleActualizeSupersetFile запускает фоновую цепочку сразу после
+        // построения кандидатов (hydrateSupersetCache -> ... -> loadReviewTasks),
+        // а loadReviewTasks ВСЕГДА откатывает state.review.rows обратно к
+        // лёгким заглушкам (fullLoaded=false, см. её же комментарий) -- если
+        // оператор успевает кликнуть "Закрыть" раньше, чем сюда долетит
+        // следующий ensureFullActiveTasksLoaded(), часть кандидатов находит
+        // через findTaskRow уже свежую лёгкую версию и ложно уходит в
+        // "Пропущено (задача ещё не полностью загружена)". Досасываем полные
+        // данные здесь же, прямо перед построением планов закрытия, вместо
+        // того чтобы полагаться на то, что кто-то другой успел это сделать раньше.
+        await ensureFullActiveTasksLoaded();
         let completed = 0;
         let updated = 0;
         let created = 0;
@@ -4761,8 +4772,12 @@
             }
             await loadReviewTasks();
             state.actualize.candidates = [];
+            // Один и тот же текст раньше дублировался в двух блоках с
+            // РАЗНЫМ тоном (этот всегда зелёный, actualizeStatus -- красный
+            // при пропусках) -- выглядело так, будто один блок сообщает об
+            // успехе, а другой тут же противоречит ему. Тон синхронизирован.
             if ($("actualizeResults")) {
-                $("actualizeResults").innerHTML = "<div class='status-line good'>Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote() + "</div>";
+                $("actualizeResults").innerHTML = "<div class='status-line " + (lightSkipped.length ? "error" : "good") + "'>Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote() + "</div>";
             }
             setActualizeStatus("Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote(), lightSkipped.length ? "error" : "good");
             refreshExpandedSections();
