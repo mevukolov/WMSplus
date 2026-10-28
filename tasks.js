@@ -2473,7 +2473,7 @@
         const title = $("shiftGateTitle");
         const text = $("shiftGateText");
         const openButton = $("openShiftFromBanner");
-        const uploads = $("openUploads");
+        const uploads = $("openUploadsFromReview");
         if (!banner || !title || !text || !uploads) return;
         const shift = state.shift.current;
         uploads.classList.toggle("is-disabled", !shift);
@@ -20419,7 +20419,7 @@
         $("openFlowDebug").addEventListener("click", () => { void openFlowDebugSandbox(); });
         $("openFlow").addEventListener("click", () => { void showFlowPage(); });
         $("startFlowBanner").addEventListener("click", () => { void showFlowPage(); });
-        $("openUploads").addEventListener("click", () => { void showUploads(); });
+        $("openUploadsFromReview").addEventListener("click", () => { void showUploads(); });
         $("openReview").addEventListener("click", showReviewPage);
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
