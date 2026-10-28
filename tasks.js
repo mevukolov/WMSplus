@@ -506,6 +506,7 @@
         "Списания AWH",
         "Коробки на входе",
         "2-я линия предсписка",
+        CANCELLATION_AFTER_WRITEOFF_VERDICT,
     ];
     // Не задача-секция -- физическая зона (стеллажи/короба из
     // no_shk_zone.js, те же данные, что "Зона «Без ШК»"), а не группировка
@@ -5488,6 +5489,12 @@
     }
 
     function isWaitingReopenTask(row) {
+        // "Аннулирование после списания" тоже технически "Отложено" с
+        // reopen_after в будущем (reopenAfterForVerdict), но смысл этого
+        // вердикта -- не отложить с глаз долой на пару дней, а сразу
+        // осесть в своей папке в "Задачах" и ждать там разбора. Поэтому
+        // не считаем его "спящим", даже пока reopen_after не наступил.
+        if (normalizeText(row && row.opp_verdict) === CANCELLATION_AFTER_WRITEOFF_VERDICT) return false;
         return taskStatus(row) === "Отложено" && reopenTime(row) > Date.now();
     }
 
@@ -5540,6 +5547,12 @@
     }
 
     function requestSectionName(row) {
+        // Проверяем ПЕРВЫМ -- вердикт сильнее любой другой классификации:
+        // задача с этим вердиктом уходит в свою папку независимо от
+        // task_type/title/модуля-источника (см. тоже проверку в
+        // reviewGroupedRows, которая этим же способом выкидывает такие
+        // строки из обычного Предразбора).
+        if (normalizeText(row && row.opp_verdict) === CANCELLATION_AFTER_WRITEOFF_VERDICT) return CANCELLATION_AFTER_WRITEOFF_VERDICT;
         const taskType = normalizeForMatch(row && row.task_type);
         const sourceModule = normalizeForMatch(row && row.source_module);
         const uploadType = normalizeForMatch(row && row.upload_type);
