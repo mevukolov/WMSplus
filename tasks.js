@@ -3097,7 +3097,7 @@
         // sizing -- a pixel-exact stand-in for "how wide this page's content
         // column really is" so the picker row's width matches it exactly,
         // rather than matching the switcher card's outer (padded) box.
-        const statusBar = document.querySelector(".review-status-bar");
+        const statusBar = document.querySelector("#reviewPage .review-status-bar");
         if (!track || !statusBar) return;
         const available = statusBar.getBoundingClientRect().width;
         if (available > 0) track.style.setProperty("--pager-panel-w", available + "px");
@@ -13216,7 +13216,7 @@
     // влетает от нулевой ширины до первой реальной отрисовки).
     function updateStatusViewThumb(instant) {
         const thumb = $("statusViewThumb");
-        const active = document.querySelector(".status-pilot-view-tabs .review-view-tab.active");
+        const active = document.querySelector("#statusPilotModal .status-pilot-view-tabs .review-view-tab.active");
         if (!thumb || !active) return;
         if (instant) thumb.style.transition = "none";
         thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
