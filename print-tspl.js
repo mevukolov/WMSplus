@@ -153,12 +153,22 @@ const QR_QUIET_ZONE_MODULES = 4;
 // bitmap sized to fit widthMm, adding the quiet zone margin. Pure/no DOM
 // -- isDarkFn(row, col) is any function, so this is fully unit-testable
 // with a hand-built fake matrix, independent of qrcodejs.
-function packQrModulesToBitmap(moduleCount, isDarkFn, widthMm) {
+//
+// invert flips which bit value means "printed" -- on-site testing
+// (2026-10-28) found this printer draws bit=1 as WHITE and bit=0 as
+// BLACK (the opposite of the "standard" assumption the rest of this file
+// was written under), which is why every existing BITMAP label prints
+// its background solid black with the QR pattern showing through white.
+// That's been fine for the existing "Без ШК" labels, but a new QR-only
+// label needs the normal look (black QR on a white background), so
+// invert is opt-in per qr element rather than changing default behavior
+// everywhere -- see qrBitmapCommandBytes below.
+function packQrModulesToBitmap(moduleCount, isDarkFn, widthMm, invert) {
     const totalModules = moduleCount + QR_QUIET_ZONE_MODULES * 2;
     const cellSizeDots = Math.max(1, Math.round(mmToDots(widthMm || 20) / totalModules));
     const pixelSize = totalModules * cellSizeDots;
     const widthBytes = Math.ceil(pixelSize / 8);
-    const bytes = new Array(widthBytes * pixelSize).fill(0);
+    const bytes = new Array(widthBytes * pixelSize).fill(invert ? 0xff : 0);
     for (let row = 0; row < moduleCount; row++) {
         for (let col = 0; col < moduleCount; col++) {
             if (!isDarkFn(row, col)) continue;
@@ -168,7 +178,10 @@ function packQrModulesToBitmap(moduleCount, isDarkFn, widthMm) {
                 const rowByteOffset = (pxRowStart + dy) * widthBytes;
                 for (let dx = 0; dx < cellSizeDots; dx++) {
                     const pxCol = pxColStart + dx;
-                    bytes[rowByteOffset + (pxCol >> 3)] |= (0x80 >> (pxCol & 7));
+                    const byteIdx = rowByteOffset + (pxCol >> 3);
+                    const mask = 0x80 >> (pxCol & 7);
+                    if (invert) bytes[byteIdx] &= (~mask & 0xff);
+                    else bytes[byteIdx] |= mask;
                 }
             }
         }
@@ -203,7 +216,7 @@ function qrModuleMatrixFor(value) {
 function qrBitmapCommandBytes(element, data) {
     const value = tsplEscape(resolveElementValue(element, data));
     const { moduleCount, isDark } = qrModuleMatrixFor(value);
-    const { widthBytes, heightDots, bytes } = packQrModulesToBitmap(moduleCount, isDark, element.width_mm);
+    const { widthBytes, heightDots, bytes } = packQrModulesToBitmap(moduleCount, isDark, element.width_mm, !!element.invert);
     const x = mmToDots(element.x_mm);
     const y = mmToDots(element.y_mm);
     const header = cp1251Encode(`BITMAP ${x},${y},${widthBytes},${heightDots},0,`);
