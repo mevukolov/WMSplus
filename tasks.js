@@ -742,6 +742,11 @@
             activeSection: PURE_LOSSES_LR_SECTIONS[0],
             sectionExpanded: false,
         },
+        pureLossesUpload: {
+            fileName: "",
+            prepared: null,
+            saving: false,
+        },
         inactive: {
             rows: [],
             loading: false,
@@ -2095,14 +2100,22 @@
     // другой, тот же паттерн таблетки-переключателя, что и у Маршрутизатора
     // (updateStatusViewThumb) и Нарушений (updateViolationsViewThumb).
     function renderUploadsCalendarView(instant) {
-        const isStatuses = state.uploadsCalendarView === "statuses";
+        const mode = state.uploadsCalendarView;
         document.querySelectorAll("[data-uploads-calendar-view]").forEach((button) => {
-            button.classList.toggle("active", button.dataset.uploadsCalendarView === state.uploadsCalendarView);
+            button.classList.toggle("active", button.dataset.uploadsCalendarView === mode);
         });
         const uploadsGrid = $("calendarGrid");
         const statusesGrid = $("statusCoverageCalendarGrid");
-        if (uploadsGrid) uploadsGrid.classList.toggle("hidden", isStatuses);
-        if (statusesGrid) statusesGrid.classList.toggle("hidden", !isStatuses);
+        const pureLossesHint = $("pureLossesUploadHint");
+        if (uploadsGrid) uploadsGrid.classList.toggle("hidden", mode !== "uploads");
+        if (statusesGrid) statusesGrid.classList.toggle("hidden", mode !== "statuses");
+        if (pureLossesHint) pureLossesHint.classList.toggle("hidden", mode !== "pureLosses");
+        // В режиме "Чистые списания" нет ни мастер-выгрузки, ни ручной
+        // догрузки за прошлую дату -- это разовая загрузка произвольного
+        // файла, обе кнопки тут не имеют смысла.
+        if ($("makeMasterUpload")) $("makeMasterUpload").classList.toggle("hidden", mode === "pureLosses");
+        if ($("backfillUpload")) $("backfillUpload").classList.toggle("hidden", mode === "pureLosses");
+        if ($("makeUpload")) $("makeUpload").textContent = mode === "pureLosses" ? "Загрузить чистые списания" : "Сделать выгрузку";
         updateUploadsCalendarViewThumb(instant);
     }
 
@@ -16260,6 +16273,157 @@
         }
     }
 
+    // ---- Чистые списания: ручная загрузка файла за произвольный период
+    // (кнопка "Сделать выгрузку" в режиме "Чистые списания" на экране
+    // Выгрузок) -- в отличие от preparePureLossesRows (открытие смены),
+    // здесь НЕТ фильтра по конкретной дате и по "авто" ЛР -- обрабатываем
+    // каждую строку файла с её собственной датой, дедуп только по ШК
+    // (один физический ШК не может быть в "Чистые списания" дважды).
+    // wh_id сверяем, только если колонка реально есть в файле и у юзера
+    // задан WH_ID -- не валим строку из-за отсутствующей колонки.
+    function preparePureLossesUploadRows(rows, whId) {
+        const rowsByKey = new Map();
+        const stats = {
+            source_total_rows: (rows || []).length,
+            candidate_rows: 0,
+            candidate_sum_price: 0,
+            skipped_by_wh: 0,
+            skipped_invalid: 0,
+            duplicate_in_file_ignored: 0,
+        };
+        (rows || []).forEach((row) => {
+            const normalizedRow = buildNormalizedObjectRow(row);
+            const shk = normalizeIdentifier(objectCell(row, normalizedRow, "shk"));
+            if (!shk) { stats.skipped_invalid += 1; return; }
+            const rowWhId = normalizeIdentifier(objectCell(row, normalizedRow, "wh_id"));
+            if (rowWhId && whId && rowWhId !== whId) { stats.skipped_by_wh += 1; return; }
+            if (rowsByKey.has(shk)) { stats.duplicate_in_file_ignored += 1; return; }
+            const dateLost = parseDateTime(objectCell(row, normalizedRow, "date_lost")).date || "";
+            const lrRaw = objectCell(row, normalizedRow, "lr");
+            const lr = normalizeLossReason(lrRaw);
+            rowsByKey.set(shk, {
+                shk,
+                nm: toIntegerOrNull(objectCell(row, normalizedRow, "nm")),
+                decription: normalizeText(objectCell(row, normalizedRow, "decription")),
+                date_lost: dateLost,
+                lr: toIntegerOrNull(lrRaw) ?? toIntegerOrNull(lr) ?? lr,
+                price: normalizePrice(objectCell(row, normalizedRow, "price")) ?? 0,
+            });
+        });
+        rowsByKey.forEach((row) => {
+            stats.candidate_rows += 1;
+            stats.candidate_sum_price += Number(row.price) || 0;
+        });
+        stats.candidate_sum_price = Math.round(stats.candidate_sum_price * 100) / 100;
+        return { rowsByKey, stats };
+    }
+
+    function setPureLossesUploadStatus(message, type) {
+        const el = $("pureLossesUploadStatus");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = "status-line" + (type ? " " + type : "");
+    }
+
+    function updatePureLossesUploadForm() {
+        const button = $("savePureLossesUpload");
+        const ready = Boolean(state.pureLossesUpload.prepared && state.pureLossesUpload.prepared.rowsByKey.size && !state.pureLossesUpload.saving);
+        if (button) button.disabled = !ready;
+    }
+
+    function renderPureLossesUploadStats(stats) {
+        const target = $("pureLossesUploadStats");
+        if (!target || !stats) return;
+        const cards = [
+            ["Строк в файле", stats.source_total_rows],
+            ["К загрузке (уникальных ШК)", stats.candidate_rows],
+            ["Сумма", formatMoney(stats.candidate_sum_price || 0)],
+            ["Дубли в файле", stats.duplicate_in_file_ignored],
+            ["Отсечено (другой склад)", stats.skipped_by_wh],
+            ["Невалидные строки", stats.skipped_invalid],
+        ];
+        target.innerHTML = cards.map(([label, value]) => "<div class='mini-stat'><div class='mini-stat-label'>" + escapeHtml(label) + "</div><div class='mini-stat-value'>" + escapeHtml(value) + "</div></div>").join("");
+    }
+
+    async function handlePureLossesUploadFile(file) {
+        if (!file) return;
+        state.pureLossesUpload.fileName = file.name;
+        if ($("pureLossesUploadFileName")) $("pureLossesUploadFileName").textContent = "Файл выбран: " + file.name;
+        setPureLossesUploadStatus("Читаю файл...");
+        try {
+            const rows = await readObjectWorkbookRows(file);
+            const prepared = preparePureLossesUploadRows(rows, WH_ID);
+            state.pureLossesUpload.prepared = prepared;
+            renderPureLossesUploadStats(prepared.stats);
+            setPureLossesUploadStatus("Файл разобран. К загрузке: " + prepared.rowsByKey.size + " ШК.", prepared.rowsByKey.size ? "good" : "");
+        } catch (error) {
+            console.error("pure losses upload file failed:", error);
+            state.pureLossesUpload.prepared = null;
+            if ($("pureLossesUploadStats")) $("pureLossesUploadStats").innerHTML = "";
+            setPureLossesUploadStatus("Не удалось разобрать файл: " + (error && error.message ? error.message : String(error)), "error");
+        } finally {
+            updatePureLossesUploadForm();
+        }
+    }
+
+    function openPureLossesUploadModal() {
+        state.pureLossesUpload.fileName = "";
+        state.pureLossesUpload.prepared = null;
+        state.pureLossesUpload.saving = false;
+        if ($("pureLossesUploadFile")) $("pureLossesUploadFile").value = "";
+        if ($("pureLossesUploadFileName")) $("pureLossesUploadFileName").textContent = "Файл пока не выбран";
+        if ($("pureLossesUploadStats")) $("pureLossesUploadStats").innerHTML = "";
+        setPureLossesUploadStatus("Выберите файл чистых списаний.");
+        updatePureLossesUploadForm();
+        setFlowModalOpen("pureLossesUploadModal", true);
+    }
+
+    function closePureLossesUploadModal() {
+        setFlowModalOpen("pureLossesUploadModal", false);
+    }
+
+    // Та же RPC (wms_pure_losses_absorb_shks), что у открытия смены, но
+    // вызываем напрямую, а не через absorbShksIntoPureLossesZone -- та
+    // глотает ошибку в console.warn (приемлемо для best-effort фона при
+    // открытии смены), здесь это единственное действие в модалке и
+    // оператор должен увидеть, если что-то пошло не так.
+    async function savePureLossesUpload() {
+        const prepared = state.pureLossesUpload.prepared;
+        if (!prepared || !prepared.rowsByKey.size || state.pureLossesUpload.saving) return;
+        const db = supabaseDb();
+        if (!db) { setPureLossesUploadStatus("Supabase недоступен.", "error"); return; }
+        const rows = buildPureLossesAbsorbRows(prepared);
+        state.pureLossesUpload.saving = true;
+        updatePureLossesUploadForm();
+        setPureLossesUploadStatus("Загружаю " + rows.length + " ШК в «Чистые списания»...");
+        try {
+            const actor = currentWmsUser();
+            const { data, error } = await db.rpc("wms_pure_losses_absorb_shks", {
+                p_rows: rows,
+                p_actor_id: actor.id || null,
+                p_actor_name: actor.name || null,
+            });
+            if (error) throw error;
+            const results = Array.isArray(data) ? data : [];
+            const createdCount = results.filter((item) => item && item.action === "created_new").length;
+            const movedCount = results.filter((item) => item && item.action === "zoned_in_place").length;
+            const alreadyThere = rows.length - results.length;
+            state.pureLosses.loaded = false;
+            setPureLossesUploadStatus(
+                "Готово. Новых задач: " + createdCount + ". Перенесено существующих: " + movedCount
+                    + (alreadyThere > 0 ? ". Уже были в «Чистые списания»: " + alreadyThere + "." : "."),
+                "good"
+            );
+            toast("Чистые списания загружены: " + results.length + " ШК.", "success");
+        } catch (error) {
+            console.error("pure losses manual upload failed:", error);
+            setPureLossesUploadStatus("Не удалось загрузить: " + (error && error.message ? error.message : String(error)), "error");
+        } finally {
+            state.pureLossesUpload.saving = false;
+            updatePureLossesUploadForm();
+        }
+    }
+
     async function applyPureLossesImport(prepared, whId, targetDate) {
         const shks = collectPureShks(prepared);
         const existingByShk = await loadExistingPureRowsByShk(shks, whId, targetDate);
@@ -20576,9 +20740,19 @@
             if (state.view === "uploads") { showReviewPage(); return; }
             showHome();
         });
-        $("makeUpload").addEventListener("click", () => openChooser(""));
+        $("makeUpload").addEventListener("click", () => {
+            if (state.uploadsCalendarView === "pureLosses") { openPureLossesUploadModal(); return; }
+            openChooser("");
+        });
         $("backfillUpload").addEventListener("click", openBackfillChooser);
         $("makeMasterUpload").addEventListener("click", openMaster);
+        $("closePureLossesUpload").addEventListener("click", closePureLossesUploadModal);
+        $("pureLossesUploadModal").addEventListener("click", (event) => { if (event.target === $("pureLossesUploadModal")) closePureLossesUploadModal(); });
+        $("pureLossesUploadFile").addEventListener("change", () => {
+            const file = $("pureLossesUploadFile").files && $("pureLossesUploadFile").files[0];
+            if (file) void handlePureLossesUploadFile(file);
+        });
+        $("savePureLossesUpload").addEventListener("click", () => { void savePureLossesUpload(); });
         $("closeChooser").addEventListener("click", () => setFlowModalOpen("moduleChooser", false));
         $("backToChooser").addEventListener("click", () => openChooser(state.manualDate));
         $("saveUpload").addEventListener("click", () => { void saveCurrentUpload(); });

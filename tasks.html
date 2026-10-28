@@ -2136,6 +2136,7 @@
                         <span id="uploadsCalendarViewThumb" class="review-view-thumb" aria-hidden="true"></span>
                         <button type="button" class="review-view-tab active" data-uploads-calendar-view="uploads">Выгрузки</button>
                         <button type="button" class="review-view-tab" data-uploads-calendar-view="statuses">Статусы</button>
+                        <button type="button" class="review-view-tab" data-uploads-calendar-view="pureLosses">Чистые списания</button>
                     </div>
                 </div>
                 <div class="upload-toolbar">
@@ -2149,6 +2150,7 @@
         <section class="card calendar-shell">
             <div id="calendarGrid" class="calendar-grid"></div>
             <div id="statusCoverageCalendarGrid" class="calendar-grid hidden"></div>
+            <div id="pureLossesUploadHint" class="tasks-page-note hidden">Файл чистых списаний за произвольный период: по каждому ШК из файла — новая задача в «Чистые списания», либо перенос в неё уже существующей задачи (в любом статусе). ШК, уже переведённые в «Чистые списания», пропускаются. Кнопка «Сделать выгрузку» откроет загрузку файла.</div>
         </section>
     </section>
 
@@ -2277,6 +2279,28 @@
         <div id="shiftOpeningStatus" class="status-line">Жду выбор сотрудников и файл чистых списаний.</div>
         <div class="file-row">
             <button id="saveShiftOpening" class="btn btn-rect task-complete-btn" type="button" disabled>Открыть смену</button>
+        </div>
+    </div>
+</section>
+
+<section id="pureLossesUploadModal" class="tasks-flow-modal upload-work" aria-hidden="true">
+    <div class="tasks-flow-card tasks-flow-card-wide">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Чистые списания -- ручная загрузка</h3>
+                <p class="work-subtitle">Файл за произвольный период. По каждому ШК: новая задача в «Чистые списания», либо перенос в неё существующей (в любом статусе). Уже перенесённые -- пропускаются.</p>
+            </div>
+            <button id="closePureLossesUpload" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="file-row">
+            <label class="btn btn-rect" for="pureLossesUploadFile">Выбрать файл</label>
+            <input id="pureLossesUploadFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+            <span id="pureLossesUploadFileName" class="file-name">Файл пока не выбран</span>
+        </div>
+        <div id="pureLossesUploadStats" class="shift-pure-stats"></div>
+        <div id="pureLossesUploadStatus" class="status-line">Выберите файл чистых списаний.</div>
+        <div class="file-row">
+            <button id="savePureLossesUpload" class="btn btn-rect task-complete-btn" type="button" disabled>Загрузить в «Чистые списания»</button>
         </div>
     </div>
 </section>
