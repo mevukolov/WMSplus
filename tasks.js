@@ -2100,22 +2100,14 @@
     // другой, тот же паттерн таблетки-переключателя, что и у Маршрутизатора
     // (updateStatusViewThumb) и Нарушений (updateViolationsViewThumb).
     function renderUploadsCalendarView(instant) {
-        const mode = state.uploadsCalendarView;
+        const isStatuses = state.uploadsCalendarView === "statuses";
         document.querySelectorAll("[data-uploads-calendar-view]").forEach((button) => {
-            button.classList.toggle("active", button.dataset.uploadsCalendarView === mode);
+            button.classList.toggle("active", button.dataset.uploadsCalendarView === state.uploadsCalendarView);
         });
         const uploadsGrid = $("calendarGrid");
         const statusesGrid = $("statusCoverageCalendarGrid");
-        const pureLossesHint = $("pureLossesUploadHint");
-        if (uploadsGrid) uploadsGrid.classList.toggle("hidden", mode !== "uploads");
-        if (statusesGrid) statusesGrid.classList.toggle("hidden", mode !== "statuses");
-        if (pureLossesHint) pureLossesHint.classList.toggle("hidden", mode !== "pureLosses");
-        // В режиме "Чистые списания" нет ни мастер-выгрузки, ни ручной
-        // догрузки за прошлую дату -- это разовая загрузка произвольного
-        // файла, обе кнопки тут не имеют смысла.
-        if ($("makeMasterUpload")) $("makeMasterUpload").classList.toggle("hidden", mode === "pureLosses");
-        if ($("backfillUpload")) $("backfillUpload").classList.toggle("hidden", mode === "pureLosses");
-        if ($("makeUpload")) $("makeUpload").textContent = mode === "pureLosses" ? "Загрузить чистые списания" : "Сделать выгрузку";
+        if (uploadsGrid) uploadsGrid.classList.toggle("hidden", isStatuses);
+        if (statusesGrid) statusesGrid.classList.toggle("hidden", !isStatuses);
         updateUploadsCalendarViewThumb(instant);
     }
 
@@ -3073,6 +3065,12 @@
         });
         updateReviewViewThumb();
         renderReviewContextTools();
+        // openUploadsFromReview ведёт либо на экран Выгрузок, либо (на
+        // вкладке "Чистые списания") сразу открывает загрузку чистых
+        // списаний -- подсказка на кнопке должна отражать, куда конкретно
+        // сейчас ведёт клик.
+        const uploadsFromReviewBtn = $("openUploadsFromReview");
+        if (uploadsFromReviewBtn) uploadsFromReviewBtn.title = index === REVIEW_TAB_PURE_LOSSES ? "Загрузить чистые списания" : "Выгрузки";
         slidePagerTo(index);
         if (index === REVIEW_TAB_TASKS) void scanIncomingFlowDuplicates();
         if (index === REVIEW_TAB_INACTIVE) {
@@ -12542,13 +12540,27 @@
             renderPureLosses();
             try {
                 const db = supabaseDb();
-                const { data, error } = await db
-                    .from(WMS_TASK_ITEMS_TABLE)
-                    .select("id,task_id,shk,nm,name,price,task_type,opp_verdict,task_status,zone_payload")
-                    .eq("task_type", "Чистые списания")
-                    .neq("task_status", "Завершено");
-                if (error) throw error;
-                state.pureLosses.rows = data || [];
+                // Без пагинации PostgREST молча обрезает ответ на 1000 строк
+                // (db-max-rows) -- с ручной загрузкой чистых списаний за
+                // произвольный период активных строк теперь легко больше
+                // тысячи. Та же постраничная схема, что fetchWmsTaskRows
+                // уже использует для wms_tasks.
+                const pageSize = 1000;
+                const maxRows = 50000;
+                const rows = [];
+                for (let from = 0; from < maxRows; from += pageSize) {
+                    const { data, error } = await db
+                        .from(WMS_TASK_ITEMS_TABLE)
+                        .select("id,task_id,shk,nm,name,price,task_type,opp_verdict,task_status,zone_payload")
+                        .eq("task_type", "Чистые списания")
+                        .neq("task_status", "Завершено")
+                        .range(from, from + pageSize - 1);
+                    if (error) throw error;
+                    const batch = Array.isArray(data) ? data : [];
+                    rows.push(...batch);
+                    if (batch.length < pageSize) break;
+                }
+                state.pureLosses.rows = rows;
                 state.pureLosses.loaded = true;
             } catch (error) {
                 console.error("pure losses load failed:", error);
@@ -20673,7 +20685,13 @@
         $("openFlowDebug").addEventListener("click", () => { void openFlowDebugSandbox(); });
         $("openFlow").addEventListener("click", () => { void showFlowPage(); });
         $("startFlowBanner").addEventListener("click", () => { void showFlowPage(); });
-        $("openUploadsFromReview").addEventListener("click", () => { void showUploads(); });
+        // На вкладке "Чистые списания" эта кнопка открывает загрузку
+        // чистых списаний (отдельно от обычных выгрузок), на остальных
+        // вкладках Предразбора -- как раньше, экран Выгрузок.
+        $("openUploadsFromReview").addEventListener("click", () => {
+            if (state.review.activeTab === REVIEW_TAB_PURE_LOSSES) { openPureLossesUploadModal(); return; }
+            void showUploads();
+        });
         $("openReview").addEventListener("click", showReviewPage);
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
@@ -20786,10 +20804,7 @@
             if (state.view === "uploads") { showReviewPage(); return; }
             showHome();
         });
-        $("makeUpload").addEventListener("click", () => {
-            if (state.uploadsCalendarView === "pureLosses") { openPureLossesUploadModal(); return; }
-            openChooser("");
-        });
+        $("makeUpload").addEventListener("click", () => openChooser(""));
         $("backfillUpload").addEventListener("click", openBackfillChooser);
         $("makeMasterUpload").addEventListener("click", openMaster);
         $("closePureLossesUpload").addEventListener("click", closePureLossesUploadModal);
