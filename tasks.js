@@ -16401,6 +16401,14 @@
         setFlowModalOpen("pureLossesUploadModal", false);
     }
 
+    // Пачка может быть в десятки тысяч ШК (ручная загрузка за произвольный
+    // период) -- одним RPC-вызовом такое упирается в statement timeout
+    // (сам по себе цикл на сервере построчный, плюс per-row изоляция из
+    // 202610280006 добавляет накладных расходов на каждую строку). Режем
+    // на чанки и шлём последовательно -- тот же PURE_INSERT_CHUNK_SIZE
+    // масштаб, что уже используется для вставки в pure_losses_rep.
+    const PURE_LOSSES_UPLOAD_CHUNK_SIZE = 250;
+
     // Та же RPC (wms_pure_losses_absorb_shks), что у открытия смены, но
     // вызываем напрямую, а не через absorbShksIntoPureLossesZone -- та
     // глотает ошибку в console.warn (приемлемо для best-effort фона при
@@ -16412,25 +16420,34 @@
         const db = supabaseDb();
         if (!db) { setPureLossesUploadStatus("Supabase недоступен.", "error"); return; }
         const rows = buildPureLossesAbsorbRows(prepared);
+        const chunks = chunkArray(rows, PURE_LOSSES_UPLOAD_CHUNK_SIZE);
         state.pureLossesUpload.saving = true;
         updatePureLossesUploadForm();
-        setPureLossesUploadStatus("Загружаю " + rows.length + " ШК в «Чистые списания»...");
+        const actor = currentWmsUser();
+        let createdCount = 0;
+        let movedCount = 0;
+        let processedCount = 0;
+        const skippedItems = [];
         try {
-            const actor = currentWmsUser();
-            const { data, error } = await db.rpc("wms_pure_losses_absorb_shks", {
-                p_rows: rows,
-                p_actor_id: actor.id || null,
-                p_actor_name: actor.name || null,
-            });
-            if (error) throw error;
-            // RPC изолирует ошибки построчно (миграция 202610280006) --
-            // конфликтующий ШК (напр. уже активен под другой задачей)
-            // пропускается сам по себе, остальная пачка загружается.
-            const results = data && Array.isArray(data.results) ? data.results : [];
-            const skippedItems = data && Array.isArray(data.skipped_items) ? data.skipped_items : [];
-            const createdCount = results.filter((item) => item && item.action === "created_new").length;
-            const movedCount = results.filter((item) => item && item.action === "zoned_in_place").length;
-            const alreadyThere = rows.length - results.length - skippedItems.length;
+            for (let i = 0; i < chunks.length; i += 1) {
+                setPureLossesUploadStatus("Загружаю " + rows.length + " ШК в «Чистые списания»... (" + (i + 1) + "/" + chunks.length + ")");
+                const { data, error } = await db.rpc("wms_pure_losses_absorb_shks", {
+                    p_rows: chunks[i],
+                    p_actor_id: actor.id || null,
+                    p_actor_name: actor.name || null,
+                });
+                if (error) throw error;
+                // RPC изолирует ошибки построчно (миграция 202610280006) --
+                // конфликтующий ШК (напр. уже активен под другой задачей)
+                // пропускается сам по себе, остальные в чанке загружаются.
+                const results = data && Array.isArray(data.results) ? data.results : [];
+                const chunkSkipped = data && Array.isArray(data.skipped_items) ? data.skipped_items : [];
+                createdCount += results.filter((item) => item && item.action === "created_new").length;
+                movedCount += results.filter((item) => item && item.action === "zoned_in_place").length;
+                processedCount += results.length;
+                skippedItems.push(...chunkSkipped);
+            }
+            const alreadyThere = rows.length - processedCount - skippedItems.length;
             state.pureLosses.loaded = false;
             if (skippedItems.length) console.warn("pure losses manual upload: пропущено по ошибке", skippedItems);
             setPureLossesUploadStatus(
@@ -16439,10 +16456,14 @@
                     + (skippedItems.length ? " Пропущено из-за конфликта: " + skippedItems.length + " (см. консоль)." : ""),
                 skippedItems.length ? "error" : "good"
             );
-            toast("Чистые списания загружены: " + results.length + " ШК." + (skippedItems.length ? " Пропущено: " + skippedItems.length + "." : ""), skippedItems.length ? "error" : "success");
+            toast("Чистые списания загружены: " + processedCount + " ШК." + (skippedItems.length ? " Пропущено: " + skippedItems.length + "." : ""), skippedItems.length ? "error" : "success");
         } catch (error) {
             console.error("pure losses manual upload failed:", error);
-            setPureLossesUploadStatus("Не удалось загрузить: " + (error && error.message ? error.message : String(error)), "error");
+            state.pureLosses.loaded = false;
+            setPureLossesUploadStatus(
+                "Прервано после " + processedCount + " из " + rows.length + " ШК: " + (error && error.message ? error.message : String(error)) + ". Уже загруженное сохранено, можно загрузить файл повторно -- то, что уже в «Чистые списания», будет пропущено как дубль.",
+                "error"
+            );
         } finally {
             state.pureLossesUpload.saving = false;
             updatePureLossesUploadForm();
