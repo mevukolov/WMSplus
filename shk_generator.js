@@ -337,9 +337,15 @@
   const input = document.getElementById('shk-input');
   const generateBtn = document.getElementById('generate-btn');
   const resultTextEl = document.getElementById('result-text');
-  const qrCanvas = document.getElementById('qr-canvas');
+  const qrWrap = document.getElementById('qr-wrap');
   const copyBtn = document.getElementById('copy-btn');
   const printBtn = document.getElementById('print-btn');
+  const printThermalBtn = document.getElementById('print-thermal-btn');
+
+  // Значение последнего сгенерированного ШК -- нужно и кнопке "Печать"
+  // (экранный QR), и новой "Печать термоэтикетки" (термопринтер).
+  let lastGeneratedShk = '';
+  let thermalLabelTemplate = null;
 
 
     const decoder = ShkWithCheckSumV1JS();
@@ -415,25 +421,23 @@
       }
 
       resultTextEl.textContent = display;
+        lastGeneratedShk = display;
         await logShkGeneration(v);
 
-        // draw QR (qrcode lib)
-      if(window.QRCode && typeof QRCode.toCanvas === 'function'){
-        try {
-          // set canvas size explicitly to avoid scaling artifacts
-          const size = 150;
-          qrCanvas.width = size;
-          qrCanvas.height = size;
-          await QRCode.toCanvas(qrCanvas, display, { width: size, margin: 1 });
-        } catch(e){
-          try { const ctx = qrCanvas.getContext('2d'); ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height); } catch(e){}
+        // draw QR (qrcodejs -- same lib print-tspl.js's qr-as-bitmap
+        // rendering needs, see the <script> comment in shk_generator.html)
+        qrWrap.innerHTML = '';
+        if(window.QRCode){
+            try {
+                new QRCode(qrWrap, { text: display, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
+            } catch(e){
+                qrWrap.innerHTML = '';
+            }
         }
-      } else {
-        try { const ctx = qrCanvas.getContext('2d'); ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height); } catch(e){}
-      }
 
       copyBtn.style.display = 'inline-flex';
         printBtn.style.display = 'inline-flex';
+        printThermalBtn.style.display = 'inline-flex';
 
         window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Сгенерировано', {type:'success'});
       input.value = '';
@@ -443,7 +447,12 @@
     }
   }
     function printQr(){
-        const url = qrCanvas.toDataURL('image/png');
+        const canvas = qrWrap.querySelector('canvas');
+        if(!canvas){
+            window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('QR не готов', {type:'error'});
+            return;
+        }
+        const url = canvas.toDataURL('image/png');
 
         const frame = document.createElement('iframe');
         frame.style.position = 'fixed';
@@ -465,6 +474,55 @@
         doc.close();
     }
 
+    // Термоэтикетка -- ставит QR сгенерированного ШК в очередь печати на
+    // складском термопринтере (та же инфраструктура, что у "Короб/Полка
+    // «Без ШК»": print_label_templates -> print_jobs -> print-bridge).
+    // Бридж слушает INSERT со status='queued' и печатает сам, поэтому
+    // здесь достаточно один раз положить задание в очередь.
+    async function loadThermalLabelTemplate(){
+        if(thermalLabelTemplate) return thermalLabelTemplate;
+        const { data, error } = await supabaseClient
+            .from('print_label_templates')
+            .select('id,width_mm,height_mm,elements')
+            .eq('name', 'Генератор ШК')
+            .maybeSingle();
+        if(error){
+            console.error('Не удалось загрузить шаблон термоэтикетки:', error);
+            return null;
+        }
+        thermalLabelTemplate = data || null;
+        return thermalLabelTemplate;
+    }
+
+    async function printThermalLabel(){
+        if(!lastGeneratedShk){
+            window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Сначала сгенерируйте ШК', {type:'info'});
+            return;
+        }
+        const template = await loadThermalLabelTemplate();
+        if(!template){
+            window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Шаблон термоэтикетки не найден', {type:'error'});
+            return;
+        }
+        try {
+            const data = { shk: lastGeneratedShk };
+            const tspl = window.buildTsplPayloadBase64 ? window.buildTsplPayloadBase64(template, data) : null;
+            if(!tspl) throw new Error('buildTsplPayloadBase64 недоступна');
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            const { error } = await supabaseClient.from('print_jobs').insert({
+                template_id: template.id,
+                data,
+                tspl,
+                created_by: user.id != null ? String(user.id) : null,
+            });
+            if(error) throw error;
+            window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Термоэтикетка поставлена в печать', {type:'success'});
+        } catch(e){
+            console.error('Ошибка постановки термоэтикетки в печать:', e);
+            window.MiniUI && window.MiniUI.toast && window.MiniUI.toast('Не удалось поставить в печать', {type:'error'});
+        }
+    }
+
     generateBtn.addEventListener('click', generateAndShow);
   input.addEventListener('keydown', (ev) => {
     if(ev.key === 'Enter') generateAndShow();
@@ -482,6 +540,7 @@
   });
 
     printBtn.addEventListener('click', printQr);
+    printThermalBtn.addEventListener('click', printThermalLabel);
 
 
     // fill small user name (if any)

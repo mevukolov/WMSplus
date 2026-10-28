@@ -7,9 +7,14 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="https://raw.githubusercontent.com/mevukolov/WMSplus/refs/heads/main/icons/wms_icon.ico" type="image/x-icon">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- qrcodejs (not the "qrcode" npm package) -- same library/version as
+         display.html's pairing QR and every other print-tspl.js consumer in
+         this app. print-tspl.js's qr-as-bitmap rendering (qrModuleMatrixFor)
+         needs this exact global, so the on-screen preview below uses it too
+         instead of a second, incompatible QR library. -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="print-tspl.js"></script>
     <script src="ui.js" defer></script>
-    <!-- QR generator (browser) -->
-    <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js" defer></script>
     <script src="shk_generator.js" defer></script>
 </head>
 <body>
@@ -49,6 +54,7 @@
         <button id="generate-btn" class="btn btn-rect">Генерировать ШК</button>
         <button id="copy-btn" class="btn btn-outline" style="display:none">Копировать</button>
           <button id="print-btn" class="btn btn-outline" style="display:none">Печать</button>
+          <button id="print-thermal-btn" class="btn btn-outline" style="display:none">Печать термоэтикетки</button>
 
       </div>
 
@@ -66,9 +72,7 @@
 
         <div style="width:160px;">
           <div style="font-weight:600;margin-bottom:6px;">QR</div>
-          <div id="qr-wrap" style="width:160px;height:160px;background:#fff;border:1px solid rgba(15,23,42,0.06);display:flex;align-items:center;justify-content:center;border-radius:6px;">
-            <canvas id="qr-canvas"></canvas>
-          </div>
+          <div id="qr-wrap" style="width:160px;height:160px;background:#fff;border:1px solid rgba(15,23,42,0.06);display:flex;align-items:center;justify-content:center;border-radius:6px;"></div>
         </div>
       </div>
     </div>
