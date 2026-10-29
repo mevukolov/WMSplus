@@ -2797,7 +2797,11 @@
 
     // Простой наведённый tooltip: один общий div поверх svg,
     // позиционируется под курсором по ближайшему дню -- без полноценного
-    // crosshair, достаточно для карточки на главном экране.
+    // crosshair, достаточно для карточки на главном экране. Наведение на
+    // пустой участок дня -- сводка по всем участкам сразу; наведение
+    // точно на точку линии (homeTrendPointTooltipHtml) -- только её
+    // участок, чтобы можно было прочитать конкретное значение без
+    // необходимости искать нужную строку в общей сводке.
     function homeTrendTooltipHtml(dayIndex) {
         const day = state.homeTrend.days[dayIndex];
         if (!day) return "";
@@ -2805,6 +2809,15 @@
             .map((item) => "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + item.color + "'></span>" + escapeHtml(item.zone) + ": <strong>" + (item.points[dayIndex] || 0) + "</strong></div>")
             .join("");
         return "<div class='home-trend-tooltip-date'>" + escapeHtml(homeTrendDateLabel(day)) + "</div>" + rows;
+    }
+
+    function homeTrendPointTooltipHtml(zone, dayIndex) {
+        const day = state.homeTrend.days[dayIndex];
+        const item = state.homeTrend.series.find((candidate) => candidate.zone === zone);
+        if (!day || !item) return "";
+        return "<div class='home-trend-tooltip-date'>" + escapeHtml(item.zone) + "</div>"
+            + "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + item.color + "'></span>"
+            + escapeHtml(homeTrendDateLabel(day)) + ": <strong>" + (item.points[dayIndex] || 0) + "</strong></div>";
     }
 
     function renderHomeActiveTrendChart() {
@@ -2867,30 +2880,61 @@
         const hitAreasHtml = days.map((_, index) => (
             "<rect data-trend-day-index='" + index + "' x='" + (xFor(index) - hitWidth / 2) + "' y='" + padTop + "' width='" + hitWidth + "' height='" + plotH + "' fill='transparent' />"
         )).join("");
+        // Точечные ловушки поверх дневных полос -- на каждую (участок,
+        // день) своя, меньше и радиус с запасом под палец/курсор. Стоят
+        // ПОСЛЕ hitAreasHtml в разметке -> визуально сверху -> SVG отдаёт
+        // события мыши именно им, когда курсор рядом с точкой, иначе
+        // "побеждает" более широкая дневная полоса под ними.
+        const pointHitsHtml = series.map((item) => item.points.map((value, index) => (
+            "<circle data-trend-point data-trend-zone='" + escapeHtml(item.zone) + "' data-trend-day-index='" + index + "' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='7' fill='transparent' style='cursor:pointer' />"
+        )).join("")).join("");
         target.innerHTML = "<svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток активных задач по участкам за 14 дней'>"
             + "<title>Остаток активных задач по участкам за 14 дней</title>"
             + gridLinesHtml + linesHtml + xLabelsHtml + hitAreasHtml
+            + "<circle id='homeTrendHoverDot' r='5' fill='#0f172a' stroke='#fff' stroke-width='2' style='display:none;pointer-events:none' />"
+            + pointHitsHtml
             + "</svg>"
             + "<div id='homeTrendTooltip' class='home-trend-tooltip'></div>";
         const svg = target.querySelector("svg");
         const tooltip = target.querySelector("#homeTrendTooltip");
+        const hoverDot = target.querySelector("#homeTrendHoverDot");
+        const positionTooltip = (event, html) => {
+            tooltip.innerHTML = html;
+            const rect = target.getBoundingClientRect();
+            const left = event.clientX - rect.left;
+            // Тултип растёт вверх от точки (translateY(-100%)) -- у
+            // верхних пиков курсор слишком близко к потолку карточки,
+            // зажимаем так, чтобы сам тултип не вылезал за край.
+            const top = Math.max(tooltip.offsetHeight + 6, event.clientY - rect.top - 10);
+            tooltip.style.left = Math.min(Math.max(left, 4), target.clientWidth - 4) + "px";
+            tooltip.style.top = top + "px";
+            tooltip.classList.add("is-visible");
+        };
         if (svg && tooltip) {
-            svg.querySelectorAll("[data-trend-day-index]").forEach((hit) => {
+            svg.querySelectorAll("[data-trend-day-index]:not([data-trend-point])").forEach((hit) => {
                 hit.addEventListener("mousemove", (event) => {
-                    const dayIndex = Number(hit.dataset.trendDayIndex);
-                    tooltip.innerHTML = homeTrendTooltipHtml(dayIndex);
-                    const rect = target.getBoundingClientRect();
-                    const left = event.clientX - rect.left;
-                    // Тултип растёт вверх от точки (translateY(-100%)) -- у
-                    // верхних пиков курсор слишком близко к потолку
-                    // карточки, зажимаем так, чтобы сам тултип не вылезал
-                    // за край.
-                    const top = Math.max(tooltip.offsetHeight + 6, event.clientY - rect.top - 10);
-                    tooltip.style.left = Math.min(Math.max(left, 4), target.clientWidth - 4) + "px";
-                    tooltip.style.top = top + "px";
-                    tooltip.classList.add("is-visible");
+                    positionTooltip(event, homeTrendTooltipHtml(Number(hit.dataset.trendDayIndex)));
+                    if (hoverDot) hoverDot.style.display = "none";
                 });
                 hit.addEventListener("mouseleave", () => tooltip.classList.remove("is-visible"));
+            });
+            svg.querySelectorAll("[data-trend-point]").forEach((hit) => {
+                const zone = hit.dataset.trendZone;
+                const dayIndex = Number(hit.dataset.trendDayIndex);
+                hit.addEventListener("mousemove", (event) => {
+                    positionTooltip(event, homeTrendPointTooltipHtml(zone, dayIndex));
+                    if (hoverDot) {
+                        const zoneColor = (state.homeTrend.series.find((item) => item.zone === zone) || {}).color || "#0f172a";
+                        hoverDot.setAttribute("cx", hit.getAttribute("cx"));
+                        hoverDot.setAttribute("cy", hit.getAttribute("cy"));
+                        hoverDot.setAttribute("fill", zoneColor);
+                        hoverDot.style.display = "";
+                    }
+                });
+                hit.addEventListener("mouseleave", () => {
+                    tooltip.classList.remove("is-visible");
+                    if (hoverDot) hoverDot.style.display = "none";
+                });
             });
         }
         const legendTarget = $("homeTrendLegend");
