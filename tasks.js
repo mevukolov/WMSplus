@@ -2701,9 +2701,18 @@
     // много параллельных линий сразу). Фиксированный порядок -- цвет
     // закреплён за местом в рейтинге по объёму, не перескакивает при
     // перефильтрации.
+    // 8 ярких -- для старших по объёму участков, где различать линии
+    // важнее всего (могут переплетаться). Участков в системе обычно 11
+    // (REVIEW_SECTIONS) -- для одиннадцати по-настоящему различимых
+    // (ещё и colorblind-safe) оттенков просто не бывает, это предел
+    // восприятия, не недоработка. Вместо лишних цветов -- хвостовые
+    // (младшие по объёму) участки получают оттенки серого по убыванию
+    // светлоты: они и так внизу графика, различать их друг от друга
+    // менее критично, а серый всегда отличим от любого яркого цвета
+    // независимо от дальтонизма (тот делает неразличимым оттенок, не
+    // светлоту).
     const HOME_TREND_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
-    const HOME_TREND_OTHER_COLOR = "#94a3b8";
-    const HOME_TREND_MAX_SERIES = 7;
+    const HOME_TREND_GRAY_RAMP = ["#94a3b8", "#64748b", "#475569", "#1e293b"];
     const HOME_TREND_SNAPSHOT_THROTTLE_MS = 10 * 60 * 1000;
 
     function homeTrendDateLabel(isoDate) {
@@ -2767,20 +2776,13 @@
                 zoneTotals.set(zone, (zoneTotals.get(zone) || 0) + (Number(row.active_count) || 0));
             });
             const rankedZones = Array.from(zoneTotals.entries()).sort((a, b) => b[1] - a[1]).map(([zone]) => zone);
-            const topZones = rankedZones.slice(0, HOME_TREND_MAX_SERIES);
-            const foldedZones = rankedZones.slice(HOME_TREND_MAX_SERIES);
-            const series = topZones.map((zone, index) => ({
+            const series = rankedZones.map((zone, index) => ({
                 zone,
-                color: HOME_TREND_PALETTE[index % HOME_TREND_PALETTE.length],
+                color: index < HOME_TREND_PALETTE.length
+                    ? HOME_TREND_PALETTE[index]
+                    : HOME_TREND_GRAY_RAMP[(index - HOME_TREND_PALETTE.length) % HOME_TREND_GRAY_RAMP.length],
                 points: days.map((day) => byZoneDay.get(zone + "|" + day) || 0),
             }));
-            if (foldedZones.length) {
-                series.push({
-                    zone: "Другие",
-                    color: HOME_TREND_OTHER_COLOR,
-                    points: days.map((day) => foldedZones.reduce((sum, zone) => sum + (byZoneDay.get(zone + "|" + day) || 0), 0)),
-                });
-            }
             state.homeTrend.days = days;
             state.homeTrend.series = series;
             state.homeTrend.loaded = true;
