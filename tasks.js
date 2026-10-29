@@ -2868,36 +2868,40 @@
             if (index % dayTickEvery !== 0 && index !== days.length - 1) return "";
             return "<text x='" + xFor(index) + "' y='" + (height - 4) + "' text-anchor='middle' font-size='11' fill='#94a3b8'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
         }).join("");
+        // Общий тултип (все участки сразу) теперь только по наведению на
+        // саму подпись даты снизу -- не на весь столбец дня, иначе
+        // перекрывал точечные ловушки и путал с ними. Ловушка -- rect
+        // вокруг подписи, только там, где подпись реально нарисована
+        // (та же логика видимости, что у xLabelsHtml выше).
+        const dateLabelHitWidth = Math.min(days.length > 1 ? plotW / (days.length - 1) : plotW, 44);
+        const dateLabelHitsHtml = days.map((_, index) => {
+            if (index % dayTickEvery !== 0 && index !== days.length - 1) return "";
+            return "<rect data-trend-date-label data-trend-day-index='" + index + "' x='" + (xFor(index) - dateLabelHitWidth / 2) + "' y='" + (height - padBottom) + "' width='" + dateLabelHitWidth + "' height='" + padBottom + "' fill='transparent' style='cursor:pointer' />";
+        }).join("");
         const linesHtml = series.map((item) => {
             const path = item.points.map((value, index) => (index === 0 ? "M" : "L") + xFor(index) + "," + yFor(value)).join(" ");
             const lastIndex = item.points.length - 1;
             return "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />"
                 + "<circle cx='" + xFor(lastIndex) + "' cy='" + yFor(item.points[lastIndex]) + "' r='4' fill='" + item.color + "' stroke='#fff' stroke-width='2' />";
         }).join("");
-        // Невидимые полосы-ловушки на каждый день -- шире самой точки,
-        // чтобы было удобно навестись мышью, без полноценного crosshair.
-        const hitWidth = days.length > 1 ? plotW / (days.length - 1) : plotW;
-        const hitAreasHtml = days.map((_, index) => (
-            "<rect data-trend-day-index='" + index + "' x='" + (xFor(index) - hitWidth / 2) + "' y='" + padTop + "' width='" + hitWidth + "' height='" + plotH + "' fill='transparent' />"
-        )).join("");
-        // Точечные ловушки поверх дневных полос -- на каждую (участок,
-        // день) своя, меньше и радиус с запасом под палец/курсор. Стоят
-        // ПОСЛЕ hitAreasHtml в разметке -> визуально сверху -> SVG отдаёт
-        // события мыши именно им, когда курсор рядом с точкой, иначе
-        // "побеждает" более широкая дневная полоса под ними.
+        // Точечные ловушки -- на каждую (участок, день) своя, радиус с
+        // запасом под палец/курсор.
         const pointHitsHtml = series.map((item) => item.points.map((value, index) => (
             "<circle data-trend-point data-trend-zone='" + escapeHtml(item.zone) + "' data-trend-day-index='" + index + "' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='7' fill='transparent' style='cursor:pointer' />"
         )).join("")).join("");
         target.innerHTML = "<svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток активных задач по участкам за 14 дней'>"
             + "<title>Остаток активных задач по участкам за 14 дней</title>"
-            + gridLinesHtml + linesHtml + xLabelsHtml + hitAreasHtml
+            + gridLinesHtml + linesHtml + xLabelsHtml
             + "<circle id='homeTrendHoverDot' r='5' fill='#0f172a' stroke='#fff' stroke-width='2' style='display:none;pointer-events:none' />"
-            + pointHitsHtml
+            + pointHitsHtml + dateLabelHitsHtml
             + "</svg>"
             + "<div id='homeTrendTooltip' class='home-trend-tooltip'></div>";
         const svg = target.querySelector("svg");
         const tooltip = target.querySelector("#homeTrendTooltip");
         const hoverDot = target.querySelector("#homeTrendHoverDot");
+        // Точечный tooltip следует за курсором (positionTooltip), а
+        // общий (по дате) -- фиксирован: всегда над своей подписью даты,
+        // не гуляет вслед за мышью внутри её ловушки.
         const positionTooltip = (event, html) => {
             tooltip.innerHTML = html;
             const rect = target.getBoundingClientRect();
@@ -2910,10 +2914,20 @@
             tooltip.style.top = top + "px";
             tooltip.classList.add("is-visible");
         };
+        const positionDateTooltip = (dayIndex, html) => {
+            tooltip.innerHTML = html;
+            const scale = target.clientWidth / width;
+            const left = xFor(dayIndex) * scale;
+            const top = (height - padBottom - 6) * scale;
+            tooltip.style.left = Math.min(Math.max(left, 4), target.clientWidth - 4) + "px";
+            tooltip.style.top = top + "px";
+            tooltip.classList.add("is-visible");
+        };
         if (svg && tooltip) {
-            svg.querySelectorAll("[data-trend-day-index]:not([data-trend-point])").forEach((hit) => {
-                hit.addEventListener("mousemove", (event) => {
-                    positionTooltip(event, homeTrendTooltipHtml(Number(hit.dataset.trendDayIndex)));
+            svg.querySelectorAll("[data-trend-date-label]").forEach((hit) => {
+                const dayIndex = Number(hit.dataset.trendDayIndex);
+                hit.addEventListener("mouseenter", () => {
+                    positionDateTooltip(dayIndex, homeTrendTooltipHtml(dayIndex));
                     if (hoverDot) hoverDot.style.display = "none";
                 });
                 hit.addEventListener("mouseleave", () => tooltip.classList.remove("is-visible"));
