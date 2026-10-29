@@ -37,6 +37,7 @@
     const WMS_TASK_ITEMS_TABLE = "wms_task_items";
     const WMS_VIOLATIONS_TABLE = "wms_violations";
     const WMS_VIOLATION_TYPES_TABLE = "wms_violation_types";
+    const WMS_ACTIVE_TASKS_SNAPSHOT_TABLE = "wms_active_tasks_daily_snapshot";
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
@@ -755,6 +756,7 @@
             error: "",
             days: [],
             series: [],
+            lastSnapshotCaptureAt: 0,
         },
         inactive: {
             rows: [],
@@ -2702,33 +2704,39 @@
     const HOME_TREND_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
     const HOME_TREND_OTHER_COLOR = "#94a3b8";
     const HOME_TREND_MAX_SERIES = 7;
-
-    // Тот же классификатор, что taskSectionName, но без title/source_module
-    // (на уровне агрегата по дням их нет -- RPC возвращает только
-    // task_type) -- для тренда остатка этого достаточно, точность 1:1 с
-    // текущим Предразбором не нужна. "Чистые списания" -- отдельная
-    // вкладка Разбора, не участок Предразбора, явно исключаем.
-    function homeTrendZoneForTaskType(taskType) {
-        const normalized = normalizeForMatch(taskType);
-        if (!normalized || normalized === "чистые списания") return null;
-        const exactMatch = activeReviewZones().find((zone) => normalizeForMatch(zone) === normalized);
-        if (exactMatch) return exactMatch;
-        if (normalized.includes("wmi")) return "WMI (МП + ПЦ)";
-        if (normalized.includes("почта")) return "Почта";
-        if (normalized.includes("пм") || normalized.includes("pm")) return "ПМ";
-        if (normalized.includes("rwp")) return "RWP";
-        if (normalized.includes("упаковка") || normalized.includes("переупаковка")) return "Упаковка";
-        if (normalized.includes("предсорт")) return "Предсортировка";
-        if (normalized.includes("маркетплейс")) return "Маркетплейс";
-        if (normalized.includes("пц")) return "ПЦ";
-        if (normalized.includes("без заказа")) return "Без заказа";
-        if (normalized.includes("движение после продажи")) return "Движение после продажи";
-        return "Другие задачи";
-    }
+    const HOME_TREND_SNAPSHOT_THROTTLE_MS = 10 * 60 * 1000;
 
     function homeTrendDateLabel(isoDate) {
         const match = normalizeText(isoDate).match(/^\d{4}-(\d{2})-(\d{2})$/);
         return match ? match[2] + "." + match[1] : isoDate;
+    }
+
+    // Пишет снэпшот остатка активных задач по участкам на СЕГОДНЯ --
+    // ровно то же reviewGroupedRows(), что и реально рисует Предразбор,
+    // поэтому цифры в графике гарантированно совпадают с тем, что видит
+    // оператор, а не реконструируются задним числом приближённо (так
+    // было раньше -- не учитывало исключения Предсписка/АВХ/Коробок/
+    // Чистых списаний и расходилось с живыми цифрами). Троттлинг -- не
+    // на каждую перезагрузку списка за сессию, достаточно раз в 10 мин.
+    function captureActiveTasksSnapshot(grouped) {
+        const db = supabaseDb();
+        if (!db) return;
+        const now = Date.now();
+        if (now - state.homeTrend.lastSnapshotCaptureAt < HOME_TREND_SNAPSHOT_THROTTLE_MS) return;
+        state.homeTrend.lastSnapshotCaptureAt = now;
+        const todayIso = state.today;
+        if (!todayIso) return;
+        const rows = Array.from(grouped.entries()).map(([zone, zoneRows]) => ({
+            snapshot_date: todayIso,
+            zone,
+            active_count: zoneRows.length,
+            total_price: Math.round(zoneRows.reduce((sum, row) => sum + reviewPrice(row), 0) * 100) / 100,
+            updated_at: new Date().toISOString(),
+        }));
+        if (!rows.length) return;
+        db.from(WMS_ACTIVE_TASKS_SNAPSHOT_TABLE).upsert(rows, { onConflict: "snapshot_date,zone" })
+            .then(({ error }) => { if (error) console.warn("active tasks snapshot capture failed:", error); })
+            .catch((error) => console.warn("active tasks snapshot capture failed:", error));
     }
 
     async function loadHomeActiveTrend() {
@@ -2738,23 +2746,25 @@
         renderHomeActiveTrendChart();
         if (!db) { state.homeTrend.loading = false; return; }
         try {
-            const { data, error } = await db.rpc("wms_active_tasks_trend", { p_days: 14 });
+            const since = addDays(state.today, -13);
+            const { data, error } = await db
+                .from(WMS_ACTIVE_TASKS_SNAPSHOT_TABLE)
+                .select("snapshot_date,zone,active_count")
+                .gte("snapshot_date", since)
+                .order("snapshot_date", { ascending: true });
             if (error) throw error;
             const rows = Array.isArray(data) ? data : [];
-            const days = Array.from(new Set(rows.map((row) => normalizeText(row.day)))).sort();
+            const days = Array.from(new Set(rows.map((row) => normalizeText(row.snapshot_date)))).sort();
             const byZoneDay = new Map();
             rows.forEach((row) => {
-                const zone = homeTrendZoneForTaskType(row.task_type);
+                const zone = normalizeText(row.zone);
                 if (!zone) return;
-                const day = normalizeText(row.day);
-                const key = zone + "|" + day;
-                byZoneDay.set(key, (byZoneDay.get(key) || 0) + (Number(row.active_count) || 0));
+                byZoneDay.set(zone + "|" + normalizeText(row.snapshot_date), Number(row.active_count) || 0);
             });
             const zoneTotals = new Map();
-            (activeReviewZones().concat(["Другие задачи"])).forEach((zone) => {
-                let total = 0;
-                days.forEach((day) => { total += byZoneDay.get(zone + "|" + day) || 0; });
-                if (total > 0) zoneTotals.set(zone, total);
+            rows.forEach((row) => {
+                const zone = normalizeText(row.zone);
+                zoneTotals.set(zone, (zoneTotals.get(zone) || 0) + (Number(row.active_count) || 0));
             });
             const rankedZones = Array.from(zoneTotals.entries()).sort((a, b) => b[1] - a[1]).map(([zone]) => zone);
             const topZones = rankedZones.slice(0, HOME_TREND_MAX_SERIES);
@@ -3665,6 +3675,7 @@
                     state.review.activeSection = activeReviewZones().find((section) => (grouped.get(section) || []).length) || activeReviewZones()[0];
                 }
                 setReviewStatus("Загружено активных задач: " + state.review.rows.length + ".");
+                captureActiveTasksSnapshot(grouped);
                 void refreshWritebackFailures();
                 void hydrateSupersetCache(allTaskShkList(state.review.rows)).then(() => renderReview());
             } catch (error) {
@@ -21374,6 +21385,12 @@
         renderPrespisokHomeCard();
         void refreshPrespisokHomeState();
         void refreshPrespisokLeaderboard();
+        // showHome() -- который обычно грузит этот график -- не вызывается
+        // при самой первой загрузке страницы (главный экран просто виден
+        // по умолчанию в разметке), только при навигации обратно на него
+        // откуда-то ещё. Без этого график не показывался, пока не зайти в
+        // Разбор и не вернуться.
+        void loadHomeActiveTrend();
         void loadShiftState();
         void loadAchievements();
         void loadStatusDictionary();
