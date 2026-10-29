@@ -749,6 +749,13 @@
             prepared: null,
             saving: false,
         },
+        homeTrend: {
+            loading: false,
+            loaded: false,
+            error: "",
+            days: [],
+            series: [],
+        },
         inactive: {
             rows: [],
             loading: false,
@@ -2684,6 +2691,204 @@
         }, 220);
     }
 
+    // ---- Главный экран: линейная диаграмма остатка активных задач по
+    // участкам (блок "Предразбор") ----
+
+    // Cove-подобная фиксированная категориальная палитра (не из
+    // переиспользуемого набора проекта -- здесь впервые нужен набор под
+    // много параллельных линий сразу). Фиксированный порядок -- цвет
+    // закреплён за местом в рейтинге по объёму, не перескакивает при
+    // перефильтрации.
+    const HOME_TREND_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+    const HOME_TREND_OTHER_COLOR = "#94a3b8";
+    const HOME_TREND_MAX_SERIES = 7;
+
+    // Тот же классификатор, что taskSectionName, но без title/source_module
+    // (на уровне агрегата по дням их нет -- RPC возвращает только
+    // task_type) -- для тренда остатка этого достаточно, точность 1:1 с
+    // текущим Предразбором не нужна. "Чистые списания" -- отдельная
+    // вкладка Разбора, не участок Предразбора, явно исключаем.
+    function homeTrendZoneForTaskType(taskType) {
+        const normalized = normalizeForMatch(taskType);
+        if (!normalized || normalized === "чистые списания") return null;
+        const exactMatch = activeReviewZones().find((zone) => normalizeForMatch(zone) === normalized);
+        if (exactMatch) return exactMatch;
+        if (normalized.includes("wmi")) return "WMI (МП + ПЦ)";
+        if (normalized.includes("почта")) return "Почта";
+        if (normalized.includes("пм") || normalized.includes("pm")) return "ПМ";
+        if (normalized.includes("rwp")) return "RWP";
+        if (normalized.includes("упаковка") || normalized.includes("переупаковка")) return "Упаковка";
+        if (normalized.includes("предсорт")) return "Предсортировка";
+        if (normalized.includes("маркетплейс")) return "Маркетплейс";
+        if (normalized.includes("пц")) return "ПЦ";
+        if (normalized.includes("без заказа")) return "Без заказа";
+        if (normalized.includes("движение после продажи")) return "Движение после продажи";
+        return "Другие задачи";
+    }
+
+    function homeTrendDateLabel(isoDate) {
+        const match = normalizeText(isoDate).match(/^\d{4}-(\d{2})-(\d{2})$/);
+        return match ? match[2] + "." + match[1] : isoDate;
+    }
+
+    async function loadHomeActiveTrend() {
+        const db = supabaseDb();
+        state.homeTrend.loading = true;
+        state.homeTrend.error = "";
+        renderHomeActiveTrendChart();
+        if (!db) { state.homeTrend.loading = false; return; }
+        try {
+            const { data, error } = await db.rpc("wms_active_tasks_trend", { p_days: 14 });
+            if (error) throw error;
+            const rows = Array.isArray(data) ? data : [];
+            const days = Array.from(new Set(rows.map((row) => normalizeText(row.day)))).sort();
+            const byZoneDay = new Map();
+            rows.forEach((row) => {
+                const zone = homeTrendZoneForTaskType(row.task_type);
+                if (!zone) return;
+                const day = normalizeText(row.day);
+                const key = zone + "|" + day;
+                byZoneDay.set(key, (byZoneDay.get(key) || 0) + (Number(row.active_count) || 0));
+            });
+            const zoneTotals = new Map();
+            (activeReviewZones().concat(["Другие задачи"])).forEach((zone) => {
+                let total = 0;
+                days.forEach((day) => { total += byZoneDay.get(zone + "|" + day) || 0; });
+                if (total > 0) zoneTotals.set(zone, total);
+            });
+            const rankedZones = Array.from(zoneTotals.entries()).sort((a, b) => b[1] - a[1]).map(([zone]) => zone);
+            const topZones = rankedZones.slice(0, HOME_TREND_MAX_SERIES);
+            const foldedZones = rankedZones.slice(HOME_TREND_MAX_SERIES);
+            const series = topZones.map((zone, index) => ({
+                zone,
+                color: HOME_TREND_PALETTE[index % HOME_TREND_PALETTE.length],
+                points: days.map((day) => byZoneDay.get(zone + "|" + day) || 0),
+            }));
+            if (foldedZones.length) {
+                series.push({
+                    zone: "Другие",
+                    color: HOME_TREND_OTHER_COLOR,
+                    points: days.map((day) => foldedZones.reduce((sum, zone) => sum + (byZoneDay.get(zone + "|" + day) || 0), 0)),
+                });
+            }
+            state.homeTrend.days = days;
+            state.homeTrend.series = series;
+            state.homeTrend.loaded = true;
+        } catch (error) {
+            console.warn("home active trend load failed:", error);
+            state.homeTrend.error = "Не удалось загрузить диаграмму: " + (error && error.message ? error.message : String(error));
+        } finally {
+            state.homeTrend.loading = false;
+            renderHomeActiveTrendChart();
+        }
+    }
+
+    // Простой наведённый tooltip: один общий div поверх svg,
+    // позиционируется под курсором по ближайшему дню -- без полноценного
+    // crosshair, достаточно для карточки на главном экране.
+    function homeTrendTooltipHtml(dayIndex) {
+        const day = state.homeTrend.days[dayIndex];
+        if (!day) return "";
+        const rows = state.homeTrend.series
+            .map((item) => "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + item.color + "'></span>" + escapeHtml(item.zone) + ": <strong>" + (item.points[dayIndex] || 0) + "</strong></div>")
+            .join("");
+        return "<div class='home-trend-tooltip-date'>" + escapeHtml(homeTrendDateLabel(day)) + "</div>" + rows;
+    }
+
+    function renderHomeActiveTrendChart() {
+        const target = $("homeTrendChart");
+        if (!target) return;
+        if (state.homeTrend.loading && !state.homeTrend.loaded) {
+            target.innerHTML = "<div class='home-trend-empty'>Считаю остаток по дням...</div>";
+            return;
+        }
+        if (state.homeTrend.error && !state.homeTrend.loaded) {
+            target.innerHTML = "<div class='home-trend-empty'>" + escapeHtml(state.homeTrend.error) + "</div>";
+            return;
+        }
+        const days = state.homeTrend.days;
+        const series = state.homeTrend.series;
+        if (!days.length || !series.length) {
+            target.innerHTML = "<div class='home-trend-empty'>Пока нет данных по активным задачам.</div>";
+            return;
+        }
+        const width = 860;
+        const height = 220;
+        const padLeft = 34;
+        const padRight = 10;
+        const padTop = 12;
+        const padBottom = 24;
+        const plotW = width - padLeft - padRight;
+        const plotH = height - padTop - padBottom;
+        const maxValue = Math.max(1, ...series.map((item) => Math.max(...item.points)));
+        // Круглый шаг сетки -- 4 линии от 0 до "красивого" максимума чуть
+        // выше реального пика, чтобы подписи были не рваными числами.
+        const niceMax = (() => {
+            const raw = maxValue / 4;
+            const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1))));
+            const steps = [1, 2, 2.5, 5, 10];
+            const step = steps.find((candidate) => candidate * magnitude >= raw) || 10;
+            return step * magnitude * 4;
+        })();
+        const xFor = (index) => padLeft + (days.length === 1 ? plotW / 2 : (plotW * index) / (days.length - 1));
+        const yFor = (value) => padTop + plotH - (plotH * value) / niceMax;
+        const gridLinesHtml = [0, 1, 2, 3, 4].map((step) => {
+            const value = Math.round((niceMax * step) / 4);
+            const y = yFor(value);
+            return "<line x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1' />"
+                + "<text x='" + (padLeft - 8) + "' y='" + (y + 4) + "' text-anchor='end' class='home-trend-axis-label' font-size='11' fill='#94a3b8'>" + value + "</text>";
+        }).join("");
+        const dayTickEvery = Math.max(1, Math.ceil(days.length / 7));
+        const xLabelsHtml = days.map((day, index) => {
+            if (index % dayTickEvery !== 0 && index !== days.length - 1) return "";
+            return "<text x='" + xFor(index) + "' y='" + (height - 4) + "' text-anchor='middle' font-size='11' fill='#94a3b8'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
+        }).join("");
+        const linesHtml = series.map((item) => {
+            const path = item.points.map((value, index) => (index === 0 ? "M" : "L") + xFor(index) + "," + yFor(value)).join(" ");
+            const lastIndex = item.points.length - 1;
+            return "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />"
+                + "<circle cx='" + xFor(lastIndex) + "' cy='" + yFor(item.points[lastIndex]) + "' r='4' fill='" + item.color + "' stroke='#fff' stroke-width='2' />";
+        }).join("");
+        // Невидимые полосы-ловушки на каждый день -- шире самой точки,
+        // чтобы было удобно навестись мышью, без полноценного crosshair.
+        const hitWidth = days.length > 1 ? plotW / (days.length - 1) : plotW;
+        const hitAreasHtml = days.map((_, index) => (
+            "<rect data-trend-day-index='" + index + "' x='" + (xFor(index) - hitWidth / 2) + "' y='" + padTop + "' width='" + hitWidth + "' height='" + plotH + "' fill='transparent' />"
+        )).join("");
+        target.innerHTML = "<svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток активных задач по участкам за 14 дней'>"
+            + "<title>Остаток активных задач по участкам за 14 дней</title>"
+            + gridLinesHtml + linesHtml + xLabelsHtml + hitAreasHtml
+            + "</svg>"
+            + "<div id='homeTrendTooltip' class='home-trend-tooltip'></div>";
+        const svg = target.querySelector("svg");
+        const tooltip = target.querySelector("#homeTrendTooltip");
+        if (svg && tooltip) {
+            svg.querySelectorAll("[data-trend-day-index]").forEach((hit) => {
+                hit.addEventListener("mousemove", (event) => {
+                    const dayIndex = Number(hit.dataset.trendDayIndex);
+                    tooltip.innerHTML = homeTrendTooltipHtml(dayIndex);
+                    const rect = target.getBoundingClientRect();
+                    const left = event.clientX - rect.left;
+                    // Тултип растёт вверх от точки (translateY(-100%)) -- у
+                    // верхних пиков курсор слишком близко к потолку
+                    // карточки, зажимаем так, чтобы сам тултип не вылезал
+                    // за край.
+                    const top = Math.max(tooltip.offsetHeight + 6, event.clientY - rect.top - 10);
+                    tooltip.style.left = Math.min(Math.max(left, 4), target.clientWidth - 4) + "px";
+                    tooltip.style.top = top + "px";
+                    tooltip.classList.add("is-visible");
+                });
+                hit.addEventListener("mouseleave", () => tooltip.classList.remove("is-visible"));
+            });
+        }
+        const legendTarget = $("homeTrendLegend");
+        if (legendTarget) {
+            legendTarget.innerHTML = series.map((item) => (
+                "<span class='home-trend-legend-item'><span class='home-trend-legend-dot' style='background:" + item.color + "'></span>" + escapeHtml(item.zone) + "</span>"
+            )).join("");
+        }
+    }
+
     function showHome() {
         state.view = "home";
         closeFlowModals();
@@ -2696,6 +2901,7 @@
         renderFlowAccessGate();
         void refreshPrespisokHomeState();
         void refreshPrespisokLeaderboard();
+        if (!state.homeTrend.loaded && !state.homeTrend.loading) void loadHomeActiveTrend();
     }
 
     function formatMinutesCountdown(minutes) {

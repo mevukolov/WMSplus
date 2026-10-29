@@ -104,6 +104,27 @@
         .tasks-action-icon { width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; background: rgba(98,60,234,.1); color: var(--accent); font-size: 22px; font-weight: 800; }
         .tasks-action-title { margin: 18px 0 8px; font-size: 24px; line-height: 1; color: var(--accent-dark); }
         .tasks-action-text { margin: 0; color: #64748b; line-height: 1.45; font-size: 14px; }
+        .home-trend-card { border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); padding: 18px 20px 14px; }
+        .home-trend-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; color: #0f172a; font-size: 15px; }
+        .home-trend-note { color: #64748b; font-size: 12px; font-weight: 600; }
+        .home-trend-chart { position: relative; margin-top: 10px; }
+        .home-trend-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+        .home-trend-chart .home-trend-empty { color: #64748b; font-size: 13px; padding: 30px 0; text-align: center; }
+        .home-trend-tooltip { position: absolute; pointer-events: none; background: #0f172a; color: #fff; border-radius: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.5; box-shadow: var(--shadow-md); opacity: 0; transform: translate(-50%, -100%); transition: opacity .1s ease; z-index: 5; white-space: nowrap; }
+        .home-trend-tooltip.is-visible { opacity: 1; }
+        .home-trend-tooltip-date { font-weight: 800; margin-bottom: 4px; }
+        .home-trend-tooltip-row { display: flex; align-items: center; gap: 6px; }
+        .home-trend-tooltip-dot { width: 8px; height: 8px; border-radius: 99px; flex: none; }
+        .home-trend-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 12px; }
+        .home-trend-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #475569; font-weight: 700; }
+        .home-trend-legend-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+        .home-review-btn { display: flex; align-items: center; gap: 16px; width: 100%; margin-top: 14px; padding: 18px 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); text-align: left; color: #0f172a; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
+        .home-review-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
+        .home-review-btn .tasks-action-icon { flex: none; }
+        .home-review-btn-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .home-review-btn-title { font-size: 22px; line-height: 1; color: var(--accent-dark); font-weight: 800; }
+        .home-review-btn-text { color: #64748b; line-height: 1.4; font-size: 13px; }
+        @media (max-width: 620px) { .home-review-btn { flex-direction: column; align-items: flex-start; } }
         .flow-home-card { background: radial-gradient(circle 120px at 86% 18%, rgba(250,204,21,.24), transparent 70%), linear-gradient(135deg, #242038, #3e2e23); color: #fff; border-color: rgba(255,255,255,.18); }
         .flow-home-card .tasks-action-icon { background: rgba(255,255,255,.14); color: #facc15; }
         .flow-home-card .tasks-action-title { color: #fff; }
@@ -2052,13 +2073,21 @@
                     <p class="tasks-home-group-note">Регулярные выгрузки, активный разбор и хвосты задач.</p>
                 </div>
             </div>
-            <div class="tasks-actions">
-                <button id="openReview" class="tasks-action-card" type="button">
-                    <span class="tasks-action-icon">✓</span>
-                    <h2 class="tasks-action-title">Разбор</h2>
-                    <p class="tasks-action-text">Активные задачи по участкам: таблица, карточка задачи, комментарий, вердикт и завершение.</p>
-                </button>
+            <div id="homeTrendCard" class="home-trend-card">
+                <div class="home-trend-head">
+                    <strong>Остаток активных задач по участкам</strong>
+                    <span class="home-trend-note">За последние 14 дней</span>
+                </div>
+                <div id="homeTrendChart" class="home-trend-chart"></div>
+                <div id="homeTrendLegend" class="home-trend-legend"></div>
             </div>
+            <button id="openReview" class="home-review-btn" type="button">
+                <span class="tasks-action-icon">✓</span>
+                <span class="home-review-btn-copy">
+                    <span class="home-review-btn-title">Разбор</span>
+                    <span class="home-review-btn-text">Активные задачи по участкам: таблица, карточка задачи, комментарий, вердикт и завершение.</span>
+                </span>
+            </button>
         </div>
         <div class="tasks-home-group tasks-home-group-dev">
             <div class="tasks-home-group-head">
