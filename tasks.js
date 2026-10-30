@@ -15132,21 +15132,23 @@
         return "Тип";
     }
 
-    function renderViolationDetailTable(rows) {
+    function renderViolationDetailTable(rows, dimension) {
         const target = $("violationDetailWrap");
         if (!target) return;
+        const showType = dimension !== "type";
         const sorted = rows.slice().sort((a, b) => (normalizeText(b.created_at)).localeCompare(normalizeText(a.created_at)));
         const body = sorted.map((row) => (
             "<tr>"
             + "<td>" + escapeHtml(row.shk || "-") + "</td>"
             + "<td>" + escapeHtml(formatRuDateTime(row.created_at)) + "</td>"
+            + (showType ? "<td>" + escapeHtml(normalizeText(row.violation_type) || "-") + "</td>" : "")
             + "<td>" + escapeHtml(normalizeText(row.culprit_name) || "-") + "</td>"
             + "<td>" + escapeHtml(normalizeText(row.logged_by_name) || "-") + "</td>"
             + "<td class='review-wrap-cell'>" + escapeHtml(row.comment || "-") + "</td>"
             + "</tr>"
         )).join("");
         target.innerHTML = rows.length
-            ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>ШК</th><th>Дата</th><th>Сотрудник</th><th>Ответственный</th><th>Комментарий</th></tr></thead><tbody>" + body + "</tbody></table></div>"
+            ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>ШК</th><th>Дата</th>" + (showType ? "<th>Тип нарушения</th>" : "") + "<th>Сотрудник</th><th>Ответственный</th><th>Комментарий</th></tr></thead><tbody>" + body + "</tbody></table></div>"
             : "<div class='empty-state'>Пусто.</div>";
     }
 
@@ -15157,7 +15159,7 @@
         const label = group ? group.label : key;
         const title = $("violationDetailTitle");
         if (title) title.textContent = violationDetailDimLabel(dimension) + ": " + label + " (" + rows.length + ")";
-        renderViolationDetailTable(rows);
+        renderViolationDetailTable(rows, dimension);
         setFlowModalOpen("violationDetailModal", true);
     }
 
