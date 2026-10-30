@@ -1070,7 +1070,6 @@
             animation: tasksModalIn .22s cubic-bezier(.2,.8,.2,1) both;
         }
         .tasks-flow-card-wide { width: min(1160px, 100%); }
-        .no-shk-modal-xl { width: fit-content; max-width: min(1300px, 98vw); }
         .no-shk-move-card {
             width: 100vw;
             height: 100dvh;
@@ -2110,16 +2109,6 @@
                     <h2 class="tasks-action-title">Флоу</h2>
                     <p class="tasks-action-text">Единая умная очередь: WMS+ сам выбирает следующую задачу по риску, зоне и срочности.</p>
                 </button>
-                <button id="openDebugSandbox" class="tasks-action-card" type="button" data-dev-only>
-                    <span class="tasks-action-icon">🛠</span>
-                    <h2 class="tasks-action-title">Отладка</h2>
-                    <p class="tasks-action-text">Проверка интерфейсов Без ШК и Предсписка на реальных данных, без записи.</p>
-                </button>
-                <button id="openNoShkZone" class="tasks-action-card" type="button" data-dev-only>
-                    <span class="tasks-action-icon">🗄</span>
-                    <h2 class="tasks-action-title">Зона «Без ШК»</h2>
-                    <p class="tasks-action-text">Стеллажи и полки физической зоны хранения товаров «Без ШК», их вместимость.</p>
-                </button>
             </div>
         </div>
     </section>
@@ -2635,10 +2624,23 @@
             <span id="statusViewThumb" class="review-view-thumb" aria-hidden="true"></span>
             <button type="button" class="review-view-tab" data-status-view="uploads">Выгрузки</button>
             <button type="button" class="review-view-tab" data-status-view="zones">Участки</button>
+            <button type="button" class="review-view-tab" data-status-view="violations">Нарушения</button>
+            <button type="button" class="review-view-tab" data-status-view="noshk">Без ШК</button>
         </div>
         <div class="status-pilot-scroll">
             <div id="statusDictionaryWrap" class="writeoff-terms-wrap"></div>
             <div id="statusZonesWrap" class="writeoff-terms-wrap hidden"></div>
+            <div id="statusViolationsWrap" class="hidden">
+                <div id="violationTypesWrap" class="writeoff-terms-wrap"></div>
+            </div>
+            <div id="statusNoShkWrap" class="hidden">
+                <div class="file-row" style="margin-top:0;" data-status-noshk-only>
+                    <button id="openNewBoxBtn" class="btn btn-rect" type="button">+ Добавить короб</button>
+                    <button id="openMoveBoxesBtn" class="btn btn-outline" type="button">Перемещение коробов</button>
+                    <button id="editNoShkZoneBtn" class="btn btn-outline" type="button">✎ Управление стеллажами</button>
+                </div>
+                <div id="noShkZoneWrap"></div>
+            </div>
         </div>
         <div class="file-row" data-status-uploads-only>
             <button id="addStatusDictionaryRow" class="btn btn-outline" type="button">Добавить статус</button>
@@ -2646,6 +2648,11 @@
             <button id="openReviewZonesFromStatus" class="btn btn-outline" type="button">Участки разбора</button>
         </div>
         <div id="statusDictionaryStatus" class="review-status" data-status-uploads-only></div>
+        <div class="file-row" data-status-violations-only>
+            <button id="addViolationType" class="btn btn-outline" type="button">Добавить тип</button>
+            <button id="saveViolationTypes" class="btn btn-rect" type="button">Сохранить типы</button>
+        </div>
+        <div id="violationTypesStatus" class="review-status" data-status-violations-only></div>
     </div>
 </section>
 
@@ -2654,14 +2661,9 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Нарушения</h3>
-                <p class="work-subtitle">Лог складских ошибок, заполняется после сохранения вердикта любой задачи. Статистика за последние 30 дней, типы -- редактируемый справочник.</p>
+                <p class="work-subtitle">Лог складских ошибок, заполняется после сохранения вердикта любой задачи. Статистика за последние 30 дней.</p>
             </div>
             <button id="closeViolationsHub" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
-        </div>
-        <div id="violationsViewTabs" class="review-view-tabs status-pilot-view-tabs" style="margin-top:14px;">
-            <span id="violationsViewThumb" class="review-view-thumb" aria-hidden="true"></span>
-            <button type="button" class="review-view-tab active" data-violations-view="stats">Статистика</button>
-            <button type="button" class="review-view-tab" data-violations-view="types">Типы</button>
         </div>
         <div class="status-pilot-scroll">
             <div id="violationsStatsScreen">
@@ -2672,14 +2674,6 @@
                     <button type="button" class="review-view-tab" data-violations-stat-dim="employee">По сотрудникам</button>
                 </div>
                 <div id="violationsStatsWrap"></div>
-            </div>
-            <div id="violationTypesScreen" class="hidden">
-                <div id="violationTypesWrap" class="writeoff-terms-wrap"></div>
-                <div class="file-row">
-                    <button id="addViolationType" class="btn btn-outline" type="button">Добавить тип</button>
-                    <button id="saveViolationTypes" class="btn btn-rect" type="button">Сохранить типы</button>
-                </div>
-                <div id="violationTypesStatus" class="review-status"></div>
             </div>
         </div>
     </div>
@@ -2766,50 +2760,6 @@
             <div id="staffStatsGrid" class="staff-stats-grid"></div>
             <div id="staffStatsDetail" class="staff-stats-detail"></div>
         </div>
-    </div>
-</section>
-
-<section id="debugSandboxModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card tasks-flow-card-wide">
-        <div class="work-head">
-            <div>
-                <h3 class="work-title">Отладка</h3>
-                <p class="work-subtitle">Режим только для проверки интерфейсов. Реальные задачи и предсписок подгружаются на чтение — вердикты нигде не сохраняются.</p>
-            </div>
-            <button id="closeDebugSandbox" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
-        </div>
-        <div class="tasks-actions">
-            <button id="openPrespisokDebug" class="tasks-action-card" type="button">
-                <span class="tasks-action-icon">◈</span>
-                <h2 class="tasks-action-title">Предсписок</h2>
-                <p class="tasks-action-text">Данные последнего реального запуска, без загрузки файла — без записи решения.</p>
-            </button>
-            <button id="openFlowDebug" class="tasks-action-card" type="button">
-                <span class="tasks-action-icon">↻</span>
-                <h2 class="tasks-action-title">Флоу</h2>
-                <p class="tasks-action-text">Реальная очередь и карточка — без клейма задачи и без записи вердикта/скипа.</p>
-            </button>
-        </div>
-    </div>
-</section>
-
-<section id="noShkZoneModal" class="tasks-flow-modal upload-work" aria-hidden="true">
-    <div class="tasks-flow-card no-shk-modal-xl">
-        <div class="work-head">
-            <div>
-                <h3 class="work-title">Зона «Без ШК»</h3>
-                <p class="work-subtitle">Стеллажи, полки и короба физической зоны хранения товаров «Без ШК».</p>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <button id="editNoShkZoneBtn" class="btn btn-square" type="button" title="Управление стеллажами">✎</button>
-                <button id="closeNoShkZone" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
-            </div>
-        </div>
-        <div class="file-row" style="margin-top:0;">
-            <button id="openNewBoxBtn" class="btn btn-rect" type="button">+ Добавить короб</button>
-            <button id="openMoveBoxesBtn" class="btn btn-outline" type="button">Перемещение коробов</button>
-        </div>
-        <div id="noShkZoneWrap"></div>
     </div>
 </section>
 

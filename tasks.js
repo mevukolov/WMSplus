@@ -633,7 +633,6 @@
             loading: false,
             loaded: false,
             error: "",
-            view: "stats",
             statDimension: "type",
         },
         // Контекст всплывающей модалки "Нарушение", открытой поверх
@@ -2109,7 +2108,7 @@
     // считаются в renderCalendar()/renderStatusCoverageCalendar() разом
     // (дешево, тот же range), здесь только показываем нужный и прячем
     // другой, тот же паттерн таблетки-переключателя, что и у Маршрутизатора
-    // (updateStatusViewThumb) и Нарушений (updateViolationsViewThumb).
+    // (updateStatusViewThumb) и Нарушений (updateViolationsStatDimThumb).
     function renderUploadsCalendarView(instant) {
         const isStatuses = state.uploadsCalendarView === "statuses";
         document.querySelectorAll("[data-uploads-calendar-view]").forEach((button) => {
@@ -2239,8 +2238,6 @@
         setFlowModalOpen("achievementsModal", false);
         setFlowModalOpen("specialInfoModal", false);
         setFlowModalOpen("allTareShkModal", false);
-        setFlowModalOpen("debugSandboxModal", false);
-        setFlowModalOpen("noShkZoneModal", false);
         setFlowModalOpen("noShkZoneAdminModal", false);
         setFlowModalOpen("noShkNewBoxModal", false);
         setFlowModalOpen("noShkBoxDetailModal", false);
@@ -13504,21 +13501,32 @@
     }
 
     // Верхний диспетчер модалки Маршрутизатора -- переключает видимость
-    // между видом "Выгрузки" (старый список по source_format) и
-    // "Участки" (новый, см. renderStatusZonesScreen). Кнопки
-    // "Добавить статус"/"Сохранить словарь" имеют смысл только в
-    // "Выгрузки" -- прячем их во втором виде, а не дублируем логику.
+    // между 4 видами: "Выгрузки" (старый список по source_format),
+    // "Участки" (renderStatusZonesScreen), "Нарушения" (редактор типов
+    // нарушений, перенесён сюда из модалки "Нарушения") и "Без ШК" (вся
+    // зона хранения, перенесена из отдельной модалки noShkZoneModal --
+    // см. no_shk_zone.js). Кнопки-действия каждого вида ("Добавить
+    // статус"/"Сохранить словарь" и т.д.) показываем только в своём виде
+    // через data-status-*-only, а не дублируем разметку.
     function renderStatusPilotScreen(instant) {
+        const view = state.statusDictionary.viewMode || "uploads";
         const uploadsWrap = $("statusDictionaryWrap");
         const zonesWrap = $("statusZonesWrap");
-        const isZones = state.statusDictionary.viewMode === "zones";
+        const violationsWrap = $("statusViolationsWrap");
+        const noShkWrap = $("statusNoShkWrap");
         document.querySelectorAll("[data-status-view]").forEach((button) => {
-            button.classList.toggle("active", button.dataset.statusView === state.statusDictionary.viewMode);
+            button.classList.toggle("active", button.dataset.statusView === view);
         });
-        if (uploadsWrap) uploadsWrap.classList.toggle("hidden", isZones);
-        document.querySelectorAll("[data-status-uploads-only]").forEach((el) => el.classList.toggle("hidden", isZones));
-        if (zonesWrap) zonesWrap.classList.toggle("hidden", !isZones);
-        if (isZones) renderStatusZonesScreen();
+        if (uploadsWrap) uploadsWrap.classList.toggle("hidden", view !== "uploads");
+        if (zonesWrap) zonesWrap.classList.toggle("hidden", view !== "zones");
+        if (violationsWrap) violationsWrap.classList.toggle("hidden", view !== "violations");
+        if (noShkWrap) noShkWrap.classList.toggle("hidden", view !== "noshk");
+        document.querySelectorAll("[data-status-uploads-only]").forEach((el) => el.classList.toggle("hidden", view !== "uploads"));
+        document.querySelectorAll("[data-status-violations-only]").forEach((el) => el.classList.toggle("hidden", view !== "violations"));
+        document.querySelectorAll("[data-status-noshk-only]").forEach((el) => el.classList.toggle("hidden", view !== "noshk"));
+        if (view === "zones") renderStatusZonesScreen();
+        else if (view === "violations") renderViolationTypesEditor();
+        else if (view === "noshk") { if (typeof window.__noShkLoadZone === "function") window.__noShkLoadZone(); }
         else renderStatusDictionaryModal();
         updateStatusViewThumb(instant);
     }
@@ -14770,7 +14778,7 @@
             return false;
         } finally {
             state.violationTypes.loading = false;
-            renderViolationsHubScreen();
+            renderViolationTypesEditor();
         }
     }
 
@@ -15007,22 +15015,8 @@
         }
     }
 
-    // ---- Нарушения: справочник + статистика (единая модалка, тот же
-    // переключатель вида, что у Маршрутизатора -- Выгрузки/Участки там,
-    // Статистика/Типы здесь) ----
-
-    function updateViolationsViewThumb(instant) {
-        const thumb = $("violationsViewThumb");
-        const active = document.querySelector("#violationsViewTabs .review-view-tab.active");
-        if (!thumb || !active) return;
-        if (instant) thumb.style.transition = "none";
-        thumb.style.transform = "translateX(" + active.offsetLeft + "px)";
-        thumb.style.width = active.offsetWidth + "px";
-        if (instant) {
-            void thumb.offsetWidth;
-            thumb.style.transition = "";
-        }
-    }
+    // ---- Нарушения: статистика (справочник типов живёт в Маршрутизаторе,
+    // вкладка "Нарушения" -- см. renderStatusPilotScreen) ----
 
     async function loadViolations(force) {
         if (state.violations.loaded && !force) return true;
@@ -15169,18 +15163,9 @@
 
     function renderViolationsHubScreen(instant) {
         const statsWrap = $("violationsStatsScreen");
-        const typesWrap = $("violationTypesScreen");
-        if (!statsWrap || !typesWrap) return;
-        const view = state.violations.view || "stats";
-        statsWrap.classList.toggle("hidden", view !== "stats");
-        typesWrap.classList.toggle("hidden", view !== "types");
-        document.querySelectorAll("#violationsViewTabs .review-view-tab").forEach((tab) => {
-            tab.classList.toggle("active", tab.dataset.violationsView === view);
-        });
-        updateViolationsViewThumb(instant);
+        if (!statsWrap) return;
         renderViolationsStats();
-        renderViolationTypesEditor();
-        if (view === "stats") updateViolationsStatDimThumb(instant);
+        updateViolationsStatDimThumb(instant);
     }
 
     async function openViolationsHubModal() {
@@ -15188,7 +15173,7 @@
         closeFlowModals();
         setFlowModalOpen("violationsHubModal", true);
         renderViolationsHubScreen(true);
-        await Promise.all([loadViolationTypes(true), loadViolations(true)]);
+        await loadViolations(true);
         renderViolationsHubScreen(true);
     }
 
@@ -15207,8 +15192,9 @@
         // позже. Журнал покрытия (ensureCoverageLogLoaded, без force) --
         // для календаря покрытия статусов в самом виде "Выгрузки"; обычно
         // уже загружен при первом посещении главного экрана, но не
-        // полагаемся на это.
-        await Promise.all([loadStatusDictionary(true), loadRoutingRules(true), ensureCoverageLogLoaded()]);
+        // полагаемся на это. Типы нарушений -- для вида "Нарушения",
+        // та же логика "грузим сразу, не ждём переключения вида".
+        await Promise.all([loadStatusDictionary(true), loadRoutingRules(true), ensureCoverageLogLoaded(), loadViolationTypes(true)]);
         renderStatusPilotScreen(true);
     }
 
@@ -15614,30 +15600,6 @@
             state.staffStats.loading = false;
             renderStaffStatsModal();
         }
-    }
-
-    function openDebugSandboxModal() {
-        if (!ensureDevelopmentAccess("Отладка")) return;
-        closeFlowModals();
-        setFlowModalOpen("debugSandboxModal", true);
-    }
-
-    function closeDebugSandboxModal() {
-        setFlowModalOpen("debugSandboxModal", false);
-    }
-
-    // Same "real data, read-only" sandbox pattern as предсписок/Без ШК above:
-    // the real scored queue and the real embedded card, but issueNextFlowTask
-    // skips claimFlowTask entirely (no lock written) while state.flow.debugMode
-    // is on, and every real verdict/defer/skip write it can reach short-
-    // circuits into a fake success instead of touching Supabase -- see the
-    // state.flow.debugMode checks in completeTaskFromDetail, deferTaskFromModal,
-    // skipFlowTaskFromModal and writeTaskHistory.
-    function openFlowDebugSandbox() {
-        if (!ensureDevelopmentAccess("Отладка")) return;
-        closeDebugSandboxModal();
-        state.flow.debugMode = true;
-        void showFlowPage();
     }
 
     function openStaffStatsModal() {
@@ -18753,56 +18715,6 @@
     // Debug sandbox: skips the upload step entirely, reading the most
     // recent REAL run's already-stored item list (payload.items_full,
     // same field the normal remote-rejoin path already trusts) instead.
-    // Read-only -- every write reachable from applyPrespisokAction
-    // (insertPrespisokAction, upsertPrespisokRun, createPrespisokTask,
-    // persistPrespisokState) self-guards on state.prespisok.debugMode.
-    async function openPrespisokDebugModal() {
-        if (!ensureDevelopmentAccess("Отладка")) return;
-        if (state.prespisok.items.length && !state.prespisok.finished && !state.prespisok.debugMode) {
-            toast("Сначала закрой активный предсписок.", "error");
-            return;
-        }
-        closeFlowModals();
-        resetPrespisokState();
-        state.prespisok.debugMode = true;
-        setFlowModalOpen("prespisokModal", true);
-        const target = $("prespisokWrap");
-        if (target) target.innerHTML = prespisokTopHtml("Отладка: читаю последний реальный запуск предсписка, без записи.") + "<div class='prespisok-center'><div class='prespisok-wait'>Загружаю данные</div></div>";
-        const db = supabaseDb();
-        let items = [];
-        if (db) {
-            try {
-                const { data, error } = await db
-                    .from(WMS_PRESPISOK_RUNS_TABLE)
-                    .select("id,payload")
-                    .order("started_at", { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                if (error) throw error;
-                const payload = data && data.payload && typeof data.payload === "object" ? data.payload : {};
-                items = Array.isArray(payload.items_full) ? payload.items_full : [];
-            } catch (error) {
-                console.warn("prespisok debug fetch failed:", error);
-            }
-        }
-        if (!state.prespisok.debugMode || !$("prespisokModal") || !$("prespisokModal").classList.contains("active")) return;
-        if (!items.length) {
-            if (target) target.innerHTML = prespisokTopHtml("Отладка: нет данных.") + "<div class='prespisok-center'><div class='prespisok-wait'>Ни одного реального запуска предсписка еще не было — нечего показать.</div></div>";
-            bindPrespisokClose();
-            return;
-        }
-        state.prespisok.items = items;
-        state.prespisok.index = 0;
-        state.prespisok.startedAt = new Date().toISOString();
-        state.prespisok.timerStartedAt = Date.now();
-        state.prespisok.itemTimerStartedAt = Date.now();
-        // Same real-history fetch the upload path does -- without it every
-        // item here would fall back to the synthetic 2-line history too.
-        state.prespisok.history = await loadPrespisokHistory(items);
-        if (!state.prespisok.debugMode || !$("prespisokModal") || !$("prespisokModal").classList.contains("active")) return;
-        renderPrespisokPlay();
-    }
-
     function prespisokMoneyStats() {
         const result = { saved: 0, writeoff: 0, savedCount: 0, writeoffCount: 0, autoWriteoffCount: 0, taskCount: 0 };
         (state.prespisok.actions || []).forEach((action) => {
@@ -21055,10 +20967,6 @@
 
     function initEvents() {
         $("openStatusPilotUploads").addEventListener("click", openStatusPilotModal);
-        $("openDebugSandbox").addEventListener("click", openDebugSandboxModal);
-        $("closeDebugSandbox").addEventListener("click", closeDebugSandboxModal);
-        $("openPrespisokDebug").addEventListener("click", () => { void openPrespisokDebugModal(); });
-        $("openFlowDebug").addEventListener("click", () => { void openFlowDebugSandbox(); });
         $("openFlow").addEventListener("click", () => { void showFlowPage(); });
         $("startFlowBanner").addEventListener("click", () => { void showFlowPage(); });
         // На вкладке "Чистые списания" эта кнопка открывает загрузку
@@ -21113,13 +21021,6 @@
         $("resetFlowSettings").addEventListener("click", resetFlowSettingsFromModal);
         $("openViolationsHub").addEventListener("click", () => { void openViolationsHubModal(); });
         $("closeViolationsHub").addEventListener("click", closeViolationsHubModal);
-        document.querySelectorAll("#violationsHubModal [data-violations-view]").forEach((button) => {
-            button.addEventListener("click", () => {
-                if (state.violations.view === button.dataset.violationsView) return;
-                state.violations.view = button.dataset.violationsView;
-                renderViolationsHubScreen();
-            });
-        });
         document.querySelectorAll("#violationsStatsDimTabs [data-violations-stat-dim]").forEach((button) => {
             button.addEventListener("click", () => {
                 if (state.violations.statDimension === button.dataset.violationsStatDim) return;

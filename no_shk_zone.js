@@ -1455,17 +1455,13 @@
 
     window.__noShkStartGetBox = function () { void startGetBox(); };
 
-    document.addEventListener("DOMContentLoaded", () => {
-        const openBtn = $("openNoShkZone");
-        if (openBtn) {
-            openBtn.addEventListener("click", () => {
-                setZoneModalOpen("noShkZoneModal", true);
-                void loadZone();
-            });
-        }
-        const closeBtn = $("closeNoShkZone");
-        if (closeBtn) closeBtn.addEventListener("click", () => setZoneModalOpen("noShkZoneModal", false));
+    // Зона «Без ШК» больше не своя модалка -- она встроена вкладкой
+    // "Без ШК" внутри Маршрутизатора (tasks.js, renderStatusPilotScreen).
+    // tasks.js зовёт это при переключении на вкладку вместо прежнего
+    // клика по openNoShkZone.
+    window.__noShkLoadZone = function () { void loadZone(); };
 
+    document.addEventListener("DOMContentLoaded", () => {
         const editBtn = $("editNoShkZoneBtn");
         if (editBtn) {
             editBtn.addEventListener("click", () => {
