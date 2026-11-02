@@ -2389,6 +2389,7 @@
         const profile = state.profile;
         const viewedUser = profile.view === "employeeAchievements" && profile.viewedEmployee ? profile.viewedEmployee : ownUser;
         const isOwnProfile = profile.view === "personal";
+        const isCurrentUser = Boolean(normalizeText(viewedUser.id) && normalizeText(viewedUser.id) === normalizeText(ownUser.id));
         const avatarImage = $("profileAvatarImage");
         const avatarFallback = $("profileAvatarFallback");
         const coverImage = $("profileCoverImage");
@@ -2397,10 +2398,23 @@
         const status = $("profileStatus");
         const content = $("profileContent");
         const hero = $("profileCover") && $("profileCover").closest(".profile-hero");
-        const avatarUrl = isOwnProfile ? profileMediaUrl(profile.media && profile.media.avatar_path) : "";
-        const coverUrl = isOwnProfile ? profileMediaUrl(profile.media && profile.media.cover_path) : "";
+        const avatarUrl = (isOwnProfile || isCurrentUser) ? profileMediaUrl(profile.media && profile.media.avatar_path) : "";
+        const coverUrl = (isOwnProfile || isCurrentUser) ? profileMediaUrl(profile.media && profile.media.cover_path) : "";
         const displayName = normalizeText(viewedUser.name) || "Сотрудник ОПП";
-        if (identityName) identityName.textContent = displayName;
+        if (identityName) {
+            const canReturnToOwnStats = profile.view === "warehouse";
+            identityName.textContent = displayName;
+            identityName.classList.toggle("is-return-link", canReturnToOwnStats);
+            if (canReturnToOwnStats) {
+                identityName.setAttribute("role", "button");
+                identityName.setAttribute("tabindex", "0");
+                identityName.setAttribute("title", "Открыть мою статистику");
+            } else {
+                identityName.removeAttribute("role");
+                identityName.removeAttribute("tabindex");
+                identityName.removeAttribute("title");
+            }
+        }
         if (identityMeta) identityMeta.textContent = [normalizeText(viewedUser.wh_name) || "Склад не указан", viewedUser.id ? "ID " + viewedUser.id : "ID не указан"].join(" · ");
         if (avatarImage) {
             avatarImage.hidden = !avatarUrl;
@@ -2646,8 +2660,27 @@
     async function openEmployeeProfile(employeeId) {
         const employee = (state.profile.warehouseEmployees || []).find((row) => normalizeText(row.id) === normalizeText(employeeId));
         if (!employee) return;
+        if (normalizeText(employee.id) === normalizeText(currentWmsUser().id)) {
+            state.profile.view = "personal";
+            state.profile.editing = false;
+            state.profile.viewedEmployee = null;
+            state.profile.employeeAchievements = [];
+            state.profile.employeeAchievementsError = "";
+            animateProfileContent();
+            renderProfileDrawer();
+            return;
+        }
         state.profile.viewedEmployee = employee;
         await openEmployeeAchievements();
+    }
+
+    function returnToOwnProfileStats() {
+        if (state.profile.view !== "warehouse") return;
+        state.profile.view = "personal";
+        state.profile.editing = false;
+        state.profile.viewedEmployee = null;
+        animateProfileContent();
+        renderProfileDrawer();
     }
 
     async function openEmployeeAchievements() {
@@ -2777,6 +2810,12 @@
                 return;
             }
             void openAchievementsModal();
+        });
+        $("profileIdentityName")?.addEventListener("click", returnToOwnProfileStats);
+        $("profileIdentityName")?.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            returnToOwnProfileStats();
         });
         $("profileContent")?.addEventListener("click", (event) => {
             if (!(event.target instanceof Element)) return;
