@@ -663,6 +663,15 @@
             stats: null,
             status: "",
             statusError: false,
+            view: "personal",
+            editing: false,
+            warehouseLoading: false,
+            warehouseError: "",
+            warehouseEmployees: [],
+            viewedEmployee: null,
+            employeeAchievementsLoading: false,
+            employeeAchievementsError: "",
+            employeeAchievements: [],
         },
         loadingStatus: false,
         calendarRange: null,
@@ -2327,22 +2336,72 @@
         ].map(([label, value]) => "<div class='profile-stat-tile'><span>" + escapeHtml(label) + "</span><strong>" + escapeHtml(value) + "</strong></div>").join("");
     }
 
+    function profileContentHtml(profile, ownUser) {
+        if (profile.view === "warehouse") {
+            const warehouseId = normalizeText(ownUser.user_wh_id);
+            const name = normalizeText(ownUser.wh_name) || "Склад не указан";
+            const employees = profile.warehouseEmployees || [];
+            const people = profile.warehouseLoading
+                ? "<div class='profile-content-empty'>Загружаю список сотрудников…</div>"
+                : profile.warehouseError
+                    ? "<div class='profile-content-empty'>" + escapeHtml(profile.warehouseError) + "</div>"
+                    : employees.length
+                        ? "<div class='profile-warehouse-people'>" + employees.map((employee) => "<button type='button' class='profile-warehouse-person' data-profile-employee='" + escapeHtml(employee.id) + "'><strong>" + escapeHtml(employee.name) + "</strong><span>ID " + escapeHtml(employee.id) + "</span></button>").join("") + "</div>"
+                        : "<div class='profile-content-empty'>На этом складе пока нет сотрудников.</div>";
+            return "<section class='profile-personal-stats' aria-label='Мой склад'>"
+                + "<div class='profile-section-head'><h4>Мой склад</h4><span>Сотрудники</span></div>"
+                + "<div class='profile-warehouse-summary'><div><h5>" + escapeHtml(name) + "</h5><p>" + escapeHtml(warehouseId ? "ID склада " + warehouseId : "ID склада не указан") + "</p></div><div class='profile-warehouse-count' title='Сотрудников'>" + (profile.warehouseLoading ? "…" : escapeHtml(employees.length)) + "</div></div>"
+                + people + "</section>";
+        }
+        if (profile.view === "employee") {
+            const employee = profile.viewedEmployee || {};
+            const earned = profile.employeeAchievements || [];
+            const cards = profile.employeeAchievementsLoading
+                ? "<div class='profile-content-empty'>Загружаю достижения…</div>"
+                : profile.employeeAchievementsError
+                    ? "<div class='profile-content-empty'>" + escapeHtml(profile.employeeAchievementsError) + "</div>"
+                    : earned.length
+                        ? "<div class='profile-earned-list'>" + earned.map((row) => {
+                            const achievement = ACHIEVEMENT_BY_ID.get(normalizeText(row.achievement_id));
+                            if (!achievement) return "";
+                            return "<article class='profile-earned-card rarity-" + escapeHtml(achievement.rarity || "common") + "'><div class='profile-earned-card-icon'>" + escapeHtml(achievement.emoji || "🏆") + "</div><div><strong>" + escapeHtml(achievement.title) + "</strong><span>Получено " + escapeHtml(formatRuDateTime(row.unlocked_at)) + "</span></div></article>";
+                        }).join("") + "</div>"
+                        : "<div class='profile-content-empty'>У сотрудника пока нет отображаемых достижений.</div>";
+            return "<section class='profile-personal-stats' aria-label='Достижения сотрудника'>"
+                + "<div class='profile-section-head'><h4>Достижения</h4><span>" + escapeHtml(normalizeText(employee.name) || "Сотрудник") + "</span></div>"
+                + cards + "</section>";
+        }
+        return "<section class='profile-personal-stats' aria-labelledby='profileStatsTitle'>"
+            + "<div class='profile-section-head'><h4 id='profileStatsTitle'>Сегодня в ОПП</h4><span>" + escapeHtml(formatRuDate(state.today || todayIsoInMoscow())) + "</span></div>"
+            + "<div class='profile-stats-grid'>" + profileStatsTiles(profile.stats, profile.statsLoading) + "</div></section>";
+    }
+
+    function animateProfileContent() {
+        const content = $("profileContent");
+        if (!content) return;
+        content.classList.remove("is-switching");
+        void content.offsetWidth;
+        content.classList.add("is-switching");
+    }
+
     function renderProfileDrawer() {
-        const user = currentWmsUser();
+        const ownUser = currentWmsUser();
         const profile = state.profile;
+        const viewedUser = profile.view === "employee" && profile.viewedEmployee ? profile.viewedEmployee : ownUser;
+        const isOwnProfile = profile.view === "personal";
         const avatarImage = $("profileAvatarImage");
         const avatarFallback = $("profileAvatarFallback");
         const coverImage = $("profileCoverImage");
         const identityName = $("profileIdentityName");
         const identityMeta = $("profileIdentityMeta");
-        const stats = $("profileStats");
-        const statsDate = $("profileStatsDate");
         const status = $("profileStatus");
-        const avatarUrl = profileMediaUrl(profile.media && profile.media.avatar_path);
-        const coverUrl = profileMediaUrl(profile.media && profile.media.cover_path);
-        const displayName = normalizeText(user.name) || "Сотрудник ОПП";
+        const content = $("profileContent");
+        const hero = $("profileCover") && $("profileCover").closest(".profile-hero");
+        const avatarUrl = isOwnProfile ? profileMediaUrl(profile.media && profile.media.avatar_path) : "";
+        const coverUrl = isOwnProfile ? profileMediaUrl(profile.media && profile.media.cover_path) : "";
+        const displayName = normalizeText(viewedUser.name) || "Сотрудник ОПП";
         if (identityName) identityName.textContent = displayName;
-        if (identityMeta) identityMeta.textContent = [normalizeText(user.wh_name) || "Склад не указан", user.id ? "ID " + user.id : "ID не указан"].join(" · ");
+        if (identityMeta) identityMeta.textContent = [normalizeText(viewedUser.wh_name) || "Склад не указан", viewedUser.id ? "ID " + viewedUser.id : "ID не указан"].join(" · ");
         if (avatarImage) {
             avatarImage.hidden = !avatarUrl;
             if (avatarUrl) avatarImage.src = avatarUrl;
@@ -2352,17 +2411,25 @@
             avatarFallback.textContent = avatarInitials(displayName);
         }
         const avatar = avatarImage && avatarImage.parentElement;
-        if (avatar) avatar.style.background = avatarColorFor(user.id || displayName);
+        if (avatar) avatar.style.background = avatarColorFor(viewedUser.id || displayName);
         if (coverImage) {
             coverImage.hidden = !coverUrl;
             if (coverUrl) coverImage.src = coverUrl;
         }
-        if (stats) stats.innerHTML = profileStatsTiles(profile.stats, profile.statsLoading);
-        if (statsDate) statsDate.textContent = formatRuDate(state.today || todayIsoInMoscow());
+        if (hero) hero.classList.toggle("is-editing", Boolean(isOwnProfile && profile.editing));
+        const editButton = $("editProfileButton");
+        if (editButton) {
+            editButton.hidden = !isOwnProfile;
+            editButton.classList.toggle("active", Boolean(profile.editing));
+            editButton.setAttribute("aria-expanded", String(Boolean(isOwnProfile && profile.editing)));
+        }
+        const achievementsButton = $("openAchievementsFromProfile");
+        if (achievementsButton) achievementsButton.hidden = !isOwnProfile;
+        if (content) content.innerHTML = profileContentHtml(profile, ownUser);
         if (status) {
-            const message = profile.status || profile.statsError || (profile.mediaLoading ? "Загружаю оформление профиля…" : profile.statsLoading ? "Собираю личную статистику…" : "");
+            const message = profile.status || (isOwnProfile ? profile.statsError : "") || (profile.mediaLoading ? "Загружаю оформление профиля…" : profile.statsLoading && isOwnProfile ? "Собираю личную статистику…" : "");
             status.textContent = message;
-            status.classList.toggle("is-error", Boolean(profile.statusError || profile.statsError));
+            status.classList.toggle("is-error", Boolean(profile.statusError || (isOwnProfile && profile.statsError)));
         }
     }
 
@@ -2523,11 +2590,103 @@
         }
     }
 
+    async function openWarehouseProfile() {
+        const user = currentWmsUser();
+        const warehouseId = normalizeText(user.user_wh_id);
+        state.profile.view = "warehouse";
+        state.profile.editing = false;
+        state.profile.viewedEmployee = null;
+        state.profile.employeeAchievements = [];
+        state.profile.employeeAchievementsError = "";
+        state.profile.warehouseError = "";
+        state.profile.status = "";
+        state.profile.statusError = false;
+        animateProfileContent();
+        if (!warehouseId) {
+            state.profile.warehouseLoading = false;
+            state.profile.warehouseEmployees = [];
+            state.profile.warehouseError = "У текущего пользователя не указан склад.";
+            renderProfileDrawer();
+            return;
+        }
+        const db = supabaseDb();
+        if (!db) {
+            state.profile.warehouseLoading = false;
+            state.profile.warehouseEmployees = [];
+            state.profile.warehouseError = "Supabase недоступен: список сотрудников не загружен.";
+            renderProfileDrawer();
+            return;
+        }
+        state.profile.warehouseLoading = true;
+        renderProfileDrawer();
+        try {
+            const { data, error } = await db
+                .from("users")
+                .select("id,fio,user_wh_id")
+                .eq("user_wh_id", warehouseId)
+                .order("fio", { ascending: true });
+            if (error) throw error;
+            state.profile.warehouseEmployees = (data || []).map((row) => ({
+                id: normalizeText(row && row.id),
+                name: normalizeText(row && row.fio) || "Сотрудник ОПП",
+                wh_name: normalizeText(user.wh_name),
+                user_wh_id: warehouseId,
+            })).filter((row) => row.id);
+        } catch (error) {
+            state.profile.warehouseEmployees = [];
+            state.profile.warehouseError = "Не удалось загрузить сотрудников: " + (error && error.message ? error.message : String(error));
+        } finally {
+            state.profile.warehouseLoading = false;
+            renderProfileDrawer();
+        }
+    }
+
+    async function openEmployeeProfile(employeeId) {
+        const employee = (state.profile.warehouseEmployees || []).find((row) => normalizeText(row.id) === normalizeText(employeeId));
+        if (!employee) return;
+        state.profile.view = "employee";
+        state.profile.editing = false;
+        state.profile.viewedEmployee = employee;
+        state.profile.employeeAchievements = [];
+        state.profile.employeeAchievementsError = "";
+        state.profile.employeeAchievementsLoading = true;
+        state.profile.status = "";
+        state.profile.statusError = false;
+        animateProfileContent();
+        renderProfileDrawer();
+        const db = supabaseDb();
+        if (!db) {
+            state.profile.employeeAchievementsLoading = false;
+            state.profile.employeeAchievementsError = "Supabase недоступен: достижения не загружены.";
+            renderProfileDrawer();
+            return;
+        }
+        try {
+            const { data, error } = await db
+                .from(WMS_ACHIEVEMENTS_TABLE)
+                .select("achievement_id,unlocked_at")
+                .eq("wh_id", normalizeText(employee.user_wh_id) || WH_ID)
+                .eq("user_id", employee.id)
+                .order("unlocked_at", { ascending: false });
+            if (error) throw error;
+            state.profile.employeeAchievements = (data || []).filter((row) => {
+                const achievement = ACHIEVEMENT_BY_ID.get(normalizeText(row && row.achievement_id));
+                return achievement && !achievement.hidden && !achievement.soon;
+            });
+        } catch (error) {
+            state.profile.employeeAchievementsError = "Не удалось загрузить достижения: " + (error && error.message ? error.message : String(error));
+        } finally {
+            state.profile.employeeAchievementsLoading = false;
+            renderProfileDrawer();
+        }
+    }
+
     function openProfileModal() {
-        const editTools = $("profileEditTools");
-        if (editTools) editTools.hidden = true;
-        $("editProfileButton")?.classList.remove("active");
-        $("editProfileButton")?.setAttribute("aria-expanded", "false");
+        state.profile.view = "personal";
+        state.profile.editing = false;
+        state.profile.viewedEmployee = null;
+        state.profile.employeeAchievements = [];
+        state.profile.employeeAchievementsError = "";
         renderProfileDrawer();
         setFlowModalOpen("profileModal", true);
         void loadProfileDrawer();
@@ -2597,22 +2756,22 @@
         $("closeNotifications")?.addEventListener("click", () => setFlowModalOpen("notificationsModal", false));
         $("closeProfile")?.addEventListener("click", () => setFlowModalOpen("profileModal", false));
         $("editProfileButton")?.addEventListener("click", () => {
-            const tools = $("profileEditTools");
-            if (!tools) return;
-            const isOpen = tools.hidden;
-            tools.hidden = !isOpen;
-            $("editProfileButton").classList.toggle("active", isOpen);
-            $("editProfileButton").setAttribute("aria-expanded", String(isOpen));
+            if (state.profile.view !== "personal") return;
+            state.profile.editing = !state.profile.editing;
+            renderProfileDrawer();
         });
         $("chooseProfileAvatar")?.addEventListener("click", () => $("profileAvatarInput")?.click());
         $("chooseProfileCover")?.addEventListener("click", () => $("profileCoverInput")?.click());
         $("profileAvatarInput")?.addEventListener("change", () => { void uploadProfileMedia("avatar", $("profileAvatarInput").files && $("profileAvatarInput").files[0]); });
         $("profileCoverInput")?.addEventListener("change", () => { void uploadProfileMedia("cover", $("profileCoverInput").files && $("profileCoverInput").files[0]); });
-        $("openMyWarehouse")?.addEventListener("click", () => {
-            const warehouse = normalizeText(currentWmsUser().wh_name);
-            toast(warehouse ? "Мой склад: " + warehouse : "Склад пока не указан.", warehouse ? "info" : "error");
-        });
+        $("openMyWarehouse")?.addEventListener("click", () => { void openWarehouseProfile(); });
         $("openAchievementsFromProfile")?.addEventListener("click", () => { void openAchievementsModal(); });
+        $("profileContent")?.addEventListener("click", (event) => {
+            if (!(event.target instanceof Element)) return;
+            const button = event.target.closest("[data-profile-employee]");
+            if (!button) return;
+            void openEmployeeProfile(button.getAttribute("data-profile-employee"));
+        });
         $("cancelLogoutBtn")?.addEventListener("click", () => setFlowModalOpen("logoutConfirmModal", false));
         $("confirmLogoutBtn")?.addEventListener("click", () => {
             if (typeof clearAllCaches === "function") clearAllCaches();
