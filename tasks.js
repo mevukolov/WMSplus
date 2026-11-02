@@ -3405,7 +3405,7 @@
         const target = $("homeTrendChart");
         if (!target) return;
         if (state.homeTrend.loading && !state.homeTrend.loaded) {
-            target.innerHTML = "<div class='home-trend-empty'>Считаю остаток по дням...</div>";
+            target.innerHTML = "<div class='home-trend-loading' role='status'><span class='home-trend-loading-bars' aria-hidden='true'><i></i><i></i><i></i><i></i></span><span>Считаю остаток по дням...</span></div>";
             return;
         }
         if (state.homeTrend.error && !state.homeTrend.loaded) {
@@ -3445,13 +3445,13 @@
         const gridLinesHtml = [0, 1, 2, 3, 4].map((step) => {
             const value = Math.round((niceMax * step) / 4);
             const y = yFor(value);
-            return "<line x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1' />"
+            return "<line class='home-trend-grid-line' x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1' />"
                 + "<text x='" + (padLeft - 7) + "' y='" + (y + 3) + "' text-anchor='end' class='home-trend-axis-label' font-size='9' fill='#94a3b8'>" + value + "</text>";
         }).join("");
         const dayTickEvery = Math.max(1, Math.ceil(days.length / 7));
         const xLabelsHtml = days.map((day, index) => {
             if (index % dayTickEvery !== 0 && index !== days.length - 1 && day <= state.today) return "";
-            return "<text x='" + xFor(index) + "' y='" + (height - 5) + "' text-anchor='middle' font-size='9' fill='#94a3b8'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
+            return "<text class='home-trend-date-label' x='" + xFor(index) + "' y='" + (height - 5) + "' text-anchor='middle' font-size='9' fill='#94a3b8'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
         }).join("");
         // Общий тултип (все участки сразу) теперь только по наведению на
         // саму подпись даты снизу -- не на весь столбец дня, иначе
@@ -3463,17 +3463,18 @@
             if (index % dayTickEvery !== 0 && index !== days.length - 1 && day <= state.today) return "";
             return "<rect data-trend-date-label data-trend-day-index='" + index + "' x='" + (xFor(index) - dateLabelHitWidth / 2) + "' y='" + (height - padBottom) + "' width='" + dateLabelHitWidth + "' height='" + padBottom + "' fill='transparent' style='cursor:pointer' />";
         }).join("");
-        const linesHtml = visibleSeries.map((item) => {
+        const linesHtml = visibleSeries.map((item, seriesIndex) => {
             const path = homeTrendSmoothPath(item.points, xFor, yFor);
-            const dots = item.points.map((value, index) => value == null ? "" : "<circle cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='3' fill='" + item.color + "' stroke='#fff' stroke-width='1.5' />").join("");
-            return (path ? "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />" : "") + dots;
+            const baseDelay = seriesIndex * 45;
+            const dots = item.points.map((value, index) => value == null ? "" : "<circle class='home-trend-dot' style='--home-trend-delay:" + (baseDelay + 170 + index * 24) + "ms' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='3' fill='" + item.color + "' stroke='#fff' stroke-width='1.5' />").join("");
+            return (path ? "<path class='home-trend-line' pathLength='1' style='--home-trend-delay:" + baseDelay + "ms' d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />" : "") + dots;
         }).join("");
         const reopenPath = homeTrendSmoothPath(reopenPoints, xFor, yFor);
         const reopenDotsHtml = reopenVisible ? reopenPoints.map((value, index) => (
-            "<circle cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='3' fill='" + HOME_TREND_REOPEN_COLOR + "' stroke='#fff' stroke-width='1.5' />"
+            "<circle class='home-trend-dot' style='--home-trend-delay:" + (220 + index * 24) + "ms' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='3' fill='" + HOME_TREND_REOPEN_COLOR + "' stroke='#fff' stroke-width='1.5' />"
         )).join("") : "";
         const reopenLineHtml = reopenVisible && reopenPath
-            ? "<path d='" + reopenPath + "' fill='none' stroke='" + HOME_TREND_REOPEN_COLOR + "' stroke-width='2.5' stroke-dasharray='5 4' stroke-linejoin='round' stroke-linecap='round' />" + reopenDotsHtml
+            ? "<path class='home-trend-line home-trend-reopen-line' style='--home-trend-delay:90ms' d='" + reopenPath + "' fill='none' stroke='" + HOME_TREND_REOPEN_COLOR + "' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round' />" + reopenDotsHtml
             : "";
         // Точечные ловушки -- на каждую (участок, день) своя, радиус с
         // запасом под палец/курсор.
@@ -3483,7 +3484,7 @@
         const reopenHitsHtml = reopenVisible ? reopenPoints.map((value, index) => (
             "<circle data-trend-reopen data-trend-day-index='" + index + "' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='7' fill='transparent' style='cursor:pointer' />"
         )).join("") : "";
-        target.innerHTML = "<svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток задач за 14 дней'>"
+        target.innerHTML = "<svg class='home-trend-svg' viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток задач за 14 дней'>"
             + "<title>Остаток задач и переоткрытия за 14 дней с прогнозом на 2 дня</title>"
             + gridLinesHtml + linesHtml + reopenLineHtml + xLabelsHtml
             + "<circle id='homeTrendHoverDot' r='5' fill='#0f172a' stroke='#fff' stroke-width='2' style='display:none;pointer-events:none' />"

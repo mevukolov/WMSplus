@@ -110,6 +110,26 @@
         .home-trend-chart { position: relative; margin-top: 10px; }
         .home-trend-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
         .home-trend-chart .home-trend-empty { color: #64748b; font-size: 13px; padding: 30px 0; text-align: center; }
+        .home-trend-loading { display: grid; place-items: center; min-height: 178px; gap: 10px; color: #64748b; font-size: 13px; font-weight: 700; animation: homeTrendLoadingIn .2s ease-out both; }
+        .home-trend-loading-bars { display: flex; align-items: end; gap: 5px; height: 26px; }
+        .home-trend-loading-bars i { display: block; width: 5px; height: 11px; border-radius: 99px; background: var(--accent); animation: homeTrendLoadingBar .72s ease-in-out infinite alternate; }
+        .home-trend-loading-bars i:nth-child(2) { animation-delay: .12s; }
+        .home-trend-loading-bars i:nth-child(3) { animation-delay: .24s; }
+        .home-trend-loading-bars i:nth-child(4) { animation-delay: .36s; }
+        .home-trend-grid-line { animation: homeTrendFadeIn .32s ease-out both; }
+        .home-trend-axis-label, .home-trend-date-label { animation: homeTrendFadeIn .35s ease-out both; animation-delay: .1s; }
+        .home-trend-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: homeTrendDrawLine .68s cubic-bezier(.22, .61, .36, 1) forwards; animation-delay: var(--home-trend-delay, 0ms); }
+        .home-trend-line.home-trend-reopen-line { stroke-dasharray: 5 4; stroke-dashoffset: 0; animation: homeTrendFadeIn .5s ease-out both; }
+        .home-trend-dot { transform-box: fill-box; transform-origin: center; animation: homeTrendDotIn .24s cubic-bezier(.34, 1.56, .64, 1) both; animation-delay: var(--home-trend-delay, 0ms); }
+        @keyframes homeTrendLoadingIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes homeTrendLoadingBar { from { height: 8px; opacity: .45; } to { height: 26px; opacity: 1; } }
+        @keyframes homeTrendFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes homeTrendDrawLine { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+        @keyframes homeTrendDotIn { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+        @media (prefers-reduced-motion: reduce) {
+            .home-trend-loading, .home-trend-loading-bars i, .home-trend-grid-line, .home-trend-axis-label, .home-trend-date-label, .home-trend-line, .home-trend-dot { animation: none; }
+            .home-trend-line { stroke-dashoffset: 0; }
+        }
         .home-trend-tooltip { position: absolute; pointer-events: none; background: #0f172a; color: #fff; border-radius: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.5; box-shadow: var(--shadow-md); opacity: 0; transform: translate(-50%, -100%); transition: opacity .1s ease; z-index: 5; white-space: nowrap; }
         .home-trend-tooltip.is-visible { opacity: 1; }
         .home-trend-tooltip-date { font-weight: 800; margin-bottom: 4px; }
