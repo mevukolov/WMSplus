@@ -1150,8 +1150,12 @@
         .no-shk-getbox-prompt { display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; padding: 24px 4px; }
         .no-shk-getbox-main { font-size: clamp(20px, 2.6vw, 26px); font-weight: 800; color: #0f172a; margin: 0; }
         .no-shk-getbox-details { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #475569; }
+        .no-shk-getbox-free-note { max-width: 360px; margin: -8px 0 0; color: #64748b; font-size: 14px; line-height: 1.4; }
         .no-shk-getbox-error { font-size: 14px; font-weight: 600; color: #b91c1c; min-height: 20px; opacity: 0; transition: opacity .2s ease; }
         .no-shk-getbox-error.is-visible { opacity: 1; }
+        .no-shk-getbox-actions { display: flex; gap: 8px; flex: none; }
+        .no-shk-getbox-actions .btn-square { display: inline-flex; align-items: center; justify-content: center; }
+        .no-shk-getbox-actions svg { width: 18px; height: 18px; }
         .no-shk-getbox-rack-scroll { width: 100%; overflow-x: auto; padding: 2px; }
         .no-shk-getbox-rack-scroll .no-shk-rack-frame { margin: 0 auto; }
         .no-shk-box.no-shk-box-target {
@@ -3076,7 +3080,12 @@
     <div class="tasks-flow-card">
         <div class="work-head">
             <div><h3 class="work-title">Получить короб</h3></div>
-            <button id="closeNoShkGetBox" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+            <div class="no-shk-getbox-actions">
+                <button id="enableNoShkFreeScan" class="btn btn-square" type="button" aria-label="Сканировать любой короб" title="Сканировать любой короб">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h5v5H4zM15 4h5v5h-5zM4 15h5v5H4zM16 16h1M20 16v4h-3M16 20h1M20 12v1M12 12h4v4h-4z"/></svg>
+                </button>
+                <button id="closeNoShkGetBox" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+            </div>
         </div>
         <div id="noShkGetBoxWrap"></div>
         <input id="noShkGetBoxScanInput" type="text" autocomplete="off" class="no-shk-move-hidden-input" aria-hidden="true" tabindex="-1">

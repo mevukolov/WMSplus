@@ -1109,6 +1109,7 @@
 
     let disassembleBox = null; // box currently claimed by THIS browser tab, or null
     let disassembleItems = [];
+    let isFreeDisassembleScan = false;
 
     function currentZoneActor() {
         try {
@@ -1122,7 +1123,9 @@
     // Boxes on a shelf OR "на полу" -- same shape as the floorBoxes query
     // above (outside_opp/shortage both false), just without the shelf_id
     // filter so shelved boxes are included too, and ordered oldest-first
-    // for the claim loop below to walk in order.
+    // for the claim loop below to walk in order. Do not cap this list: a
+    // claimed/stale row near its head must never make a newer box look like
+    // the next one when an older available box exists further in the queue.
     async function fetchDisassembleCandidates() {
         const client = db();
         if (!client) return [];
@@ -1136,7 +1139,7 @@
             .lte("shift_date", cutoffDate)
             .order("shift_date", { ascending: true })
             .order("created_at", { ascending: true })
-            .limit(25);
+            .order("box_number", { ascending: true });
         if (error) { console.error("[no_shk_zone] candidates failed:", error.message); return []; }
         return data || [];
     }
@@ -1231,7 +1234,14 @@
     }
 
     async function startGetBox() {
+        // A repeated press of "Получить короб" used to lose the in-memory
+        // reference to the previous claim before releasing it. That made
+        // the next press skip the oldest box for up to four hours. Release
+        // it first, then ask for the oldest candidate again.
+        const previousBox = disassembleBox;
         disassembleBox = null;
+        isFreeDisassembleScan = false;
+        if (previousBox) await releaseDisassembleClaim(previousBox.id);
         $("noShkGetBoxWrap").innerHTML = "<p style='text-align:center;color:#64748b;padding:40px 0;'>Ищу короб…</p>";
         setZoneModalOpen("noShkGetBoxModal", true);
         // loadZone() alongside the claim so racks/floorBoxes are fresh
@@ -1302,7 +1312,14 @@
 
     function renderGetBoxPrompt(kgtCount) {
         const box = disassembleBox;
-        if (!box) return;
+        if (!box) {
+            $("noShkGetBoxWrap").innerHTML = "<div class='no-shk-getbox-prompt'>"
+                + "<p class='no-shk-getbox-main'>Отсканируйте этикетку любого короба</p>"
+                + "<p class='no-shk-getbox-free-note'>Можно начать разбор с любого короба: порядок не фиксирован.</p>"
+                + "<div id='noShkGetBoxError' class='no-shk-getbox-error'></div>"
+                + "</div>";
+            return;
+        }
         $("noShkGetBoxWrap").innerHTML = "<div class='no-shk-getbox-prompt'>"
             + "<p class='no-shk-getbox-main'>Возьмите короб " + escapeHtmlLocal(computeDateLabel(box)) + " и отсканируйте этикетку</p>"
             + getBoxLocationHtml(box)
@@ -1330,9 +1347,82 @@
     // обход для отладки без физической этикетки под рукой.
     const DEBUG_GET_BOX_SCAN_CODE = "24052004";
 
+    function boxNumberFromCode(code) {
+        const match = /^WMSP\.BOX\.(\d+)$/i.exec(String(code || "").trim());
+        if (!match) return null;
+        const boxNumber = Number(match[1]);
+        return Number.isSafeInteger(boxNumber) && boxNumber >= 0 ? boxNumber : null;
+    }
+
+    async function claimScannedDisassembleBox(code) {
+        const boxNumber = boxNumberFromCode(code);
+        if (boxNumber == null) {
+            showGetBoxError("Отсканируйте QR этикетки короба.");
+            return null;
+        }
+        const client = db();
+        if (!client) {
+            showGetBoxError("Supabase недоступен. Повторите позже.");
+            return null;
+        }
+        const { data: box, error } = await client
+            .from("wms_no_shk_boxes")
+            .select(BOX_FIELDS + ",shortage,disassembly_started_at")
+            .eq("box_number", boxNumber)
+            .maybeSingle();
+        if (error) {
+            console.error("[no_shk_zone] scanned box lookup failed:", error.message);
+            showGetBoxError("Не удалось проверить короб. Повторите сканирование.");
+            return null;
+        }
+        if (!box) {
+            showGetBoxError("Короб по этой этикетке не найден.");
+            return null;
+        }
+        if (box.disassembled_at) {
+            showGetBoxError("Этот короб уже разобран.");
+            return null;
+        }
+        if (box.outside_opp) {
+            showGetBoxError("Этот короб находится вне ОПП.");
+            return null;
+        }
+        if (box.shortage) {
+            showGetBoxError("Этот короб отмечен как недостача.");
+            return null;
+        }
+        const claimed = await claimDisassembleBox(box, currentZoneActor());
+        if (!claimed) {
+            showGetBoxError("Этот короб уже находится в разборе у другого сотрудника.");
+            return null;
+        }
+        return claimed;
+    }
+
+    async function enableFreeDisassembleScan() {
+        if (isFreeDisassembleScan) return;
+        const claimedBox = disassembleBox;
+        isFreeDisassembleScan = true;
+        disassembleBox = null;
+        if (claimedBox) await releaseDisassembleClaim(claimedBox.id);
+        renderGetBoxPrompt();
+        const scanInput = $("noShkGetBoxScanInput");
+        if (scanInput) { scanInput.value = ""; setTimeout(() => scanInput.focus({ preventScroll: true }), 50); }
+    }
+
     async function handleGetBoxScan(rawCode) {
         const code = rawCode.trim();
-        if (!code || !disassembleBox) return;
+        if (!code) return;
+        if (isFreeDisassembleScan) {
+            const claimed = await claimScannedDisassembleBox(code);
+            if (!claimed) return;
+            disassembleBox = claimed;
+            isFreeDisassembleScan = false;
+            setZoneModalOpen("noShkGetBoxModal", false);
+            await openDisassembleFullscreen();
+            return;
+        }
+        if (!disassembleBox) return;
         if (code !== boxCode(disassembleBox) && code !== DEBUG_GET_BOX_SCAN_CODE) {
             showGetBoxError("Это не тот короб. Нужен короб №" + disassembleBox.box_number + ".");
             return;
@@ -1566,8 +1656,11 @@
                 // the next "Получить коробку" click (by anyone) should be
                 // able to pick this same box right back up.
                 if (disassembleBox) { void releaseDisassembleClaim(disassembleBox.id); disassembleBox = null; }
+                isFreeDisassembleScan = false;
             });
         }
+        const enableFreeScanBtn = $("enableNoShkFreeScan");
+        if (enableFreeScanBtn) enableFreeScanBtn.addEventListener("click", () => void enableFreeDisassembleScan());
         const getBoxInput = $("noShkGetBoxScanInput");
         if (getBoxInput) {
             let getBoxScanBuffer = "";
