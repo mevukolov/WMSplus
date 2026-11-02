@@ -46,16 +46,17 @@
         return map;
     }
     const RU_TO_EN = buildRuToEnMap();
-    function ruToEnLayout(str) {
-        return String(str || "").split("").map((ch) => RU_TO_EN[ch] || ch).join("");
-    }
-
     // A scanner is a keyboard, so its payload inherits the active Windows
     // layout. Normalize its text once at the boundary instead of asking an
-    // operator to flip EN/RU for every box. Zero-width characters are also
-    // common in copied/scanned strings and must not break a QR comparison.
+    // operator to flip EN/RU for every box. Only Cyrillic characters are
+    // remapped: mapping every symbol corrupts an already-English payload
+    // such as WMSP.BOX.01868 (a dot was previously turned into a slash).
+    // Zero-width characters are also common in copied/scanned strings and
+    // must not break a QR comparison.
     function normalizeScannerText(str) {
-        return ruToEnLayout(str)
+        return String(str || "").split("").map((ch) => {
+            return /[а-яё]/i.test(ch) ? (RU_TO_EN[ch] || ch) : ch;
+        }).join("")
             .replace(/[\u200B-\u200D\uFEFF]/g, "")
             .trim();
     }

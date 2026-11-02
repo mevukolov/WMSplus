@@ -48,7 +48,10 @@
     const SCANNER_RU_TO_EN = buildRuToEnMap();
     function normalizeStickerScan(value) {
         return String(value || "")
-            .split("").map((ch) => SCANNER_RU_TO_EN[ch] || ch).join("")
+            // Preserve ASCII punctuation in an English scan: a Base64 QR
+            // payload legitimately uses + and /, which must never be
+            // converted according to the active keyboard layout.
+            .split("").map((ch) => /[а-яё]/i.test(ch) ? (SCANNER_RU_TO_EN[ch] || ch) : ch).join("")
             .replace(/[\u200B-\u200D\uFEFF]/g, "")
             .replace(/[＊﹡✱]/g, "*")
             .replace(/[／⁄∕]/g, "/")
