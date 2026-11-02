@@ -656,7 +656,9 @@
         },
         profile: {
             authUid: "",
-            media: { avatar_path: "", cover_path: "" },
+            media: { avatar_path: "", cover_path: "", avatar_url: "", cover_url: "" },
+            viewedMedia: { avatar_path: "", cover_path: "", avatar_url: "", cover_url: "" },
+            viewedMediaLoading: false,
             mediaLoading: false,
             statsLoading: false,
             statsError: "",
@@ -2314,11 +2316,22 @@
         setTimeout(finish, 260);
     }
 
-    function profileMediaUrl(path) {
-        const cleanPath = normalizeText(path);
-        if (!cleanPath) return "";
-        const baseUrl = SUPABASE_FUNCTIONS_BASE_URL.replace(/\/functions\/v1$/, "");
-        return baseUrl + "/storage/v1/object/public/" + PROFILE_MEDIA_BUCKET + "/" + cleanPath.split("/").map(encodeURIComponent).join("/");
+    async function signedProfileMedia(db, media) {
+        const source = media || {};
+        const avatarPath = normalizeText(source.avatar_path);
+        const coverPath = normalizeText(source.cover_path);
+        const [avatarResult, coverResult] = await Promise.all([
+            avatarPath ? db.storage.from(PROFILE_MEDIA_BUCKET).createSignedUrl(avatarPath, 3600) : Promise.resolve({ data: null, error: null }),
+            coverPath ? db.storage.from(PROFILE_MEDIA_BUCKET).createSignedUrl(coverPath, 3600) : Promise.resolve({ data: null, error: null }),
+        ]);
+        if (avatarResult.error) throw avatarResult.error;
+        if (coverResult.error) throw coverResult.error;
+        return {
+            avatar_path: avatarPath,
+            cover_path: coverPath,
+            avatar_url: normalizeText(avatarResult.data && avatarResult.data.signedUrl),
+            cover_url: normalizeText(coverResult.data && coverResult.data.signedUrl),
+        };
     }
 
     function profileStatsTiles(stats, loading) {
@@ -2398,8 +2411,9 @@
         const status = $("profileStatus");
         const content = $("profileContent");
         const hero = $("profileCover") && $("profileCover").closest(".profile-hero");
-        const avatarUrl = (isOwnProfile || isCurrentUser) ? profileMediaUrl(profile.media && profile.media.avatar_path) : "";
-        const coverUrl = (isOwnProfile || isCurrentUser) ? profileMediaUrl(profile.media && profile.media.cover_path) : "";
+        const media = (isOwnProfile || isCurrentUser) ? profile.media : profile.viewedMedia;
+        const avatarUrl = normalizeText(media && media.avatar_url);
+        const coverUrl = normalizeText(media && media.cover_url);
         const displayName = normalizeText(viewedUser.name) || "Сотрудник ОПП";
         if (identityName) {
             const canReturnToOwnStats = profile.view === "warehouse";
@@ -2463,10 +2477,26 @@
             .eq("auth_uid", authUser.id)
             .maybeSingle();
         if (error) throw error;
-        state.profile.media = {
+        state.profile.media = await signedProfileMedia(db, {
             avatar_path: normalizeText(data && data.avatar_path),
             cover_path: normalizeText(data && data.cover_path),
-        };
+        });
+    }
+
+    async function loadViewedProfileMedia(db, employee) {
+        const authUid = normalizeText(employee && employee.auth_uid);
+        state.profile.viewedMedia = { avatar_path: "", cover_path: "", avatar_url: "", cover_url: "" };
+        if (!authUid) return;
+        const { data, error } = await db
+            .from(WMS_USER_PROFILES_TABLE)
+            .select("avatar_path,cover_path")
+            .eq("auth_uid", authUid)
+            .maybeSingle();
+        if (error) throw error;
+        state.profile.viewedMedia = await signedProfileMedia(db, {
+            avatar_path: normalizeText(data && data.avatar_path),
+            cover_path: normalizeText(data && data.cover_path),
+        });
     }
 
     async function loadProfileStats(db, user) {
@@ -2587,7 +2617,13 @@
             const { error } = await db.from(WMS_USER_PROFILES_TABLE).upsert({ auth_uid: authUser.id, [column]: uploadedPath }, { onConflict: "auth_uid" });
             if (error) throw error;
             state.profile.authUid = authUser.id;
-            state.profile.media = { ...(state.profile.media || {}), [column]: uploadedPath };
+            const nextMedia = { ...(state.profile.media || {}), [column]: uploadedPath };
+            try {
+                state.profile.media = await signedProfileMedia(db, nextMedia);
+            } catch (signError) {
+                console.warn("profile media URL refresh skipped:", signError);
+                state.profile.media = { ...nextMedia, avatar_url: "", cover_url: "" };
+            }
             state.profile.status = kind === "avatar" ? "Аватар обновлён." : "Шапка обновлена.";
             if (previousPath && previousPath !== uploadedPath) {
                 const removal = await db.storage.from(PROFILE_MEDIA_BUCKET).remove([previousPath]);
@@ -2612,6 +2648,7 @@
         state.profile.view = "warehouse";
         state.profile.editing = false;
         state.profile.viewedEmployee = null;
+        state.profile.viewedMedia = { avatar_path: "", cover_path: "", avatar_url: "", cover_url: "" };
         state.profile.employeeAchievements = [];
         state.profile.employeeAchievementsError = "";
         state.profile.warehouseError = "";
@@ -2638,7 +2675,7 @@
         try {
             const { data, error } = await db
                 .from("users")
-                .select("id,fio,user_wh_id")
+                .select("id,fio,user_wh_id,auth_uid")
                 .eq("user_wh_id", warehouseId)
                 .order("fio", { ascending: true });
             if (error) throw error;
@@ -2647,6 +2684,7 @@
                 name: normalizeText(row && row.fio) || "Сотрудник ОПП",
                 wh_name: normalizeText(user.wh_name),
                 user_wh_id: warehouseId,
+                auth_uid: normalizeText(row && row.auth_uid),
             })).filter((row) => row.id);
         } catch (error) {
             state.profile.warehouseEmployees = [];
@@ -2688,6 +2726,8 @@
         if (!employee) return;
         state.profile.view = "employeeAchievements";
         state.profile.editing = false;
+        state.profile.viewedMedia = { avatar_path: "", cover_path: "", avatar_url: "", cover_url: "" };
+        state.profile.viewedMediaLoading = true;
         state.profile.employeeAchievements = [];
         state.profile.employeeAchievementsError = "";
         state.profile.employeeAchievementsLoading = true;
@@ -2695,26 +2735,34 @@
         renderProfileDrawer();
         const db = supabaseDb();
         if (!db) {
+            state.profile.viewedMediaLoading = false;
             state.profile.employeeAchievementsLoading = false;
             state.profile.employeeAchievementsError = "Supabase недоступен: достижения не загружены.";
             renderProfileDrawer();
             return;
         }
         try {
-            const { data, error } = await db
-                .from(WMS_ACHIEVEMENTS_TABLE)
-                .select("achievement_id,unlocked_at")
-                .eq("wh_id", normalizeText(employee.user_wh_id) || WH_ID)
-                .eq("user_id", employee.id)
-                .order("unlocked_at", { ascending: false });
-            if (error) throw error;
-            state.profile.employeeAchievements = (data || []).filter((row) => {
+            const results = await Promise.allSettled([
+                db.from(WMS_ACHIEVEMENTS_TABLE)
+                    .select("achievement_id,unlocked_at")
+                    .eq("wh_id", normalizeText(employee.user_wh_id) || WH_ID)
+                    .eq("user_id", employee.id)
+                    .order("unlocked_at", { ascending: false }),
+                loadViewedProfileMedia(db, employee),
+            ]);
+            const achievementsResult = results[0];
+            const mediaResult = results[1];
+            if (achievementsResult.status === "rejected") throw achievementsResult.reason;
+            if (achievementsResult.value.error) throw achievementsResult.value.error;
+            state.profile.employeeAchievements = (achievementsResult.value.data || []).filter((row) => {
                 const achievement = ACHIEVEMENT_BY_ID.get(normalizeText(row && row.achievement_id));
                 return achievement && !achievement.hidden && !achievement.soon;
             });
+            if (mediaResult.status === "rejected") console.warn("viewed profile media skipped:", mediaResult.reason);
         } catch (error) {
             state.profile.employeeAchievementsError = "Не удалось загрузить достижения: " + (error && error.message ? error.message : String(error));
         } finally {
+            state.profile.viewedMediaLoading = false;
             state.profile.employeeAchievementsLoading = false;
             renderProfileDrawer();
         }
@@ -2724,6 +2772,7 @@
         state.profile.view = "personal";
         state.profile.editing = false;
         state.profile.viewedEmployee = null;
+        state.profile.viewedMedia = { avatar_path: "", cover_path: "", avatar_url: "", cover_url: "" };
         state.profile.employeeAchievements = [];
         state.profile.employeeAchievementsError = "";
         renderProfileDrawer();
