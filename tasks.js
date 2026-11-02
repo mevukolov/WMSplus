@@ -28,6 +28,8 @@
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
     const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
+    const WMS_USER_PROFILES_TABLE = "wms_user_profiles";
+    const PROFILE_MEDIA_BUCKET = "profile-media";
     const FLOW_SETTINGS_TABLE = "wms_flow_score_settings";
     const FLOW_HISTORY_TABLE = "wms_task_history";
     const SUPABASE_FUNCTIONS_BASE_URL = ((typeof window !== "undefined" && window.SUPABASE_URL) || "https://bgphllmzmlwurfnbagho.supabase.co").replace(/\/$/, "") + "/functions/v1";
@@ -651,6 +653,16 @@
             selectedKey: "",
             activeTab: "tasks",
             taskRowsById: {},
+        },
+        profile: {
+            authUid: "",
+            media: { avatar_path: "", cover_path: "" },
+            mediaLoading: false,
+            statsLoading: false,
+            statsError: "",
+            stats: null,
+            status: "",
+            statusError: false,
         },
         loadingStatus: false,
         calendarRange: null,
@@ -2293,17 +2305,237 @@
         setTimeout(finish, 260);
     }
 
+    function profileMediaUrl(path) {
+        const cleanPath = normalizeText(path);
+        if (!cleanPath) return "";
+        const baseUrl = SUPABASE_FUNCTIONS_BASE_URL.replace(/\/functions\/v1$/, "");
+        return baseUrl + "/storage/v1/object/public/" + PROFILE_MEDIA_BUCKET + "/" + cleanPath.split("/").map(encodeURIComponent).join("/");
+    }
+
+    function profileStatsTiles(stats, loading) {
+        if (loading) return ["Задачи", "Запросы", "ШК предсписка", "Без ШК найдено", "Отложено", "Вердикты"]
+            .map((label) => "<div class='profile-stat-tile'><span>" + escapeHtml(label) + "</span><strong>…</strong></div>").join("");
+        const safeStats = stats || {};
+        const verdicts = Object.values(safeStats.verdicts || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+        return [
+            ["Задачи", safeStats.tasksCompleted || 0],
+            ["Запросы", safeStats.requestsCompleted || 0],
+            ["ШК предсписка", safeStats.prespisokShk || 0],
+            ["Без ШК найдено", safeStats.noShkFound || 0],
+            ["Отложено", safeStats.deferred || 0],
+            ["Вердикты", verdicts],
+        ].map(([label, value]) => "<div class='profile-stat-tile'><span>" + escapeHtml(label) + "</span><strong>" + escapeHtml(value) + "</strong></div>").join("");
+    }
+
     function renderProfileDrawer() {
         const body = $("profileDrawerBody");
         if (!body) return;
-        const user = parseJsonSafe(localStorage.getItem("user"), {}) || {};
+        const user = currentWmsUser();
+        const profile = state.profile;
+        const avatarImage = $("profileAvatarImage");
+        const avatarFallback = $("profileAvatarFallback");
+        const coverImage = $("profileCoverImage");
+        const identityName = $("profileIdentityName");
+        const identityMeta = $("profileIdentityMeta");
+        const stats = $("profileStats");
+        const statsDate = $("profileStatsDate");
+        const status = $("profileStatus");
+        const avatarUrl = profileMediaUrl(profile.media && profile.media.avatar_path);
+        const coverUrl = profileMediaUrl(profile.media && profile.media.cover_path);
+        const displayName = normalizeText(user.name) || "Сотрудник ОПП";
+        if (identityName) identityName.textContent = displayName;
+        if (identityMeta) identityMeta.textContent = [normalizeText(user.wh_name) || "Склад не указан", user.id ? "ID " + user.id : "ID не указан"].join(" · ");
+        if (avatarImage) {
+            avatarImage.hidden = !avatarUrl;
+            if (avatarUrl) avatarImage.src = avatarUrl;
+        }
+        if (avatarFallback) {
+            avatarFallback.hidden = Boolean(avatarUrl);
+            avatarFallback.textContent = avatarInitials(displayName);
+        }
+        const avatar = avatarImage && avatarImage.parentElement;
+        if (avatar) avatar.style.background = avatarColorFor(user.id || displayName);
+        if (coverImage) {
+            coverImage.hidden = !coverUrl;
+            if (coverUrl) coverImage.src = coverUrl;
+        }
+        if (stats) stats.innerHTML = profileStatsTiles(profile.stats, profile.statsLoading);
+        if (statsDate) statsDate.textContent = formatRuDate(state.today || todayIsoInMoscow());
+        if (status) {
+            const message = profile.status || profile.statsError || (profile.mediaLoading ? "Загружаю оформление профиля…" : profile.statsLoading ? "Собираю личную статистику…" : "");
+            status.textContent = message;
+            status.classList.toggle("is-error", Boolean(profile.statusError || profile.statsError));
+        }
         const rows = [
-            ["ФИО", normalizeText(user.name) || "-"],
+            ["ФИО", displayName],
             ["ID", normalizeText(user.id) || "-"],
             ["Склад", normalizeText(user.wh_name) || "-"],
             ["Доступы", Array.isArray(user.accesses) && user.accesses.length ? user.accesses.join(", ") : "-"],
         ];
         body.innerHTML = rows.map(([label, value]) => "<div class='profile-info-row'><span>" + escapeHtml(label) + "</span><span>" + escapeHtml(value) + "</span></div>").join("");
+    }
+
+    async function getProfileAuthUser(db) {
+        const { data, error } = await db.auth.getSession();
+        if (error) throw error;
+        if (!data || !data.session || !data.session.user) throw new Error("Сессия истекла. Войдите заново.");
+        return data.session.user;
+    }
+
+    async function loadProfileMedia(db, authUser) {
+        const { data, error } = await db
+            .from(WMS_USER_PROFILES_TABLE)
+            .select("avatar_path,cover_path")
+            .eq("auth_uid", authUser.id)
+            .maybeSingle();
+        if (error) throw error;
+        state.profile.media = {
+            avatar_path: normalizeText(data && data.avatar_path),
+            cover_path: normalizeText(data && data.cover_path),
+        };
+    }
+
+    async function loadProfileStats(db, user) {
+        const date = state.today || todayIsoInMoscow();
+        const bounds = moscowDayBoundsUtc(date);
+        const [completedRead, updatedRead, historyRead, prespisokRead, employeesRead] = await Promise.all([
+            db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("completed_at", bounds.start).lt("completed_at", bounds.end).order("completed_at", { ascending: false, nullsFirst: false }).limit(10000),
+            db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("updated_at", bounds.start).lt("updated_at", bounds.end).order("updated_at", { ascending: false, nullsFirst: false }).limit(10000),
+            readOptionalRows(db, FLOW_HISTORY_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
+            readOptionalRows(db, WMS_PRESPISOK_ACTIONS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
+            readOptionalRows(db, WMS_EMPLOYEES_TABLE, (query) => query.select("*").eq("is_active", true).order("full_name", { ascending: true })),
+        ]);
+        if (completedRead.error) throw completedRead.error;
+        if (updatedRead.error) throw updatedRead.error;
+        const byId = new Map();
+        [...(completedRead.data || []), ...(updatedRead.data || [])].forEach((row) => {
+            if (row && row.id) byId.set(row.id, row);
+        });
+        const built = buildStaffStats(
+            Array.from(byId.values()),
+            historyRead.ok ? historyRead.rows : [],
+            prespisokRead.ok ? prespisokRead.rows : [],
+            employeesRead.ok ? employeesRead.rows : state.shift.employees,
+            date,
+        );
+        const ownKey = staffStatsKey(user.id, user.name);
+        const ownName = normalizeForMatch(user.name);
+        state.profile.stats = built.employees.find((row) => row.key === ownKey)
+            || built.employees.find((row) => ownName && normalizeForMatch(row.name) === ownName)
+            || createStaffStatsRow(user.id, user.name);
+    }
+
+    async function loadProfileDrawer() {
+        const db = supabaseDb();
+        if (!db) {
+            state.profile.status = "Supabase недоступен: оформление профиля не загружено.";
+            state.profile.statusError = true;
+            renderProfileDrawer();
+            return;
+        }
+        state.profile.status = "";
+        state.profile.statusError = false;
+        state.profile.mediaLoading = true;
+        state.profile.statsLoading = true;
+        state.profile.statsError = "";
+        renderProfileDrawer();
+        try {
+            const authUser = await getProfileAuthUser(db);
+            state.profile.authUid = authUser.id;
+            const currentUser = currentWmsUser();
+            const results = await Promise.allSettled([
+                loadProfileMedia(db, authUser),
+                loadProfileStats(db, currentUser),
+            ]);
+            const mediaResult = results[0];
+            const statsResult = results[1];
+            if (mediaResult.status === "rejected") {
+                state.profile.status = "Не удалось загрузить оформление профиля: " + (mediaResult.reason && mediaResult.reason.message ? mediaResult.reason.message : String(mediaResult.reason));
+                state.profile.statusError = true;
+            }
+            if (statsResult.status === "rejected") {
+                state.profile.statsError = "Не удалось собрать личную статистику.";
+            }
+        } catch (error) {
+            state.profile.status = "Не удалось открыть профиль: " + (error && error.message ? error.message : String(error));
+            state.profile.statusError = true;
+        } finally {
+            state.profile.mediaLoading = false;
+            state.profile.statsLoading = false;
+            renderProfileDrawer();
+        }
+    }
+
+    async function uploadProfileMedia(kind, file) {
+        if (!file) return;
+        const db = supabaseDb();
+        const input = kind === "avatar" ? $("profileAvatarInput") : $("profileCoverInput");
+        if (input) input.value = "";
+        const allowedTypes = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+        const extension = allowedTypes[normalizeText(file.type).toLowerCase()];
+        if (!extension) {
+            state.profile.status = "Подойдут только JPG, PNG или WebP.";
+            state.profile.statusError = true;
+            renderProfileDrawer();
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            state.profile.status = "Файл должен быть не больше 5 МБ.";
+            state.profile.statusError = true;
+            renderProfileDrawer();
+            return;
+        }
+        if (!db) {
+            state.profile.status = "Supabase недоступен: файл не загружен.";
+            state.profile.statusError = true;
+            renderProfileDrawer();
+            return;
+        }
+        state.profile.mediaLoading = true;
+        state.profile.status = kind === "avatar" ? "Загружаю аватар…" : "Загружаю шапку…";
+        state.profile.statusError = false;
+        renderProfileDrawer();
+        let uploadedPath = "";
+        try {
+            const authUser = await getProfileAuthUser(db);
+            const randomPart = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? crypto.randomUUID()
+                : Math.random().toString(36).slice(2);
+            uploadedPath = authUser.id + "/" + kind + "/" + Date.now() + "-" + randomPart + "." + extension;
+            const upload = await db.storage.from(PROFILE_MEDIA_BUCKET).upload(uploadedPath, file, {
+                cacheControl: "3600",
+                contentType: file.type,
+                upsert: false,
+            });
+            if (upload.error) throw upload.error;
+            const column = kind === "avatar" ? "avatar_path" : "cover_path";
+            const previousPath = normalizeText(state.profile.media && state.profile.media[column]);
+            const { error } = await db.from(WMS_USER_PROFILES_TABLE).upsert({ auth_uid: authUser.id, [column]: uploadedPath }, { onConflict: "auth_uid" });
+            if (error) throw error;
+            state.profile.authUid = authUser.id;
+            state.profile.media = { ...(state.profile.media || {}), [column]: uploadedPath };
+            state.profile.status = kind === "avatar" ? "Аватар обновлён." : "Шапка обновлена.";
+            if (previousPath && previousPath !== uploadedPath) {
+                const removal = await db.storage.from(PROFILE_MEDIA_BUCKET).remove([previousPath]);
+                if (removal.error) console.warn("old profile media cleanup skipped:", removal.error);
+            }
+        } catch (error) {
+            if (uploadedPath) {
+                const cleanup = await db.storage.from(PROFILE_MEDIA_BUCKET).remove([uploadedPath]);
+                if (cleanup.error) console.warn("profile media rollback skipped:", cleanup.error);
+            }
+            state.profile.status = "Не удалось загрузить файл: " + (error && error.message ? error.message : String(error));
+            state.profile.statusError = true;
+        } finally {
+            state.profile.mediaLoading = false;
+            renderProfileDrawer();
+        }
+    }
+
+    function openProfileModal() {
+        renderProfileDrawer();
+        setFlowModalOpen("profileModal", true);
+        void loadProfileDrawer();
     }
 
     // The header menu trigger/strip and the 4 right-side drawers it opens
@@ -2356,8 +2588,7 @@
         });
         $("tasksMenuProfile")?.addEventListener("click", () => {
             closeTasksHeaderMenuStrip();
-            renderProfileDrawer();
-            setFlowModalOpen("profileModal", true);
+            openProfileModal();
         });
         $("tasksMenuHome")?.addEventListener("click", () => {
             closeTasksHeaderMenuStrip();
@@ -2370,6 +2601,10 @@
 
         $("closeNotifications")?.addEventListener("click", () => setFlowModalOpen("notificationsModal", false));
         $("closeProfile")?.addEventListener("click", () => setFlowModalOpen("profileModal", false));
+        $("chooseProfileAvatar")?.addEventListener("click", () => $("profileAvatarInput")?.click());
+        $("chooseProfileCover")?.addEventListener("click", () => $("profileCoverInput")?.click());
+        $("profileAvatarInput")?.addEventListener("change", () => { void uploadProfileMedia("avatar", $("profileAvatarInput").files && $("profileAvatarInput").files[0]); });
+        $("profileCoverInput")?.addEventListener("change", () => { void uploadProfileMedia("cover", $("profileCoverInput").files && $("profileCoverInput").files[0]); });
         $("openAchievementsFromProfile")?.addEventListener("click", () => { void openAchievementsModal(); });
         $("cancelLogoutBtn")?.addEventListener("click", () => setFlowModalOpen("logoutConfirmModal", false));
         $("confirmLogoutBtn")?.addEventListener("click", () => {
