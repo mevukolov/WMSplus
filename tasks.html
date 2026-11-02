@@ -116,7 +116,9 @@
         .home-trend-tooltip-row { display: flex; align-items: center; gap: 6px; }
         .home-trend-tooltip-dot { width: 8px; height: 8px; border-radius: 99px; flex: none; }
         .home-trend-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 12px; }
-        .home-trend-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #475569; font-weight: 700; }
+        .home-trend-legend-item { display: flex; align-items: center; gap: 6px; border: 0; padding: 0; background: transparent; font: inherit; font-size: 12px; color: #475569; font-weight: 700; cursor: pointer; transition: opacity .16s ease, color .16s ease; }
+        .home-trend-legend-item:hover { color: var(--accent-dark); }
+        .home-trend-legend-item.is-hidden { opacity: .38; text-decoration: line-through; }
         .home-trend-legend-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
         .home-review-btn { display: flex; align-items: center; gap: 16px; width: 100%; margin-top: 14px; padding: 18px 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); text-align: left; color: #0f172a; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
         .home-review-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
