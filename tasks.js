@@ -2328,8 +2328,6 @@
     }
 
     function renderProfileDrawer() {
-        const body = $("profileDrawerBody");
-        if (!body) return;
         const user = currentWmsUser();
         const profile = state.profile;
         const avatarImage = $("profileAvatarImage");
@@ -2366,13 +2364,6 @@
             status.textContent = message;
             status.classList.toggle("is-error", Boolean(profile.statusError || profile.statsError));
         }
-        const rows = [
-            ["ФИО", displayName],
-            ["ID", normalizeText(user.id) || "-"],
-            ["Склад", normalizeText(user.wh_name) || "-"],
-            ["Доступы", Array.isArray(user.accesses) && user.accesses.length ? user.accesses.join(", ") : "-"],
-        ];
-        body.innerHTML = rows.map(([label, value]) => "<div class='profile-info-row'><span>" + escapeHtml(label) + "</span><span>" + escapeHtml(value) + "</span></div>").join("");
     }
 
     async function getProfileAuthUser(db) {
@@ -2533,6 +2524,10 @@
     }
 
     function openProfileModal() {
+        const editTools = $("profileEditTools");
+        if (editTools) editTools.hidden = true;
+        $("editProfileButton")?.classList.remove("active");
+        $("editProfileButton")?.setAttribute("aria-expanded", "false");
         renderProfileDrawer();
         setFlowModalOpen("profileModal", true);
         void loadProfileDrawer();
@@ -2601,10 +2596,22 @@
 
         $("closeNotifications")?.addEventListener("click", () => setFlowModalOpen("notificationsModal", false));
         $("closeProfile")?.addEventListener("click", () => setFlowModalOpen("profileModal", false));
+        $("editProfileButton")?.addEventListener("click", () => {
+            const tools = $("profileEditTools");
+            if (!tools) return;
+            const isOpen = tools.hidden;
+            tools.hidden = !isOpen;
+            $("editProfileButton").classList.toggle("active", isOpen);
+            $("editProfileButton").setAttribute("aria-expanded", String(isOpen));
+        });
         $("chooseProfileAvatar")?.addEventListener("click", () => $("profileAvatarInput")?.click());
         $("chooseProfileCover")?.addEventListener("click", () => $("profileCoverInput")?.click());
         $("profileAvatarInput")?.addEventListener("change", () => { void uploadProfileMedia("avatar", $("profileAvatarInput").files && $("profileAvatarInput").files[0]); });
         $("profileCoverInput")?.addEventListener("change", () => { void uploadProfileMedia("cover", $("profileCoverInput").files && $("profileCoverInput").files[0]); });
+        $("openMyWarehouse")?.addEventListener("click", () => {
+            const warehouse = normalizeText(currentWmsUser().wh_name);
+            toast(warehouse ? "Мой склад: " + warehouse : "Склад пока не указан.", warehouse ? "info" : "error");
+        });
         $("openAchievementsFromProfile")?.addEventListener("click", () => { void openAchievementsModal(); });
         $("cancelLogoutBtn")?.addEventListener("click", () => setFlowModalOpen("logoutConfirmModal", false));
         $("confirmLogoutBtn")?.addEventListener("click", () => {
@@ -11900,7 +11907,12 @@
         const parsed = parseJsonSafe(localStorage.getItem("user"), {}) || {};
         const id = normalizeText(parsed.id || parsed.employee_id || parsed.employeeId || parsed.user_id || parsed.userId);
         const name = normalizeText(parsed.name || parsed.fio || parsed.full_name || parsed.fullName || $("user-name") && $("user-name").textContent);
-        return { id, name };
+        const whName = normalizeText(parsed.wh_name || parsed.whName || parsed.warehouse_name || parsed.warehouseName);
+        const warehouseId = normalizeText(parsed.user_wh_id || parsed.userWhId || parsed.wh_id || parsed.whId || parsed.warehouse_id || parsed.warehouseId);
+        const accesses = Array.isArray(parsed.accesses)
+            ? parsed.accesses.map(normalizeText).filter(Boolean)
+            : normalizeText(parsed.accesses).split(/[;,]/).map(normalizeText).filter(Boolean);
+        return { id, name, wh_name: whName, user_wh_id: warehouseId, accesses };
     }
 
     function flowAccessAllowed() {
