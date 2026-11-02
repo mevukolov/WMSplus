@@ -778,6 +778,7 @@
             error: "",
             days: [],
             series: [],
+            reopenPoints: [],
             lastSnapshotCaptureAt: 0,
         },
         inactive: {
@@ -3211,7 +3212,10 @@
     // светлоту).
     const HOME_TREND_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
     const HOME_TREND_GRAY_RAMP = ["#94a3b8", "#64748b", "#475569", "#1e293b"];
+    const HOME_TREND_REOPEN_COLOR = "#94a3b8";
     const HOME_TREND_SNAPSHOT_THROTTLE_MS = 10 * 60 * 1000;
+    const HOME_TREND_HISTORY_DAYS = 14;
+    const HOME_TREND_FORECAST_DAYS = 2;
 
     function homeTrendDateLabel(isoDate) {
         const match = normalizeText(isoDate).match(/^\d{4}-(\d{2})-(\d{2})$/);
@@ -3253,15 +3257,34 @@
         renderHomeActiveTrendChart();
         if (!db) { state.homeTrend.loading = false; return; }
         try {
-            const since = addDays(state.today, -13);
-            const { data, error } = await db
-                .from(WMS_ACTIVE_TASKS_SNAPSHOT_TABLE)
-                .select("snapshot_date,zone,active_count")
-                .gte("snapshot_date", since)
-                .order("snapshot_date", { ascending: true });
-            if (error) throw error;
-            const rows = Array.isArray(data) ? data : [];
-            const days = Array.from(new Set(rows.map((row) => normalizeText(row.snapshot_date)))).sort();
+            const since = addDays(state.today, -(HOME_TREND_HISTORY_DAYS - 1));
+            const forecastEnd = addDays(state.today, HOME_TREND_FORECAST_DAYS);
+            const reopenQueryEnd = addDays(forecastEnd, 1) + "T00:00:00+03:00";
+            const [snapshotsResult, reopensResult] = await Promise.all([
+                db.from(WMS_ACTIVE_TASKS_SNAPSHOT_TABLE)
+                    .select("snapshot_date,zone,active_count")
+                    .gte("snapshot_date", since)
+                    .lte("snapshot_date", state.today)
+                    .order("snapshot_date", { ascending: true }),
+                db.from(WMS_TASKS_TABLE)
+                    .select("reopen_after")
+                    .eq("is_deleted", false)
+                    .not("reopen_after", "is", null)
+                    .gte("reopen_after", since + "T00:00:00+03:00")
+                    .lt("reopen_after", reopenQueryEnd)
+                    .range(0, 9999),
+            ]);
+            if (snapshotsResult.error) throw snapshotsResult.error;
+            if (reopensResult.error) throw reopensResult.error;
+            const rows = Array.isArray(snapshotsResult.data) ? snapshotsResult.data : [];
+            // The horizon is calendar-based rather than derived from rows:
+            // the next two dates must be visible even before their snapshot
+            // can exist. Future dates deliberately have no normal-series
+            // values -- only the scheduled reopen forecast is drawn there.
+            const days = Array.from(
+                { length: HOME_TREND_HISTORY_DAYS + HOME_TREND_FORECAST_DAYS },
+                (_, index) => addDays(since, index)
+            );
             const byZoneDay = new Map();
             rows.forEach((row) => {
                 const zone = normalizeText(row.zone);
@@ -3279,10 +3302,20 @@
                 color: index < HOME_TREND_PALETTE.length
                     ? HOME_TREND_PALETTE[index]
                     : HOME_TREND_GRAY_RAMP[(index - HOME_TREND_PALETTE.length) % HOME_TREND_GRAY_RAMP.length],
-                points: days.map((day) => byZoneDay.get(zone + "|" + day) || 0),
+                points: days.map((day) => {
+                    if (day > state.today) return null;
+                    const key = zone + "|" + day;
+                    return byZoneDay.has(key) ? byZoneDay.get(key) : null;
+                }),
             }));
+            const reopenByDay = new Map(days.map((day) => [day, 0]));
+            (Array.isArray(reopensResult.data) ? reopensResult.data : []).forEach((row) => {
+                const day = moscowDateFromValue(row && row.reopen_after);
+                if (reopenByDay.has(day)) reopenByDay.set(day, (reopenByDay.get(day) || 0) + 1);
+            });
             state.homeTrend.days = days;
             state.homeTrend.series = series;
+            state.homeTrend.reopenPoints = days.map((day) => reopenByDay.get(day) || 0);
             state.homeTrend.loaded = true;
         } catch (error) {
             console.warn("home active trend load failed:", error);
@@ -3304,9 +3337,11 @@
         const day = state.homeTrend.days[dayIndex];
         if (!day) return "";
         const rows = state.homeTrend.series
-            .map((item) => "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + item.color + "'></span>" + escapeHtml(item.zone) + ": <strong>" + (item.points[dayIndex] || 0) + "</strong></div>")
+            .map((item) => "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + item.color + "'></span>" + escapeHtml(item.zone) + ": <strong>" + (item.points[dayIndex] == null ? "—" : item.points[dayIndex]) + "</strong></div>")
             .join("");
-        return "<div class='home-trend-tooltip-date'>" + escapeHtml(homeTrendDateLabel(day)) + "</div>" + rows;
+        const reopens = state.homeTrend.reopenPoints[dayIndex] || 0;
+        const reopenRow = "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + HOME_TREND_REOPEN_COLOR + "'></span>Переоткрыто задач: <strong>" + reopens + "</strong></div>";
+        return "<div class='home-trend-tooltip-date'>" + escapeHtml(homeTrendDateLabel(day)) + "</div>" + rows + reopenRow;
     }
 
     function homeTrendPointTooltipHtml(zone, dayIndex) {
@@ -3316,6 +3351,47 @@
         return "<div class='home-trend-tooltip-date'>" + escapeHtml(item.zone) + "</div>"
             + "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + item.color + "'></span>"
             + escapeHtml(homeTrendDateLabel(day)) + ": <strong>" + (item.points[dayIndex] || 0) + "</strong></div>";
+    }
+
+    function homeTrendReopenTooltipHtml(dayIndex) {
+        const day = state.homeTrend.days[dayIndex];
+        if (!day) return "";
+        return "<div class='home-trend-tooltip-date'>Переоткрыто задач</div>"
+            + "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + HOME_TREND_REOPEN_COLOR + "'></span>"
+            + escapeHtml(homeTrendDateLabel(day)) + ": <strong>" + (state.homeTrend.reopenPoints[dayIndex] || 0) + "</strong></div>";
+    }
+
+    // Catmull–Rom → cubic Bézier gives the chart its soft, continuous
+    // waves while retaining every real daily value as an exact anchor. Null
+    // values split the path, so future dates never get a fake drop to zero.
+    function homeTrendSmoothPath(points, xFor, yFor) {
+        let path = "";
+        let segment = [];
+        const appendSegment = () => {
+            if (!segment.length) return;
+            path += "M" + segment[0].x + "," + segment[0].y;
+            for (let index = 0; index < segment.length - 1; index += 1) {
+                const p0 = segment[index - 1] || segment[index];
+                const p1 = segment[index];
+                const p2 = segment[index + 1];
+                const p3 = segment[index + 2] || p2;
+                const cp1x = p1.x + (p2.x - p0.x) / 6;
+                const cp1y = p1.y + (p2.y - p0.y) / 6;
+                const cp2x = p2.x - (p3.x - p1.x) / 6;
+                const cp2y = p2.y - (p3.y - p1.y) / 6;
+                path += " C" + cp1x + "," + cp1y + " " + cp2x + "," + cp2y + " " + p2.x + "," + p2.y;
+            }
+            segment = [];
+        };
+        points.forEach((value, index) => {
+            if (value == null || !Number.isFinite(Number(value))) {
+                appendSegment();
+                return;
+            }
+            segment.push({ x: xFor(index), y: yFor(Number(value)) });
+        });
+        appendSegment();
+        return path;
     }
 
     function renderHomeActiveTrendChart() {
@@ -3331,7 +3407,8 @@
         }
         const days = state.homeTrend.days;
         const series = state.homeTrend.series;
-        if (!days.length || !series.length) {
+        const reopenPoints = state.homeTrend.reopenPoints;
+        if (!days.length || (!series.length && !reopenPoints.length)) {
             target.innerHTML = "<div class='home-trend-empty'>Пока нет данных по активным задачам.</div>";
             return;
         }
@@ -3343,7 +3420,8 @@
         const padBottom = 24;
         const plotW = width - padLeft - padRight;
         const plotH = height - padTop - padBottom;
-        const maxValue = Math.max(1, ...series.map((item) => Math.max(...item.points)));
+        const normalValues = series.flatMap((item) => item.points.filter((value) => value != null).map(Number));
+        const maxValue = Math.max(1, ...normalValues, ...reopenPoints.map(Number));
         // Круглый шаг сетки -- 4 линии от 0 до "красивого" максимума чуть
         // выше реального пика, чтобы подписи были не рваными числами.
         const niceMax = (() => {
@@ -3359,12 +3437,12 @@
             const value = Math.round((niceMax * step) / 4);
             const y = yFor(value);
             return "<line x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1' />"
-                + "<text x='" + (padLeft - 8) + "' y='" + (y + 4) + "' text-anchor='end' class='home-trend-axis-label' font-size='11' fill='#94a3b8'>" + value + "</text>";
+                + "<text x='" + (padLeft - 7) + "' y='" + (y + 3) + "' text-anchor='end' class='home-trend-axis-label' font-size='9' fill='#94a3b8'>" + value + "</text>";
         }).join("");
         const dayTickEvery = Math.max(1, Math.ceil(days.length / 7));
         const xLabelsHtml = days.map((day, index) => {
-            if (index % dayTickEvery !== 0 && index !== days.length - 1) return "";
-            return "<text x='" + xFor(index) + "' y='" + (height - 4) + "' text-anchor='middle' font-size='11' fill='#94a3b8'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
+            if (index % dayTickEvery !== 0 && index !== days.length - 1 && day <= state.today) return "";
+            return "<text x='" + xFor(index) + "' y='" + (height - 5) + "' text-anchor='middle' font-size='9' fill='#94a3b8'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
         }).join("");
         // Общий тултип (все участки сразу) теперь только по наведению на
         // саму подпись даты снизу -- не на весь столбец дня, иначе
@@ -3372,26 +3450,33 @@
         // вокруг подписи, только там, где подпись реально нарисована
         // (та же логика видимости, что у xLabelsHtml выше).
         const dateLabelHitWidth = Math.min(days.length > 1 ? plotW / (days.length - 1) : plotW, 44);
-        const dateLabelHitsHtml = days.map((_, index) => {
-            if (index % dayTickEvery !== 0 && index !== days.length - 1) return "";
+        const dateLabelHitsHtml = days.map((day, index) => {
+            if (index % dayTickEvery !== 0 && index !== days.length - 1 && day <= state.today) return "";
             return "<rect data-trend-date-label data-trend-day-index='" + index + "' x='" + (xFor(index) - dateLabelHitWidth / 2) + "' y='" + (height - padBottom) + "' width='" + dateLabelHitWidth + "' height='" + padBottom + "' fill='transparent' style='cursor:pointer' />";
         }).join("");
         const linesHtml = series.map((item) => {
-            const path = item.points.map((value, index) => (index === 0 ? "M" : "L") + xFor(index) + "," + yFor(value)).join(" ");
-            const lastIndex = item.points.length - 1;
-            return "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />"
-                + "<circle cx='" + xFor(lastIndex) + "' cy='" + yFor(item.points[lastIndex]) + "' r='4' fill='" + item.color + "' stroke='#fff' stroke-width='2' />";
+            const path = homeTrendSmoothPath(item.points, xFor, yFor);
+            const lastIndex = item.points.reduce((result, value, index) => value == null ? result : index, -1);
+            const endDot = lastIndex < 0 ? "" : "<circle cx='" + xFor(lastIndex) + "' cy='" + yFor(item.points[lastIndex]) + "' r='4' fill='" + item.color + "' stroke='#fff' stroke-width='2' />";
+            return (path ? "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />" : "") + endDot;
         }).join("");
+        const reopenPath = homeTrendSmoothPath(reopenPoints, xFor, yFor);
+        const reopenLineHtml = reopenPath
+            ? "<path d='" + reopenPath + "' fill='none' stroke='" + HOME_TREND_REOPEN_COLOR + "' stroke-width='2.5' stroke-dasharray='5 4' stroke-linejoin='round' stroke-linecap='round' />"
+            : "";
         // Точечные ловушки -- на каждую (участок, день) своя, радиус с
         // запасом под палец/курсор.
-        const pointHitsHtml = series.map((item) => item.points.map((value, index) => (
+        const pointHitsHtml = series.map((item) => item.points.map((value, index) => value == null ? "" : (
             "<circle data-trend-point data-trend-zone='" + escapeHtml(item.zone) + "' data-trend-day-index='" + index + "' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='7' fill='transparent' style='cursor:pointer' />"
         )).join("")).join("");
+        const reopenHitsHtml = reopenPoints.map((value, index) => (
+            "<circle data-trend-reopen data-trend-day-index='" + index + "' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='7' fill='transparent' style='cursor:pointer' />"
+        )).join("");
         target.innerHTML = "<svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток задач за 14 дней'>"
-            + "<title>Остаток задач за 14 дней</title>"
-            + gridLinesHtml + linesHtml + xLabelsHtml
+            + "<title>Остаток задач и переоткрытия за 14 дней с прогнозом на 2 дня</title>"
+            + gridLinesHtml + linesHtml + reopenLineHtml + xLabelsHtml
             + "<circle id='homeTrendHoverDot' r='5' fill='#0f172a' stroke='#fff' stroke-width='2' style='display:none;pointer-events:none' />"
-            + pointHitsHtml + dateLabelHitsHtml
+            + pointHitsHtml + reopenHitsHtml + dateLabelHitsHtml
             + "</svg>"
             + "<div id='homeTrendTooltip' class='home-trend-tooltip'></div>";
         const svg = target.querySelector("svg");
@@ -3448,12 +3533,28 @@
                     if (hoverDot) hoverDot.style.display = "none";
                 });
             });
+            svg.querySelectorAll("[data-trend-reopen]").forEach((hit) => {
+                const dayIndex = Number(hit.dataset.trendDayIndex);
+                hit.addEventListener("mousemove", (event) => {
+                    positionTooltip(event, homeTrendReopenTooltipHtml(dayIndex));
+                    if (hoverDot) {
+                        hoverDot.setAttribute("cx", hit.getAttribute("cx"));
+                        hoverDot.setAttribute("cy", hit.getAttribute("cy"));
+                        hoverDot.setAttribute("fill", HOME_TREND_REOPEN_COLOR);
+                        hoverDot.style.display = "";
+                    }
+                });
+                hit.addEventListener("mouseleave", () => {
+                    tooltip.classList.remove("is-visible");
+                    if (hoverDot) hoverDot.style.display = "none";
+                });
+            });
         }
         const legendTarget = $("homeTrendLegend");
         if (legendTarget) {
             legendTarget.innerHTML = series.map((item) => (
                 "<span class='home-trend-legend-item'><span class='home-trend-legend-dot' style='background:" + item.color + "'></span>" + escapeHtml(item.zone) + "</span>"
-            )).join("");
+            )).join("") + "<span class='home-trend-legend-item'><span class='home-trend-legend-dot' style='background:" + HOME_TREND_REOPEN_COLOR + "'></span>Переоткрыто задач</span>";
         }
     }
 
