@@ -30,6 +30,32 @@
         return div.innerHTML;
     }
 
+    // QR scanners emulate a keyboard. The sticker payload contains Latin
+    // letters and symbols, so a Russian Windows layout otherwise turns a
+    // perfectly valid scan into a different string. Normalize only the
+    // scanner text at input/submit time; the stored sticker remains the
+    // canonical QR payload.
+    function buildRuToEnMap() {
+        const ruLow = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю.";
+        const enLow = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./";
+        const ruHigh = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
+        const enHigh = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
+        const map = {};
+        for (let i = 0; i < ruLow.length; i += 1) map[ruLow[i]] = enLow[i];
+        for (let i = 0; i < ruHigh.length; i += 1) map[ruHigh[i]] = enHigh[i];
+        return map;
+    }
+    const SCANNER_RU_TO_EN = buildRuToEnMap();
+    function normalizeStickerScan(value) {
+        return String(value || "")
+            .split("").map((ch) => SCANNER_RU_TO_EN[ch] || ch).join("")
+            .replace(/[\u200B-\u200D\uFEFF]/g, "")
+            .replace(/[＊﹡✱]/g, "*")
+            .replace(/[／⁄∕]/g, "/")
+            .replace(/[＋]/g, "+")
+            .trim();
+    }
+
     function buildIntakePhotoUrl(path) {
         return "https://bgphllmzmlwurfnbagho.supabase.co/storage/v1/object/public/intake-photos/" + path;
     }
@@ -751,7 +777,7 @@
         const input = $("intakeAssignShkInput");
         const preview = $("intakeAssignShkPreview");
         if (!input || !preview) return;
-        const value = input.value.trim();
+        const value = normalizeStickerScan(input.value);
         if (!value) {
             preview.textContent = "";
             preview.className = "intake-assign-preview";
@@ -778,7 +804,8 @@
         const input = $("intakeAssignShkInput");
         const msg = $("intakeAssignShkMsg");
         if (!item || !input || !msg) return;
-        const value = input.value.trim();
+        const value = normalizeStickerScan(input.value);
+        input.value = value;
         if (value.charAt(0) !== "*" || !decodeStickerCode(value)) {
             msg.textContent = "Проверьте значение стикера.";
             msg.className = "intake-assign-msg is-error";
@@ -984,7 +1011,10 @@
         if (assignInput) {
             assignInput.addEventListener("input", updatePreview);
             assignInput.addEventListener("keydown", (e) => {
-                if (e.key === "Enter") void confirmAssignSticker();
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    void confirmAssignSticker();
+                }
             });
         }
         const assignCancel = $("intakeAssignShkCancel");

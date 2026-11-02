@@ -50,6 +50,27 @@
         return String(str || "").split("").map((ch) => RU_TO_EN[ch] || ch).join("");
     }
 
+    // A scanner is a keyboard, so its payload inherits the active Windows
+    // layout. Normalize its text once at the boundary instead of asking an
+    // operator to flip EN/RU for every box. Zero-width characters are also
+    // common in copied/scanned strings and must not break a QR comparison.
+    function normalizeScannerText(str) {
+        return ruToEnLayout(str)
+            .replace(/[\u200B-\u200D\uFEFF]/g, "")
+            .trim();
+    }
+
+    // Older printed labels and the current generator differ only in zero
+    // padding (WMSP.BOX.1868 vs WMSP.BOX.01868). Compare the box number,
+    // not the literal QR payload, and accept dot/dash/space separators.
+    function scannedBoxNumber(rawCode) {
+        const compact = normalizeScannerText(rawCode).toUpperCase().replace(/[.\s_\-/]/g, "");
+        const match = /^WMSPBOX(\d+)$/.exec(compact);
+        if (!match) return null;
+        const boxNumber = Number(match[1]);
+        return Number.isSafeInteger(boxNumber) && boxNumber >= 0 ? boxNumber : null;
+    }
+
     // Same fixed-class animated overlay every other modal on this page
     // uses (see .tasks-flow-modal.upload-work in tasks.html), but tasks.js
     // keeps its own setFlowModalOpen()/closeFlowModals() private to its
@@ -1044,11 +1065,12 @@
     }
 
     async function handleScan(rawCode) {
-        const code = rawCode.trim();
+        const code = normalizeScannerText(rawCode);
+        const upperCode = code.toUpperCase();
         if (!code) return;
-        if (code.startsWith("WMSP.PLCE.WSHK.")) {
+        if (upperCode.startsWith("WMSP.PLCE.WSHK.")) {
             if (moveStage !== "shelf") { flashMoveError("Сейчас нужно отсканировать короб."); return; }
-            const parts = code.slice("WMSP.PLCE.WSHK.".length).split(".");
+            const parts = upperCode.slice("WMSP.PLCE.WSHK.".length).split(".");
             const rackNumber = parseInt(parts[0], 10);
             const shelfNumber = parseInt(parts[1], 10);
             const rack = racks.find((r) => r.rack_number === rackNumber);
@@ -1062,9 +1084,9 @@
             setMovePrompt("Отсканируйте короб — " + rack.name + " · " + shelf.name);
             return;
         }
-        if (code.startsWith("WMSP.BOX.")) {
+        const boxNumber = scannedBoxNumber(code);
+        if (boxNumber != null) {
             if (moveStage !== "box" || !moveActiveShelf) { flashMoveError("Сначала отсканируйте полку."); return; }
-            const boxNumber = parseInt(code.slice("WMSP.BOX.".length), 10);
             const box = findBoxByNumber(boxNumber);
             if (!box) { flashMoveError("Короб №" + boxNumber + " не найден."); return; }
             const currentCount = (moveActiveShelf.shelf.wms_no_shk_boxes || []).length;
@@ -1347,12 +1369,7 @@
     // обход для отладки без физической этикетки под рукой.
     const DEBUG_GET_BOX_SCAN_CODE = "24052004";
 
-    function boxNumberFromCode(code) {
-        const match = /^WMSP\.BOX\.(\d+)$/i.exec(String(code || "").trim());
-        if (!match) return null;
-        const boxNumber = Number(match[1]);
-        return Number.isSafeInteger(boxNumber) && boxNumber >= 0 ? boxNumber : null;
-    }
+    function boxNumberFromCode(code) { return scannedBoxNumber(code); }
 
     async function claimScannedDisassembleBox(code) {
         const boxNumber = boxNumberFromCode(code);
@@ -1411,7 +1428,7 @@
     }
 
     async function handleGetBoxScan(rawCode) {
-        const code = rawCode.trim();
+        const code = normalizeScannerText(rawCode);
         if (!code) return;
         if (isFreeDisassembleScan) {
             const claimed = await claimScannedDisassembleBox(code);
@@ -1423,7 +1440,8 @@
             return;
         }
         if (!disassembleBox) return;
-        if (code !== boxCode(disassembleBox) && code !== DEBUG_GET_BOX_SCAN_CODE) {
+        const boxNumber = boxNumberFromCode(code);
+        if (boxNumber !== Number(disassembleBox.box_number) && code !== DEBUG_GET_BOX_SCAN_CODE) {
             showGetBoxError("Это не тот короб. Нужен короб №" + disassembleBox.box_number + ".");
             return;
         }
@@ -1618,7 +1636,7 @@
             moveInput.addEventListener("keydown", (event) => {
                 if (event.key === "Enter") {
                     event.preventDefault();
-                    const code = ruToEnLayout(scanBuffer || moveInput.value).trim();
+                    const code = normalizeScannerText(scanBuffer || moveInput.value);
                     scanBuffer = "";
                     moveInput.value = "";
                     void handleScan(code);
@@ -1667,7 +1685,7 @@
             getBoxInput.addEventListener("keydown", (event) => {
                 if (event.key === "Enter") {
                     event.preventDefault();
-                    const code = ruToEnLayout(getBoxScanBuffer || getBoxInput.value).trim();
+                    const code = normalizeScannerText(getBoxScanBuffer || getBoxInput.value);
                     getBoxScanBuffer = "";
                     getBoxInput.value = "";
                     void handleGetBoxScan(code);
