@@ -621,6 +621,7 @@
         .profile-cover { position: relative; min-height: 190px; overflow: hidden; background: radial-gradient(circle 250px at 82% 8%, rgba(250,204,21,.44), transparent 62%), radial-gradient(circle 300px at 12% 120%, rgba(98,60,234,.38), transparent 68%), linear-gradient(135deg, #242038 0%, #623cea 55%, #a78bfa 100%); }
         .profile-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, rgba(15,23,42,.28), transparent 55%); pointer-events: none; }
         .profile-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+        .profile-cover img[hidden], .profile-avatar img[hidden] { display: none; }
         .profile-media-upload { position: absolute; z-index: 2; right: 14px; top: 14px; border: 1px solid rgba(255,255,255,.38); border-radius: 999px; background: rgba(15,23,42,.52); color: #fff; padding: 9px 12px; font: inherit; font-size: 12px; font-weight: 900; cursor: pointer; backdrop-filter: blur(12px); transition: opacity .18s ease, transform .18s ease, background .18s ease; }
         .profile-media-upload:hover { background: rgba(15,23,42,.72); }
         .profile-hero:not(.is-editing) .profile-media-upload { opacity: 0; pointer-events: none; transform: translateY(-6px); }

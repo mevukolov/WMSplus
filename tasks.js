@@ -2405,6 +2405,7 @@
         if (avatarImage) {
             avatarImage.hidden = !avatarUrl;
             if (avatarUrl) avatarImage.src = avatarUrl;
+            else avatarImage.removeAttribute("src");
         }
         if (avatarFallback) {
             avatarFallback.hidden = Boolean(avatarUrl);
@@ -2415,6 +2416,7 @@
         if (coverImage) {
             coverImage.hidden = !coverUrl;
             if (coverUrl) coverImage.src = coverUrl;
+            else coverImage.removeAttribute("src");
         }
         if (hero) hero.classList.toggle("is-editing", Boolean(isOwnProfile && profile.editing));
         const editButton = $("editProfileButton");
