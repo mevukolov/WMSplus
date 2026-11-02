@@ -669,9 +669,6 @@
             warehouseError: "",
             warehouseEmployees: [],
             viewedEmployee: null,
-            employeeStatsLoading: false,
-            employeeStatsError: "",
-            employeeStats: null,
             employeeAchievementsLoading: false,
             employeeAchievementsError: "",
             employeeAchievements: [],
@@ -2374,15 +2371,6 @@
                 + "<div class='profile-section-head'><h4>Достижения</h4><span>" + escapeHtml(normalizeText(employee.name) || "Сотрудник") + "</span></div>"
                 + cards + "</section>";
         }
-        if (profile.view === "employee") {
-            const employee = profile.viewedEmployee || {};
-            const body = profile.employeeStatsError
-                ? "<div class='profile-content-empty'>" + escapeHtml(profile.employeeStatsError) + "</div>"
-                : "<div class='profile-stats-grid'>" + profileStatsTiles(profile.employeeStats, profile.employeeStatsLoading) + "</div>";
-            return "<section class='profile-personal-stats' aria-label='Статистика сотрудника'>"
-                + "<div class='profile-section-head'><h4>Сегодня в ОПП</h4><span>" + escapeHtml(formatRuDate(state.today || todayIsoInMoscow())) + "</span></div>"
-                + body + "</section>";
-        }
         return "<section class='profile-personal-stats' aria-labelledby='profileStatsTitle'>"
             + "<div class='profile-section-head'><h4 id='profileStatsTitle'>Сегодня в ОПП</h4><span>" + escapeHtml(formatRuDate(state.today || todayIsoInMoscow())) + "</span></div>"
             + "<div class='profile-stats-grid'>" + profileStatsTiles(profile.stats, profile.statsLoading) + "</div></section>";
@@ -2399,7 +2387,7 @@
     function renderProfileDrawer() {
         const ownUser = currentWmsUser();
         const profile = state.profile;
-        const viewedUser = (profile.view === "employee" || profile.view === "employeeAchievements") && profile.viewedEmployee ? profile.viewedEmployee : ownUser;
+        const viewedUser = profile.view === "employeeAchievements" && profile.viewedEmployee ? profile.viewedEmployee : ownUser;
         const isOwnProfile = profile.view === "personal";
         const avatarImage = $("profileAvatarImage");
         const avatarFallback = $("profileAvatarFallback");
@@ -2412,15 +2400,7 @@
         const avatarUrl = isOwnProfile ? profileMediaUrl(profile.media && profile.media.avatar_path) : "";
         const coverUrl = isOwnProfile ? profileMediaUrl(profile.media && profile.media.cover_path) : "";
         const displayName = normalizeText(viewedUser.name) || "Сотрудник ОПП";
-        if (identityName) {
-            identityName.textContent = displayName;
-            identityName.classList.toggle("is-navigable", profile.view !== "personal");
-            identityName.title = profile.view === "employeeAchievements"
-                ? "Вернуться к статистике сотрудника"
-                : profile.view === "warehouse" || profile.view === "employee"
-                    ? "Вернуться к моей статистике"
-                    : "";
-        }
+        if (identityName) identityName.textContent = displayName;
         if (identityMeta) identityMeta.textContent = [normalizeText(viewedUser.wh_name) || "Склад не указан", viewedUser.id ? "ID " + viewedUser.id : "ID не указан"].join(" · ");
         if (avatarImage) {
             avatarImage.hidden = !avatarUrl;
@@ -2446,7 +2426,7 @@
             editButton.setAttribute("aria-expanded", String(Boolean(isOwnProfile && profile.editing)));
         }
         const achievementsButton = $("openAchievementsFromProfile");
-        if (achievementsButton) achievementsButton.hidden = !(isOwnProfile || profile.view === "employee" || profile.view === "employeeAchievements");
+        if (achievementsButton) achievementsButton.hidden = !(isOwnProfile || profile.view === "employeeAchievements");
         if (content) content.innerHTML = profileContentHtml(profile, ownUser);
         if (status) {
             const message = profile.status || (isOwnProfile ? profile.statsError : "") || (profile.mediaLoading ? "Загружаю оформление профиля…" : profile.statsLoading && isOwnProfile ? "Собираю личную статистику…" : "");
@@ -2475,7 +2455,7 @@
         };
     }
 
-    async function loadProfileStats(db, user, target) {
+    async function loadProfileStats(db, user) {
         const date = state.today || todayIsoInMoscow();
         const bounds = moscowDayBoundsUtc(date);
         const [completedRead, updatedRead, historyRead, prespisokRead, employeesRead] = await Promise.all([
@@ -2500,10 +2480,9 @@
         );
         const ownKey = staffStatsKey(user.id, user.name);
         const ownName = normalizeForMatch(user.name);
-        const stats = built.employees.find((row) => row.key === ownKey)
+        state.profile.stats = built.employees.find((row) => row.key === ownKey)
             || built.employees.find((row) => ownName && normalizeForMatch(row.name) === ownName)
             || createStaffStatsRow(user.id, user.name);
-        state.profile[target || "stats"] = stats;
     }
 
     async function loadProfileDrawer() {
@@ -2667,31 +2646,8 @@
     async function openEmployeeProfile(employeeId) {
         const employee = (state.profile.warehouseEmployees || []).find((row) => normalizeText(row.id) === normalizeText(employeeId));
         if (!employee) return;
-        state.profile.view = "employee";
-        state.profile.editing = false;
         state.profile.viewedEmployee = employee;
-        state.profile.employeeStats = null;
-        state.profile.employeeStatsError = "";
-        state.profile.employeeStatsLoading = true;
-        state.profile.status = "";
-        state.profile.statusError = false;
-        animateProfileContent();
-        renderProfileDrawer();
-        const db = supabaseDb();
-        if (!db) {
-            state.profile.employeeStatsLoading = false;
-            state.profile.employeeStatsError = "Supabase недоступен: статистика не загружена.";
-            renderProfileDrawer();
-            return;
-        }
-        try {
-            await loadProfileStats(db, employee, "employeeStats");
-        } catch (error) {
-            state.profile.employeeStatsError = "Не удалось загрузить статистику: " + (error && error.message ? error.message : String(error));
-        } finally {
-            state.profile.employeeStatsLoading = false;
-            renderProfileDrawer();
-        }
+        await openEmployeeAchievements();
     }
 
     async function openEmployeeAchievements() {
@@ -2729,20 +2685,6 @@
             state.profile.employeeAchievementsLoading = false;
             renderProfileDrawer();
         }
-    }
-
-    function returnToProfileStats() {
-        if (state.profile.view === "employeeAchievements") {
-            state.profile.view = "employee";
-        } else if (state.profile.view !== "personal") {
-            state.profile.view = "personal";
-            state.profile.viewedEmployee = null;
-        } else {
-            return;
-        }
-        state.profile.editing = false;
-        animateProfileContent();
-        renderProfileDrawer();
     }
 
     function openProfileModal() {
@@ -2830,13 +2772,12 @@
         $("profileCoverInput")?.addEventListener("change", () => { void uploadProfileMedia("cover", $("profileCoverInput").files && $("profileCoverInput").files[0]); });
         $("openMyWarehouse")?.addEventListener("click", () => { void openWarehouseProfile(); });
         $("openAchievementsFromProfile")?.addEventListener("click", () => {
-            if (state.profile.view === "employee" || state.profile.view === "employeeAchievements") {
+            if (state.profile.view === "employeeAchievements") {
                 void openEmployeeAchievements();
                 return;
             }
             void openAchievementsModal();
         });
-        $("profileIdentityName")?.addEventListener("click", returnToProfileStats);
         $("profileContent")?.addEventListener("click", (event) => {
             if (!(event.target instanceof Element)) return;
             const button = event.target.closest("[data-profile-employee]");
