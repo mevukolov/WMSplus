@@ -2886,8 +2886,8 @@
         const pointHitsHtml = series.map((item) => item.points.map((value, index) => (
             "<circle data-trend-point data-trend-zone='" + escapeHtml(item.zone) + "' data-trend-day-index='" + index + "' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='7' fill='transparent' style='cursor:pointer' />"
         )).join("")).join("");
-        target.innerHTML = "<svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток активных задач по участкам за 14 дней'>"
-            + "<title>Остаток активных задач по участкам за 14 дней</title>"
+        target.innerHTML = "<svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток задач за 14 дней'>"
+            + "<title>Остаток задач за 14 дней</title>"
             + gridLinesHtml + linesHtml + xLabelsHtml
             + "<circle id='homeTrendHoverDot' r='5' fill='#0f172a' stroke='#fff' stroke-width='2' style='display:none;pointer-events:none' />"
             + pointHitsHtml + dateLabelHitsHtml
