@@ -636,6 +636,7 @@
             loaded: false,
             error: "",
             statDimension: "overview",
+            statPeriodDays: 30,
         },
         // Контекст всплывающей модалки "Нарушение", открытой поверх
         // taskDetailModal сразу после сохранения вердикта -- не знает о
@@ -15663,8 +15664,9 @@
             return false;
         }
         try {
-            // Inclusive period: today and the preceding 29 calendar days.
-            const since = addDays(state.today, -(VIOLATION_OVERVIEW_DAY_COUNT - 1));
+            // Load the largest selectable period once; switching 7/30/90
+            // days then redraws instantly without another network request.
+            const since = addDays(state.today, -(VIOLATION_OVERVIEW_MAX_DAYS - 1));
             const { data, error } = await db
                 .from(WMS_VIOLATIONS_TABLE)
                 .select("*")
@@ -15706,8 +15708,8 @@
         return key;
     }
 
-    function violationStatGroups(dimension) {
-        const rows = state.violations.rows || [];
+    function violationStatGroups(dimension, sourceRows) {
+        const rows = Array.isArray(sourceRows) ? sourceRows : violationRowsForSelectedPeriod();
         const groups = new Map();
         rows.forEach((row) => {
             const key = violationGroupKey(row, dimension);
@@ -15733,12 +15735,29 @@
     }
 
     const VIOLATION_OVERVIEW_DAY_COUNT = 30;
+    const VIOLATION_OVERVIEW_MAX_DAYS = 90;
+    const VIOLATION_OVERVIEW_PERIODS = [7, 30, 90];
     const VIOLATION_OVERVIEW_PALETTE = ["#2a78d6", "#e05f2f", "#15976a", "#c78600", "#8b5cf6", "#d65483", "#00889b", "#64748b", "#6b8e23", "#be4d36", "#2563eb", "#4b5563"];
 
-    function violationOverviewDays() {
+    function violationSelectedPeriodDays() {
+        const value = Number(state.violations.statPeriodDays);
+        return VIOLATION_OVERVIEW_PERIODS.includes(value) ? value : VIOLATION_OVERVIEW_DAY_COUNT;
+    }
+
+    function violationRowsForSelectedPeriod() {
+        const days = violationSelectedPeriodDays();
+        const start = addDays(state.today, -(days - 1));
+        return (state.violations.rows || []).filter((row) => {
+            const day = moscowDateFromValue(row.created_at);
+            return day >= start && day <= state.today;
+        });
+    }
+
+    function violationOverviewDays(dayCount) {
+        const days = Number(dayCount) || violationSelectedPeriodDays();
         return Array.from(
-            { length: VIOLATION_OVERVIEW_DAY_COUNT },
-            (_, index) => addDays(state.today, -(VIOLATION_OVERVIEW_DAY_COUNT - 1 - index))
+            { length: days },
+            (_, index) => addDays(state.today, -(days - 1 - index))
         );
     }
 
@@ -15767,11 +15786,15 @@
     }
 
     function violationsOverviewHtml(rows) {
-        const days = violationOverviewDays();
+        const periodDays = violationSelectedPeriodDays();
+        const days = violationOverviewDays(periodDays);
         const series = violationOverviewSeries(rows, days);
         const priceTotal = (rows || []).reduce((sum, row) => sum + Math.max(0, Number(row.task_price) || 0), 0);
-        const employeeGroups = violationStatGroups("employee").filter((group) => group.key !== "-").slice(0, 5);
-        if (!series.length) return "<div class='empty-state'>Нет данных за последние 30 дней.</div>";
+        const employeeGroups = violationStatGroups("employee", rows).filter((group) => group.key !== "-").slice(0, 5);
+        const periodTabs = VIOLATION_OVERVIEW_PERIODS.map((daysCount) => "<button type='button' class='violation-period-tab" + (daysCount === periodDays ? " active" : "") + "' data-violation-period-days='" + daysCount + "'>За " + daysCount + " дней</button>").join("");
+        if (!series.length) {
+            return "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Динамика по типам</strong><div class='violation-period-tabs' aria-label='Период статистики'>" + periodTabs + "</div></div><div class='empty-state'>Нет данных за последние " + periodDays + " дней.</div></section>";
+        }
 
         const width = 860;
         const height = 228;
@@ -15791,8 +15814,9 @@
             return "<line x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1' />"
                 + "<text x='" + (padLeft - 7) + "' y='" + (y + 3) + "' text-anchor='end'>" + value + "</text>";
         }).join("");
+        const labelEvery = Math.max(1, Math.ceil(days.length / 7));
         const labels = days.map((day, index) => {
-            if (index % 5 !== 0 && index !== days.length - 1) return "";
+            if (index % labelEvery !== 0 && index !== days.length - 1) return "";
             return "<text x='" + xFor(index) + "' y='" + (height - 5) + "' text-anchor='middle'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
         }).join("");
         const lines = series.map((item) => {
@@ -15800,22 +15824,54 @@
             const dots = item.points.map((value, index) => "<circle cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='2.5' fill='" + item.color + "' stroke='#fff' stroke-width='1.2' />").join("");
             return "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />" + dots;
         }).join("");
+        const lineHits = series.map((item, index) => "<path data-violation-overview-line data-violation-series-index='" + index + "' d='" + homeTrendSmoothPath(item.points, xFor, yFor) + "' fill='none' stroke='transparent' stroke-width='14' style='cursor:crosshair;pointer-events:stroke' />").join("");
         const legend = series.map((item) => "<span class='violation-overview-legend-item'><i style='background:" + item.color + "'></i>" + escapeHtml(item.type) + "</span>").join("");
         const topEmployees = employeeGroups.length
             ? employeeGroups.map((group, index) => "<button type='button' class='violation-top-row' data-violation-overview-employee='" + escapeHtml(group.key) + "'><span>" + (index + 1) + ". " + escapeHtml(group.label) + "</span><strong>" + group.rows.length + "</strong></button>").join("")
             : "<div class='status-line'>Нет указанных сотрудников.</div>";
 
         return "<div class='violation-overview'>"
-            + "<div class='violation-overview-kpis'><div class='violation-overview-kpi'><span>Нарушений за 30 дней</span><strong>" + rows.length + "</strong></div><div class='violation-overview-kpi'><span>Стоимость задач</span><strong>" + escapeHtml(formatMoney(priceTotal)) + "</strong></div></div>"
-            + "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Динамика по типам</strong><span>Каждая точка — число нарушений за день</span></div><div class='violation-overview-chart'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Динамика нарушений по дням и типам'>" + grid + lines + labels + "</svg></div><div class='violation-overview-legend'>" + legend + "</div></section>"
-            + "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Топ-5 сотрудников по ошибкам</strong><span>За последние 30 дней</span></div><div class='violation-top-list'>" + topEmployees + "</div></section>"
+            + "<div class='violation-overview-kpis'><div class='violation-overview-kpi'><span>Нарушений за " + periodDays + " дней</span><strong>" + rows.length + "</strong></div><div class='violation-overview-kpi'><span>Стоимость задач</span><strong>" + escapeHtml(formatMoney(priceTotal)) + "</strong></div></div>"
+            + "<section class='violation-overview-card'><div class='violation-overview-head'><div><strong>Динамика по типам</strong><span>Каждая точка — число нарушений за день</span></div><div class='violation-period-tabs' aria-label='Период статистики'>" + periodTabs + "</div></div><div class='violation-overview-chart'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Динамика нарушений по дням и типам'>" + grid + lines + lineHits + labels + "</svg><div class='violation-overview-tooltip'></div></div><div class='violation-overview-legend'>" + legend + "</div></section>"
+            + "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Топ-5 сотрудников по ошибкам</strong><span>За последние " + periodDays + " дней</span></div><div class='violation-top-list'>" + topEmployees + "</div></section>"
             + "</div>";
+    }
+
+    function bindViolationsOverviewChart(target, rows) {
+        const chart = target.querySelector(".violation-overview-chart");
+        const tooltip = chart && chart.querySelector(".violation-overview-tooltip");
+        if (!chart || !tooltip) return;
+        const days = violationOverviewDays();
+        const series = violationOverviewSeries(rows, days);
+        const width = 860;
+        const padLeft = 34;
+        const padRight = 10;
+        const plotW = width - padLeft - padRight;
+        const showTooltip = (event, seriesIndex) => {
+            const item = series[seriesIndex];
+            if (!item) return;
+            const rect = chart.getBoundingClientRect();
+            const chartX = (event.clientX - rect.left) * width / Math.max(rect.width, 1);
+            const dayIndex = Math.max(0, Math.min(days.length - 1, Math.round((chartX - padLeft) * (days.length - 1) / plotW)));
+            tooltip.innerHTML = "<strong>" + escapeHtml(item.type) + "</strong><span>" + escapeHtml(homeTrendDateLabel(days[dayIndex])) + ": " + item.points[dayIndex] + " нарушений</span>";
+            const left = Math.min(Math.max(event.clientX - rect.left, 6), rect.width - 6);
+            const top = Math.max(tooltip.offsetHeight + 8, event.clientY - rect.top - 8);
+            tooltip.style.left = left + "px";
+            tooltip.style.top = top + "px";
+            tooltip.classList.add("is-visible");
+        };
+        chart.querySelectorAll("[data-violation-overview-line]").forEach((line) => {
+            const seriesIndex = Number(line.dataset.violationSeriesIndex);
+            line.addEventListener("mousemove", (event) => showTooltip(event, seriesIndex));
+            line.addEventListener("mouseenter", (event) => showTooltip(event, seriesIndex));
+            line.addEventListener("mouseleave", () => tooltip.classList.remove("is-visible"));
+        });
     }
 
     function renderViolationsStats() {
         const target = $("violationsStatsWrap");
         if (!target) return;
-        const rows = state.violations.rows || [];
+        const rows = violationRowsForSelectedPeriod();
         const dimension = state.violations.statDimension || "overview";
         document.querySelectorAll("#violationsStatsDimTabs .review-view-tab").forEach((tab) => {
             tab.classList.toggle("active", tab.dataset.violationsStatDim === dimension);
@@ -15827,6 +15883,15 @@
             target.querySelectorAll("[data-violation-overview-employee]").forEach((button) => {
                 button.addEventListener("click", () => openViolationDetailModal("employee", button.dataset.violationOverviewEmployee));
             });
+            target.querySelectorAll("[data-violation-period-days]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    const days = Number(button.dataset.violationPeriodDays);
+                    if (!VIOLATION_OVERVIEW_PERIODS.includes(days) || days === violationSelectedPeriodDays()) return;
+                    state.violations.statPeriodDays = days;
+                    renderViolationsStats();
+                });
+            });
+            bindViolationsOverviewChart(target, rows);
             return;
         }
         const groups = violationStatGroups(dimension);
@@ -15898,6 +15963,7 @@
         if (!ensureDevelopmentAccess("Нарушения")) return;
         closeFlowModals();
         state.violations.statDimension = "overview";
+        state.violations.statPeriodDays = VIOLATION_OVERVIEW_DAY_COUNT;
         setFlowModalOpen("violationsHubModal", true);
         renderViolationsHubScreen(true);
         await loadViolations(true);
