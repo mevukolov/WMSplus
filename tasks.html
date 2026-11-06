@@ -1261,19 +1261,20 @@
         .violation-overview-kpi strong { display: block; margin-top: 5px; color: #242038; font-size: 22px; line-height: 1; }
         .violation-overview-card { padding: 14px; }
         .violation-overview-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-        .violation-overview-head strong { color: #242038; font-size: 15px; }
-        .violation-overview-head span { color: #64748b; font-size: 12px; font-weight: 700; }
+        .violation-overview-head-copy { min-width: 0; }
+        .violation-overview-head-copy strong { display: block; color: #242038; font-size: 15px; }
+        .violation-overview-head-copy span { display: block; margin-top: 3px; color: #64748b; font-size: 12px; font-weight: 700; line-height: 1.35; }
         .violation-period-tabs { display: inline-flex; gap: 4px; padding: 3px; border-radius: 10px; background: #eef2f7; }
         .violation-period-tab { border: 0; border-radius: 7px; padding: 5px 8px; background: transparent; color: #64748b; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; transition: background .16s ease, color .16s ease, box-shadow .16s ease; }
         .violation-period-tab:hover { color: var(--accent-dark); }
         .violation-period-tab.active { background: #fff; color: var(--accent-dark); box-shadow: 0 1px 4px rgba(15,23,42,.12); }
-        .violation-overview-chart { position: relative; margin-top: 8px; }
+        .violation-overview-chart { position: relative; min-width: 0; margin-top: 8px; }
         .violation-overview-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
         .violation-overview-chart text { font-size: 9px; fill: #94a3b8; }
-        .violation-overview-tooltip { position: absolute; z-index: 3; pointer-events: none; max-width: 220px; padding: 7px 9px; border-radius: 9px; background: #0f172a; color: #fff; font-size: 12px; line-height: 1.35; box-shadow: 0 8px 22px rgba(15,23,42,.2); opacity: 0; transform: translate(-50%, -110%); transition: opacity .12s ease; white-space: nowrap; }
+        .violation-overview-tooltip { position: absolute; z-index: 3; pointer-events: none; width: max-content; max-width: min(280px, calc(100% - 12px)); padding: 7px 9px; border-radius: 9px; background: #0f172a; color: #fff; font-size: 12px; line-height: 1.35; box-shadow: 0 8px 22px rgba(15,23,42,.2); opacity: 0; transform: translate(-50%, -110%); transition: opacity .12s ease; white-space: normal; overflow-wrap: anywhere; }
         .violation-overview-tooltip.is-visible { opacity: 1; }
-        .violation-overview-tooltip strong, .violation-overview-tooltip span { display: block; }
-        .violation-overview-tooltip span { margin-top: 2px; color: #cbd5e1; font-size: 11px; }
+        .status-pilot-card .violation-overview-tooltip strong { display: block; margin: 0; color: #fff; font-size: 12px; line-height: 1.35; }
+        .status-pilot-card .violation-overview-tooltip span { display: block; margin-top: 2px; color: #cbd5e1; font-size: 11px; line-height: 1.35; }
         .violation-overview-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; }
         .violation-overview-legend-item { display: inline-flex; align-items: center; gap: 5px; color: #64748b; font-size: 11px; font-weight: 700; }
         .violation-overview-legend-item i { width: 9px; height: 9px; border-radius: 50%; flex: none; }
@@ -1282,7 +1283,7 @@
         .violation-top-row:first-child { border-top: 0; }
         .violation-top-row:hover { color: var(--accent-dark); }
         .violation-top-row strong { color: #242038; }
-        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } }
+        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } .violation-overview-head { align-items: flex-start; } .violation-period-tabs { width: 100%; } .violation-period-tab { flex: 1; } }
         .violation-form { display: grid; gap: 12px; margin-top: 4px; }
         .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
         .violation-form-field select, .violation-form-field input, .violation-form-field textarea { font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background: #fff; }

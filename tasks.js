@@ -15811,18 +15811,19 @@
         const grid = [0, 1, 2, 3, 4].map((step) => {
             const value = Math.round(niceMax * step / 4);
             const y = yFor(value);
-            return "<line x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1' />"
-                + "<text x='" + (padLeft - 7) + "' y='" + (y + 3) + "' text-anchor='end'>" + value + "</text>";
+            return "<line class='home-trend-grid-line' x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1' />"
+                + "<text class='home-trend-axis-label' x='" + (padLeft - 7) + "' y='" + (y + 3) + "' text-anchor='end'>" + value + "</text>";
         }).join("");
         const labelEvery = Math.max(1, Math.ceil(days.length / 7));
         const labels = days.map((day, index) => {
             if (index % labelEvery !== 0 && index !== days.length - 1) return "";
-            return "<text x='" + xFor(index) + "' y='" + (height - 5) + "' text-anchor='middle'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
+            return "<text class='home-trend-date-label' x='" + xFor(index) + "' y='" + (height - 5) + "' text-anchor='middle'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
         }).join("");
-        const lines = series.map((item) => {
+        const lines = series.map((item, seriesIndex) => {
             const path = homeTrendSmoothPath(item.points, xFor, yFor);
-            const dots = item.points.map((value, index) => "<circle cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='2.5' fill='" + item.color + "' stroke='#fff' stroke-width='1.2' />").join("");
-            return "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />" + dots;
+            const baseDelay = seriesIndex * 45;
+            const dots = item.points.map((value, index) => "<circle class='home-trend-dot' style='--home-trend-delay:" + (baseDelay + 170 + index * 18) + "ms' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='2.5' fill='" + item.color + "' stroke='#fff' stroke-width='1.2' />").join("");
+            return "<path class='home-trend-line' pathLength='1' style='--home-trend-delay:" + baseDelay + "ms' d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />" + dots;
         }).join("");
         const lineHits = series.map((item, index) => "<path data-violation-overview-line data-violation-series-index='" + index + "' d='" + homeTrendSmoothPath(item.points, xFor, yFor) + "' fill='none' stroke='transparent' stroke-width='14' style='cursor:crosshair;pointer-events:stroke' />").join("");
         const legend = series.map((item) => "<span class='violation-overview-legend-item'><i style='background:" + item.color + "'></i>" + escapeHtml(item.type) + "</span>").join("");
@@ -15832,7 +15833,7 @@
 
         return "<div class='violation-overview'>"
             + "<div class='violation-overview-kpis'><div class='violation-overview-kpi'><span>Нарушений за " + periodDays + " дней</span><strong>" + rows.length + "</strong></div><div class='violation-overview-kpi'><span>Стоимость задач</span><strong>" + escapeHtml(formatMoney(priceTotal)) + "</strong></div></div>"
-            + "<section class='violation-overview-card'><div class='violation-overview-head'><div><strong>Динамика по типам</strong><span>Каждая точка — число нарушений за день</span></div><div class='violation-period-tabs' aria-label='Период статистики'>" + periodTabs + "</div></div><div class='violation-overview-chart'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Динамика нарушений по дням и типам'>" + grid + lines + lineHits + labels + "</svg><div class='violation-overview-tooltip'></div></div><div class='violation-overview-legend'>" + legend + "</div></section>"
+            + "<section class='violation-overview-card'><div class='violation-overview-head'><div class='violation-overview-head-copy'><strong>Динамика по типам</strong><span>Каждая точка — число нарушений за день</span></div><div class='violation-period-tabs' aria-label='Период статистики'>" + periodTabs + "</div></div><div class='violation-overview-chart home-trend-chart'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Динамика нарушений по дням и типам'>" + grid + lines + lineHits + labels + "</svg><div class='violation-overview-tooltip'></div></div><div class='violation-overview-legend'>" + legend + "</div></section>"
             + "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Топ-5 сотрудников по ошибкам</strong><span>За последние " + periodDays + " дней</span></div><div class='violation-top-list'>" + topEmployees + "</div></section>"
             + "</div>";
     }
@@ -15853,7 +15854,7 @@
             const rect = chart.getBoundingClientRect();
             const chartX = (event.clientX - rect.left) * width / Math.max(rect.width, 1);
             const dayIndex = Math.max(0, Math.min(days.length - 1, Math.round((chartX - padLeft) * (days.length - 1) / plotW)));
-            tooltip.innerHTML = "<strong>" + escapeHtml(item.type) + "</strong><span>" + escapeHtml(homeTrendDateLabel(days[dayIndex])) + ": " + item.points[dayIndex] + " нарушений</span>";
+            tooltip.innerHTML = "<strong>" + escapeHtml(item.type) + "</strong><span>" + escapeHtml(homeTrendDateLabel(days[dayIndex])) + " · " + item.points[dayIndex] + " нарушений</span>";
             const left = Math.min(Math.max(event.clientX - rect.left, 6), rect.width - 6);
             const top = Math.max(tooltip.offsetHeight + 8, event.clientY - rect.top - 8);
             tooltip.style.left = left + "px";
