@@ -1253,6 +1253,28 @@
         .violation-stat-row:first-child { border-top: 0; }
         .violation-stat-row:hover { color: var(--accent-dark); }
         .violation-stat-total { font-weight: 1000; font-size: 15px; margin-top: 6px; }
+        .violation-overview { display: grid; gap: 14px; margin-top: 12px; }
+        .violation-overview-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .violation-overview-kpi, .violation-overview-card { border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; }
+        .violation-overview-kpi { padding: 12px 14px; }
+        .violation-overview-kpi span { display: block; color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+        .violation-overview-kpi strong { display: block; margin-top: 5px; color: #242038; font-size: 22px; line-height: 1; }
+        .violation-overview-card { padding: 14px; }
+        .violation-overview-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+        .violation-overview-head strong { color: #242038; font-size: 15px; }
+        .violation-overview-head span { color: #64748b; font-size: 12px; font-weight: 700; }
+        .violation-overview-chart { margin-top: 8px; }
+        .violation-overview-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+        .violation-overview-chart text { font-size: 9px; fill: #94a3b8; }
+        .violation-overview-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; }
+        .violation-overview-legend-item { display: inline-flex; align-items: center; gap: 5px; color: #64748b; font-size: 11px; font-weight: 700; }
+        .violation-overview-legend-item i { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+        .violation-top-list { display: grid; margin-top: 8px; }
+        .violation-top-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px 0; border: 0; border-top: 1px solid #e2e8f0; background: transparent; color: #475569; font: inherit; font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
+        .violation-top-row:first-child { border-top: 0; }
+        .violation-top-row:hover { color: var(--accent-dark); }
+        .violation-top-row strong { color: #242038; }
+        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } }
         .violation-form { display: grid; gap: 12px; margin-top: 4px; }
         .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
         .violation-form-field select, .violation-form-field input, .violation-form-field textarea { font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background: #fff; }
@@ -2743,7 +2765,8 @@
             <div id="violationsStatsScreen">
                 <div id="violationsStatsDimTabs" class="review-view-tabs status-pilot-view-tabs" style="margin-top:10px;">
                     <span id="violationsStatsDimThumb" class="review-view-thumb" aria-hidden="true"></span>
-                    <button type="button" class="review-view-tab active" data-violations-stat-dim="type">По типам</button>
+                    <button type="button" class="review-view-tab active" data-violations-stat-dim="overview">Общее</button>
+                    <button type="button" class="review-view-tab" data-violations-stat-dim="type">По типам</button>
                     <button type="button" class="review-view-tab" data-violations-stat-dim="zone">По участкам</button>
                     <button type="button" class="review-view-tab" data-violations-stat-dim="employee">По сотрудникам</button>
                 </div>

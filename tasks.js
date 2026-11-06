@@ -635,7 +635,7 @@
             loading: false,
             loaded: false,
             error: "",
-            statDimension: "type",
+            statDimension: "overview",
         },
         // Контекст всплывающей модалки "Нарушение", открытой поверх
         // taskDetailModal сразу после сохранения вердикта -- не знает о
@@ -12855,6 +12855,7 @@
                 taskType: "Чистые списания",
                 zone: "Чистые списания",
                 verdict,
+                taskPrice: Number(synthetic.price) || 0,
             });
         } catch (error) {
             console.error("pure losses item complete failed:", error);
@@ -13013,6 +13014,7 @@
                     taskType: row.task_type || "",
                     zone: taskSectionName(row),
                     verdict,
+                    taskPrice: reviewPrice(row),
                     employeeId: culprit.id || normalizeIdentifier(row.assignee_employee_id),
                     employeeName: culprit.name || normalizeText(row.assignee_name),
                 });
@@ -15525,6 +15527,7 @@
             taskType: context.taskType || "",
             zone: context.zone || "Другие задачи",
             verdict: context.verdict || "",
+            taskPrice: Math.max(0, Math.round((Number(context.taskPrice) || 0) * 100) / 100),
             employeeId: context.employeeId || "",
             employeeName: context.employeeName || "",
             loggedById: user.id || "",
@@ -15628,6 +15631,7 @@
                 zone,
                 violation_type: violationType,
                 verdict: pending.verdict || null,
+                task_price: pending.taskPrice,
                 culprit_employee_id: employee.id || null,
                 culprit_name: employee.name || null,
                 comment: comment || null,
@@ -15659,7 +15663,8 @@
             return false;
         }
         try {
-            const since = addDays(state.today, -30);
+            // Inclusive period: today and the preceding 29 calendar days.
+            const since = addDays(state.today, -(VIOLATION_OVERVIEW_DAY_COUNT - 1));
             const { data, error } = await db
                 .from(WMS_VIOLATIONS_TABLE)
                 .select("*")
@@ -15727,14 +15732,103 @@
         }
     }
 
+    const VIOLATION_OVERVIEW_DAY_COUNT = 30;
+    const VIOLATION_OVERVIEW_PALETTE = ["#2a78d6", "#e05f2f", "#15976a", "#c78600", "#8b5cf6", "#d65483", "#00889b", "#64748b", "#6b8e23", "#be4d36", "#2563eb", "#4b5563"];
+
+    function violationOverviewDays() {
+        return Array.from(
+            { length: VIOLATION_OVERVIEW_DAY_COUNT },
+            (_, index) => addDays(state.today, -(VIOLATION_OVERVIEW_DAY_COUNT - 1 - index))
+        );
+    }
+
+    function violationOverviewSeries(rows, days) {
+        const dayIndex = new Map(days.map((day, index) => [day, index]));
+        const byType = new Map();
+        (rows || []).forEach((row) => {
+            const day = moscowDateFromValue(row.created_at);
+            const index = dayIndex.get(day);
+            if (index == null) return;
+            const type = normalizeText(row.violation_type) || "Без типа";
+            if (!byType.has(type)) byType.set(type, Array(days.length).fill(0));
+            byType.get(type)[index] += 1;
+        });
+        return Array.from(byType.entries())
+            .map(([type, points]) => ({ type, points, total: points.reduce((sum, value) => sum + value, 0) }))
+            .sort((a, b) => b.total - a.total || a.type.localeCompare(b.type, "ru"))
+            .map((item, index) => ({ ...item, color: VIOLATION_OVERVIEW_PALETTE[index % VIOLATION_OVERVIEW_PALETTE.length] }));
+    }
+
+    function violationOverviewNiceMax(maxValue) {
+        const raw = Math.max(1, maxValue) / 4;
+        const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+        const factor = [1, 2, 2.5, 5, 10].find((item) => item * magnitude >= raw) || 10;
+        return factor * magnitude * 4;
+    }
+
+    function violationsOverviewHtml(rows) {
+        const days = violationOverviewDays();
+        const series = violationOverviewSeries(rows, days);
+        const priceTotal = (rows || []).reduce((sum, row) => sum + Math.max(0, Number(row.task_price) || 0), 0);
+        const employeeGroups = violationStatGroups("employee").filter((group) => group.key !== "-").slice(0, 5);
+        if (!series.length) return "<div class='empty-state'>Нет данных за последние 30 дней.</div>";
+
+        const width = 860;
+        const height = 228;
+        const padLeft = 34;
+        const padRight = 10;
+        const padTop = 12;
+        const padBottom = 25;
+        const plotW = width - padLeft - padRight;
+        const plotH = height - padTop - padBottom;
+        const maxValue = Math.max(1, ...series.flatMap((item) => item.points));
+        const niceMax = violationOverviewNiceMax(maxValue);
+        const xFor = (index) => padLeft + (days.length === 1 ? plotW / 2 : plotW * index / (days.length - 1));
+        const yFor = (value) => padTop + plotH - plotH * value / niceMax;
+        const grid = [0, 1, 2, 3, 4].map((step) => {
+            const value = Math.round(niceMax * step / 4);
+            const y = yFor(value);
+            return "<line x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1' />"
+                + "<text x='" + (padLeft - 7) + "' y='" + (y + 3) + "' text-anchor='end'>" + value + "</text>";
+        }).join("");
+        const labels = days.map((day, index) => {
+            if (index % 5 !== 0 && index !== days.length - 1) return "";
+            return "<text x='" + xFor(index) + "' y='" + (height - 5) + "' text-anchor='middle'>" + escapeHtml(homeTrendDateLabel(day)) + "</text>";
+        }).join("");
+        const lines = series.map((item) => {
+            const path = homeTrendSmoothPath(item.points, xFor, yFor);
+            const dots = item.points.map((value, index) => "<circle cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='2.5' fill='" + item.color + "' stroke='#fff' stroke-width='1.2' />").join("");
+            return "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' />" + dots;
+        }).join("");
+        const legend = series.map((item) => "<span class='violation-overview-legend-item'><i style='background:" + item.color + "'></i>" + escapeHtml(item.type) + "</span>").join("");
+        const topEmployees = employeeGroups.length
+            ? employeeGroups.map((group, index) => "<button type='button' class='violation-top-row' data-violation-overview-employee='" + escapeHtml(group.key) + "'><span>" + (index + 1) + ". " + escapeHtml(group.label) + "</span><strong>" + group.rows.length + "</strong></button>").join("")
+            : "<div class='status-line'>Нет указанных сотрудников.</div>";
+
+        return "<div class='violation-overview'>"
+            + "<div class='violation-overview-kpis'><div class='violation-overview-kpi'><span>Нарушений за 30 дней</span><strong>" + rows.length + "</strong></div><div class='violation-overview-kpi'><span>Стоимость задач</span><strong>" + escapeHtml(formatMoney(priceTotal)) + "</strong></div></div>"
+            + "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Динамика по типам</strong><span>Каждая точка — число нарушений за день</span></div><div class='violation-overview-chart'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Динамика нарушений по дням и типам'>" + grid + lines + labels + "</svg></div><div class='violation-overview-legend'>" + legend + "</div></section>"
+            + "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Топ-5 сотрудников по ошибкам</strong><span>За последние 30 дней</span></div><div class='violation-top-list'>" + topEmployees + "</div></section>"
+            + "</div>";
+    }
+
     function renderViolationsStats() {
         const target = $("violationsStatsWrap");
         if (!target) return;
         const rows = state.violations.rows || [];
-        const dimension = state.violations.statDimension || "type";
+        const dimension = state.violations.statDimension || "overview";
         document.querySelectorAll("#violationsStatsDimTabs .review-view-tab").forEach((tab) => {
             tab.classList.toggle("active", tab.dataset.violationsStatDim === dimension);
         });
+        if (dimension === "overview") {
+            target.innerHTML = (state.violations.error ? "<div class='status-line error'>" + escapeHtml(state.violations.error) + "</div>" : "")
+                + (state.violations.loading ? "<div class='status-line'>Загружаю...</div>" : "")
+                + violationsOverviewHtml(rows);
+            target.querySelectorAll("[data-violation-overview-employee]").forEach((button) => {
+                button.addEventListener("click", () => openViolationDetailModal("employee", button.dataset.violationOverviewEmployee));
+            });
+            return;
+        }
         const groups = violationStatGroups(dimension);
         const body = groups.length
             ? groups.map((group) => "<button type='button' class='violation-stat-row' data-violation-group='" + escapeHtml(group.key) + "'><span>" + escapeHtml(group.label) + "</span><span>" + group.rows.length + "</span></button>").join("")
@@ -15765,6 +15859,7 @@
         const body = sorted.map((row) => (
             "<tr>"
             + "<td>" + escapeHtml(row.shk || "-") + "</td>"
+            + "<td>" + escapeHtml(formatMoney(row.task_price || 0)) + "</td>"
             + "<td>" + escapeHtml(formatRuDateTime(row.created_at)) + "</td>"
             + (showType ? "<td>" + escapeHtml(normalizeText(row.violation_type) || "-") + "</td>" : "")
             + "<td>" + escapeHtml(normalizeText(row.culprit_name) || "-") + "</td>"
@@ -15773,7 +15868,7 @@
             + "</tr>"
         )).join("");
         target.innerHTML = rows.length
-            ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>ШК</th><th>Дата</th>" + (showType ? "<th>Тип нарушения</th>" : "") + "<th>Сотрудник</th><th>Ответственный</th><th>Комментарий</th></tr></thead><tbody>" + body + "</tbody></table></div>"
+            ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>ШК</th><th>Стоимость</th><th>Дата</th>" + (showType ? "<th>Тип нарушения</th>" : "") + "<th>Сотрудник</th><th>Ответственный</th><th>Комментарий</th></tr></thead><tbody>" + body + "</tbody></table></div>"
             : "<div class='empty-state'>Пусто.</div>";
     }
 
@@ -15802,6 +15897,7 @@
     async function openViolationsHubModal() {
         if (!ensureDevelopmentAccess("Нарушения")) return;
         closeFlowModals();
+        state.violations.statDimension = "overview";
         setFlowModalOpen("violationsHubModal", true);
         renderViolationsHubScreen(true);
         await loadViolations(true);
