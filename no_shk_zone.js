@@ -1133,6 +1133,10 @@
     let disassembleBox = null; // box currently claimed by THIS browser tab, or null
     let disassembleItems = [];
     let isFreeDisassembleScan = false;
+    // Some scanner drivers emit the terminating Enter twice. A second
+    // request used to race the successful first claim and then incorrectly
+    // tell the very same operator that another employee had taken the box.
+    let isGetBoxScanProcessing = false;
 
     function currentZoneActor() {
         try {
@@ -1372,6 +1376,16 @@
 
     function boxNumberFromCode(code) { return scannedBoxNumber(code); }
 
+    function hasFreshClaimByActor(box, actorName) {
+        const startedAt = Date.parse(box && box.disassembly_started_at);
+        const currentActor = String(actorName || "").trim().toLocaleLowerCase("ru");
+        const claimActor = String(box && box.disassembly_started_by || "").trim().toLocaleLowerCase("ru");
+        return Number.isFinite(startedAt)
+            && startedAt >= Date.now() - DISASSEMBLE_STALE_CLAIM_MS
+            && currentActor !== ""
+            && currentActor === claimActor;
+    }
+
     async function claimScannedDisassembleBox(code) {
         const boxNumber = boxNumberFromCode(code);
         if (boxNumber == null) {
@@ -1385,7 +1399,7 @@
         }
         const { data: box, error } = await client
             .from("wms_no_shk_boxes")
-            .select(BOX_FIELDS + ",shortage,disassembly_started_at")
+            .select(BOX_FIELDS + ",shortage,disassembly_started_at,disassembly_started_by")
             .eq("box_number", boxNumber)
             .maybeSingle();
         if (error) {
@@ -1409,9 +1423,17 @@
             showGetBoxError("Этот короб отмечен как недостача.");
             return null;
         }
-        const claimed = await claimDisassembleBox(box, currentZoneActor());
+        const actorName = currentZoneActor();
+        // Re-open the active disassembly for the same person. This covers
+        // a duplicate scan as well as a drawer that was briefly closed
+        // without discarding the operator's in-progress box.
+        if (hasFreshClaimByActor(box, actorName)) return box;
+        const claimed = await claimDisassembleBox(box, actorName);
         if (!claimed) {
-            showGetBoxError("Этот короб уже находится в разборе у другого сотрудника.");
+            const holder = String(box.disassembly_started_by || "").trim();
+            showGetBoxError(holder
+                ? "Этот короб сейчас разбирает: " + holder + "."
+                : "Этот короб уже находится в разборе у другого сотрудника.");
             return null;
         }
         return claimed;
@@ -1429,25 +1451,31 @@
     }
 
     async function handleGetBoxScan(rawCode) {
-        const code = normalizeScannerText(rawCode);
-        if (!code) return;
-        if (isFreeDisassembleScan) {
-            const claimed = await claimScannedDisassembleBox(code);
-            if (!claimed) return;
-            disassembleBox = claimed;
-            isFreeDisassembleScan = false;
+        if (isGetBoxScanProcessing) return;
+        isGetBoxScanProcessing = true;
+        try {
+            const code = normalizeScannerText(rawCode);
+            if (!code) return;
+            if (isFreeDisassembleScan) {
+                const claimed = await claimScannedDisassembleBox(code);
+                if (!claimed) return;
+                disassembleBox = claimed;
+                isFreeDisassembleScan = false;
+                setZoneModalOpen("noShkGetBoxModal", false);
+                await openDisassembleFullscreen();
+                return;
+            }
+            if (!disassembleBox) return;
+            const boxNumber = boxNumberFromCode(code);
+            if (boxNumber !== Number(disassembleBox.box_number) && code !== DEBUG_GET_BOX_SCAN_CODE) {
+                showGetBoxError("Это не тот короб. Нужен короб №" + disassembleBox.box_number + ".");
+                return;
+            }
             setZoneModalOpen("noShkGetBoxModal", false);
             await openDisassembleFullscreen();
-            return;
+        } finally {
+            isGetBoxScanProcessing = false;
         }
-        if (!disassembleBox) return;
-        const boxNumber = boxNumberFromCode(code);
-        if (boxNumber !== Number(disassembleBox.box_number) && code !== DEBUG_GET_BOX_SCAN_CODE) {
-            showGetBoxError("Это не тот короб. Нужен короб №" + disassembleBox.box_number + ".");
-            return;
-        }
-        setZoneModalOpen("noShkGetBoxModal", false);
-        await openDisassembleFullscreen();
     }
 
     async function openDisassembleFullscreen() {
