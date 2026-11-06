@@ -15943,8 +15943,11 @@
         const group = groups.find((item) => item.key === key);
         const rows = group ? group.rows : [];
         const label = group ? group.label : key;
+        const priceTotal = rows.reduce((sum, row) => sum + Math.max(0, Number(row.task_price) || 0), 0);
         const title = $("violationDetailTitle");
+        const summary = $("violationDetailSummary");
         if (title) title.textContent = violationDetailDimLabel(dimension) + ": " + label + " (" + rows.length + ")";
+        if (summary) summary.textContent = "За " + violationSelectedPeriodDays() + " дней · сумма стоимости: " + formatMoney(priceTotal);
         renderViolationDetailTable(rows, dimension);
         setFlowModalOpen("violationDetailModal", true);
     }
