@@ -69,6 +69,20 @@
     .display-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .display-chart-legend i { width: 10px; height: 10px; border-radius: 99px; flex: none; }
     .display-chart-empty { display: grid; place-items: center; height: 100%; color: #64748b; font-size: 18px; font-weight: 700; }
+    .display-chart-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: display-chart-draw .82s cubic-bezier(.22,.61,.36,1) forwards; animation-delay: var(--display-chart-delay, 0ms); }
+    .display-chart-dot { transform-box: fill-box; transform-origin: center; animation: display-chart-dot .28s cubic-bezier(.34,1.56,.64,1) both; animation-delay: var(--display-chart-delay, 0ms); }
+    .display-chart-status { display: flex; justify-content: center; margin-top: 15px; }
+    .display-chart-status-dots { display: inline-flex; align-items: center; gap: 8px; height: 12px; }
+    .display-chart-status-dots i { position: relative; display: block; box-sizing: border-box; width: 8px; height: 8px; overflow: hidden; border-radius: 999px; background: #cbd5e1; transition: width .26s cubic-bezier(.22,.8,.32,1), background-color .18s ease, box-shadow .18s ease; }
+    .display-chart-status-dots i.active { width: 72px; background: #e9e3ff; box-shadow: inset 0 0 0 1px rgba(98,60,234,.12); }
+    .display-chart-status-dots i.active.is-arming { width: 8px; background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
+    .display-chart-status-dots i.active::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, #623cea, #8b5cf6); transform: scaleX(0); transform-origin: left; animation: display-chart-progress 14.74s linear forwards; }
+    .display-chart-status-dots i.active.is-arming::after { animation-play-state: paused; }
+    .display-chart-status-dots i.active.is-collapsing { width: 8px; background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
+    .display-chart-status-dots i.active.is-collapsing::after { animation: none; transform: scaleX(1); opacity: 0; transition: opacity .14s ease; }
+    @keyframes display-chart-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+    @keyframes display-chart-dot { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+    @keyframes display-chart-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
     @keyframes display-chart-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
     /* Night mode (20:30-07:30, toggled by display.js): nobody's on the
        floor overnight, but the monitor stays on -- so instead of turning
@@ -444,6 +458,6 @@
 
 <!-- Cache-busting query string -- see the same comment in
      mobile-inventory.html; bump alongside it whenever display.js changes. -->
-<script src="display.js?v=10"></script>
+<script src="display.js?v=11"></script>
 </body>
 </html>

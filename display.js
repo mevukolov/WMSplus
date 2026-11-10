@@ -26,7 +26,7 @@
     // 24/7 with nobody around to manually reload it, so it's the single
     // most important place for this check. Bump CLIENT_VERSION here AND
     // version.json's "v" together whenever this file changes.
-    const CLIENT_VERSION = 10;
+    const CLIENT_VERSION = 11;
     setInterval(() => {
         fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
             .then((res) => res.json())
@@ -73,6 +73,7 @@
     const DASHBOARD_DAYS = 14;
     const DASHBOARD_SLIDE_MS = 15000;
     const DASHBOARD_SLIDES = ["zone", "active", "pulse", "pure"];
+    const DASHBOARD_CHART_SLIDES = ["active", "pulse", "pure"];
     const DASHBOARD_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948", "#64748b"];
     const DASHBOARD_ACTIVE_SPECIAL_COLORS = { "Без ШК": "#7c3aed", "Списания AWH": "#dc2626", "Коробки на входе": "#0891b2" };
     const DASHBOARD_PULSE_COLORS = { "Задач": "#2a78d6", "Без ШК": "#7c3aed", "Запросы": "#eb6834" };
@@ -159,13 +160,27 @@
         };
     }
 
+    function dashboardStatusHtml(key) {
+        return "<div class='display-chart-status' aria-label='Следующий график через 15 секунд'><span class='display-chart-status-dots' aria-hidden='true'>"
+            + DASHBOARD_CHART_SLIDES.map((item) => "<i class='" + (item === key ? "active is-arming" : "") + "'></i>").join("")
+            + "</span></div>";
+    }
+
+    function armDashboardStatus() {
+        requestAnimationFrame(() => {
+            const active = document.querySelector("#displayDashboard .display-chart-status-dots i.active.is-arming");
+            if (active) active.classList.remove("is-arming");
+        });
+    }
+
     function renderDashboardChart(key, animate) {
         const dashboard = document.getElementById("displayDashboard");
         if (!dashboard) return;
         const config = dashboardConfig(key);
         const trend = dashboardSeries(key);
         if (!trend.series.length) {
-            dashboard.innerHTML = "<div class='display-chart-card" + (animate ? " is-entering" : "") + "'><h2>" + escapeHtmlLocal(config.title) + "</h2><p>" + escapeHtmlLocal(config.note) + "</p><div class='display-chart-empty'>Пока нет данных за последние 14 дней.</div></div>";
+            dashboard.innerHTML = "<div class='display-chart-card" + (animate ? " is-entering" : "") + "'><h2>" + escapeHtmlLocal(config.title) + "</h2><p>" + escapeHtmlLocal(config.note) + "</p><div class='display-chart-empty'>Пока нет данных за последние 14 дней.</div>" + dashboardStatusHtml(key) + "</div>";
+            armDashboardStatus();
             return;
         }
         const width = 1000;
@@ -186,13 +201,15 @@
             return "<line x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1'/><text x='" + (padLeft - 8) + "' y='" + (y + 4) + "' text-anchor='end' fill='#94a3b8' font-size='12' font-weight='600'>" + value + "</text>";
         }).join("");
         const labels = trend.days.map((day, index) => index % 2 && index !== trend.days.length - 1 ? "" : "<text x='" + xFor(index) + "' y='" + (height - 8) + "' text-anchor='middle' fill='#94a3b8' font-size='12' font-weight='600'>" + dashboardDateLabel(day) + "</text>").join("");
-        const lines = trend.series.map((item) => {
+        const lines = trend.series.map((item, seriesIndex) => {
             const path = dashboardSmoothPath(item.points, xFor, yFor);
-            const dots = item.points.map((value, index) => "<circle cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='4' fill='" + item.color + "' stroke='#fff' stroke-width='2'/>").join("");
-            return "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/>" + dots;
+            const delay = seriesIndex * 70;
+            const dots = item.points.map((value, index) => "<circle class='display-chart-dot' style='--display-chart-delay:" + (delay + 230 + index * 28) + "ms' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='4' fill='" + item.color + "' stroke='#fff' stroke-width='2'/>").join("");
+            return "<path class='display-chart-line' pathLength='1' style='--display-chart-delay:" + delay + "ms' d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/>" + dots;
         }).join("");
         const legend = trend.series.map((item) => "<span><i style='background:" + item.color + "'></i>" + escapeHtmlLocal(item.key) + "</span>").join("");
-        dashboard.innerHTML = "<div class='display-chart-card" + (animate ? " is-entering" : "") + "'><h2>" + escapeHtmlLocal(config.title) + "</h2><p>" + escapeHtmlLocal(config.note) + "</p><div class='display-chart-plot'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='" + escapeHtmlLocal(config.title) + "'>" + grid + lines + labels + "</svg></div><div class='display-chart-legend'>" + legend + "</div></div>";
+        dashboard.innerHTML = "<div class='display-chart-card" + (animate ? " is-entering" : "") + "'><h2>" + escapeHtmlLocal(config.title) + "</h2><p>" + escapeHtmlLocal(config.note) + "</p><div class='display-chart-plot'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='" + escapeHtmlLocal(config.title) + "'>" + grid + lines + labels + "</svg></div><div class='display-chart-legend'>" + legend + "</div>" + dashboardStatusHtml(key) + "</div>";
+        armDashboardStatus();
     }
 
     function renderDashboardSlide(animate) {
@@ -210,9 +227,13 @@
     function scheduleDashboardSlide() {
         clearTimeout(dashboardSlideTimer);
         dashboardSlideTimer = setTimeout(() => {
-            dashboardSlideIndex = (dashboardSlideIndex + 1) % DASHBOARD_SLIDES.length;
-            renderDashboardSlide(true);
-            scheduleDashboardSlide();
+            const active = document.querySelector("#displayDashboard .display-chart-status-dots i.active");
+            if (active) active.classList.add("is-collapsing");
+            setTimeout(() => {
+                dashboardSlideIndex = (dashboardSlideIndex + 1) % DASHBOARD_SLIDES.length;
+                renderDashboardSlide(true);
+                scheduleDashboardSlide();
+            }, 260);
         }, DASHBOARD_SLIDE_MS);
     }
 
