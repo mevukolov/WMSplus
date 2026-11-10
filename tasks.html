@@ -188,9 +188,13 @@
         .staff-detail-tab { border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; color: #475569; padding: 8px 10px; font-size: 12px; font-weight: 1000; cursor: pointer; }
         .staff-detail-tab.active { background: #623cea; border-color: #623cea; color: #fff; }
         .staff-detail-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; padding-right: 4px; }
-        .staff-detail-row { border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; padding: 10px 12px; color: #242038; }
+        .staff-detail-row { width: 100%; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; padding: 10px 12px; color: #242038; text-align: left; font: inherit; }
+        .staff-detail-row.copyable, .staff-detail-row.scope { cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
+        .staff-detail-row.copyable:hover, .staff-detail-row.scope:hover { transform: translateY(-1px); border-color: rgba(98,60,234,.36); box-shadow: var(--shadow-sm); }
         .staff-detail-row strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
         .staff-detail-row span { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; font-weight: 850; overflow-wrap: anywhere; }
+        .staff-detail-scope-back { margin: 0 0 7px; border: 0; background: transparent; color: #623cea; padding: 3px 0; font: inherit; font-size: 12px; font-weight: 1000; cursor: pointer; }
+        .staff-detail-scope-title { margin: 0 0 8px; color: #475569; font-size: 13px; font-weight: 900; overflow-wrap: anywhere; }
         .staff-stats-empty { border-radius: 18px; background: #fff; border: 1px dashed #cbd5e1; color: #64748b; padding: 18px; text-align: center; font-weight: 850; }
         .flow-shell { display: grid; gap: 14px; }
         .flow-command-card { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: clamp(18px, 3vw, 28px); border-radius: 28px; background: radial-gradient(circle 220px at calc(100% + 70px) 0, rgba(250,204,21,.3), transparent 72%), linear-gradient(135deg, #242038 0%, #3e2e23 100%); color: #fff; box-shadow: 0 26px 70px rgba(36,32,56,.18); }
@@ -2849,7 +2853,7 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Пульс смены</h3>
-                <p class="work-subtitle">Статистика по сотрудникам за день: ручные задачи, запросы, предсписок, Без ШК, отложения и вердикты.</p>
+                <p class="work-subtitle">Статистика по реальным действиям за день: вердикты, ручные отложения, предсписок и присвоенные стикеры «Без ШК».</p>
             </div>
             <button id="closeStaffStats" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>

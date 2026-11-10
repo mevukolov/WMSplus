@@ -27,6 +27,7 @@
     const WMS_SHIFTS_TABLE = "wms_shifts";
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
+    const WMS_NO_SHK_STICKER_EVENTS_TABLE = "wms_no_shk_sticker_events";
     const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
     const WMS_USER_PROFILES_TABLE = "wms_user_profiles";
     const PROFILE_MEDIA_BUCKET = "profile-media";
@@ -653,6 +654,7 @@
             employees: [],
             selectedKey: "",
             activeTab: "tasks",
+            detailScope: null,
             taskRowsById: {},
         },
         profile: {
@@ -16093,6 +16095,12 @@
         return normalizeIdentifier(id) || normalizeForMatch(name) || "unknown";
     }
 
+    function staffStatsActorIsKnown(actor) {
+        const id = normalizeIdentifier(actor && actor.id);
+        const name = normalizeText(actor && actor.name);
+        return Boolean(id || (name && normalizeForMatch(name) !== "не определено"));
+    }
+
     function createStaffStatsRow(id, name) {
         const cleanId = normalizeIdentifier(id);
         const cleanName = normalizeText(name) || (cleanId ? "Сотрудник " + cleanId : "Не определено");
@@ -16105,7 +16113,6 @@
             prespisokTargets: 0,
             prespisokShk: 0,
             noShkFound: 0,
-            noShkChecked: 0,
             deferred: 0,
             verdicts: {},
             sections: {},
@@ -16115,6 +16122,8 @@
                 prespisok: [],
                 noShk: [],
                 deferred: [],
+                verdicts: {},
+                sections: {},
             },
         };
     }
@@ -16128,6 +16137,11 @@
         return row;
     }
 
+    function staffStatsEmployeeForActor(map, actor) {
+        if (!staffStatsActorIsKnown(actor)) return null;
+        return ensureStaffStatsRow(map, actor.id, actor.name);
+    }
+
     function incrementCounter(target, key, amount) {
         const cleanKey = normalizeText(key) || "Не указано";
         target[cleanKey] = (Number(target[cleanKey]) || 0) + (Number(amount) || 1);
@@ -16135,16 +16149,6 @@
 
     function staffStatsTaskActor(row, historyRow) {
         return taskCompletionActor(row, historyRow);
-    }
-
-    function staffStatsNoShkActor(row) {
-        const payload = taskPayload(row);
-        const review = taskReviewPayload(row);
-        const noShk = payload.no_shk_review && typeof payload.no_shk_review === "object" && !Array.isArray(payload.no_shk_review) ? payload.no_shk_review : {};
-        return {
-            id: normalizeIdentifier(noShk.checked_by_id) || normalizeIdentifier(review.completed_by_id) || normalizeIdentifier(row && row.assignee_employee_id),
-            name: normalizeText(noShk.checked_by_name) || normalizeText(review.completed_by_name) || normalizeText(row && row.assignee_name),
-        };
     }
 
     function staffStatsPrespisokActor(row) {
@@ -16161,28 +16165,88 @@
         };
     }
 
-    function sourceShkCountFromPrespisokAction(row) {
+    function staffStatsShksFromPrespisokAction(row) {
         const payload = row && row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : {};
         const ids = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : Array.isArray(payload.source_shk_ids) ? payload.source_shk_ids : [];
-        return ids.map(normalizeIdentifier).filter(Boolean).length || 1;
+        const entityId = normalizeIdentifier(row && row.entity_id);
+        const isTare = normalizeForMatch(row && row.entity_type) === "tare" || Boolean(normalizeIdentifier(row && row.source_tare_id));
+        return Array.from(new Set(ids.map(normalizeIdentifier).filter(Boolean).concat(!isTare && entityId ? [entityId] : [])));
     }
 
     function staffStatsActivityScore(row) {
-        return row.tasksCompleted + row.requestsCompleted + row.prespisokShk + row.noShkChecked + row.deferred;
+        // "Запросы" are included in tasks, and a task with a verdict is not
+        // added again through the verdict counter.  This score is only for
+        // hiding employees with no real actions, not a productivity metric.
+        return row.tasksCompleted + row.prespisokShk + row.noShkFound;
     }
 
-    function isQuickNoShkVerdict(value) {
-        const normalized = normalizeForMatch(value);
-        return normalized === normalizeForMatch(SYSTEM_NO_SHK_NOT_FOUND_VERDICT)
-            || normalized === normalizeForMatch(SYSTEM_NO_SHK_FOUND_VERDICT);
+    function staffStatsPayload(row) {
+        return row && row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : {};
     }
 
-    function isQuickNoShkFoundResult(value) {
+    function staffStatsTaskShks(row, historyRow) {
+        const payload = staffStatsPayload(historyRow);
+        const eventShk = normalizeIdentifier(payload.shk || payload.source_shk || payload.sourceShk);
+        if (eventShk) return [eventShk];
+        return Array.from(new Set(taskItems(row || {}).map((item) => normalizeIdentifier(item.shk)).filter(Boolean)));
+    }
+
+    function staffStatsDetailsForTask(row, historyRow, metaParts, fallbackTitle) {
+        const shks = staffStatsTaskShks(row, historyRow);
+        const meta = (metaParts || []).filter(Boolean).join(" · ");
+        if (!shks.length) {
+            return [{
+                id: row && row.id,
+                title: fallbackTitle || normalizeText(staffStatsPayload(historyRow).title) || (row ? displayTaskTitle(row) : "Задача"),
+                meta,
+            }];
+        }
+        return shks.map((shk) => ({
+            id: row && row.id,
+            title: "ШК " + shk,
+            meta,
+        }));
+    }
+
+    function staffStatsAddGroupDetail(target, key, details) {
+        const cleanKey = normalizeText(key) || "Не указано";
+        if (!target[cleanKey]) target[cleanKey] = [];
+        target[cleanKey].push(...details);
+    }
+
+    function staffStatsIsNoVerdict(value) {
         const normalized = normalizeForMatch(value);
-        if (!normalized || normalized.includes("не найден")) return false;
-        return normalized === normalizeForMatch(SYSTEM_NO_SHK_FOUND_VERDICT)
-            || normalized.includes("обнаружен")
-            || normalized === "найден";
+        return !normalized || normalized === normalizeForMatch("Не выбран");
+    }
+
+    function staffStatsRecordTaskAction(employee, task, event, verdict, isManualDefer) {
+        const requestSection = task ? requestSectionName(task) : "";
+        const section = requestSection || (task ? taskSectionName(task) : "Другие задачи");
+        const at = event && event.created_at || task && (task.completed_at || task.updated_at);
+        const payload = staffStatsPayload(event);
+        const details = staffStatsDetailsForTask(task, event, [
+            section,
+            verdict ? "Вердикт: " + verdict : "Отложено вручную",
+            task ? formatMoney(reviewPrice(task)) : "",
+            payload.reopen_after ? "Переоткрытие: " + formatRuDateTime(payload.reopen_after) : "",
+            at ? formatRuDateTime(at) : "",
+        ], isManualDefer ? "Отложенная задача" : "Задача");
+
+        employee.tasksCompleted += 1;
+        employee.details.tasks.push(...details);
+        if (requestSection === "Запросы входящего потока") {
+            employee.requestsCompleted += 1;
+            employee.details.requests.push(...details);
+        }
+        if (isManualDefer) {
+            employee.deferred += 1;
+            employee.details.deferred.push(...details);
+            return;
+        }
+        incrementCounter(employee.verdicts, verdict, 1);
+        incrementCounter(employee.sections, section, 1);
+        staffStatsAddGroupDetail(employee.details.verdicts, verdict, details);
+        staffStatsAddGroupDetail(employee.details.sections, section, details);
     }
 
     function staffStatsSummaryFromEmployees(employees) {
@@ -16207,100 +16271,78 @@
         return summary;
     }
 
-    function buildStaffStats(tasks, historyRows, prespisokActions, employees, date) {
+    function buildStaffStats(tasks, historyRows, prespisokActions, noShkStickerEvents, employees, date) {
         const byEmployee = new Map();
         (employees || []).forEach((employee) => {
             ensureStaffStatsRow(byEmployee, employee.employee_id || employee.id, employee.full_name || employee.name);
         });
-        // History-first, payload-fallback: wms_task_history only has rows since
-        // 2026-08-24, so historyDeferredTaskIds dedupes against source_payload.deferred_at
-        // below only to catch older tasks that predate history tracking, not as a
-        // parallel counting path for the same event.
-        const historyDeferredTaskIds = new Set();
-        const completedHistoryByTaskId = new Map();
-        (historyRows || []).filter((row) => normalizeText(row.event_type) === "task_completed" && moscowDateFromValue(row.created_at) === date).forEach((row) => {
-            const taskId = normalizeText(row.task_id);
-            if (taskId && !completedHistoryByTaskId.has(taskId)) completedHistoryByTaskId.set(taskId, row);
+        const taskById = new Map((tasks || []).filter((row) => row && row.id).map((row) => [row.id, row]));
+        const historyByTaskAndType = new Set();
+
+        // The history is the source of truth: it contains the actual person
+        // who pressed a verdict/defer button.  Never attribute an event to a
+        // current assignee, and never construct a row for a system event with
+        // no actor -- that was the source of the "Не определено" card.
+        (historyRows || []).filter((event) => {
+            const type = normalizeText(event.event_type);
+            return moscowDateFromValue(event.created_at) === date && (type === "task_completed" || type === "task_deferred");
+        }).forEach((event) => {
+            const type = normalizeText(event.event_type);
+            const taskId = normalizeText(event.task_id);
+            if (taskId) historyByTaskAndType.add(type + ":" + taskId);
+            const employee = staffStatsEmployeeForActor(byEmployee, staffStatsHistoryActor(event));
+            if (!employee) return;
+            const verdict = normalizeText(staffStatsPayload(event).verdict);
+            const isManualDefer = type === "task_deferred" && staffStatsIsNoVerdict(verdict);
+            // A completed event without a verdict is an incomplete technical
+            // record, not a processed task. A manual defer is counted below.
+            if (type === "task_completed" && staffStatsIsNoVerdict(verdict)) return;
+            staffStatsRecordTaskAction(employee, taskById.get(taskId), event, verdict, isManualDefer);
         });
-        (historyRows || []).filter((row) => normalizeText(row.event_type) === "task_deferred" && moscowDateFromValue(row.created_at) === date).forEach((row) => {
-            const actor = staffStatsHistoryActor(row);
-            const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
-            const payload = row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : {};
-            // "Задачи" measures how many tasks an employee actually worked on
-            // that day, not just ones that reached a terminal status --
-            // deferring (yellow verdicts: Отправлен запрос/на релиз/на
-            // списание ревизией) is real work too, so it counts here in
-            // addition to `deferred` below, not instead of it.
-            employee.deferred += 1;
-            employee.tasksCompleted += 1;
-            if (payload.verdict) incrementCounter(employee.verdicts, payload.verdict, 1);
-            historyDeferredTaskIds.add(normalizeText(row.task_id));
-            employee.details.deferred.push({
-                title: normalizeText(payload.title) || "Отложенная задача",
-                meta: [payload.verdict ? "Вердикт: " + payload.verdict : "", payload.reopen_after ? "Переоткрытие: " + formatRuDateTime(payload.reopen_after) : "", formatRuDateTime(row.created_at)].filter(Boolean).join(" · "),
-            });
-        });
+
+        // Fallback for the older rows that predate wms_task_history. It is
+        // deliberately disabled whenever the day's matching event exists, so
+        // an action can never be counted twice.
         (tasks || []).forEach((row) => {
             const completedDate = moscowDateFromValue(row.completed_at);
-            const manualCompleted = completedDate === date && isManualAchievementTask(row);
+            const completedKey = "task_completed:" + normalizeText(row.id);
+            const manualCompleted = completedDate === date && isManualAchievementTask(row) && !historyByTaskAndType.has(completedKey);
             if (manualCompleted) {
-                const actor = staffStatsTaskActor(row, completedHistoryByTaskId.get(normalizeText(row.id)));
-                const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
-                const requestSection = requestSectionName(row);
-                const section = requestSection || taskSectionName(row);
-                const verdict = normalizeText(row.opp_verdict) || "Не выбран";
-                employee.tasksCompleted += 1;
-                if (requestSection === "Запросы входящего потока") employee.requestsCompleted += 1;
-                incrementCounter(employee.verdicts, verdict, 1);
-                incrementCounter(employee.sections, section, 1);
-                const detail = {
-                    id: row.id,
-                    title: displayTaskTitle(row),
-                    meta: [section, verdict, formatMoney(reviewPrice(row)), formatRuDateTime(row.completed_at || row.updated_at)].filter(Boolean).join(" · "),
-                };
-                employee.details.tasks.push(detail);
-                if (requestSection === "Запросы входящего потока") employee.details.requests.push(detail);
+                const employee = staffStatsEmployeeForActor(byEmployee, staffStatsTaskActor(row));
+                const verdict = normalizeText(row.opp_verdict);
+                if (employee && !staffStatsIsNoVerdict(verdict)) {
+                    staffStatsRecordTaskAction(employee, row, null, verdict, false);
+                }
             }
             const review = taskReviewPayload(row);
-            const payload = taskPayload(row);
-            const noShk = payload.no_shk_review && typeof payload.no_shk_review === "object" && !Array.isArray(payload.no_shk_review) ? payload.no_shk_review : {};
-            const noShkAt = normalizeText(noShk.checked_at) || (isQuickNoShkVerdict(row.opp_verdict) ? row.completed_at : "");
-            if (moscowDateFromValue(noShkAt) === date && (noShk.result || isQuickNoShkVerdict(row.opp_verdict))) {
-                const actor = staffStatsNoShkActor(row);
-                const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
-                const result = normalizeText(noShk.result) || normalizeText(row.opp_verdict);
-                employee.noShkChecked += 1;
-                if (isQuickNoShkFoundResult(result)) employee.noShkFound += 1;
-                incrementCounter(employee.verdicts, result, 1);
-                employee.details.noShk.push({
-                    id: row.id,
-                    title: displayTaskTitle(row),
-                    meta: [result, noShk.shk ? "ШК " + noShk.shk : "", noShk.name || taskItemName(row), formatRuDateTime(noShkAt)].filter(Boolean).join(" · "),
-                });
-            }
             const deferredAt = normalizeText(review.deferred_at);
-            if (deferredAt && moscowDateFromValue(deferredAt) === date && !historyDeferredTaskIds.has(normalizeText(row.id))) {
-                const employee = ensureStaffStatsRow(byEmployee, review.deferred_by_id, review.deferred_by_name);
-                employee.deferred += 1;
-                employee.tasksCompleted += 1;
-                employee.details.deferred.push({
-                    id: row.id,
-                    title: displayTaskTitle(row),
-                    meta: [review.defer_reason ? "Причина: " + review.defer_reason : "", review.reopen_after ? "Переоткрытие: " + formatRuDateTime(review.reopen_after) : "", formatRuDateTime(deferredAt)].filter(Boolean).join(" · "),
-                });
+            const deferredKey = "task_deferred:" + normalizeText(row.id);
+            if (deferredAt && moscowDateFromValue(deferredAt) === date && !historyByTaskAndType.has(deferredKey)) {
+                const employee = staffStatsEmployeeForActor(byEmployee, { id: review.deferred_by_id, name: review.deferred_by_name });
+                if (employee) staffStatsRecordTaskAction(employee, row, { created_at: deferredAt, payload: { reopen_after: review.reopen_after } }, "", true);
             }
         });
         (prespisokActions || []).filter((row) => moscowDateFromValue(row.created_at) === date).forEach((row) => {
-            const actor = staffStatsPrespisokActor(row);
-            const employee = ensureStaffStatsRow(byEmployee, actor.id, actor.name);
-            const shkCount = sourceShkCountFromPrespisokAction(row);
+            const employee = staffStatsEmployeeForActor(byEmployee, staffStatsPrespisokActor(row));
+            if (!employee) return;
+            const shks = staffStatsShksFromPrespisokAction(row);
             const verdict = normalizeText(row.verdict) || "Не указан";
             employee.prespisokTargets += 1;
-            employee.prespisokShk += shkCount;
-            incrementCounter(employee.verdicts, verdict, 1);
-            employee.details.prespisok.push({
-                title: normalizeText(row.entity_type) === "tare" ? "Тара " + normalizeText(row.entity_id) : "ШК " + normalizeText(row.entity_id),
-                meta: [verdict, shkCount + " ШК", formatMoney(row.price), formatRuDateTime(row.created_at)].filter(Boolean).join(" · "),
+            employee.prespisokShk += shks.length || 1;
+            const meta = [verdict, formatMoney(row.price), formatRuDateTime(row.created_at)].filter(Boolean).join(" · ");
+            employee.details.prespisok.push(...(shks.length ? shks : [""]).map((shk) => ({
+                title: shk ? "ШК " + shk : "Тара " + (normalizeIdentifier(row.entity_id) || "—"),
+                meta,
+            })));
+        });
+        (noShkStickerEvents || []).filter((row) => moscowDateFromValue(row.created_at) === date).forEach((row) => {
+            const employee = staffStatsEmployeeForActor(byEmployee, { id: row.actor_employee_id, name: row.actor_name });
+            if (!employee) return;
+            const shk = decodeNoShkStickerCode(normalizeText(row.sticker_code)) || normalizeText(row.sticker_code) || "—";
+            employee.noShkFound += 1;
+            employee.details.noShk.push({
+                title: "ШК " + shk,
+                meta: [normalizeText(row.source) === "form" ? "Присвоен через форму" : "Присвоен через ленту Без ШК", formatRuDateTime(row.created_at)].filter(Boolean).join(" · "),
             });
         });
         const rows = Array.from(byEmployee.values())
@@ -16332,11 +16374,11 @@
         const summary = state.staffStats.summary || {};
         summaryWrap.innerHTML = [
             ["Сотрудников", summary.employees || 0],
-            ["Ручных задач", summary.tasksCompleted || 0],
+            ["Задач", summary.tasksCompleted || 0],
             ["Запросов", summary.requestsCompleted || 0],
             ["ШК предсписка", summary.prespisokShk || 0],
-            ["Без ШК найдено", summary.noShkFound || 0],
-            ["Отложено", summary.deferred || 0],
+            ["Без ШК: стикер", summary.noShkFound || 0],
+            ["Отложено вручную", summary.deferred || 0],
         ].map((item) => "<div class='staff-stat-tile'><span>" + escapeHtml(item[0]) + "</span><strong>" + escapeHtml(item[1]) + "</strong></div>").join("");
         if (!state.staffStats.employees.length) {
             grid.innerHTML = "<div class='staff-stats-empty'>За эту дату пока нет действий. Тишина подозрительная, но статистически допустимая.</div>";
@@ -16355,8 +16397,8 @@
                 + "<div class='staff-card-stat'><span>Задачи</span><strong>" + employee.tasksCompleted + "</strong></div>"
                 + "<div class='staff-card-stat'><span>Запросы</span><strong>" + employee.requestsCompleted + "</strong></div>"
                 + "<div class='staff-card-stat'><span>Предсписок</span><strong>" + employee.prespisokShk + "</strong></div>"
-                + "<div class='staff-card-stat'><span>Без ШК</span><strong>" + employee.noShkFound + "</strong></div>"
-                + "<div class='staff-card-stat'><span>Отложил</span><strong>" + employee.deferred + "</strong></div>"
+                + "<div class='staff-card-stat'><span>Без ШК: стикер</span><strong>" + employee.noShkFound + "</strong></div>"
+                + "<div class='staff-card-stat'><span>Отложил вручную</span><strong>" + employee.deferred + "</strong></div>"
                 + "<div class='staff-card-stat'><span>Вердикты</span><strong>" + Object.values(employee.verdicts || {}).reduce((sum, value) => sum + value, 0) + "</strong></div>"
                 + "</div>"
                 + "<div class='staff-verdict-strip'>" + (topVerdicts.length ? topVerdicts.map(([label, count]) => "<span class='staff-verdict-chip'>" + escapeHtml(label) + ": " + count + "</span>").join("") : "<span class='staff-verdict-chip'>Вердиктов нет</span>") + "</div>"
@@ -16366,6 +16408,7 @@
             button.addEventListener("click", () => {
                 state.staffStats.selectedKey = button.dataset.staffStatsKey || "";
                 state.staffStats.activeTab = "tasks";
+                state.staffStats.detailScope = null;
                 renderStaffStatsModal();
             });
         });
@@ -16377,12 +16420,12 @@
         if (tab === "verdicts") {
             return Object.entries(employee.verdicts || {})
                 .sort((a, b) => b[1] - a[1])
-                .map(([label, count]) => ({ title: label, meta: count + " раз" }));
+                .map(([label, count]) => ({ title: label, meta: count + " задач · открыть ШК", scope: { kind: "verdicts", key: label } }));
         }
         if (tab === "sections") {
             return Object.entries(employee.sections || {})
                 .sort((a, b) => b[1] - a[1])
-                .map(([label, count]) => ({ title: label, meta: count + " задач" }));
+                .map(([label, count]) => ({ title: label, meta: count + " задач · открыть ШК", scope: { kind: "sections", key: label } }));
         }
         return employee.details[tab] || [];
     }
@@ -16396,7 +16439,7 @@
             return;
         }
         const tabs = [
-            ["tasks", "Задачи", employee.details.tasks.length],
+            ["tasks", "ШК задач", employee.details.tasks.length],
             ["requests", "Запросы", employee.details.requests.length],
             ["prespisok", "Предсписок", employee.details.prespisok.length],
             ["noShk", "Без ШК", employee.details.noShk.length],
@@ -16406,15 +16449,35 @@
         ];
         const active = tabs.some(([key]) => key === state.staffStats.activeTab) ? state.staffStats.activeTab : "tasks";
         state.staffStats.activeTab = active;
-        const rows = staffStatsTabRows(employee, active);
+        const scope = state.staffStats.detailScope;
+        const rows = scope && scope.kind && scope.key
+            ? ((employee.details[scope.kind] || {})[scope.key] || [])
+            : staffStatsTabRows(employee, active);
+        const scopeTitle = scope && scope.kind && scope.key ? scope.key : "";
         detail.innerHTML = "<div class='staff-stats-detail-head'><div><h4 class='staff-stats-detail-title'>" + escapeHtml(employee.name) + "</h4><p class='staff-stats-detail-sub'>" + escapeHtml([employee.id ? "ID " + employee.id : "", "дата " + formatRuDate(state.staffStats.date)].filter(Boolean).join(" · ")) + "</p></div></div>"
             + "<div class='staff-detail-tabs'>" + tabs.map(([key, label, count]) => "<button class='staff-detail-tab" + (key === active ? " active" : "") + "' type='button' data-staff-stats-tab='" + escapeHtml(key) + "'>" + escapeHtml(label + " · " + count) + "</button>").join("") + "</div>"
-            + "<div class='staff-detail-list'>" + (rows.length ? rows.map((row) => "<div class='staff-detail-row" + (row.id ? " copyable" : "") + "' " + (row.id ? "data-staff-task-id='" + escapeHtml(row.id) + "'" : "") + "><strong>" + escapeHtml(row.title || "-") + "</strong><span>" + escapeHtml(row.meta || "-") + "</span></div>").join("") : "<div class='staff-stats-empty'>В этом разделе пусто.</div>") + "</div>";
+            + (scopeTitle ? "<button class='staff-detail-scope-back' type='button' data-staff-stats-scope-back>← Все " + escapeHtml(scope.kind === "verdicts" ? "вердикты" : "участки") + "</button><p class='staff-detail-scope-title'>" + escapeHtml(scopeTitle) + " · ШК: " + rows.length + "</p>" : "")
+            + "<div class='staff-detail-list'>" + (rows.length ? rows.map((row) => {
+                const scopeData = row.scope ? " data-staff-stats-scope-kind='" + escapeHtml(row.scope.kind) + "' data-staff-stats-scope-key='" + escapeHtml(row.scope.key) + "'" : "";
+                return "<button type='button' class='staff-detail-row" + (row.id ? " copyable" : "") + (row.scope ? " scope" : "") + "' " + (row.id ? "data-staff-task-id='" + escapeHtml(row.id) + "'" : "") + scopeData + "><strong>" + escapeHtml(row.title || "-") + "</strong><span>" + escapeHtml(row.meta || "-") + "</span></button>";
+            }).join("") : "<div class='staff-stats-empty'>В этом разделе пусто.</div>") + "</div>";
         detail.querySelectorAll("[data-staff-stats-tab]").forEach((button) => {
             button.addEventListener("click", () => {
                 state.staffStats.activeTab = button.dataset.staffStatsTab || "tasks";
+                state.staffStats.detailScope = null;
                 renderStaffStatsDetail();
             });
+        });
+        detail.querySelectorAll("[data-staff-stats-scope-kind]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.staffStats.detailScope = { kind: button.dataset.staffStatsScopeKind || "", key: button.dataset.staffStatsScopeKey || "" };
+                renderStaffStatsDetail();
+            });
+        });
+        const scopeBack = detail.querySelector("[data-staff-stats-scope-back]");
+        if (scopeBack) scopeBack.addEventListener("click", () => {
+            state.staffStats.detailScope = null;
+            renderStaffStatsDetail();
         });
         detail.querySelectorAll("[data-staff-task-id]").forEach((row) => {
             row.addEventListener("click", () => {
@@ -16443,11 +16506,12 @@
         state.staffStats.error = "";
         renderStaffStatsModal();
         try {
-            const [completedRead, updatedRead, historyRead, prespisokRead, employeesRead] = await Promise.all([
+            const [completedRead, updatedRead, historyRead, prespisokRead, noShkStickerRead, employeesRead] = await Promise.all([
                 db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("completed_at", bounds.start).lt("completed_at", bounds.end).order("completed_at", { ascending: false, nullsFirst: false }).limit(10000),
                 db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("updated_at", bounds.start).lt("updated_at", bounds.end).order("updated_at", { ascending: false, nullsFirst: false }).limit(10000),
                 readOptionalRows(db, FLOW_HISTORY_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
                 readOptionalRows(db, WMS_PRESPISOK_ACTIONS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
+                readOptionalRows(db, WMS_NO_SHK_STICKER_EVENTS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
                 readOptionalRows(db, WMS_EMPLOYEES_TABLE, (query) => query.select("*").eq("is_active", true).order("full_name", { ascending: true })),
             ]);
             if (completedRead.error) throw completedRead.error;
@@ -16456,11 +16520,20 @@
             [...(completedRead.data || []), ...(updatedRead.data || [])].forEach((row) => {
                 if (row && row.id) byId.set(row.id, row);
             });
+            const historyTaskIds = Array.from(new Set((historyRead.ok ? historyRead.rows : []).map((row) => normalizeIdentifier(row && row.task_id)).filter(Boolean)));
+            if (historyTaskIds.length) {
+                const historyTasksRead = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).in("id", historyTaskIds).limit(10000);
+                if (historyTasksRead.error) throw historyTasksRead.error;
+                (historyTasksRead.data || []).forEach((row) => {
+                    if (row && row.id) byId.set(row.id, row);
+                });
+            }
             state.staffStats.taskRowsById = Object.fromEntries(Array.from(byId.values()).filter((row) => row && row.id).map((row) => [row.id, row]));
             const built = buildStaffStats(
                 Array.from(byId.values()),
                 historyRead.ok ? historyRead.rows : [],
                 prespisokRead.ok ? prespisokRead.rows : [],
+                noShkStickerRead.ok ? noShkStickerRead.rows : [],
                 employeesRead.ok ? employeesRead.rows : state.shift.employees,
                 date,
             );
@@ -21936,10 +22009,14 @@
         $("closeStatusDictionaryEdit").addEventListener("click", closeStatusDictionaryEditModal);
         $("statusDictionaryEditModal").addEventListener("click", (event) => { if (event.target === $("statusDictionaryEditModal")) closeStatusDictionaryEditModal(); });
         $("closeStaffStats").addEventListener("click", closeStaffStatsModal);
-        $("reloadStaffStats").addEventListener("click", () => { void loadStaffStats(); });
+        $("reloadStaffStats").addEventListener("click", () => {
+            state.staffStats.detailScope = null;
+            void loadStaffStats();
+        });
         $("staffStatsDate").addEventListener("change", () => {
             state.staffStats.date = normalizeText($("staffStatsDate").value) || state.today || todayIsoInMoscow();
             state.staffStats.selectedKey = "";
+            state.staffStats.detailScope = null;
             void loadStaffStats();
         });
         $("closeRoutingRules").addEventListener("click", closeRoutingRulesModal);
