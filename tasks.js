@@ -2527,8 +2527,8 @@
         const [completedRead, updatedRead, historyRead, prespisokRead, employeesRead] = await Promise.all([
             db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("completed_at", bounds.start).lt("completed_at", bounds.end).order("completed_at", { ascending: false, nullsFirst: false }).limit(10000),
             db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("updated_at", bounds.start).lt("updated_at", bounds.end).order("updated_at", { ascending: false, nullsFirst: false }).limit(10000),
-            readOptionalRows(db, FLOW_HISTORY_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
-            readOptionalRows(db, WMS_PRESPISOK_ACTIONS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
+            readOptionalRowsPaged(db, FLOW_HISTORY_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false })),
+            readOptionalRowsPaged(db, WMS_PRESPISOK_ACTIONS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false })),
             readOptionalRows(db, WMS_EMPLOYEES_TABLE, (query) => query.select("*").eq("is_active", true).order("full_name", { ascending: true })),
         ]);
         if (completedRead.error) throw completedRead.error;
@@ -14297,6 +14297,30 @@
         }
     }
 
+    // PostgREST caps a single response even when a larger `.limit()` is
+    // requested. A busy shift can have more than a thousand history records,
+    // and silently accepting that first page makes the Pulse look as if older
+    // actions have disappeared. Use ranges and collect until the server
+    // returns a short page.
+    async function readOptionalRowsPaged(db, table, buildQuery, pageSize = 1000) {
+        const rows = [];
+        let from = 0;
+        try {
+            while (true) {
+                const result = await buildQuery(db.from(table)).range(from, from + pageSize - 1);
+                if (result.error) throw result.error;
+                const page = Array.isArray(result.data) ? result.data : [];
+                rows.push(...page);
+                if (page.length < pageSize) break;
+                from += pageSize;
+            }
+            return { ok: true, rows };
+        } catch (error) {
+            console.warn("optional paged table read failed:", table, error);
+            return { ok: false, rows: [], error };
+        }
+    }
+
     async function loadStatusDictionary(force) {
         if (state.statusDictionary.loaded && !force) return true;
         const db = supabaseDb();
@@ -16818,9 +16842,9 @@
             const [completedRead, updatedRead, historyRead, prespisokRead, noShkStickerRead, employeesRead] = await Promise.all([
                 db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("completed_at", bounds.start).lt("completed_at", bounds.end).order("completed_at", { ascending: false, nullsFirst: false }).limit(10000),
                 db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("updated_at", bounds.start).lt("updated_at", bounds.end).order("updated_at", { ascending: false, nullsFirst: false }).limit(10000),
-                readOptionalRows(db, FLOW_HISTORY_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
-                readOptionalRows(db, WMS_PRESPISOK_ACTIONS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
-                readOptionalRows(db, WMS_NO_SHK_STICKER_EVENTS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false }).limit(10000)),
+                readOptionalRowsPaged(db, FLOW_HISTORY_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false })),
+                readOptionalRowsPaged(db, WMS_PRESPISOK_ACTIONS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false })),
+                readOptionalRowsPaged(db, WMS_NO_SHK_STICKER_EVENTS_TABLE, (query) => query.select("*").gte("created_at", bounds.start).lt("created_at", bounds.end).order("created_at", { ascending: false })),
                 readOptionalRows(db, WMS_EMPLOYEES_TABLE, (query) => query.select("*").eq("is_active", true).order("full_name", { ascending: true })),
             ]);
             if (completedRead.error) throw completedRead.error;
