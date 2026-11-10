@@ -105,9 +105,15 @@
         .tasks-action-title { margin: 18px 0 8px; font-size: 24px; line-height: 1; color: var(--accent-dark); }
         .tasks-action-text { margin: 0; color: #64748b; line-height: 1.45; font-size: 14px; }
         .home-trend-card { border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); padding: 18px 20px 14px; }
-        .home-trend-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; color: #0f172a; font-size: 15px; }
+        .home-trend-head { display: grid; grid-template-columns: 38px minmax(0, 1fr) 38px; align-items: center; gap: 10px; color: #0f172a; font-size: 15px; }
+        .home-trend-head-copy { min-width: 0; display: grid; gap: 3px; }
+        .home-trend-head-copy strong { font-size: 15px; }
         .home-trend-note { color: #64748b; font-size: 12px; font-weight: 600; }
+        .home-trend-nav { width: 38px; height: 38px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; color: #475569; font: inherit; font-size: 20px; line-height: 1; cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+        .home-trend-nav:hover { transform: translateY(-1px); border-color: rgba(98,60,234,.4); box-shadow: var(--shadow-sm); color: var(--accent-dark); }
         .home-trend-chart { position: relative; margin-top: 10px; }
+        .home-trend-chart.is-switching svg, .home-trend-chart.is-switching .home-trend-empty { animation: homeTrendSwap .36s ease both; }
+        @keyframes homeTrendSwap { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
         .home-trend-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
         .home-trend-chart .home-trend-empty { color: #64748b; font-size: 13px; padding: 30px 0; text-align: center; }
         .home-trend-loading { display: grid; place-items: center; min-height: 178px; gap: 10px; color: #64748b; font-size: 13px; font-weight: 700; animation: homeTrendLoadingIn .2s ease-out both; }
@@ -140,6 +146,13 @@
         .home-trend-legend-item:hover { color: var(--accent-dark); }
         .home-trend-legend-item.is-hidden { opacity: .38; text-decoration: line-through; }
         .home-trend-legend-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+        .home-trend-status { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 13px; color: #64748b; font-size: 11px; font-weight: 850; }
+        .home-trend-status-track { height: 5px; overflow: hidden; border-radius: 99px; background: #e9e8f4; }
+        .home-trend-status-progress { display: block; width: 100%; height: 100%; transform-origin: left; border-radius: inherit; background: linear-gradient(90deg, #623cea, #8b5cf6); animation: homeTrendCountdown 10s linear forwards; }
+        @keyframes homeTrendCountdown { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+        .home-trend-status-dots { display: inline-flex; gap: 5px; }
+        .home-trend-status-dots i { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+        .home-trend-status-dots i.active { background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
         .home-review-btn { display: flex; align-items: center; gap: 16px; width: 100%; margin-top: 14px; padding: 18px 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); text-align: left; color: #0f172a; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
         .home-review-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }
         .home-review-btn .tasks-action-icon { flex: none; }
@@ -2182,10 +2195,16 @@
             </div>
             <div id="homeTrendCard" class="home-trend-card">
                 <div class="home-trend-head">
-                    <strong>Остаток задач</strong>
+                    <button id="homeTrendPrev" class="home-trend-nav" type="button" aria-label="Предыдущий график">‹</button>
+                    <div class="home-trend-head-copy">
+                        <strong id="homeTrendTitle">Остаток задач</strong>
+                        <span id="homeTrendNote" class="home-trend-note">Активные задачи по участкам</span>
+                    </div>
+                    <button id="homeTrendNext" class="home-trend-nav" type="button" aria-label="Следующий график">›</button>
                 </div>
                 <div id="homeTrendChart" class="home-trend-chart"></div>
                 <div id="homeTrendLegend" class="home-trend-legend"></div>
+                <div id="homeTrendStatus" class="home-trend-status" aria-live="polite"></div>
             </div>
             <button id="openReview" class="home-review-btn" type="button">
                 <span class="tasks-action-icon">✓</span>
@@ -2862,9 +2881,6 @@
                 <label class="staff-stats-date" for="staffStatsDate">Дата
                     <input id="staffStatsDate" type="date">
                 </label>
-                <div class="file-row" style="margin-top:0">
-                    <button id="reloadStaffStats" class="btn btn-rect" type="button">Обновить статистику</button>
-                </div>
             </div>
             <div id="staffStatsStatus" class="review-status"></div>
             <div id="staffStatsSummary" class="staff-stats-summary"></div>

@@ -29,6 +29,7 @@
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
     const WMS_NO_SHK_STICKER_EVENTS_TABLE = "wms_no_shk_sticker_events";
     const WMS_STAFF_PULSE_SNAPSHOT_TABLE = "wms_staff_shift_pulse_snapshots";
+    const WMS_STAFF_PULSE_DAILY_SNAPSHOT_TABLE = "wms_staff_shift_pulse_daily_snapshot";
     const STAFF_PULSE_SNAPSHOT_VERSION = 1;
     const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
     const WMS_USER_PROFILES_TABLE = "wms_user_profiles";
@@ -786,6 +787,13 @@
             series: [],
             reopenPoints: [],
             hiddenSeries: new Set(),
+            mode: "active",
+            activeData: { days: [], series: [], reopenPoints: [] },
+            pulseData: { days: [], series: [], reopenPoints: [] },
+            pulseLoading: false,
+            pulseLoaded: false,
+            pulseError: "",
+            rotationTimer: null,
             lastSnapshotCaptureAt: 0,
             refreshAfterSnapshot: false,
         },
@@ -3325,11 +3333,110 @@
             .catch((error) => console.warn("active tasks snapshot capture failed:", error));
     }
 
+    function homeTrendModeConfig() {
+        return state.homeTrend.mode === "pulse"
+            ? { title: "Пульс смены", note: "Действия сотрудников по дням", label: "Пульс смены за 14 дней" }
+            : { title: "Остаток задач", note: "Активные задачи по участкам", label: "Остаток задач за 14 дней" };
+    }
+
+    function syncHomeTrendDisplayedData() {
+        const data = state.homeTrend.mode === "pulse" ? state.homeTrend.pulseData : state.homeTrend.activeData;
+        state.homeTrend.days = data.days || [];
+        state.homeTrend.series = data.series || [];
+        state.homeTrend.reopenPoints = data.reopenPoints || [];
+    }
+
+    function renderHomeTrendStatus() {
+        const status = $("homeTrendStatus");
+        if (!status) return;
+        const pulse = state.homeTrend.mode === "pulse";
+        status.innerHTML = "<span>Следующий график через 10 сек.</span>"
+            + "<span class='home-trend-status-track'><i class='home-trend-status-progress'></i></span>"
+            + "<span class='home-trend-status-dots' aria-label='" + (pulse ? "Показан Пульс смены" : "Показан Остаток задач") + "'><i class='" + (!pulse ? "active" : "") + "'></i><i class='" + (pulse ? "active" : "") + "'></i></span>";
+    }
+
+    function renderHomeTrendCard(animate) {
+        syncHomeTrendDisplayedData();
+        const config = homeTrendModeConfig();
+        const title = $("homeTrendTitle");
+        const note = $("homeTrendNote");
+        if (title) title.textContent = config.title;
+        if (note) note.textContent = config.note;
+        renderHomeTrendStatus();
+        renderHomeActiveTrendChart();
+        const chart = $("homeTrendChart");
+        if (animate && chart) {
+            chart.classList.remove("is-switching");
+            void chart.offsetWidth;
+            chart.classList.add("is-switching");
+            setTimeout(() => chart.classList.remove("is-switching"), 420);
+        }
+    }
+
+    function setHomeTrendMode(mode, animate) {
+        const next = mode === "pulse" ? "pulse" : "active";
+        state.homeTrend.mode = next;
+        if (next === "pulse" && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
+        renderHomeTrendCard(animate);
+    }
+
+    function rotateHomeTrend(direction) {
+        const next = state.homeTrend.mode === "active" ? "pulse" : "active";
+        setHomeTrendMode(direction === "previous" ? (next === "active" ? "pulse" : "active") : next, true);
+    }
+
+    function ensureHomeTrendRotation() {
+        if (state.homeTrend.rotationTimer) return;
+        state.homeTrend.rotationTimer = setInterval(() => {
+            if (state.view === "home") rotateHomeTrend("next");
+        }, 10000);
+    }
+
+    async function loadHomeShiftPulseTrend() {
+        const db = supabaseDb();
+        if (!db || state.homeTrend.pulseLoading) return;
+        state.homeTrend.pulseLoading = true;
+        state.homeTrend.pulseError = "";
+        if (state.homeTrend.mode === "pulse") renderHomeTrendCard();
+        try {
+            const since = addDays(state.today, -(HOME_TREND_HISTORY_DAYS - 1));
+            const { data, error } = await db.from(WMS_STAFF_PULSE_DAILY_SNAPSHOT_TABLE)
+                .select("snapshot_date,tasks_count,no_shk_count,requests_count")
+                .gte("snapshot_date", since)
+                .lte("snapshot_date", state.today)
+                .order("snapshot_date", { ascending: true });
+            if (error) throw error;
+            const byDay = new Map((data || []).map((row) => [normalizeText(row.snapshot_date), row]));
+            const days = Array.from({ length: HOME_TREND_HISTORY_DAYS }, (_, index) => addDays(since, index));
+            const makeSeries = (zone, color, field) => ({
+                zone,
+                color,
+                points: days.map((day) => Number((byDay.get(day) || {})[field]) || 0),
+            });
+            state.homeTrend.pulseData = {
+                days,
+                series: [
+                    makeSeries("Задач", "#2a78d6", "tasks_count"),
+                    makeSeries("Без ШК", "#7c3aed", "no_shk_count"),
+                    makeSeries("Запросы", "#eb6834", "requests_count"),
+                ],
+                reopenPoints: [],
+            };
+            state.homeTrend.pulseLoaded = true;
+        } catch (error) {
+            console.warn("home shift pulse load failed:", error);
+            state.homeTrend.pulseError = "Не удалось загрузить Пульс смены: " + (error && error.message ? error.message : String(error));
+        } finally {
+            state.homeTrend.pulseLoading = false;
+            if (state.homeTrend.mode === "pulse") renderHomeTrendCard();
+        }
+    }
+
     async function loadHomeActiveTrend() {
         const db = supabaseDb();
         state.homeTrend.loading = true;
         state.homeTrend.error = "";
-        renderHomeActiveTrendChart();
+        if (state.homeTrend.mode === "active") renderHomeTrendCard();
         if (!db) { state.homeTrend.loading = false; return; }
         try {
             const since = addDays(state.today, -(HOME_TREND_HISTORY_DAYS - 1));
@@ -3401,16 +3508,14 @@
                 const day = moscowDateFromValue(row && row.reopen_after);
                 if (reopenByDay.has(day)) reopenByDay.set(day, (reopenByDay.get(day) || 0) + 1);
             });
-            state.homeTrend.days = days;
-            state.homeTrend.series = series;
-            state.homeTrend.reopenPoints = days.map((day) => reopenByDay.get(day) || 0);
+            state.homeTrend.activeData = { days, series, reopenPoints: days.map((day) => reopenByDay.get(day) || 0) };
             state.homeTrend.loaded = true;
         } catch (error) {
             console.warn("home active trend load failed:", error);
             state.homeTrend.error = "Не удалось загрузить диаграмму: " + (error && error.message ? error.message : String(error));
         } finally {
             state.homeTrend.loading = false;
-            renderHomeActiveTrendChart();
+            if (state.homeTrend.mode === "active") renderHomeTrendCard();
             if (state.homeTrend.refreshAfterSnapshot) {
                 state.homeTrend.refreshAfterSnapshot = false;
                 void loadHomeActiveTrend();
@@ -3433,7 +3538,7 @@
             .map((item) => "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + item.color + "'></span>" + escapeHtml(item.zone) + ": <strong>" + (item.points[dayIndex] == null ? "—" : item.points[dayIndex]) + "</strong></div>")
             .join("");
         const reopens = state.homeTrend.reopenPoints[dayIndex] || 0;
-        const reopenRow = state.homeTrend.hiddenSeries.has(HOME_TREND_REOPEN_SERIES_KEY) ? "" : "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + HOME_TREND_REOPEN_COLOR + "'></span>Переоткрыто задач: <strong>" + reopens + "</strong></div>";
+        const reopenRow = state.homeTrend.mode === "pulse" || state.homeTrend.hiddenSeries.has(HOME_TREND_REOPEN_SERIES_KEY) ? "" : "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + HOME_TREND_REOPEN_COLOR + "'></span>Переоткрыто задач: <strong>" + reopens + "</strong></div>";
         return "<div class='home-trend-tooltip-date'>" + escapeHtml(homeTrendDateLabel(day)) + "</div>" + rows + reopenRow;
     }
 
@@ -3490,19 +3595,23 @@
     function renderHomeActiveTrendChart() {
         const target = $("homeTrendChart");
         if (!target) return;
-        if (state.homeTrend.loading && !state.homeTrend.loaded) {
+        const isPulse = state.homeTrend.mode === "pulse";
+        const loading = isPulse ? state.homeTrend.pulseLoading : state.homeTrend.loading;
+        const loaded = isPulse ? state.homeTrend.pulseLoaded : state.homeTrend.loaded;
+        const error = isPulse ? state.homeTrend.pulseError : state.homeTrend.error;
+        if (loading && !loaded) {
             target.innerHTML = "<div class='home-trend-loading' role='status'><span class='home-trend-loading-bars' aria-hidden='true'><i></i><i></i><i></i><i></i></span><span>Считаю остаток по дням...</span></div>";
             return;
         }
-        if (state.homeTrend.error && !state.homeTrend.loaded) {
-            target.innerHTML = "<div class='home-trend-empty'>" + escapeHtml(state.homeTrend.error) + "</div>";
+        if (error && !loaded) {
+            target.innerHTML = "<div class='home-trend-empty'>" + escapeHtml(error) + "</div>";
             return;
         }
         const days = state.homeTrend.days;
         const series = state.homeTrend.series;
         const reopenPoints = state.homeTrend.reopenPoints;
         const visibleSeries = series.filter((item) => !state.homeTrend.hiddenSeries.has(item.zone));
-        const reopenVisible = !state.homeTrend.hiddenSeries.has(HOME_TREND_REOPEN_SERIES_KEY);
+        const reopenVisible = !isPulse && !state.homeTrend.hiddenSeries.has(HOME_TREND_REOPEN_SERIES_KEY);
         if (!days.length || (!series.length && !reopenPoints.length)) {
             target.innerHTML = "<div class='home-trend-empty'>Пока нет данных по активным задачам.</div>";
             return;
@@ -3566,8 +3675,9 @@
         const reopenHitsHtml = reopenVisible ? reopenPoints.map((value, index) => (
             "<circle data-trend-reopen data-trend-day-index='" + index + "' cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='7' fill='transparent' style='cursor:pointer' />"
         )).join("") : "";
-        target.innerHTML = "<svg class='home-trend-svg' viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Остаток задач за 14 дней'>"
-            + "<title>Остаток задач и переоткрытия за 14 дней с прогнозом на 2 дня</title>"
+        const config = homeTrendModeConfig();
+        target.innerHTML = "<svg class='home-trend-svg' viewBox='0 0 " + width + " " + height + "' role='img' aria-label='" + escapeHtml(config.label) + "'>"
+            + "<title>" + escapeHtml(config.label) + "</title>"
             + gridLinesHtml + linesHtml + reopenLineHtml + xLabelsHtml
             + "<circle id='homeTrendHoverDot' r='5' fill='#0f172a' stroke='#fff' stroke-width='2' style='display:none;pointer-events:none' />"
             + pointHitsHtml + reopenHitsHtml + dateLabelHitsHtml
@@ -3651,7 +3761,7 @@
                 return "<button type='button' class='home-trend-legend-item" + (hidden ? " is-hidden" : "") + "' data-home-trend-series='" + escapeHtml(key) + "' aria-pressed='" + (!hidden) + "' title='" + (hidden ? "Показать" : "Скрыть") + " линию: " + escapeHtml(label) + "'><span class='home-trend-legend-dot' style='background:" + color + "'></span>" + escapeHtml(label) + "</button>";
             };
             legendTarget.innerHTML = series.map((item) => legendItemHtml(item.zone, item.zone, item.color)).join("")
-                + legendItemHtml(HOME_TREND_REOPEN_SERIES_KEY, "Переоткрыто задач", HOME_TREND_REOPEN_COLOR);
+                + (isPulse ? "" : legendItemHtml(HOME_TREND_REOPEN_SERIES_KEY, "Переоткрыто задач", HOME_TREND_REOPEN_COLOR));
             legendTarget.querySelectorAll("[data-home-trend-series]").forEach((item) => {
                 item.addEventListener("click", () => {
                     const key = item.dataset.homeTrendSeries;
@@ -3677,6 +3787,9 @@
         void refreshPrespisokHomeState();
         void refreshPrespisokLeaderboard();
         if (!state.homeTrend.loaded && !state.homeTrend.loading) void loadHomeActiveTrend();
+        if (!state.homeTrend.pulseLoaded && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
+        ensureHomeTrendRotation();
+        renderHomeTrendCard();
     }
 
     function formatMinutesCountdown(minutes) {
@@ -16376,7 +16489,7 @@
 
     async function saveStaffStatsSnapshot(db, date, built) {
         if (!db || !date || !built) return;
-        const { error } = await db.from(WMS_STAFF_PULSE_SNAPSHOT_TABLE).upsert({
+        const snapshotWrite = db.from(WMS_STAFF_PULSE_SNAPSHOT_TABLE).upsert({
             shift_date: date,
             snapshot: {
                 version: STAFF_PULSE_SNAPSHOT_VERSION,
@@ -16386,7 +16499,9 @@
             },
             updated_at: new Date().toISOString(),
         }, { onConflict: "shift_date" });
+        const { error } = await snapshotWrite;
         if (error) throw error;
+        if (state.homeTrend.pulseLoaded && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
     }
 
     function renderStaffStatsModal() {
@@ -16644,7 +16759,7 @@
         state.staffStats.date = state.staffStats.date || state.today || todayIsoInMoscow();
         setFlowModalOpen("staffStatsModal", true);
         renderStaffStatsModal();
-        void loadStaffStats();
+        void loadStaffStats(true);
     }
 
     function closeStaffStatsModal() {
@@ -22095,10 +22210,8 @@
         $("closeStatusDictionaryEdit").addEventListener("click", closeStatusDictionaryEditModal);
         $("statusDictionaryEditModal").addEventListener("click", (event) => { if (event.target === $("statusDictionaryEditModal")) closeStatusDictionaryEditModal(); });
         $("closeStaffStats").addEventListener("click", closeStaffStatsModal);
-        $("reloadStaffStats").addEventListener("click", () => {
-            state.staffStats.detailScope = null;
-            void loadStaffStats(true);
-        });
+        $("homeTrendPrev").addEventListener("click", () => rotateHomeTrend("previous"));
+        $("homeTrendNext").addEventListener("click", () => rotateHomeTrend("next"));
         $("staffStatsDate").addEventListener("change", () => {
             state.staffStats.date = normalizeText($("staffStatsDate").value) || state.today || todayIsoInMoscow();
             state.staffStats.selectedKey = "";
