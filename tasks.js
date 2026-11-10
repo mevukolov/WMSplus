@@ -782,6 +782,7 @@
             reopenPoints: [],
             hiddenSeries: new Set(),
             lastSnapshotCaptureAt: 0,
+            refreshAfterSnapshot: false,
         },
         inactive: {
             rows: [],
@@ -3216,6 +3217,15 @@
     const HOME_TREND_GRAY_RAMP = ["#94a3b8", "#64748b", "#475569", "#1e293b"];
     const HOME_TREND_REOPEN_COLOR = "#94a3b8";
     const HOME_TREND_REOPEN_SERIES_KEY = "__reopens__";
+    // Эти три блока показываются в «Задачах», но не входят в обычные
+    // участки Предразбора. Держим для них стабильные цвета: порядок по
+    // остаткам меняется ежедневно и не должен менять смысл линии.
+    const HOME_TREND_BLOCK_SERIES = [
+        { zone: "Без ШК", color: "#7c3aed" },
+        { zone: "Списания AWH", color: "#dc2626" },
+        { zone: "Коробки на входе", color: "#0891b2" },
+    ];
+    const HOME_TREND_BLOCK_ZONE_SET = new Set(HOME_TREND_BLOCK_SERIES.map((item) => item.zone));
     const HOME_TREND_SNAPSHOT_THROTTLE_MS = 10 * 60 * 1000;
     const HOME_TREND_HISTORY_DAYS = 14;
     const HOME_TREND_FORECAST_DAYS = 2;
@@ -3223,6 +3233,47 @@
     function homeTrendDateLabel(isoDate) {
         const match = normalizeText(isoDate).match(/^\d{4}-(\d{2})-(\d{2})$/);
         return match ? match[2] + "." + match[1] : isoDate;
+    }
+
+    function homeTrendSnapshotRow(snapshotDate, zone, rows) {
+        const sourceRows = Array.isArray(rows) ? rows : [];
+        return {
+            snapshot_date: snapshotDate,
+            zone,
+            active_count: sourceRows.length,
+            total_price: Math.round(sourceRows.reduce((sum, row) => sum + reviewPrice(row), 0) * 100) / 100,
+            updated_at: new Date().toISOString(),
+        };
+    }
+
+    function refreshHomeTrendAfterSnapshot() {
+        // На первом входе график уже мог успеть прочитать снимок до
+        // загрузки задач. После успешного upsert перерисовываем его, чтобы
+        // текущий день и новые блоки появлялись сразу, без обновления окна.
+        if (state.homeTrend.loading) {
+            state.homeTrend.refreshAfterSnapshot = true;
+            return;
+        }
+        if (state.homeTrend.loaded) void loadHomeActiveTrend();
+    }
+
+    function captureNoShkReadySnapshot(count) {
+        const db = supabaseDb();
+        const activeCount = Number(count);
+        if (!db || !state.today || !Number.isFinite(activeCount)) return;
+        db.from(WMS_ACTIVE_TASKS_SNAPSHOT_TABLE)
+            .upsert([{
+                snapshot_date: state.today,
+                zone: "Без ШК",
+                active_count: Math.max(0, Math.trunc(activeCount)),
+                total_price: 0,
+                updated_at: new Date().toISOString(),
+            }], { onConflict: "snapshot_date,zone" })
+            .then(({ error }) => {
+                if (error) console.warn("no shk snapshot capture failed:", error);
+                else refreshHomeTrendAfterSnapshot();
+            })
+            .catch((error) => console.warn("no shk snapshot capture failed:", error));
     }
 
     // Пишет снэпшот остатка активных задач по участкам на СЕГОДНЯ --
@@ -3240,16 +3291,32 @@
         state.homeTrend.lastSnapshotCaptureAt = now;
         const todayIso = state.today;
         if (!todayIso) return;
-        const rows = Array.from(grouped.entries()).map(([zone, zoneRows]) => ({
-            snapshot_date: todayIso,
-            zone,
-            active_count: zoneRows.length,
-            total_price: Math.round(zoneRows.reduce((sum, row) => sum + reviewPrice(row), 0) * 100) / 100,
-            updated_at: new Date().toISOString(),
-        }));
+        const rows = Array.from(grouped.entries()).map(([zone, zoneRows]) => homeTrendSnapshotRow(todayIso, zone, zoneRows));
+        // AWH и входящие короба исключены из reviewGroupedRows(), поэтому
+        // добавляем их тем же снэпшотом отдельными сериями. Нулевые остатки
+        // тоже сохраняем: так линия честно опускается к нулю, а не обрывается.
+        const requestGroups = requestsGroupedRows();
+        HOME_TREND_BLOCK_SERIES.filter((item) => item.zone !== "Без ШК").forEach((item) => {
+            rows.push(homeTrendSnapshotRow(todayIso, item.zone, requestGroups.get(item.zone) || []));
+        });
+        // «Без ШК» — физические короба, не wms_tasks. Если счётчик уже
+        // загружен, включаем его сюда; иначе он допишется отдельным upsert
+        // сразу после получения из no_shk_zone.js.
+        if (Number.isFinite(Number(state.requests.noShkReadyCount))) {
+            rows.push({
+                snapshot_date: todayIso,
+                zone: "Без ШК",
+                active_count: Math.max(0, Math.trunc(Number(state.requests.noShkReadyCount))),
+                total_price: 0,
+                updated_at: new Date().toISOString(),
+            });
+        }
         if (!rows.length) return;
         db.from(WMS_ACTIVE_TASKS_SNAPSHOT_TABLE).upsert(rows, { onConflict: "snapshot_date,zone" })
-            .then(({ error }) => { if (error) console.warn("active tasks snapshot capture failed:", error); })
+            .then(({ error }) => {
+                if (error) console.warn("active tasks snapshot capture failed:", error);
+                else refreshHomeTrendAfterSnapshot();
+            })
             .catch((error) => console.warn("active tasks snapshot capture failed:", error));
     }
 
@@ -3303,12 +3370,21 @@
                 const zone = normalizeText(row.zone);
                 zoneTotals.set(zone, (zoneTotals.get(zone) || 0) + (Number(row.active_count) || 0));
             });
-            const rankedZones = Array.from(zoneTotals.entries()).sort((a, b) => b[1] - a[1]).map(([zone]) => zone);
+            const rankedZones = Array.from(zoneTotals.entries())
+                .sort((a, b) => b[1] - a[1])
+                .map(([zone]) => zone)
+                .filter((zone) => !HOME_TREND_BLOCK_ZONE_SET.has(zone));
+            // Блоки «Задач» идут в легенде отдельной группой в одном и том
+            // же порядке — так они не прыгают из-за изменения остатков.
+            HOME_TREND_BLOCK_SERIES.forEach((item) => {
+                if (zoneTotals.has(item.zone)) rankedZones.push(item.zone);
+            });
             const series = rankedZones.map((zone, index) => ({
                 zone,
-                color: index < HOME_TREND_PALETTE.length
-                    ? HOME_TREND_PALETTE[index]
-                    : HOME_TREND_GRAY_RAMP[(index - HOME_TREND_PALETTE.length) % HOME_TREND_GRAY_RAMP.length],
+                color: (HOME_TREND_BLOCK_SERIES.find((item) => item.zone === zone) || {}).color
+                    || (index < HOME_TREND_PALETTE.length
+                        ? HOME_TREND_PALETTE[index]
+                        : HOME_TREND_GRAY_RAMP[(index - HOME_TREND_PALETTE.length) % HOME_TREND_GRAY_RAMP.length]),
                 points: days.map((day) => {
                     if (day > state.today) return null;
                     const key = zone + "|" + day;
@@ -3330,6 +3406,10 @@
         } finally {
             state.homeTrend.loading = false;
             renderHomeActiveTrendChart();
+            if (state.homeTrend.refreshAfterSnapshot) {
+                state.homeTrend.refreshAfterSnapshot = false;
+                void loadHomeActiveTrend();
+            }
         }
     }
 
@@ -8914,6 +8994,7 @@
             state.requests.noShkReadyCountFetchedAt = Date.now();
             if (state.requests.noShkReadyCount === count) return;
             state.requests.noShkReadyCount = count;
+            captureNoShkReadySnapshot(count);
             if ($("requestsSectionsGrid")) renderRequestsSections(requestsGroupedRows());
         }).catch(() => {}).finally(() => { noShkReadyCountFetching = false; });
     }
@@ -22151,6 +22232,10 @@
         // откуда-то ещё. Без этого график не показывался, пока не зайти в
         // Разбор и не вернуться.
         void loadHomeActiveTrend();
+        // Счётчик «Без ШК» живёт в отдельной таблице физической зоны, а не
+        // в wms_tasks. Запрашиваем его сразу, чтобы его линия на главной
+        // не зависела от того, открывал ли пользователь вкладку «Задачи».
+        void refreshNoShkReadyCount();
         void loadShiftState();
         void loadAchievements();
         void loadStatusDictionary();
