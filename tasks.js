@@ -790,9 +790,13 @@
             mode: "active",
             activeData: { days: [], series: [], reopenPoints: [] },
             pulseData: { days: [], series: [], reopenPoints: [] },
+            pureLossesData: { days: [], series: [], reopenPoints: [] },
             pulseLoading: false,
             pulseLoaded: false,
             pulseError: "",
+            pureLossesLoading: false,
+            pureLossesLoaded: false,
+            pureLossesError: "",
             rotationTimer: null,
             rotationPending: false,
             lastSnapshotCaptureAt: 0,
@@ -3243,6 +3247,8 @@
     const HOME_TREND_SNAPSHOT_THROTTLE_MS = 10 * 60 * 1000;
     const HOME_TREND_HISTORY_DAYS = 14;
     const HOME_TREND_FORECAST_DAYS = 2;
+    const HOME_TREND_MODES = ["active", "pulse", "pureLosses"];
+    const HOME_TREND_PURE_LOSS_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#0891b2", "#64748b"];
 
     function homeTrendDateLabel(isoDate) {
         const match = normalizeText(isoDate).match(/^\d{4}-(\d{2})-(\d{2})$/);
@@ -3335,13 +3341,21 @@
     }
 
     function homeTrendModeConfig() {
-        return state.homeTrend.mode === "pulse"
-            ? { title: "Пульс смены", note: "Действия сотрудников по дням", label: "Пульс смены за 14 дней" }
-            : { title: "Остаток задач", note: "Активные задачи по участкам", label: "Остаток задач за 14 дней" };
+        if (state.homeTrend.mode === "pulse") {
+            return { title: "Пульс смены", note: "Действия сотрудников по дням", label: "Пульс смены за 14 дней" };
+        }
+        if (state.homeTrend.mode === "pureLosses") {
+            return { title: "Чистые списания", note: "Количество ШК по LR и дням списания", label: "Чистые списания за 14 дней" };
+        }
+        return { title: "Остаток задач", note: "Активные задачи по участкам", label: "Остаток задач за 14 дней" };
     }
 
     function syncHomeTrendDisplayedData() {
-        const data = state.homeTrend.mode === "pulse" ? state.homeTrend.pulseData : state.homeTrend.activeData;
+        const data = state.homeTrend.mode === "pulse"
+            ? state.homeTrend.pulseData
+            : state.homeTrend.mode === "pureLosses"
+                ? state.homeTrend.pureLossesData
+                : state.homeTrend.activeData;
         state.homeTrend.days = data.days || [];
         state.homeTrend.series = data.series || [];
         state.homeTrend.reopenPoints = data.reopenPoints || [];
@@ -3350,13 +3364,14 @@
     function renderHomeTrendStatus(force) {
         const status = $("homeTrendStatus");
         if (!status) return;
-        const pulse = state.homeTrend.mode === "pulse";
-        const mode = pulse ? "pulse" : "active";
+        const mode = state.homeTrend.mode;
         if (!force && status.dataset.mode === mode) return;
         status.dataset.mode = mode;
-        status.setAttribute("aria-label", pulse ? "Показан Пульс смены" : "Показан Остаток задач");
+        status.setAttribute("aria-label", "Показан график: " + homeTrendModeConfig().title);
         status.innerHTML = "<span class='home-trend-status-track'><i class='home-trend-status-progress'></i></span>"
-            + "<span class='home-trend-status-dots' aria-hidden='true'><i class='" + (!pulse ? "active is-arming" : "") + "'></i><i class='" + (pulse ? "active is-arming" : "") + "'></i></span>";
+            + "<span class='home-trend-status-dots' aria-hidden='true'>"
+            + HOME_TREND_MODES.map((item) => "<i class='" + (item === mode ? "active is-arming" : "") + "'></i>").join("")
+            + "</span>";
         requestAnimationFrame(() => {
             const active = status.querySelector(".home-trend-status-dots i.active.is-arming");
             if (active) active.classList.remove("is-arming");
@@ -3382,9 +3397,10 @@
     }
 
     function setHomeTrendMode(mode, animate) {
-        const next = mode === "pulse" ? "pulse" : "active";
+        const next = HOME_TREND_MODES.includes(mode) ? mode : "active";
         state.homeTrend.mode = next;
         if (next === "pulse" && !state.homeTrend.pulseLoaded && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
+        if (next === "pureLosses" && !state.homeTrend.pureLossesLoaded && !state.homeTrend.pureLossesLoading) void loadHomePureLossesTrend();
         renderHomeTrendCard(animate);
     }
 
@@ -3398,10 +3414,9 @@
         const current = $("homeTrendStatus");
         const active = current && current.querySelector(".home-trend-status-dots i.active");
         if (active) active.classList.add("is-collapsing");
-        const next = state.homeTrend.mode === "active" ? "pulse" : "active";
-        // Сейчас графиков два, поэтому обе стрелки переключают на второй;
-        // направление станет различием, когда появится третий график.
-        const target = next;
+        const currentIndex = Math.max(0, HOME_TREND_MODES.indexOf(state.homeTrend.mode));
+        const shift = direction === "previous" ? -1 : 1;
+        const target = HOME_TREND_MODES[(currentIndex + shift + HOME_TREND_MODES.length) % HOME_TREND_MODES.length];
         setTimeout(() => {
             setHomeTrendMode(target, true);
             state.homeTrend.rotationPending = false;
@@ -3453,6 +3468,74 @@
         } finally {
             state.homeTrend.pulseLoading = false;
             if (state.homeTrend.mode === "pulse") renderHomeTrendCard();
+        }
+    }
+
+    function pureLossesTrendLr(row) {
+        const match = normalizeText(row && row.lr).match(/\d+/);
+        return match ? Number(match[0]) : null;
+    }
+
+    async function loadHomePureLossesTrend() {
+        const db = supabaseDb();
+        if (!db || state.homeTrend.pureLossesLoading) return;
+        state.homeTrend.pureLossesLoading = true;
+        state.homeTrend.pureLossesError = "";
+        try {
+            const since = addDays(state.today, -(HOME_TREND_HISTORY_DAYS - 1));
+            const pageSize = 1000;
+            const rows = [];
+            for (let from = 0; ; from += pageSize) {
+                const { data, error } = await db.from(PURE_LOSSES_TABLE)
+                    .select("date_lost,lr")
+                    .eq("wh_id", WH_ID)
+                    .gte("date_lost", since)
+                    .lte("date_lost", state.today)
+                    .order("date_lost", { ascending: true })
+                    .range(from, from + pageSize - 1);
+                if (error) throw error;
+                const batch = Array.isArray(data) ? data : [];
+                rows.push(...batch);
+                if (batch.length < pageSize) break;
+            }
+            const days = Array.from({ length: HOME_TREND_HISTORY_DAYS }, (_, index) => addDays(since, index));
+            const knownLrs = new Set(PURE_LOSSES_LR_SECTIONS);
+            const byDay = new Map(days.map((day) => [day, new Map()]));
+            rows.forEach((row) => {
+                const day = parseDateTime(row && row.date_lost).date;
+                const lr = pureLossesTrendLr(row);
+                if (!byDay.has(day) || lr === null) return;
+                knownLrs.add(lr);
+                const counts = byDay.get(day);
+                counts.set(lr, (counts.get(lr) || 0) + 1);
+            });
+            const lrs = Array.from(knownLrs).sort((a, b) => {
+                const knownOrder = PURE_LOSSES_LR_SECTIONS.indexOf(a) - PURE_LOSSES_LR_SECTIONS.indexOf(b);
+                if (knownOrder !== 0 && PURE_LOSSES_LR_SECTIONS.includes(a) && PURE_LOSSES_LR_SECTIONS.includes(b)) return knownOrder;
+                if (PURE_LOSSES_LR_SECTIONS.includes(a)) return -1;
+                if (PURE_LOSSES_LR_SECTIONS.includes(b)) return 1;
+                return a - b;
+            });
+            const totalPoints = days.map((day) => Array.from(byDay.get(day).values()).reduce((sum, value) => sum + value, 0));
+            state.homeTrend.pureLossesData = {
+                days,
+                series: [
+                    { zone: "Всего", color: "#0f172a", points: totalPoints },
+                    ...lrs.map((lr, index) => ({
+                        zone: lr + " LR",
+                        color: HOME_TREND_PURE_LOSS_COLORS[index % HOME_TREND_PURE_LOSS_COLORS.length],
+                        points: days.map((day) => byDay.get(day).get(lr) || 0),
+                    })),
+                ],
+                reopenPoints: [],
+            };
+            state.homeTrend.pureLossesLoaded = true;
+        } catch (error) {
+            console.warn("home pure losses trend load failed:", error);
+            state.homeTrend.pureLossesError = "Не удалось загрузить чистые списания: " + (error && error.message ? error.message : String(error));
+        } finally {
+            state.homeTrend.pureLossesLoading = false;
+            if (state.homeTrend.mode === "pureLosses") renderHomeTrendCard();
         }
     }
 
@@ -3562,7 +3645,7 @@
             .map((item) => "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + item.color + "'></span>" + escapeHtml(item.zone) + ": <strong>" + (item.points[dayIndex] == null ? "—" : item.points[dayIndex]) + "</strong></div>")
             .join("");
         const reopens = state.homeTrend.reopenPoints[dayIndex] || 0;
-        const reopenRow = state.homeTrend.mode === "pulse" || state.homeTrend.hiddenSeries.has(HOME_TREND_REOPEN_SERIES_KEY) ? "" : "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + HOME_TREND_REOPEN_COLOR + "'></span>Переоткрыто задач: <strong>" + reopens + "</strong></div>";
+        const reopenRow = state.homeTrend.mode !== "active" || state.homeTrend.hiddenSeries.has(HOME_TREND_REOPEN_SERIES_KEY) ? "" : "<div class='home-trend-tooltip-row'><span class='home-trend-tooltip-dot' style='background:" + HOME_TREND_REOPEN_COLOR + "'></span>Переоткрыто задач: <strong>" + reopens + "</strong></div>";
         return "<div class='home-trend-tooltip-date'>" + escapeHtml(homeTrendDateLabel(day)) + "</div>" + rows + reopenRow;
     }
 
@@ -3619,12 +3702,24 @@
     function renderHomeActiveTrendChart() {
         const target = $("homeTrendChart");
         if (!target) return;
-        const isPulse = state.homeTrend.mode === "pulse";
-        const loading = isPulse ? state.homeTrend.pulseLoading : state.homeTrend.loading;
-        const loaded = isPulse ? state.homeTrend.pulseLoaded : state.homeTrend.loaded;
-        const error = isPulse ? state.homeTrend.pulseError : state.homeTrend.error;
+        const isActive = state.homeTrend.mode === "active";
+        const loading = state.homeTrend.mode === "pulse"
+            ? state.homeTrend.pulseLoading
+            : state.homeTrend.mode === "pureLosses"
+                ? state.homeTrend.pureLossesLoading
+                : state.homeTrend.loading;
+        const loaded = state.homeTrend.mode === "pulse"
+            ? state.homeTrend.pulseLoaded
+            : state.homeTrend.mode === "pureLosses"
+                ? state.homeTrend.pureLossesLoaded
+                : state.homeTrend.loaded;
+        const error = state.homeTrend.mode === "pulse"
+            ? state.homeTrend.pulseError
+            : state.homeTrend.mode === "pureLosses"
+                ? state.homeTrend.pureLossesError
+                : state.homeTrend.error;
         if (loading && !loaded) {
-            target.innerHTML = "<div class='home-trend-loading' role='status'><span class='home-trend-loading-bars' aria-hidden='true'><i></i><i></i><i></i><i></i></span><span>Считаю остаток по дням...</span></div>";
+            target.innerHTML = "<div class='home-trend-loading' role='status'><span class='home-trend-loading-bars' aria-hidden='true'><i></i><i></i><i></i><i></i></span><span>Загружаю данные по дням...</span></div>";
             return;
         }
         if (error && !loaded) {
@@ -3635,9 +3730,9 @@
         const series = state.homeTrend.series;
         const reopenPoints = state.homeTrend.reopenPoints;
         const visibleSeries = series.filter((item) => !state.homeTrend.hiddenSeries.has(item.zone));
-        const reopenVisible = !isPulse && !state.homeTrend.hiddenSeries.has(HOME_TREND_REOPEN_SERIES_KEY);
+        const reopenVisible = isActive && !state.homeTrend.hiddenSeries.has(HOME_TREND_REOPEN_SERIES_KEY);
         if (!days.length || (!series.length && !reopenPoints.length)) {
-            target.innerHTML = "<div class='home-trend-empty'>Пока нет данных по активным задачам.</div>";
+            target.innerHTML = "<div class='home-trend-empty'>Пока нет данных для этого графика.</div>";
             return;
         }
         const width = 860;
@@ -3785,7 +3880,7 @@
                 return "<button type='button' class='home-trend-legend-item" + (hidden ? " is-hidden" : "") + "' data-home-trend-series='" + escapeHtml(key) + "' aria-pressed='" + (!hidden) + "' title='" + (hidden ? "Показать" : "Скрыть") + " линию: " + escapeHtml(label) + "'><span class='home-trend-legend-dot' style='background:" + color + "'></span>" + escapeHtml(label) + "</button>";
             };
             legendTarget.innerHTML = series.map((item) => legendItemHtml(item.zone, item.zone, item.color)).join("")
-                + (isPulse ? "" : legendItemHtml(HOME_TREND_REOPEN_SERIES_KEY, "Переоткрыто задач", HOME_TREND_REOPEN_COLOR));
+                + (isActive ? legendItemHtml(HOME_TREND_REOPEN_SERIES_KEY, "Переоткрыто задач", HOME_TREND_REOPEN_COLOR) : "");
             legendTarget.querySelectorAll("[data-home-trend-series]").forEach((item) => {
                 item.addEventListener("click", () => {
                     const key = item.dataset.homeTrendSeries;
@@ -3812,6 +3907,7 @@
         void refreshPrespisokLeaderboard();
         if (!state.homeTrend.loaded && !state.homeTrend.loading) void loadHomeActiveTrend();
         if (!state.homeTrend.pulseLoaded && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
+        if (!state.homeTrend.pureLossesLoaded && !state.homeTrend.pureLossesLoading) void loadHomePureLossesTrend();
         ensureHomeTrendRotation();
         renderHomeTrendCard();
     }
@@ -22533,6 +22629,7 @@
         // Разбор и не вернуться.
         void loadHomeActiveTrend();
         void loadHomeShiftPulseTrend();
+        void loadHomePureLossesTrend();
         ensureHomeTrendRotation();
         // Счётчик «Без ШК» живёт в отдельной таблице физической зоны, а не
         // в wms_tasks. Запрашиваем его сразу, чтобы его линия на главной
