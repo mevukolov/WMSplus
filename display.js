@@ -26,7 +26,7 @@
     // 24/7 with nobody around to manually reload it, so it's the single
     // most important place for this check. Bump CLIENT_VERSION here AND
     // version.json's "v" together whenever this file changes.
-    const CLIENT_VERSION = 9;
+    const CLIENT_VERSION = 10;
     setInterval(() => {
         fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
             .then((res) => res.json())
@@ -65,6 +65,167 @@
     // no_shk_zone.js, so boxes that just appeared are the ones that catch
     // the eye on an unattended screen.
     let seenBoxIds = new Set();
+
+    // ---------- Idle dashboard carousel ----------
+    // The kiosk is intentionally anonymous. It receives only aggregate
+    // time-series rows through wms_display_dashboard_trends(), never raw
+    // tasks, barcodes, names, prices, or pure-loss records.
+    const DASHBOARD_DAYS = 14;
+    const DASHBOARD_SLIDE_MS = 15000;
+    const DASHBOARD_SLIDES = ["zone", "active", "pulse", "pure"];
+    const DASHBOARD_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948", "#64748b"];
+    const DASHBOARD_ACTIVE_SPECIAL_COLORS = { "Без ШК": "#7c3aed", "Списания AWH": "#dc2626", "Коробки на входе": "#0891b2" };
+    const DASHBOARD_PULSE_COLORS = { "Задач": "#2a78d6", "Без ШК": "#7c3aed", "Запросы": "#eb6834" };
+    let dashboardRows = [];
+    let dashboardSlideIndex = 0;
+    let dashboardSlideTimer = null;
+
+    function dashboardMoscowToday() {
+        const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+        const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+        return values.year + "-" + values.month + "-" + values.day;
+    }
+
+    function dashboardAddDays(isoDate, offset) {
+        const date = new Date(isoDate + "T12:00:00Z");
+        date.setUTCDate(date.getUTCDate() + offset);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function dashboardDateLabel(isoDate) {
+        const match = String(isoDate || "").match(/^\d{4}-(\d{2})-(\d{2})$/);
+        return match ? match[2] + "." + match[1] : String(isoDate || "");
+    }
+
+    function dashboardSmoothPath(points, xFor, yFor) {
+        if (!points.length) return "";
+        let path = "M" + xFor(0) + "," + yFor(points[0]);
+        for (let index = 0; index < points.length - 1; index += 1) {
+            const p0 = points[index - 1] == null ? points[index] : points[index - 1];
+            const p1 = points[index];
+            const p2 = points[index + 1];
+            const p3 = points[index + 2] == null ? p2 : points[index + 2];
+            const cp1x = xFor(index) + (xFor(index + 1) - xFor(Math.max(0, index - 1))) / 6;
+            const cp1y = yFor(p1) + (yFor(p2) - yFor(p0)) / 6;
+            const cp2x = xFor(index + 1) - (xFor(Math.min(points.length - 1, index + 2)) - xFor(index)) / 6;
+            const cp2y = yFor(p2) - (yFor(p3) - yFor(p1)) / 6;
+            path += " C" + cp1x + "," + cp1y + " " + cp2x + "," + cp2y + " " + xFor(index + 1) + "," + yFor(p2);
+        }
+        return path;
+    }
+
+    function dashboardConfig(key) {
+        if (key === "pulse") return { title: "Пульс смены", note: "Действия сотрудников по дням" };
+        if (key === "pure") return { title: "Чистые списания", note: "Количество ШК по LR и дням списания" };
+        return { title: "Остаток задач", note: "Активные задачи по участкам" };
+    }
+
+    function dashboardSeries(key) {
+        const today = dashboardMoscowToday();
+        const firstDay = dashboardAddDays(today, -(DASHBOARD_DAYS - 1));
+        const days = Array.from({ length: DASHBOARD_DAYS }, (_, index) => dashboardAddDays(firstDay, index));
+        const values = new Map();
+        (dashboardRows || []).filter((row) => row.chart_key === key).forEach((row) => {
+            const day = String(row.snapshot_date || "").slice(0, 10);
+            const seriesKey = String(row.series_key || "");
+            if (!days.includes(day) || !seriesKey) return;
+            if (!values.has(seriesKey)) values.set(seriesKey, new Map());
+            values.get(seriesKey).set(day, Number(row.metric_count) || 0);
+        });
+        const expected = key === "pulse" ? ["Задач", "Без ШК", "Запросы"] : [];
+        expected.forEach((item) => { if (!values.has(item)) values.set(item, new Map()); });
+        const keys = Array.from(values.keys()).sort((a, b) => {
+            if (key === "pure") {
+                if (a === "Всего") return -1;
+                if (b === "Всего") return 1;
+                return Number(a) - Number(b) || a.localeCompare(b, "ru");
+            }
+            if (key === "pulse") return expected.indexOf(a) - expected.indexOf(b);
+            const aTotal = Array.from(values.get(a).values()).reduce((sum, value) => sum + value, 0);
+            const bTotal = Array.from(values.get(b).values()).reduce((sum, value) => sum + value, 0);
+            return bTotal - aTotal || a.localeCompare(b, "ru");
+        });
+        return {
+            days,
+            series: keys.map((seriesKey, index) => ({
+                key: seriesKey,
+                color: key === "pulse"
+                    ? DASHBOARD_PULSE_COLORS[seriesKey]
+                    : key === "pure" && seriesKey === "Всего"
+                        ? "#0f172a"
+                        : DASHBOARD_ACTIVE_SPECIAL_COLORS[seriesKey] || DASHBOARD_PALETTE[index % DASHBOARD_PALETTE.length],
+                points: days.map((day) => values.get(seriesKey).get(day) || 0),
+            })),
+        };
+    }
+
+    function renderDashboardChart(key, animate) {
+        const dashboard = document.getElementById("displayDashboard");
+        if (!dashboard) return;
+        const config = dashboardConfig(key);
+        const trend = dashboardSeries(key);
+        if (!trend.series.length) {
+            dashboard.innerHTML = "<div class='display-chart-card" + (animate ? " is-entering" : "") + "'><h2>" + escapeHtmlLocal(config.title) + "</h2><p>" + escapeHtmlLocal(config.note) + "</p><div class='display-chart-empty'>Пока нет данных за последние 14 дней.</div></div>";
+            return;
+        }
+        const width = 1000;
+        const height = 460;
+        const padLeft = 42;
+        const padRight = 20;
+        const padTop = 24;
+        const padBottom = 34;
+        const plotW = width - padLeft - padRight;
+        const plotH = height - padTop - padBottom;
+        const maxValue = Math.max(1, ...trend.series.flatMap((item) => item.points));
+        const topValue = Math.max(1, Math.ceil(maxValue * 1.08));
+        const xFor = (index) => padLeft + (plotW * index) / Math.max(trend.days.length - 1, 1);
+        const yFor = (value) => padTop + plotH - (plotH * value) / topValue;
+        const grid = [0, 1, 2, 3, 4].map((step) => {
+            const value = Math.round((topValue * step) / 4);
+            const y = yFor(value);
+            return "<line x1='" + padLeft + "' y1='" + y + "' x2='" + (width - padRight) + "' y2='" + y + "' stroke='#e2e8f0' stroke-width='1'/><text x='" + (padLeft - 8) + "' y='" + (y + 4) + "' text-anchor='end' fill='#94a3b8' font-size='12' font-weight='600'>" + value + "</text>";
+        }).join("");
+        const labels = trend.days.map((day, index) => index % 2 && index !== trend.days.length - 1 ? "" : "<text x='" + xFor(index) + "' y='" + (height - 8) + "' text-anchor='middle' fill='#94a3b8' font-size='12' font-weight='600'>" + dashboardDateLabel(day) + "</text>").join("");
+        const lines = trend.series.map((item) => {
+            const path = dashboardSmoothPath(item.points, xFor, yFor);
+            const dots = item.points.map((value, index) => "<circle cx='" + xFor(index) + "' cy='" + yFor(value) + "' r='4' fill='" + item.color + "' stroke='#fff' stroke-width='2'/>").join("");
+            return "<path d='" + path + "' fill='none' stroke='" + item.color + "' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/>" + dots;
+        }).join("");
+        const legend = trend.series.map((item) => "<span><i style='background:" + item.color + "'></i>" + escapeHtmlLocal(item.key) + "</span>").join("");
+        dashboard.innerHTML = "<div class='display-chart-card" + (animate ? " is-entering" : "") + "'><h2>" + escapeHtmlLocal(config.title) + "</h2><p>" + escapeHtmlLocal(config.note) + "</p><div class='display-chart-plot'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='" + escapeHtmlLocal(config.title) + "'>" + grid + lines + labels + "</svg></div><div class='display-chart-legend'>" + legend + "</div></div>";
+    }
+
+    function renderDashboardSlide(animate) {
+        const slide = DASHBOARD_SLIDES[dashboardSlideIndex];
+        const zone = document.getElementById("displayZoneWrap");
+        const dashboard = document.getElementById("displayDashboard");
+        const title = document.getElementById("displayTitle");
+        const isZone = slide === "zone";
+        if (zone) zone.classList.toggle("is-hidden", !isZone);
+        if (dashboard) dashboard.classList.toggle("is-active", !isZone);
+        if (title) title.textContent = isZone ? "Зона «Без ШК»" : dashboardConfig(slide).title;
+        if (!isZone) renderDashboardChart(slide, animate);
+    }
+
+    function scheduleDashboardSlide() {
+        clearTimeout(dashboardSlideTimer);
+        dashboardSlideTimer = setTimeout(() => {
+            dashboardSlideIndex = (dashboardSlideIndex + 1) % DASHBOARD_SLIDES.length;
+            renderDashboardSlide(true);
+            scheduleDashboardSlide();
+        }, DASHBOARD_SLIDE_MS);
+    }
+
+    async function loadDashboardTrends() {
+        try {
+            const { data, error } = await supabaseClient.rpc("wms_display_dashboard_trends", { p_days: DASHBOARD_DAYS });
+            if (error) throw error;
+            dashboardRows = Array.isArray(data) ? data : [];
+            if (DASHBOARD_SLIDES[dashboardSlideIndex] !== "zone") renderDashboardSlide(false);
+        } catch (error) {
+            console.warn("display dashboard trends load failed:", error);
+        }
+    }
 
     function boxTileHtml(box, index) {
         const isNew = !seenBoxIds.has(box.id);
@@ -727,10 +888,14 @@
     }, 20000);
 
     void loadZone();
+    renderDashboardSlide(false);
+    void loadDashboardTrends();
+    scheduleDashboardSlide();
     // Safety net alongside Realtime -- same reasoning as print-bridge's own
     // poll-plus-subscription combo: a dropped Realtime connection on an
     // unattended screen should never mean a permanently stale display.
     setInterval(() => { void loadZone(); }, 20000);
+    setInterval(() => { void loadDashboardTrends(); }, 60000);
 
     updateNightMode();
     setInterval(updateNightMode, 60000);

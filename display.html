@@ -41,6 +41,35 @@
         gap: 12px;
         transition: opacity .8s ease;
     }
+    .display-zone.is-hidden { display: none; }
+    .display-dashboard {
+        display: none;
+        flex: 1 1 auto;
+        min-height: 0;
+        padding: 4px 28px 18px;
+    }
+    .display-dashboard.is-active { display: flex; }
+    .display-chart-card {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+        flex-direction: column;
+        padding: clamp(16px, 2vw, 30px);
+        border: 1px solid rgba(15,23,42,.08);
+        border-radius: 18px;
+        background: rgba(255,255,255,.9);
+        box-shadow: 0 18px 48px rgba(76,29,149,.1);
+        animation: display-chart-in .48s cubic-bezier(.22,.8,.32,1) both;
+    }
+    .display-chart-card h2 { margin: 0; color: #1f2937; font-size: clamp(22px, 2.5vw, 34px); letter-spacing: -.035em; }
+    .display-chart-card p { margin: 5px 0 0; color: #64748b; font-size: clamp(13px, 1.4vw, 18px); font-weight: 600; }
+    .display-chart-plot { flex: 1 1 auto; min-height: 0; margin-top: 10px; }
+    .display-chart-plot svg { display: block; width: 100%; height: 100%; min-height: 260px; overflow: visible; }
+    .display-chart-legend { display: flex; flex-wrap: wrap; gap: 9px 17px; margin-top: 8px; color: #475569; font-size: clamp(11px, 1.15vw, 15px); font-weight: 700; }
+    .display-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .display-chart-legend i { width: 10px; height: 10px; border-radius: 99px; flex: none; }
+    .display-chart-empty { display: grid; place-items: center; height: 100%; color: #64748b; font-size: 18px; font-weight: 700; }
+    @keyframes display-chart-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
     /* Night mode (20:30-07:30, toggled by display.js): nobody's on the
        floor overnight, but the monitor stays on -- so instead of turning
        it off, the page itself goes to a plain black screen. The QR
@@ -48,7 +77,8 @@
        land during this window -- night mode only hides the zone view. */
     body.is-night { background: #000; }
     body.is-night .display-header,
-    body.is-night .display-zone {
+    body.is-night .display-zone,
+    body.is-night .display-dashboard {
         opacity: 0;
         pointer-events: none;
     }
@@ -384,9 +414,10 @@
 <body>
 
 <header class="display-header">
-    <h1>Зона «Без ШК»</h1>
+    <h1 id="displayTitle">Зона «Без ШК»</h1>
 </header>
 <div id="displayZoneWrap" class="display-zone"></div>
+<section id="displayDashboard" class="display-dashboard" aria-live="polite"></section>
 
 <div id="qrOverlay" class="qr-overlay" aria-hidden="true">
     <div class="qr-card">
@@ -413,6 +444,6 @@
 
 <!-- Cache-busting query string -- see the same comment in
      mobile-inventory.html; bump alongside it whenever display.js changes. -->
-<script src="display.js?v=9"></script>
+<script src="display.js?v=10"></script>
 </body>
 </html>
