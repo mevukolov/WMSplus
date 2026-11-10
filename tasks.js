@@ -794,6 +794,7 @@
             pulseLoaded: false,
             pulseError: "",
             rotationTimer: null,
+            rotationPending: false,
             lastSnapshotCaptureAt: 0,
             refreshAfterSnapshot: false,
         },
@@ -3346,13 +3347,20 @@
         state.homeTrend.reopenPoints = data.reopenPoints || [];
     }
 
-    function renderHomeTrendStatus() {
+    function renderHomeTrendStatus(force) {
         const status = $("homeTrendStatus");
         if (!status) return;
         const pulse = state.homeTrend.mode === "pulse";
+        const mode = pulse ? "pulse" : "active";
+        if (!force && status.dataset.mode === mode) return;
+        status.dataset.mode = mode;
         status.setAttribute("aria-label", pulse ? "Показан Пульс смены" : "Показан Остаток задач");
         status.innerHTML = "<span class='home-trend-status-track'><i class='home-trend-status-progress'></i></span>"
-            + "<span class='home-trend-status-dots' aria-label='" + (pulse ? "Показан Пульс смены" : "Показан Остаток задач") + "'><i class='" + (!pulse ? "active" : "") + "'></i><i class='" + (pulse ? "active" : "") + "'></i></span>";
+            + "<span class='home-trend-status-dots' aria-hidden='true'><i class='" + (!pulse ? "active is-arming" : "") + "'></i><i class='" + (pulse ? "active is-arming" : "") + "'></i></span>";
+        requestAnimationFrame(() => {
+            const active = status.querySelector(".home-trend-status-dots i.active.is-arming");
+            if (active) active.classList.remove("is-arming");
+        });
     }
 
     function renderHomeTrendCard(animate) {
@@ -3376,18 +3384,35 @@
     function setHomeTrendMode(mode, animate) {
         const next = mode === "pulse" ? "pulse" : "active";
         state.homeTrend.mode = next;
-        if (next === "pulse" && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
+        if (next === "pulse" && !state.homeTrend.pulseLoaded && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
         renderHomeTrendCard(animate);
     }
 
     function rotateHomeTrend(direction) {
+        if (state.homeTrend.rotationPending) return;
+        if (state.homeTrend.rotationTimer) {
+            clearTimeout(state.homeTrend.rotationTimer);
+            state.homeTrend.rotationTimer = null;
+        }
+        state.homeTrend.rotationPending = true;
+        const current = $("homeTrendStatus");
+        const active = current && current.querySelector(".home-trend-status-dots i.active");
+        if (active) active.classList.add("is-collapsing");
         const next = state.homeTrend.mode === "active" ? "pulse" : "active";
-        setHomeTrendMode(direction === "previous" ? (next === "active" ? "pulse" : "active") : next, true);
+        // Сейчас графиков два, поэтому обе стрелки переключают на второй;
+        // направление станет различием, когда появится третий график.
+        const target = next;
+        setTimeout(() => {
+            setHomeTrendMode(target, true);
+            state.homeTrend.rotationPending = false;
+            ensureHomeTrendRotation();
+        }, 260);
     }
 
     function ensureHomeTrendRotation() {
         if (state.homeTrend.rotationTimer) return;
-        state.homeTrend.rotationTimer = setInterval(() => {
+        state.homeTrend.rotationTimer = setTimeout(() => {
+            state.homeTrend.rotationTimer = null;
             if (state.view === "home") rotateHomeTrend("next");
         }, 10000);
     }
@@ -3397,7 +3422,6 @@
         if (!db || state.homeTrend.pulseLoading) return;
         state.homeTrend.pulseLoading = true;
         state.homeTrend.pulseError = "";
-        if (state.homeTrend.mode === "pulse") renderHomeTrendCard();
         try {
             const since = addDays(state.today, -(HOME_TREND_HISTORY_DAYS - 1));
             const { data, error } = await db.from(WMS_STAFF_PULSE_DAILY_SNAPSHOT_TABLE)
