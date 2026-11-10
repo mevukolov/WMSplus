@@ -28,6 +28,8 @@
     const WMS_PRESPISOK_RUNS_TABLE = "wms_prespisok_runs";
     const WMS_PRESPISOK_ACTIONS_TABLE = "wms_prespisok_actions";
     const WMS_NO_SHK_STICKER_EVENTS_TABLE = "wms_no_shk_sticker_events";
+    const WMS_STAFF_PULSE_SNAPSHOT_TABLE = "wms_staff_shift_pulse_snapshots";
+    const STAFF_PULSE_SNAPSHOT_VERSION = 1;
     const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
     const WMS_USER_PROFILES_TABLE = "wms_user_profiles";
     const PROFILE_MEDIA_BUCKET = "profile-media";
@@ -655,6 +657,7 @@
             selectedKey: "",
             activeTab: "tasks",
             detailScope: null,
+            snapshotUpdatedAt: "",
             taskRowsById: {},
         },
         profile: {
@@ -3514,15 +3517,11 @@
         const plotH = height - padTop - padBottom;
         const normalValues = visibleSeries.flatMap((item) => item.points.filter((value) => value != null).map(Number));
         const maxValue = Math.max(1, ...normalValues, ...(reopenVisible ? reopenPoints.map(Number) : []));
-        // Круглый шаг сетки -- 4 линии от 0 до "красивого" максимума чуть
-        // выше реального пика, чтобы подписи были не рваными числами.
-        const niceMax = (() => {
-            const raw = maxValue / 4;
-            const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1))));
-            const steps = [1, 2, 2.5, 5, 10];
-            const step = steps.find((candidate) => candidate * magnitude >= raw) || 10;
-            return step * magnitude * 4;
-        })();
+        // Верхняя граница следует за фактическим максимумом. Раньше
+        // "красивый" шаг мог поднять потолок с 13 сразу до 20 и оставлял
+        // почти треть графика пустой. Небольшие 8% сверху сохраняют место
+        // для точки и tooltip, но не прячут динамику внизу.
+        const niceMax = Math.max(1, Math.ceil(maxValue * 1.08));
         const xFor = (index) => padLeft + (days.length === 1 ? plotW / 2 : (plotW * index) / (days.length - 1));
         const yFor = (value) => padTop + plotH - (plotH * value) / niceMax;
         const gridLinesHtml = [0, 1, 2, 3, 4].map((step) => {
@@ -16353,6 +16352,43 @@
         return { employees: rows, summary: staffStatsSummaryFromEmployees(rows) };
     }
 
+    function staffStatsSnapshotFromRow(row, date) {
+        const snapshot = row && row.snapshot && typeof row.snapshot === "object" && !Array.isArray(row.snapshot) ? row.snapshot : null;
+        if (!snapshot || Number(snapshot.version) !== STAFF_PULSE_SNAPSHOT_VERSION || normalizeText(snapshot.date) !== normalizeText(date)) return null;
+        if (!snapshot.summary || !Array.isArray(snapshot.employees)) return null;
+        return {
+            summary: snapshot.summary,
+            employees: snapshot.employees,
+            updatedAt: normalizeText(row.updated_at),
+        };
+    }
+
+    function applyStaffStatsSnapshot(snapshot) {
+        state.staffStats.summary = snapshot.summary;
+        state.staffStats.employees = snapshot.employees;
+        state.staffStats.taskRowsById = {};
+        state.staffStats.snapshotUpdatedAt = snapshot.updatedAt || "";
+        state.staffStats.loaded = true;
+        if (!state.staffStats.selectedKey || !state.staffStats.employees.some((row) => row.key === state.staffStats.selectedKey)) {
+            state.staffStats.selectedKey = state.staffStats.employees[0] ? state.staffStats.employees[0].key : "";
+        }
+    }
+
+    async function saveStaffStatsSnapshot(db, date, built) {
+        if (!db || !date || !built) return;
+        const { error } = await db.from(WMS_STAFF_PULSE_SNAPSHOT_TABLE).upsert({
+            shift_date: date,
+            snapshot: {
+                version: STAFF_PULSE_SNAPSHOT_VERSION,
+                date,
+                summary: built.summary,
+                employees: built.employees,
+            },
+            updated_at: new Date().toISOString(),
+        }, { onConflict: "shift_date" });
+        if (error) throw error;
+    }
+
     function renderStaffStatsModal() {
         const dateInput = $("staffStatsDate");
         if (dateInput && dateInput.value !== state.staffStats.date) dateInput.value = state.staffStats.date;
@@ -16363,7 +16399,11 @@
         if (status) {
             status.textContent = state.staffStats.loading
                 ? "Собираю пульс смены. Считаю руками, без бухгалтерской магии."
-                : state.staffStats.error || (state.staffStats.loaded ? "Статистика за " + formatRuDate(state.staffStats.date) + "." : "");
+                : state.staffStats.error || (state.staffStats.loaded
+                    ? (state.staffStats.snapshotUpdatedAt
+                        ? "Снимок за " + formatRuDate(state.staffStats.date) + " · сохранён " + formatRuDateTime(state.staffStats.snapshotUpdatedAt) + "."
+                        : "Статистика за " + formatRuDate(state.staffStats.date) + ".")
+                    : "");
             status.style.color = state.staffStats.error ? "#b91c1c" : "#64748b";
         }
         if (!summaryWrap || !grid || !detail) return;
@@ -16482,10 +16522,21 @@
             renderStaffStatsDetail();
         });
         detail.querySelectorAll("[data-staff-task-id]").forEach((row) => {
-            row.addEventListener("click", () => {
+            row.addEventListener("click", async () => {
                 const id = row.dataset.staffTaskId;
                 if (!id) return;
-                const sourceRow = state.staffStats.taskRowsById && state.staffStats.taskRowsById[id];
+                let sourceRow = state.staffStats.taskRowsById && state.staffStats.taskRowsById[id];
+                if (!sourceRow) {
+                    try {
+                        sourceRow = await fetchFreshTaskRow(id);
+                    } catch (error) {
+                        console.warn("staff pulse task fetch failed:", error);
+                    }
+                }
+                if (!sourceRow) {
+                    toast("Не удалось открыть карточку задачи.", "error");
+                    return;
+                }
                 if (sourceRow && !findTaskRow(id)) {
                     state.taskSearch.rows = [sourceRow].concat(state.taskSearch.rows || []).slice(0, 25);
                 }
@@ -16495,7 +16546,7 @@
         });
     }
 
-    async function loadStaffStats() {
+    async function loadStaffStats(forceRefresh) {
         const db = supabaseDb();
         if (!db) {
             state.staffStats.error = "Supabase SDK недоступен.";
@@ -16506,8 +16557,29 @@
         const bounds = moscowDayBoundsUtc(date);
         state.staffStats.loading = true;
         state.staffStats.error = "";
+        state.staffStats.snapshotUpdatedAt = "";
         renderStaffStatsModal();
         try {
+            // A completed shift does not change in normal operation. Read its
+            // compact JSON snapshot first; this avoids downloading hundreds
+            // of history rows every time someone opens an older date. The
+            // explicit "Обновить" button still rebuilds it from source.
+            if (!forceRefresh && date < state.today) {
+                const { data: snapshotRow, error: snapshotError } = await db
+                    .from(WMS_STAFF_PULSE_SNAPSHOT_TABLE)
+                    .select("snapshot,updated_at")
+                    .eq("shift_date", date)
+                    .maybeSingle();
+                if (!snapshotError) {
+                    const snapshot = staffStatsSnapshotFromRow(snapshotRow, date);
+                    if (snapshot) {
+                        applyStaffStatsSnapshot(snapshot);
+                        return;
+                    }
+                } else {
+                    console.warn("staff pulse snapshot read failed:", snapshotError);
+                }
+            }
             const [completedRead, updatedRead, historyRead, prespisokRead, noShkStickerRead, employeesRead] = await Promise.all([
                 db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("completed_at", bounds.start).lt("completed_at", bounds.end).order("completed_at", { ascending: false, nullsFirst: false }).limit(10000),
                 db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).eq("is_deleted", false).gte("updated_at", bounds.start).lt("updated_at", bounds.end).order("updated_at", { ascending: false, nullsFirst: false }).limit(10000),
@@ -16550,7 +16622,11 @@
             state.staffStats.employees = built.employees;
             state.staffStats.summary = built.summary;
             state.staffStats.loaded = true;
+            state.staffStats.snapshotUpdatedAt = "";
             if (!state.staffStats.selectedKey && built.employees[0]) state.staffStats.selectedKey = built.employees[0].key;
+            // Persist both fresh and backfilled dates. A failed cache write
+            // never hides the live calculation from the operator.
+            void saveStaffStatsSnapshot(db, date, built).catch((error) => console.warn("staff pulse snapshot save failed:", error));
         } catch (error) {
             console.error("staff stats failed:", error);
             state.staffStats.error = "Не удалось собрать статистику: " + (error && error.message ? error.message : String(error));
@@ -22021,7 +22097,7 @@
         $("closeStaffStats").addEventListener("click", closeStaffStatsModal);
         $("reloadStaffStats").addEventListener("click", () => {
             state.staffStats.detailScope = null;
-            void loadStaffStats();
+            void loadStaffStats(true);
         });
         $("staffStatsDate").addEventListener("change", () => {
             state.staffStats.date = normalizeText($("staffStatsDate").value) || state.today || todayIsoInMoscow();
