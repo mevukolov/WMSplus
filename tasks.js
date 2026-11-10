@@ -16300,10 +16300,12 @@
             staffStatsRecordTaskAction(employee, taskById.get(taskId), event, verdict, isManualDefer);
         });
 
-        // Fallback for the older rows that predate wms_task_history. It is
-        // deliberately disabled whenever the day's matching event exists, so
-        // an action can never be counted twice.
-        (tasks || []).forEach((row) => {
+        // Fallback is only for the period before the history table existed.
+        // For recent shifts an absent history event must not be guessed from
+        // the current assignee: a task can be reassigned after completion,
+        // which was exactly how V. Pakhomova received V. Voronova's verdict.
+        const useLegacyFallback = normalizeText(date) < "2026-08-24";
+        if (useLegacyFallback) (tasks || []).forEach((row) => {
             const completedDate = moscowDateFromValue(row.completed_at);
             const completedKey = "task_completed:" + normalizeText(row.id);
             const manualCompleted = completedDate === date && isManualAchievementTask(row) && !historyByTaskAndType.has(completedKey);
@@ -16516,16 +16518,24 @@
             ]);
             if (completedRead.error) throw completedRead.error;
             if (updatedRead.error) throw updatedRead.error;
+            if (!historyRead.ok) throw historyRead.error || new Error("Не удалось прочитать историю действий смены.");
             const byId = new Map();
             [...(completedRead.data || []), ...(updatedRead.data || [])].forEach((row) => {
                 if (row && row.id) byId.set(row.id, row);
             });
             const historyTaskIds = Array.from(new Set((historyRead.ok ? historyRead.rows : []).map((row) => normalizeIdentifier(row && row.task_id)).filter(Boolean)));
             if (historyTaskIds.length) {
-                const historyTasksRead = await db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).in("id", historyTaskIds).limit(10000);
-                if (historyTasksRead.error) throw historyTasksRead.error;
-                (historyTasksRead.data || []).forEach((row) => {
-                    if (row && row.id) byId.set(row.id, row);
+                // PostgREST puts an `in` list into a GET URL. A busy shift
+                // easily has 700+ ids, so one huge list makes the browser
+                // request fail before Supabase sees it. Keep each URL small.
+                const historyTaskReads = await Promise.all(chunkArray(historyTaskIds, 80).map((ids) => (
+                    db.from(WMS_TASKS_TABLE).select(WMS_TASK_SELECT_COLUMNS).in("id", ids).limit(1000)
+                )));
+                historyTaskReads.forEach((historyTasksRead) => {
+                    if (historyTasksRead.error) throw historyTasksRead.error;
+                    (historyTasksRead.data || []).forEach((row) => {
+                        if (row && row.id) byId.set(row.id, row);
+                    });
                 });
             }
             state.staffStats.taskRowsById = Object.fromEntries(Array.from(byId.values()).filter((row) => row && row.id).map((row) => [row.id, row]));
