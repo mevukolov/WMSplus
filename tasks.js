@@ -3350,8 +3350,8 @@
         const status = $("homeTrendStatus");
         if (!status) return;
         const pulse = state.homeTrend.mode === "pulse";
-        status.innerHTML = "<span>Следующий график через 10 сек.</span>"
-            + "<span class='home-trend-status-track'><i class='home-trend-status-progress'></i></span>"
+        status.setAttribute("aria-label", pulse ? "Показан Пульс смены" : "Показан Остаток задач");
+        status.innerHTML = "<span class='home-trend-status-track'><i class='home-trend-status-progress'></i></span>"
             + "<span class='home-trend-status-dots' aria-label='" + (pulse ? "Показан Пульс смены" : "Показан Остаток задач") + "'><i class='" + (!pulse ? "active" : "") + "'></i><i class='" + (pulse ? "active" : "") + "'></i></span>";
     }
 
@@ -22508,6 +22508,8 @@
         // откуда-то ещё. Без этого график не показывался, пока не зайти в
         // Разбор и не вернуться.
         void loadHomeActiveTrend();
+        void loadHomeShiftPulseTrend();
+        ensureHomeTrendRotation();
         // Счётчик «Без ШК» живёт в отдельной таблице физической зоны, а не
         // в wms_tasks. Запрашиваем его сразу, чтобы его линия на главной
         // не зависела от того, открывал ли пользователь вкладку «Задачи».
