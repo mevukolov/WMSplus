@@ -157,7 +157,8 @@
         .home-trend-status-dots button.active.is-arming { width: 8px; background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
         .home-trend-status-dots button.active::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, #623cea, #8b5cf6); transform: scaleX(0); transform-origin: left; animation: homeTrendDotProgress 9.74s linear forwards; animation-delay: var(--home-trend-progress-delay, 0ms); }
         .home-trend-status-dots button.active.is-arming::after, .home-trend-status-dots button.active.is-paused::after { animation-play-state: paused; }
-        .home-trend-status-dots button.active.is-paused { cursor: pointer; box-shadow: inset 0 0 0 1px rgba(98,60,234,.26); }
+        .home-trend-status-dots button.active.is-paused { cursor: pointer; background: #e2e8f0; box-shadow: inset 0 0 0 1px rgba(100,116,139,.24); }
+        .home-trend-status-dots button.active.is-paused::after { background: linear-gradient(90deg, #64748b, #94a3b8); }
         .home-trend-status-dots button.active.is-collapsing { width: 8px; background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
         .home-trend-status-dots button.active.is-collapsing::after { animation: none; transform: scaleX(1); opacity: 0; transition: opacity .14s ease; }
         @keyframes homeTrendDotProgress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
