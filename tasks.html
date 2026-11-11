@@ -1267,6 +1267,9 @@
         .status-pilot-view-tabs { position: relative; }
         .status-pilot-view-tabs .review-view-tab { position: relative; z-index: 1; }
         .status-pilot-view-tabs .review-view-tab.active { background: transparent; box-shadow: none; }
+        .violations-stat-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; width: min(100%, 760px); }
+        .violations-stat-tabs .review-view-tab { min-width: 0; padding: 10px 14px; white-space: nowrap; text-align: center; }
+        .violations-period-control { margin-top: 10px; }
         #statusPilotModal .tasks-flow-card.status-pilot-card, #violationsHubModal .tasks-flow-card.status-pilot-card { height: 82vh; max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
         .status-pilot-scroll { flex: 1; min-height: 0; overflow: auto; margin-top: 10px; }
         .violation-stat-list { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 0 12px; margin-top: 10px; }
@@ -1304,7 +1307,7 @@
         .violation-top-row:first-child { border-top: 0; }
         .violation-top-row:hover { color: var(--accent-dark); }
         .violation-top-row strong { color: #242038; }
-        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } .violation-overview-head { align-items: flex-start; } .violation-period-tabs { width: 100%; } .violation-period-tab { flex: 1; } }
+        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } .violation-overview-head { align-items: flex-start; } .violations-stat-tabs { width: 100%; } .violations-stat-tabs .review-view-tab { padding: 9px 5px; font-size: 11px; white-space: normal; } .violation-period-tabs { width: 100%; } .violation-period-tab { flex: 1; } }
         .violation-form { display: grid; gap: 12px; margin-top: 4px; }
         .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
         .violation-form-field select, .violation-form-field input, .violation-form-field textarea { font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background: #fff; }
@@ -2794,12 +2797,17 @@
             <div>
                 <h3 class="work-title">Нарушения</h3>
                 <p class="work-subtitle">Лог складских ошибок, заполняется после сохранения вердикта любой задачи. Статистика за выбранный период.</p>
+                <div id="violationsPeriodTabs" class="violation-period-tabs violations-period-control" aria-label="Период статистики">
+                    <button type="button" class="violation-period-tab" data-violation-period-days="7">За 7 дней</button>
+                    <button type="button" class="violation-period-tab active" data-violation-period-days="30">За 30 дней</button>
+                    <button type="button" class="violation-period-tab" data-violation-period-days="90">За 90 дней</button>
+                </div>
             </div>
             <button id="closeViolationsHub" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
         <div class="status-pilot-scroll">
             <div id="violationsStatsScreen">
-                <div id="violationsStatsDimTabs" class="review-view-tabs status-pilot-view-tabs" style="margin-top:10px;">
+                <div id="violationsStatsDimTabs" class="review-view-tabs status-pilot-view-tabs violations-stat-tabs" style="margin-top:10px;">
                     <span id="violationsStatsDimThumb" class="review-view-thumb" aria-hidden="true"></span>
                     <button type="button" class="review-view-tab active" data-violations-stat-dim="overview">Общее</button>
                     <button type="button" class="review-view-tab" data-violations-stat-dim="type">По типам</button>
@@ -2841,8 +2849,8 @@
             <label class="violation-form-field">Участок
                 <select id="violationZoneInput"></select>
             </label>
-            <label class="violation-form-field">Виновник
-                <input id="violationEmployeeInput" type="text" list="violationEmployeeList" placeholder="ФИО сотрудника (можно вписать вручную)" autocomplete="off">
+            <label class="violation-form-field">ID виновника
+                <input id="violationEmployeeInput" type="text" inputmode="numeric" pattern="[0-9]*" list="violationEmployeeList" placeholder="Например, 1034305" autocomplete="off">
                 <datalist id="violationEmployeeList"></datalist>
             </label>
             <p id="violationPromptHint" class="tasks-page-note"></p>

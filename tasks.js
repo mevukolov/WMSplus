@@ -2919,6 +2919,15 @@
         return employee ? normalizeText(employee.full_name) : "";
     }
 
+    function numericEmployeeId(value) {
+        const id = normalizeText(value);
+        return /^\d+$/.test(id) ? id : "";
+    }
+
+    function employeeNumericId(employee) {
+        return numericEmployeeId(employee && employee.employee_id);
+    }
+
     // The one place old two-named-role shifts (incoming_employee_id/
     // outgoing_employee_id, no real `roster`) get read as an equivalent
     // roster. Everything else in this file reads shift.roster only --
@@ -15888,14 +15897,26 @@
         return activeViolationTypes().map((label) => "<option value='" + escapeHtml(label) + "'>" + escapeHtml(label) + "</option>").join("");
     }
 
-    // Виновник -- свободное текстовое поле (с подсказками из ростера), не
-    // жёсткий select: сотрудника, который реально стоял на участке в
-    // момент ошибки, не всегда можно найти по последнему движению ШК
-    // (другой человек мог его туда положить) -- оператор должен суметь
-    // вписать имя от руки, а не только выбрать из списка известных ID.
     function violationEmployeeDatalistHtml() {
         return (state.shift.employees || [])
-            .map((employee) => "<option value='" + escapeHtml(employee.full_name) + "'>").join("");
+            .map((employee) => ({ id: employeeNumericId(employee), name: normalizeText(employee.full_name) }))
+            .filter((employee) => employee.id)
+            .map((employee) => "<option value='" + escapeHtml(employee.id) + "' label='" + escapeHtml(employee.name) + "'>").join("");
+    }
+
+    function violationEmployeeIdFromValue(value) {
+        const direct = employeeById(value);
+        return employeeNumericId(direct && direct.employee_id) || numericEmployeeId(value);
+    }
+
+    function renderViolationEmployeeHint(value) {
+        const hint = $("violationPromptHint");
+        if (!hint) return;
+        const id = violationEmployeeIdFromValue(value);
+        const name = id && employeeNameById(id);
+        hint.textContent = id
+            ? (name ? "Сотрудник: " + name : "В справочнике нет расшифровки: в отчётах будет показан ID " + id + ".")
+            : "Укажи только числовой ID сотрудника.";
     }
 
     function renderViolationModal() {
@@ -15909,30 +15930,14 @@
         if (typeSelect) typeSelect.innerHTML = violationTypeOptionsHtml();
         if (zoneSelect) zoneSelect.innerHTML = violationZoneOptionsHtml(pending.zone);
         if (employeeList) employeeList.innerHTML = violationEmployeeDatalistHtml();
-        if (employeeInput) employeeInput.value = pending.employeeName || pending.employeeId || "";
+        if (employeeInput) employeeInput.value = violationEmployeeIdFromValue(pending.employeeId);
         if (comment) comment.value = "";
-        const hint = $("violationPromptHint");
-        if (hint) hint.textContent = pending.employeeId ? "" : "Виновник не определился автоматически -- впиши вручную.";
+        renderViolationEmployeeHint(employeeInput && employeeInput.value);
     }
 
     function closeViolationModal() {
         state.violationPrompt.pending = null;
         setFlowModalOpen("violationModal", false);
-    }
-
-    // Свободный текст из поля "Виновник" -- если он совпадает с ФИО/ID
-    // известного сотрудника, записываем настоящий id (нужен для фильтра
-    // "по сотрудникам" в статистике); иначе просто сохраняем текст как
-    // есть, без id -- оператор вправе вписать кого угодно.
-    function resolveEmployeeFreeText(value) {
-        const text = normalizeText(value);
-        if (!text) return { id: "", name: "" };
-        const direct = employeeById(text);
-        if (direct) return { id: normalizeText(direct.id || direct.employee_id), name: normalizeText(direct.full_name) };
-        const key = normalizeForMatch(text);
-        const byName = (state.shift.employees || []).find((employee) => normalizeForMatch(employee.full_name) === key);
-        if (byName) return { id: normalizeText(byName.id || byName.employee_id), name: normalizeText(byName.full_name) };
-        return { id: "", name: text };
     }
 
     async function saveViolationFromModal() {
@@ -15942,14 +15947,14 @@
         const status = $("violationModalStatus");
         const violationType = normalizeText($("violationTypeInput") && $("violationTypeInput").value);
         const zone = normalizeText($("violationZoneInput") && $("violationZoneInput").value);
-        const employee = resolveEmployeeFreeText($("violationEmployeeInput") && $("violationEmployeeInput").value);
+        const employeeId = numericEmployeeId($("violationEmployeeInput") && $("violationEmployeeInput").value);
         const comment = normalizeText($("violationCommentInput") && $("violationCommentInput").value);
         if (!violationType || !zone) {
             if (status) status.textContent = "Укажи тип нарушения и участок.";
             return;
         }
-        if (!employee.name) {
-            if (status) status.textContent = "Укажи ID/имя виновного -- поле обязательно.";
+        if (!employeeId) {
+            if (status) status.textContent = "Укажи числовой ID виновника.";
             return;
         }
         if (normalizeForMatch(violationType) === normalizeForMatch("Другое") && !comment) {
@@ -15972,8 +15977,8 @@
                 violation_type: violationType,
                 verdict: pending.verdict || null,
                 task_price: pending.taskPrice,
-                culprit_employee_id: employee.id || null,
-                culprit_name: employee.name || null,
+                culprit_employee_id: employeeId,
+                culprit_name: null,
                 comment: comment || null,
                 logged_by_id: pending.loggedById || null,
                 logged_by_name: pending.loggedByName || null,
@@ -16026,14 +16031,22 @@
         }
     }
 
-    // Ключ группировки -- для "сотрудников" идём по employee_id, если он
-    // есть (резолвится по ростеру), иначе по самому тексту culprit_name
-    // (виновник теперь свободное поле -- то, что вписали вручную без
-    // совпадения с известным сотрудником, не должно схлопываться в одну
-    // общую "-" группу).
+    // ID -- единственный ключ виновника. Для старых строк подхватываем
+    // числовой ID из старого поля ФИО; свободный текст больше не участвует
+    // в группировке и не дробит одного человека на несколько карточек.
+    function violationEmployeeId(row) {
+        return numericEmployeeId(row && row.culprit_employee_id) || numericEmployeeId(row && row.culprit_name);
+    }
+
+    function violationEmployeeLabel(row) {
+        const id = violationEmployeeId(row);
+        if (!id) return "ID не указан";
+        return employeeNameById(id) || "ID " + id;
+    }
+
     function violationGroupKey(row, dimension) {
         if (dimension === "zone") return normalizeText(row.zone) || "-";
-        if (dimension === "employee") return normalizeText(row.culprit_employee_id) || normalizeText(row.culprit_name) || "-";
+        if (dimension === "employee") return violationEmployeeId(row) || "-";
         return normalizeText(row.violation_type) || "-";
     }
 
@@ -16041,8 +16054,7 @@
         if (dimension === "employee") {
             const byId = employeeNameById(key);
             if (byId) return byId;
-            const sample = groupRows.find((row) => normalizeText(row.culprit_name));
-            return (sample && normalizeText(sample.culprit_name)) || key;
+            return key === "-" ? "ID не указан" : "ID " + key;
         }
         return key;
     }
@@ -16081,6 +16093,13 @@
     function violationSelectedPeriodDays() {
         const value = Number(state.violations.statPeriodDays);
         return VIOLATION_OVERVIEW_PERIODS.includes(value) ? value : VIOLATION_OVERVIEW_DAY_COUNT;
+    }
+
+    function renderViolationPeriodTabs() {
+        const periodDays = violationSelectedPeriodDays();
+        document.querySelectorAll("#violationsPeriodTabs [data-violation-period-days]").forEach((button) => {
+            button.classList.toggle("active", Number(button.dataset.violationPeriodDays) === periodDays);
+        });
     }
 
     function violationRowsForSelectedPeriod() {
@@ -16130,9 +16149,8 @@
         const series = violationOverviewSeries(rows, days);
         const priceTotal = (rows || []).reduce((sum, row) => sum + Math.max(0, Number(row.task_price) || 0), 0);
         const employeeGroups = violationStatGroups("employee", rows).filter((group) => group.key !== "-").slice(0, 5);
-        const periodTabs = VIOLATION_OVERVIEW_PERIODS.map((daysCount) => "<button type='button' class='violation-period-tab" + (daysCount === periodDays ? " active" : "") + "' data-violation-period-days='" + daysCount + "'>За " + daysCount + " дней</button>").join("");
         if (!series.length) {
-            return "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Динамика по типам</strong><div class='violation-period-tabs' aria-label='Период статистики'>" + periodTabs + "</div></div><div class='empty-state'>Нет данных за последние " + periodDays + " дней.</div></section>";
+            return "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Динамика по типам</strong></div><div class='empty-state'>Нет данных за последние " + periodDays + " дней.</div></section>";
         }
 
         const width = 860;
@@ -16171,8 +16189,8 @@
             : "<div class='status-line'>Нет указанных сотрудников.</div>";
 
         return "<div class='violation-overview'>"
-            + "<div class='violation-overview-kpis'><div class='violation-overview-kpi'><span>Нарушений за " + periodDays + " дней</span><strong>" + rows.length + "</strong></div><div class='violation-overview-kpi'><span>Стоимость задач</span><strong>" + escapeHtml(formatMoney(priceTotal)) + "</strong></div></div>"
-            + "<section class='violation-overview-card'><div class='violation-overview-head'><div class='violation-overview-head-copy'><strong>Динамика по типам</strong><span>Каждая точка — число нарушений за день</span></div><div class='violation-period-tabs' aria-label='Период статистики'>" + periodTabs + "</div></div><div class='violation-overview-chart home-trend-chart'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Динамика нарушений по дням и типам'>" + grid + lines + lineHits + labels + "</svg><div class='violation-overview-tooltip'></div></div><div class='violation-overview-legend'>" + legend + "</div></section>"
+            + "<div class='violation-overview-kpis'><div class='violation-overview-kpi'><span>Зафиксировано за " + periodDays + " дней</span><strong>" + rows.length + "</strong></div><div class='violation-overview-kpi'><span>Стоимость задач</span><strong>" + escapeHtml(formatMoney(priceTotal)) + "</strong></div></div>"
+            + "<section class='violation-overview-card'><div class='violation-overview-head'><div class='violation-overview-head-copy'><strong>Динамика по типам</strong><span>Точка — количество зафиксированных нарушений за день: одна запись создаётся при сохранении формы.</span></div></div><div class='violation-overview-chart home-trend-chart'><svg viewBox='0 0 " + width + " " + height + "' role='img' aria-label='Динамика нарушений по дням и типам'>" + grid + lines + lineHits + labels + "</svg><div class='violation-overview-tooltip'></div></div><div class='violation-overview-legend'>" + legend + "</div></section>"
             + "<section class='violation-overview-card'><div class='violation-overview-head'><strong>Топ-5 сотрудников по ошибкам</strong><span>За последние " + periodDays + " дней</span></div><div class='violation-top-list'>" + topEmployees + "</div></section>"
             + "</div>";
     }
@@ -16193,7 +16211,7 @@
             const rect = chart.getBoundingClientRect();
             const chartX = (event.clientX - rect.left) * width / Math.max(rect.width, 1);
             const dayIndex = Math.max(0, Math.min(days.length - 1, Math.round((chartX - padLeft) * (days.length - 1) / plotW)));
-            tooltip.innerHTML = "<strong>" + escapeHtml(item.type) + "</strong><span>" + escapeHtml(homeTrendDateLabel(days[dayIndex])) + " · " + item.points[dayIndex] + " нарушений</span>";
+            tooltip.innerHTML = "<strong>" + escapeHtml(item.type) + "</strong><span>" + escapeHtml(homeTrendDateLabel(days[dayIndex])) + " · зафиксировано: " + item.points[dayIndex] + "</span>";
             const left = Math.min(Math.max(event.clientX - rect.left, 6), rect.width - 6);
             const top = Math.max(tooltip.offsetHeight + 8, event.clientY - rect.top - 8);
             tooltip.style.left = left + "px";
@@ -16213,6 +16231,7 @@
         if (!target) return;
         const rows = violationRowsForSelectedPeriod();
         const dimension = state.violations.statDimension || "overview";
+        renderViolationPeriodTabs();
         document.querySelectorAll("#violationsStatsDimTabs .review-view-tab").forEach((tab) => {
             tab.classList.toggle("active", tab.dataset.violationsStatDim === dimension);
         });
@@ -16223,24 +16242,16 @@
             target.querySelectorAll("[data-violation-overview-employee]").forEach((button) => {
                 button.addEventListener("click", () => openViolationDetailModal("employee", button.dataset.violationOverviewEmployee));
             });
-            target.querySelectorAll("[data-violation-period-days]").forEach((button) => {
-                button.addEventListener("click", () => {
-                    const days = Number(button.dataset.violationPeriodDays);
-                    if (!VIOLATION_OVERVIEW_PERIODS.includes(days) || days === violationSelectedPeriodDays()) return;
-                    state.violations.statPeriodDays = days;
-                    renderViolationsStats();
-                });
-            });
             bindViolationsOverviewChart(target, rows);
             return;
         }
         const groups = violationStatGroups(dimension);
         const body = groups.length
             ? groups.map((group) => "<button type='button' class='violation-stat-row' data-violation-group='" + escapeHtml(group.key) + "'><span>" + escapeHtml(group.label) + "</span><span>" + group.rows.length + "</span></button>").join("")
-            : "<div class='status-line'>Нет данных за последние 30 дней.</div>";
+            : "<div class='status-line'>Нет данных за последние " + violationSelectedPeriodDays() + " дней.</div>";
         target.innerHTML = (state.violations.error ? "<div class='status-line error'>" + escapeHtml(state.violations.error) + "</div>" : "")
             + (state.violations.loading ? "<div class='status-line'>Загружаю...</div>" : "")
-            + "<div class='violation-stat-total'>Всего за 30 дней: " + rows.length + "</div>"
+            + "<div class='violation-stat-total'>Зафиксировано за " + violationSelectedPeriodDays() + " дней: " + rows.length + "</div>"
             + "<div class='violation-stat-list'>" + body + "</div>";
         target.querySelectorAll("[data-violation-group]").forEach((button) => {
             button.addEventListener("click", () => openViolationDetailModal(dimension, button.dataset.violationGroup));
@@ -16267,7 +16278,7 @@
             + "<td>" + escapeHtml(formatMoney(row.task_price || 0)) + "</td>"
             + "<td>" + escapeHtml(formatRuDateTime(row.created_at)) + "</td>"
             + (showType ? "<td>" + escapeHtml(normalizeText(row.violation_type) || "-") + "</td>" : "")
-            + "<td>" + escapeHtml(normalizeText(row.culprit_name) || "-") + "</td>"
+            + "<td>" + escapeHtml(violationEmployeeLabel(row)) + "</td>"
             + "<td>" + escapeHtml(normalizeText(row.logged_by_name) || "-") + "</td>"
             + "<td class='review-wrap-cell'>" + escapeHtml(row.comment || "-") + "</td>"
             + "</tr>"
@@ -22325,6 +22336,14 @@
                 updateViolationsStatDimThumb();
             });
         });
+        document.querySelectorAll("#violationsPeriodTabs [data-violation-period-days]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const days = Number(button.dataset.violationPeriodDays);
+                if (!VIOLATION_OVERVIEW_PERIODS.includes(days) || days === violationSelectedPeriodDays()) return;
+                state.violations.statPeriodDays = days;
+                renderViolationsStats();
+            });
+        });
         $("closeViolationDetail").addEventListener("click", closeViolationDetailModal);
         $("violationDetailModal").addEventListener("click", (event) => { if (event.target === $("violationDetailModal")) closeViolationDetailModal(); });
         $("addViolationType").addEventListener("click", addViolationTypeDraft);
@@ -22333,6 +22352,11 @@
         $("closeViolationModal").addEventListener("click", closeViolationModal);
         $("skipViolationBtn").addEventListener("click", closeViolationModal);
         $("saveViolationBtn").addEventListener("click", () => { void saveViolationFromModal(); });
+        $("violationEmployeeInput").addEventListener("input", (event) => {
+            const input = event.currentTarget;
+            input.value = String(input.value || "").replace(/\D/g, "");
+            renderViolationEmployeeHint(input.value);
+        });
         $("closeStatusPilot").addEventListener("click", closeStatusPilotModal);
         document.querySelectorAll("#statusPilotModal [data-status-view]").forEach((button) => {
             button.addEventListener("click", () => {
