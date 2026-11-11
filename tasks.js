@@ -793,12 +793,16 @@
             activeData: { days: [], series: [], reopenPoints: [] },
             pulseData: { days: [], series: [], reopenPoints: [] },
             pureLossesData: { days: [], series: [], reopenPoints: [] },
+            violationsData: { days: [], series: [], reopenPoints: [] },
             pulseLoading: false,
             pulseLoaded: false,
             pulseError: "",
             pureLossesLoading: false,
             pureLossesLoaded: false,
             pureLossesError: "",
+            violationsLoading: false,
+            violationsLoaded: false,
+            violationsError: "",
             rotationTimer: null,
             rotationPending: false,
             lastSnapshotCaptureAt: 0,
@@ -3259,8 +3263,9 @@
     const HOME_TREND_SNAPSHOT_THROTTLE_MS = 10 * 60 * 1000;
     const HOME_TREND_HISTORY_DAYS = 14;
     const HOME_TREND_FORECAST_DAYS = 2;
-    const HOME_TREND_MODES = ["active", "pulse", "pureLosses"];
+    const HOME_TREND_MODES = ["active", "pulse", "pureLosses", "violations"];
     const HOME_TREND_PURE_LOSS_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#0891b2", "#64748b"];
+    const HOME_TREND_VIOLATION_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#8b5cf6", "#e87ba4", "#008300", "#0891b2", "#64748b"];
 
     function homeTrendDateLabel(isoDate) {
         const match = normalizeText(isoDate).match(/^\d{4}-(\d{2})-(\d{2})$/);
@@ -3359,6 +3364,9 @@
         if (state.homeTrend.mode === "pureLosses") {
             return { title: "Чистые списания", note: "Количество ШК по LR и дням списания", label: "Чистые списания за 14 дней" };
         }
+        if (state.homeTrend.mode === "violations") {
+            return { title: "Фиксация нарушений", note: "Сохранённые нарушения по типам и дням", label: "Фиксация нарушений за 14 дней" };
+        }
         return { title: "Остаток задач", note: "Активные задачи по участкам", label: "Остаток задач за 14 дней" };
     }
 
@@ -3367,7 +3375,9 @@
             ? state.homeTrend.pulseData
             : state.homeTrend.mode === "pureLosses"
                 ? state.homeTrend.pureLossesData
-                : state.homeTrend.activeData;
+                : state.homeTrend.mode === "violations"
+                    ? state.homeTrend.violationsData
+                    : state.homeTrend.activeData;
         state.homeTrend.days = data.days || [];
         state.homeTrend.series = data.series || [];
         state.homeTrend.reopenPoints = data.reopenPoints || [];
@@ -3413,6 +3423,7 @@
         state.homeTrend.mode = next;
         if (next === "pulse" && !state.homeTrend.pulseLoaded && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
         if (next === "pureLosses" && !state.homeTrend.pureLossesLoaded && !state.homeTrend.pureLossesLoading) void loadHomePureLossesTrend();
+        if (next === "violations" && !state.homeTrend.violationsLoaded && !state.homeTrend.violationsLoading) void loadHomeViolationsTrend();
         renderHomeTrendCard(animate);
     }
 
@@ -3548,6 +3559,59 @@
         } finally {
             state.homeTrend.pureLossesLoading = false;
             if (state.homeTrend.mode === "pureLosses") renderHomeTrendCard();
+        }
+    }
+
+    async function loadHomeViolationsTrend() {
+        const db = supabaseDb();
+        if (!db || state.homeTrend.violationsLoading) return;
+        state.homeTrend.violationsLoading = true;
+        state.homeTrend.violationsError = "";
+        try {
+            const since = addDays(state.today, -(HOME_TREND_HISTORY_DAYS - 1));
+            const start = moscowDayBoundsUtc(since).start;
+            const end = moscowDayBoundsUtc(addDays(state.today, 1)).start;
+            const result = await readOptionalRowsPaged(db, WMS_VIOLATIONS_TABLE, (query) => query
+                .select("created_at,violation_type")
+                .gte("created_at", start)
+                .lt("created_at", end)
+                .order("created_at", { ascending: true }));
+            if (!result.ok) throw result.error || new Error("Не удалось прочитать нарушения.");
+            const days = Array.from({ length: HOME_TREND_HISTORY_DAYS }, (_, index) => addDays(since, index));
+            const dayIndex = new Map(days.map((day, index) => [day, index]));
+            const byType = new Map();
+            result.rows.forEach((row) => {
+                const index = dayIndex.get(moscowDateFromValue(row && row.created_at));
+                if (index === undefined) return;
+                const type = normalizeText(row && row.violation_type) || "Без типа";
+                if (!byType.has(type)) byType.set(type, Array(days.length).fill(0));
+                byType.get(type)[index] += 1;
+            });
+            const types = Array.from(byType.entries()).sort((a, b) => {
+                const countA = a[1].reduce((sum, value) => sum + value, 0);
+                const countB = b[1].reduce((sum, value) => sum + value, 0);
+                return countB - countA || a[0].localeCompare(b[0], "ru");
+            });
+            const totalPoints = days.map((_, index) => types.reduce((sum, [, points]) => sum + points[index], 0));
+            state.homeTrend.violationsData = {
+                days,
+                series: [
+                    { zone: "Всего", color: "#0f172a", points: totalPoints },
+                    ...types.map(([type, points], index) => ({
+                        zone: type,
+                        color: HOME_TREND_VIOLATION_COLORS[index % HOME_TREND_VIOLATION_COLORS.length],
+                        points,
+                    })),
+                ],
+                reopenPoints: [],
+            };
+            state.homeTrend.violationsLoaded = true;
+        } catch (error) {
+            console.warn("home violations trend load failed:", error);
+            state.homeTrend.violationsError = "Не удалось загрузить фиксации нарушений: " + (error && error.message ? error.message : String(error));
+        } finally {
+            state.homeTrend.violationsLoading = false;
+            if (state.homeTrend.mode === "violations") renderHomeTrendCard();
         }
     }
 
@@ -3719,17 +3783,23 @@
             ? state.homeTrend.pulseLoading
             : state.homeTrend.mode === "pureLosses"
                 ? state.homeTrend.pureLossesLoading
-                : state.homeTrend.loading;
+                : state.homeTrend.mode === "violations"
+                    ? state.homeTrend.violationsLoading
+                    : state.homeTrend.loading;
         const loaded = state.homeTrend.mode === "pulse"
             ? state.homeTrend.pulseLoaded
             : state.homeTrend.mode === "pureLosses"
                 ? state.homeTrend.pureLossesLoaded
-                : state.homeTrend.loaded;
+                : state.homeTrend.mode === "violations"
+                    ? state.homeTrend.violationsLoaded
+                    : state.homeTrend.loaded;
         const error = state.homeTrend.mode === "pulse"
             ? state.homeTrend.pulseError
             : state.homeTrend.mode === "pureLosses"
                 ? state.homeTrend.pureLossesError
-                : state.homeTrend.error;
+                : state.homeTrend.mode === "violations"
+                    ? state.homeTrend.violationsError
+                    : state.homeTrend.error;
         if (loading && !loaded) {
             target.innerHTML = "<div class='home-trend-loading' role='status'><span class='home-trend-loading-bars' aria-hidden='true'><i></i><i></i><i></i><i></i></span><span>Загружаю данные по дням...</span></div>";
             return;
@@ -3920,6 +3990,7 @@
         if (!state.homeTrend.loaded && !state.homeTrend.loading) void loadHomeActiveTrend();
         if (!state.homeTrend.pulseLoaded && !state.homeTrend.pulseLoading) void loadHomeShiftPulseTrend();
         if (!state.homeTrend.pureLossesLoaded && !state.homeTrend.pureLossesLoading) void loadHomePureLossesTrend();
+        if (!state.homeTrend.violationsLoaded && !state.homeTrend.violationsLoading) void loadHomeViolationsTrend();
         ensureHomeTrendRotation();
         renderHomeTrendCard();
     }
@@ -15988,6 +16059,10 @@
             });
             if (error) throw error;
             state.violations.loaded = false;
+            // Главный график использует тот же журнал: обновляем его без
+            // ожидания следующей перезагрузки страницы.
+            state.homeTrend.violationsLoaded = false;
+            if (!state.homeTrend.violationsLoading) void loadHomeViolationsTrend();
             toast("Нарушение зафиксировано.", "success");
             closeViolationModal();
         } catch (error) {
@@ -22717,6 +22792,7 @@
         void loadHomeActiveTrend();
         void loadHomeShiftPulseTrend();
         void loadHomePureLossesTrend();
+        void loadHomeViolationsTrend();
         ensureHomeTrendRotation();
         // Счётчик «Без ШК» живёт в отдельной таблице физической зоны, а не
         // в wms_tasks. Запрашиваем его сразу, чтобы его линия на главной
