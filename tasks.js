@@ -43,6 +43,7 @@
     const WMS_TASK_ITEMS_TABLE = "wms_task_items";
     const WMS_VIOLATIONS_TABLE = "wms_violations";
     const WMS_VIOLATION_TYPES_TABLE = "wms_violation_types";
+    const LINEAR_EMP_REP_TABLE = "linear_emp_rep";
     const WMS_ACTIVE_TASKS_SNAPSHOT_TABLE = "wms_active_tasks_daily_snapshot";
     const PURE_LOSSES_TABLE = "pure_losses_rep";
     const LOSSES_TABLE = "losses_rep";
@@ -636,6 +637,7 @@
         },
         violations: {
             rows: [],
+            employeeNames: {},
             loading: false,
             loaded: false,
             error: "",
@@ -2916,7 +2918,8 @@
 
     function employeeNameById(id) {
         const employee = employeeById(id);
-        return employee ? normalizeText(employee.full_name) : "";
+        if (employee) return normalizeText(employee.full_name);
+        return normalizeText(state.violations && state.violations.employeeNames && state.violations.employeeNames[normalizeText(id)]);
     }
 
     function numericEmployeeId(value) {
@@ -16011,14 +16014,38 @@
             // Load the largest selectable period once; switching 7/30/90
             // days then redraws instantly without another network request.
             const since = addDays(state.today, -(VIOLATION_OVERVIEW_MAX_DAYS - 1));
-            const { data, error } = await db
+            const violationsRead = await db
                 .from(WMS_VIOLATIONS_TABLE)
                 .select("*")
                 .gte("created_at", since)
                 .order("created_at", { ascending: false })
                 .limit(2000);
-            if (error) throw error;
-            state.violations.rows = data || [];
+            if (violationsRead.error) throw violationsRead.error;
+            state.violations.rows = violationsRead.data || [];
+            state.violations.employeeNames = {};
+            const employeeIds = Array.from(new Set(state.violations.rows
+                .map((row) => numericEmployeeId(row && row.culprit_employee_id) || numericEmployeeId(row && row.culprit_name))
+                .filter(Boolean)));
+            if (employeeIds.length) {
+                const directoryReads = await Promise.all(chunkArray(employeeIds, 80).map((ids) => (
+                    readOptionalRowsPaged(db, LINEAR_EMP_REP_TABLE, (query) => query
+                        .select("linear_emp_id,linear_emp_name")
+                        .eq("wh_id", WH_ID)
+                        .in("linear_emp_id", ids)
+                        .not("linear_emp_name", "is", null))
+                )));
+                if (directoryReads.every((read) => read.ok)) {
+                    const names = {};
+                    directoryReads.flatMap((read) => read.rows).forEach((employee) => {
+                        const id = numericEmployeeId(employee && employee.linear_emp_id);
+                        const name = normalizeText(employee && employee.linear_emp_name);
+                        if (id && name && !names[id]) names[id] = name;
+                    });
+                    state.violations.employeeNames = names;
+                }
+            } else {
+                state.violations.employeeNames = {};
+            }
             state.violations.loaded = true;
             return true;
         } catch (error) {
@@ -16040,13 +16067,20 @@
 
     function violationEmployeeLabel(row) {
         const id = violationEmployeeId(row);
-        if (!id) return "ID не указан";
+        if (!id) {
+            const legacy = normalizeText(row && row.culprit_name);
+            return legacy ? "Без ID: " + legacy : "ID не указан";
+        }
         return employeeNameById(id) || "ID " + id;
     }
 
     function violationGroupKey(row, dimension) {
         if (dimension === "zone") return normalizeText(row.zone) || "-";
-        if (dimension === "employee") return violationEmployeeId(row) || "-";
+        if (dimension === "employee") {
+            const id = violationEmployeeId(row);
+            const legacy = normalizeForMatch(row && row.culprit_name);
+            return id || (legacy ? "legacy:" + legacy : "-");
+        }
         return normalizeText(row.violation_type) || "-";
     }
 
@@ -16054,7 +16088,12 @@
         if (dimension === "employee") {
             const byId = employeeNameById(key);
             if (byId) return byId;
-            return key === "-" ? "ID не указан" : "ID " + key;
+            if (key === "-") return "ID не указан";
+            if (key.startsWith("legacy:")) {
+                const sample = groupRows.find((row) => normalizeText(row.culprit_name));
+                return "Без ID: " + normalizeText(sample && sample.culprit_name);
+            }
+            return "ID " + key;
         }
         return key;
     }

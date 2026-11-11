@@ -1267,8 +1267,9 @@
         .status-pilot-view-tabs { position: relative; }
         .status-pilot-view-tabs .review-view-tab { position: relative; z-index: 1; }
         .status-pilot-view-tabs .review-view-tab.active { background: transparent; box-shadow: none; }
-        .violations-stat-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; width: min(100%, 760px); }
-        .violations-stat-tabs .review-view-tab { min-width: 0; padding: 10px 14px; white-space: nowrap; text-align: center; }
+        .violations-stat-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; width: min(100%, 760px); height: 58px; padding: 4px; box-sizing: border-box; }
+        .violations-stat-tabs .review-view-tab { display: flex; align-items: center; justify-content: center; min-width: 0; height: 50px; padding: 0 14px; box-sizing: border-box; white-space: nowrap; text-align: center; }
+        .violations-stat-tabs .review-view-thumb { top: 4px; bottom: 4px; height: auto; }
         .violations-period-control { margin-top: 10px; }
         #statusPilotModal .tasks-flow-card.status-pilot-card, #violationsHubModal .tasks-flow-card.status-pilot-card { height: 82vh; max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
         .status-pilot-scroll { flex: 1; min-height: 0; overflow: auto; margin-top: 10px; }
@@ -1307,7 +1308,7 @@
         .violation-top-row:first-child { border-top: 0; }
         .violation-top-row:hover { color: var(--accent-dark); }
         .violation-top-row strong { color: #242038; }
-        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } .violation-overview-head { align-items: flex-start; } .violations-stat-tabs { width: 100%; } .violations-stat-tabs .review-view-tab { padding: 9px 5px; font-size: 11px; white-space: normal; } .violation-period-tabs { width: 100%; } .violation-period-tab { flex: 1; } }
+        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } .violation-overview-head { align-items: flex-start; } .violations-stat-tabs { width: 100%; height: 54px; } .violations-stat-tabs .review-view-tab { height: 46px; padding: 0 5px; font-size: 11px; white-space: normal; } .violation-period-tabs { width: 100%; } .violation-period-tab { flex: 1; } }
         .violation-form { display: grid; gap: 12px; margin-top: 4px; }
         .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
         .violation-form-field select, .violation-form-field input, .violation-form-field textarea { font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background: #fff; }
