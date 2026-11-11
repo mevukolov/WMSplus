@@ -518,17 +518,16 @@
         "2-я линия предсписка",
         CANCELLATION_AFTER_WRITEOFF_VERDICT,
     ];
-    // Матрица не даёт сотруднику искать нужный пункт в общем списке из
-    // десятков типов. «Другое» и ошибка администрации намеренно остаются
-    // доступны на любом участке: ими можно зафиксировать исключение, для
-    // которого ещё нет отдельного типа.
+    // Стартовые привязки для миграции и старого клиента. Рабочий источник
+    // после миграции — wms_violation_types.zones, который редактируется во
+    // вкладке «Нарушения» Маршрутизатора.
     const VIOLATION_ZONE_GROUPS = {
         all: REVIEW_SECTIONS.concat(["Чистые списания"]),
         grid: ["ПМ", "Почта", "Предсортировка", "Маркетплейс", "ПЦ", "WMI (МП + ПЦ)"],
         mp: ["ПМ", "Маркетплейс", "WMI (МП + ПЦ)"],
         packing: ["Упаковка", "ПЦ", "Движение после продажи", "Без заказа"],
     };
-    const VIOLATION_TYPE_ZONE_MAP = {
+    const DEFAULT_VIOLATION_TYPE_ZONE_MAP = {
         "Не отнёс задвойку/Пустую упаковку": ["Упаковка", "ПЦ", "Без заказа"],
         "Бессистемно вложен на КС": VIOLATION_ZONE_GROUPS.grid.concat(["Упаковка", "Без заказа", "Движение после продажи"]),
         "Кинул мимо сетки": VIOLATION_ZONE_GROUPS.grid,
@@ -15968,12 +15967,33 @@
         return rows.length ? rows : ["Прочее"];
     }
 
+    function violationTypeZones(row) {
+        // An empty array is deliberate: a new type stays out of the employee
+        // form until its owner assigns at least one area in the Router.
+        if (Array.isArray(row && row.zones)) return row.zones.map(normalizeText).filter(Boolean);
+        return DEFAULT_VIOLATION_TYPE_ZONE_MAP[normalizeText(row && row.label)] || [];
+    }
+
+    function violationTypeZoneChoices() {
+        return activeReviewZones().concat(["Чистые списания"]);
+    }
+
+    function violationTypeZoneCheckboxesHtml(row) {
+        const selected = new Set(violationTypeZones(row));
+        return "<fieldset class='violation-type-zones'><legend>Участки в форме</legend>"
+            + violationTypeZoneChoices().map((zone) => "<label class='violation-type-zone-option'><input data-violation-type-zone type='checkbox' value='" + escapeHtml(zone) + "'" + (selected.has(zone) ? " checked" : "") + ">" + escapeHtml(zone) + "</label>").join("")
+            + "</fieldset>";
+    }
+
     function violationTypeRowHtml(row) {
-        return "<div class='writeoff-term-row' data-violation-type-row data-violation-type-original='" + escapeHtml(row.label || "") + "'>"
-            + "<input data-violation-type-sort type='number' min='1' step='1' value='" + escapeHtml(row.sort_order || "") + "' placeholder='Порядок'>"
+        return "<div class='violation-type-route-row' data-violation-type-row data-violation-type-original='" + escapeHtml(row.label || "") + "'>"
+            + "<div class='violation-type-route-main'>"
+            + "<input data-violation-type-sort type='number' min='1' step='1' value='" + escapeHtml(row.sort_order || "") + "' aria-label='Порядок' placeholder='№'>"
             + "<input data-violation-type-label type='text' value='" + escapeHtml(row.label || "") + "' placeholder='Название типа'>"
             + "<label class='writeoff-term-active'><input data-violation-type-active type='checkbox' " + (row.is_active === false ? "" : "checked") + "> активен</label>"
             + "<button type='button' class='btn btn-square' data-violation-type-remove aria-label='Удалить'>×</button>"
+            + "</div>"
+            + violationTypeZoneCheckboxesHtml(row)
             + "</div>";
     }
 
@@ -15983,7 +16003,7 @@
         const rows = state.violationTypes.rows || [];
         target.innerHTML = (state.violationTypes.error ? "<div class='status-line error'>" + escapeHtml(state.violationTypes.error) + "</div>" : "")
             + (state.violationTypes.loading ? "<div class='status-line'>Загружаю типы...</div>" : "")
-            + "<div class='writeoff-term-head'><span>Порядок</span><span>Название</span><span>Вкл.</span></div>"
+            + "<p class='violation-type-route-hint'>Отметь участки, на которых этот тип должен быть доступен сотруднику. Тип без участков в форме не показывается.</p>"
             + "<div class='writeoff-term-list'>" + rows.map(violationTypeRowHtml).join("") + "</div>";
         target.querySelectorAll("[data-violation-type-remove]").forEach((button) => {
             button.addEventListener("click", () => removeViolationTypeRow(button.closest("[data-violation-type-row]")));
@@ -16011,7 +16031,7 @@
     function addViolationTypeDraft() {
         const rows = state.violationTypes.rows || [];
         const nextOrder = rows.reduce((max, row) => Math.max(max, Number(row.sort_order) || 0), 0) + 1;
-        state.violationTypes.rows = rows.concat({ label: "", sort_order: nextOrder, is_active: true });
+        state.violationTypes.rows = rows.concat({ label: "", sort_order: nextOrder, is_active: true, zones: [] });
         renderViolationTypesEditor();
     }
 
@@ -16023,6 +16043,7 @@
                 label,
                 sort_order: Math.max(1, Math.trunc(settingNumber(row.querySelector("[data-violation-type-sort]") && row.querySelector("[data-violation-type-sort]").value, 1))),
                 is_active: row.querySelector("[data-violation-type-active]").checked,
+                zones: Array.from(row.querySelectorAll("[data-violation-type-zone]:checked")).map((input) => normalizeText(input.value)).filter(Boolean),
                 updated_at: new Date().toISOString(),
             };
         }).filter(Boolean);
@@ -16104,15 +16125,11 @@
 
     function violationTypesForZone(zone) {
         const normalizedZone = normalizeText(zone);
-        return activeViolationTypes().filter((label) => {
-            const allowedZones = VIOLATION_TYPE_ZONE_MAP[normalizeText(label)];
-            // New types that have not yet been added to the matrix remain
-            // available in «Другие задачи», rather than leaking into every
-            // operational section and bringing the long list back.
-            return Array.isArray(allowedZones)
-                ? allowedZones.includes(normalizedZone)
-                : normalizedZone === "Другие задачи";
-        });
+        return (state.violationTypes.rows || [])
+            .filter((row) => row.is_active !== false)
+            .filter((row) => violationTypeZones(row).includes(normalizedZone))
+            .map((row) => normalizeText(row.label))
+            .filter(Boolean);
     }
 
     function violationTypeOptionsHtml(zone) {
