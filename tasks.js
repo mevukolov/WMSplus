@@ -3689,23 +3689,37 @@
         try {
             const since = addDays(state.today, -(HOME_TREND_HISTORY_DAYS - 1));
             const forecastEnd = addDays(state.today, HOME_TREND_FORECAST_DAYS);
-            const reopenQueryEnd = addDays(forecastEnd, 1) + "T00:00:00+03:00";
-            const [snapshotsResult, reopensResult] = await Promise.all([
+            const reopenQueryEnd = moscowDayBoundsUtc(addDays(forecastEnd, 1)).start;
+            const reopenHistoryStart = moscowDayBoundsUtc(since).start;
+            const reopenHistoryEnd = moscowDayBoundsUtc(addDays(state.today, 1)).start;
+            const nowIso = new Date().toISOString();
+            const [snapshotsResult, scheduledReopensResult, actualReopensRead] = await Promise.all([
                 db.from(WMS_ACTIVE_TASKS_SNAPSHOT_TABLE)
                     .select("snapshot_date,zone,active_count")
                     .gte("snapshot_date", since)
                     .lte("snapshot_date", state.today)
                     .order("snapshot_date", { ascending: true }),
                 db.from(WMS_TASKS_TABLE)
-                    .select("reopen_after")
+                    .select("id,reopen_after")
                     .eq("is_deleted", false)
+                    .eq("task_status", "Отложено")
                     .not("reopen_after", "is", null)
-                    .gte("reopen_after", since + "T00:00:00+03:00")
+                    // Only outstanding waits are a forecast. Once the cron
+                    // has reopened a task, reopen_after is cleared and the
+                    // immutable history event below becomes its source of truth.
+                    .gt("reopen_after", nowIso)
                     .lt("reopen_after", reopenQueryEnd)
                     .range(0, 9999),
+                readOptionalRowsPaged(db, FLOW_HISTORY_TABLE, (query) => query
+                    .select("task_id,event_type,created_at")
+                    .in("event_type", ["task_auto_reopened", "task_reopened"])
+                    .gte("created_at", reopenHistoryStart)
+                    .lt("created_at", reopenHistoryEnd)
+                    .order("created_at", { ascending: true })),
             ]);
             if (snapshotsResult.error) throw snapshotsResult.error;
-            if (reopensResult.error) throw reopensResult.error;
+            if (scheduledReopensResult.error) throw scheduledReopensResult.error;
+            if (!actualReopensRead.ok) throw actualReopensRead.error;
             const rows = Array.isArray(snapshotsResult.data) ? snapshotsResult.data : [];
             // Start exactly where the first real snapshot starts. The
             // snapshot history begins on 29.10 for the current rollout, so
@@ -3751,12 +3765,28 @@
                     return byZoneDay.has(key) ? byZoneDay.get(key) : null;
                 }),
             }));
-            const reopenByDay = new Map(days.map((day) => [day, 0]));
-            (Array.isArray(reopensResult.data) ? reopensResult.data : []).forEach((row) => {
-                const day = moscowDateFromValue(row && row.reopen_after);
-                if (reopenByDay.has(day)) reopenByDay.set(day, (reopenByDay.get(day) || 0) + 1);
+            // Past reopens must come from wms_task_history: the automatic
+            // reopen routine intentionally clears wms_tasks.reopen_after.
+            // The remaining scheduled rows form a forecast from this moment
+            // through the next two days. Sets prevent a task from being
+            // counted twice if it was reopened more than once in a day.
+            const reopenedTaskIdsByDay = new Map(days.map((day) => [day, new Set()]));
+            (actualReopensRead.rows || []).forEach((row) => {
+                const day = moscowDateFromValue(row && row.created_at);
+                const taskId = normalizeText(row && row.task_id);
+                if (day <= state.today && taskId && reopenedTaskIdsByDay.has(day)) {
+                    reopenedTaskIdsByDay.get(day).add(taskId);
+                }
             });
-            state.homeTrend.activeData = { days, series, reopenPoints: days.map((day) => reopenByDay.get(day) || 0) };
+            (Array.isArray(scheduledReopensResult.data) ? scheduledReopensResult.data : []).forEach((row) => {
+                const day = moscowDateFromValue(row && row.reopen_after);
+                const taskId = normalizeText(row && row.id);
+                if (day >= state.today && taskId && reopenedTaskIdsByDay.has(day)) {
+                    reopenedTaskIdsByDay.get(day).add(taskId);
+                }
+            });
+            const reopenPoints = days.map((day) => (reopenedTaskIdsByDay.get(day) || new Set()).size);
+            state.homeTrend.activeData = { days, series, reopenPoints };
             state.homeTrend.loaded = true;
         } catch (error) {
             console.warn("home active trend load failed:", error);
