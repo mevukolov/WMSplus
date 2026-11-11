@@ -518,6 +518,36 @@
         "2-я линия предсписка",
         CANCELLATION_AFTER_WRITEOFF_VERDICT,
     ];
+    // Матрица не даёт сотруднику искать нужный пункт в общем списке из
+    // десятков типов. «Другое» и ошибка администрации намеренно остаются
+    // доступны на любом участке: ими можно зафиксировать исключение, для
+    // которого ещё нет отдельного типа.
+    const VIOLATION_ZONE_GROUPS = {
+        all: REVIEW_SECTIONS.concat(["Чистые списания"]),
+        grid: ["ПМ", "Почта", "Предсортировка", "Маркетплейс", "ПЦ", "WMI (МП + ПЦ)"],
+        mp: ["ПМ", "Маркетплейс", "WMI (МП + ПЦ)"],
+        packing: ["Упаковка", "ПЦ", "Движение после продажи", "Без заказа"],
+    };
+    const VIOLATION_TYPE_ZONE_MAP = {
+        "Не отнёс задвойку/Пустую упаковку": ["Упаковка", "ПЦ", "Без заказа"],
+        "Бессистемно вложен на КС": VIOLATION_ZONE_GROUPS.grid.concat(["Упаковка", "Без заказа", "Движение после продажи"]),
+        "Кинул мимо сетки": VIOLATION_ZONE_GROUPS.grid,
+        "Неверное вложение в сетку МП": VIOLATION_ZONE_GROUPS.mp,
+        "Пикнули вещи из транзитной сетки": VIOLATION_ZONE_GROUPS.mp.concat(["Предсортировка"]),
+        "Отгружена под пустой передачей после КГТ": ["Упаковка", "ПЦ", "Движение после продажи"],
+        "Пик в гофре/Вне зоны видимости камер": ["Упаковка", "ПЦ", "Предсортировка"],
+        "Проблемы с ротацией на КГТ": ["Упаковка", "ПЦ", "Движение после продажи"],
+        "Не отнес левак": VIOLATION_ZONE_GROUPS.grid.concat(["Без заказа"]),
+        "Ошибка отдела Брак": ["Упаковка", "ПЦ", "Другие задачи"],
+        "Ошибка администрации": VIOLATION_ZONE_GROUPS.all,
+        "Бессистемное вложение в сетку упака после МП": VIOLATION_ZONE_GROUPS.mp.concat(["Упаковка"]),
+        "Обработка на МП товара, непредназначеного для МП": VIOLATION_ZONE_GROUPS.mp,
+        "Неверное вложение в сетку": VIOLATION_ZONE_GROUPS.grid,
+        "Отправлен под пустым стикером": VIOLATION_ZONE_GROUPS.packing,
+        "Присвоен стикер от другого товара": VIOLATION_ZONE_GROUPS.grid.concat(["Упаковка", "Без заказа"]),
+        "Отложил в слепую зону": REVIEW_SECTIONS.filter((zone) => zone !== "RWP" && zone !== "Другие задачи"),
+        "Другое": VIOLATION_ZONE_GROUPS.all,
+    };
     // Не задача-секция -- физическая зона (стеллажи/короба из
     // no_shk_zone.js, те же данные, что "Зона «Без ШК»"), а не группировка
     // wms_tasks -- живёт в том же ряду пилюль, но не участвует в
@@ -16072,8 +16102,22 @@
         return zones.map((zone) => "<option value='" + escapeHtml(zone) + "'" + (zone === selectedZone ? " selected" : "") + ">" + escapeHtml(zone) + "</option>").join("");
     }
 
-    function violationTypeOptionsHtml() {
-        return activeViolationTypes().map((label) => "<option value='" + escapeHtml(label) + "'>" + escapeHtml(label) + "</option>").join("");
+    function violationTypesForZone(zone) {
+        const normalizedZone = normalizeText(zone);
+        return activeViolationTypes().filter((label) => {
+            const allowedZones = VIOLATION_TYPE_ZONE_MAP[normalizeText(label)];
+            // New types that have not yet been added to the matrix remain
+            // available in «Другие задачи», rather than leaking into every
+            // operational section and bringing the long list back.
+            return Array.isArray(allowedZones)
+                ? allowedZones.includes(normalizedZone)
+                : normalizedZone === "Другие задачи";
+        });
+    }
+
+    function violationTypeOptionsHtml(zone) {
+        const types = violationTypesForZone(zone);
+        return types.map((label) => "<option value='" + escapeHtml(label) + "'>" + escapeHtml(label) + "</option>").join("");
     }
 
     function violationEmployeeDatalistHtml() {
@@ -16100,10 +16144,16 @@
         const previousZone = preserveInputs && zoneSelect ? zoneSelect.value : "";
         const previousEmployeeId = preserveInputs && employeeInput ? employeeInput.value : "";
         const previousComment = preserveInputs && comment ? comment.value : "";
-        if (typeSelect) typeSelect.innerHTML = violationTypeOptionsHtml();
         if (zoneSelect) zoneSelect.innerHTML = violationZoneOptionsHtml(pending.zone);
+        const selectedZone = previousZone || (zoneSelect && zoneSelect.value) || pending.zone;
+        if (typeSelect) {
+            typeSelect.innerHTML = violationTypeOptionsHtml(selectedZone);
+            if (previousType) typeSelect.value = previousType;
+            // Switching an area must never silently preserve an irrelevant
+            // type. The first contextual option becomes the safe default.
+            if (!typeSelect.value && typeSelect.options.length) typeSelect.selectedIndex = 0;
+        }
         if (employeeList) employeeList.innerHTML = violationEmployeeDatalistHtml();
-        if (typeSelect && previousType) typeSelect.value = previousType;
         if (zoneSelect && previousZone) zoneSelect.value = previousZone;
         if (employeeInput) employeeInput.value = previousEmployeeId || violationEmployeeIdFromValue(pending.employeeId);
         if (comment) comment.value = previousComment;
@@ -22596,6 +22646,12 @@
         $("violationsHubModal").addEventListener("click", (event) => { if (event.target === $("violationsHubModal")) closeViolationsHubModal(); });
         $("skipViolationBtn").addEventListener("click", closeViolationModal);
         $("saveViolationBtn").addEventListener("click", () => { void saveViolationFromModal(); });
+        $("violationZoneInput").addEventListener("change", () => {
+            // Rebuild only the dependent select while keeping scanned ID and
+            // comment intact. This makes changing an accidentally selected
+            // area a one-click correction instead of a form restart.
+            renderViolationModal(true);
+        });
         $("violationEmployeeInput").addEventListener("input", (event) => {
             const input = event.currentTarget;
             input.value = String(input.value || "").replace(/\D/g, "");
