@@ -16021,7 +16021,17 @@
         };
         renderViolationModal();
         setFlowModalOpen("violationModal", true);
-        if (!state.violationTypes.loaded) void loadViolationTypes().then(renderViolationModal);
+        // Тип и участок уже подставлены из завершённой задачи. Сразу
+        // ставим фокус в ID: сотруднику остаётся отсканировать/ввести его
+        // и нажать Enter, не проходя курсором по всей форме.
+        requestAnimationFrame(() => {
+            const input = $("violationEmployeeInput");
+            if (input && $("violationModal").classList.contains("active")) {
+                input.focus({ preventScroll: true });
+                input.select();
+            }
+        });
+        if (!state.violationTypes.loaded) void loadViolationTypes().then(() => renderViolationModal(true));
     }
 
     function violationZoneOptionsHtml(selectedZone) {
@@ -16046,17 +16056,7 @@
         return employeeNumericId(direct && direct.employee_id) || numericEmployeeId(value);
     }
 
-    function renderViolationEmployeeHint(value) {
-        const hint = $("violationPromptHint");
-        if (!hint) return;
-        const id = violationEmployeeIdFromValue(value);
-        const name = id && employeeNameById(id);
-        hint.textContent = id
-            ? (name ? "Сотрудник: " + name : "В справочнике нет расшифровки: в отчётах будет показан ID " + id + ".")
-            : "Укажи только числовой ID сотрудника.";
-    }
-
-    function renderViolationModal() {
+    function renderViolationModal(preserveInputs) {
         const pending = state.violationPrompt.pending;
         const typeSelect = $("violationTypeInput");
         const zoneSelect = $("violationZoneInput");
@@ -16064,12 +16064,19 @@
         const employeeList = $("violationEmployeeList");
         const comment = $("violationCommentInput");
         if (!pending) return;
+        const previousType = preserveInputs && typeSelect ? typeSelect.value : "";
+        const previousZone = preserveInputs && zoneSelect ? zoneSelect.value : "";
+        const previousEmployeeId = preserveInputs && employeeInput ? employeeInput.value : "";
+        const previousComment = preserveInputs && comment ? comment.value : "";
         if (typeSelect) typeSelect.innerHTML = violationTypeOptionsHtml();
         if (zoneSelect) zoneSelect.innerHTML = violationZoneOptionsHtml(pending.zone);
         if (employeeList) employeeList.innerHTML = violationEmployeeDatalistHtml();
-        if (employeeInput) employeeInput.value = violationEmployeeIdFromValue(pending.employeeId);
-        if (comment) comment.value = "";
-        renderViolationEmployeeHint(employeeInput && employeeInput.value);
+        if (typeSelect && previousType) typeSelect.value = previousType;
+        if (zoneSelect && previousZone) zoneSelect.value = previousZone;
+        if (employeeInput) employeeInput.value = previousEmployeeId || violationEmployeeIdFromValue(pending.employeeId);
+        if (comment) comment.value = previousComment;
+        const status = $("violationModalStatus");
+        if (status && !preserveInputs) status.textContent = "";
     }
 
     function closeViolationModal() {
@@ -22526,13 +22533,16 @@
         $("addViolationType").addEventListener("click", addViolationTypeDraft);
         $("saveViolationTypes").addEventListener("click", () => { void saveViolationTypesFromModal(); });
         $("violationsHubModal").addEventListener("click", (event) => { if (event.target === $("violationsHubModal")) closeViolationsHubModal(); });
-        $("closeViolationModal").addEventListener("click", closeViolationModal);
         $("skipViolationBtn").addEventListener("click", closeViolationModal);
         $("saveViolationBtn").addEventListener("click", () => { void saveViolationFromModal(); });
         $("violationEmployeeInput").addEventListener("input", (event) => {
             const input = event.currentTarget;
             input.value = String(input.value || "").replace(/\D/g, "");
-            renderViolationEmployeeHint(input.value);
+        });
+        $("violationEmployeeInput").addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            void saveViolationFromModal();
         });
         $("closeStatusPilot").addEventListener("click", closeStatusPilotModal);
         document.querySelectorAll("#statusPilotModal [data-status-view]").forEach((button) => {

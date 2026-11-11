@@ -1316,7 +1316,9 @@
         @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } .violation-overview-head { align-items: flex-start; } .violations-stat-tabs { width: 100%; } .violations-stat-tabs .review-view-tab { padding: 9px 5px; font-size: 11px; white-space: normal; } .violation-period-tabs { width: 100%; } .violation-period-tab { flex: 1; } }
         .violation-form { display: grid; gap: 12px; margin-top: 4px; }
         .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
-        .violation-form-field select, .violation-form-field input, .violation-form-field textarea { font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background: #fff; }
+        .violation-form-field select, .violation-form-field input, .violation-form-field textarea { box-sizing: border-box; width: 100%; font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background-color: #fff; }
+        .violation-form-field select, .violation-form-field input[list] { min-height: 48px; padding-right: 42px; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='m4 6 4 4 4-4' stroke='%2364758b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; background-size: 16px; }
+        .violation-form-field input[list]::-webkit-list-button { opacity: 0; pointer-events: none; }
         .review-pager-viewport { contain: inline-size; clip-path: inset(-64px); }
         .review-pager-track { display: flex; gap: 96px; width: calc(5 * var(--pager-panel-w, 20%) + 384px); transition: transform .5s cubic-bezier(.22,1,.36,1); }
         .review-pager-panel { flex: 0 0 var(--pager-panel-w, 100%); min-width: 0; }
@@ -2842,11 +2844,7 @@
 <section id="violationModal" class="tasks-flow-modal upload-work" aria-hidden="true" style="z-index:4300;">
     <div class="tasks-flow-card">
         <div class="work-head">
-            <div>
-                <h3 class="work-title">Нарушение</h3>
-                <p class="work-subtitle">Если товар потерялся/ошибка в процессе -- зафиксируй тип, участок и виновника. Если всё в порядке -- просто пропусти.</p>
-            </div>
-            <button id="closeViolationModal" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+            <h3 class="work-title">Нарушение</h3>
         </div>
         <div class="violation-form">
             <label class="violation-form-field">Тип нарушения
@@ -2859,7 +2857,6 @@
                 <input id="violationEmployeeInput" type="text" inputmode="numeric" pattern="[0-9]*" list="violationEmployeeList" placeholder="Например, 1034305" autocomplete="off">
                 <datalist id="violationEmployeeList"></datalist>
             </label>
-            <p id="violationPromptHint" class="tasks-page-note"></p>
             <label class="violation-form-field">Комментарий (необязательно)
                 <textarea id="violationCommentInput" rows="2" placeholder="Что произошло"></textarea>
             </label>
