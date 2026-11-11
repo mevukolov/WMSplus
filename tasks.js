@@ -30,7 +30,9 @@
     const WMS_NO_SHK_STICKER_EVENTS_TABLE = "wms_no_shk_sticker_events";
     const WMS_STAFF_PULSE_SNAPSHOT_TABLE = "wms_staff_shift_pulse_snapshots";
     const WMS_STAFF_PULSE_DAILY_SNAPSHOT_TABLE = "wms_staff_shift_pulse_daily_snapshot";
-    const STAFF_PULSE_SNAPSHOT_VERSION = 1;
+    // v2 merges name-only history entries with the roster employee and
+    // stores task-level, rather than barcode-expanded, details.
+    const STAFF_PULSE_SNAPSHOT_VERSION = 2;
     const WMS_ACHIEVEMENTS_TABLE = "wms_achievements";
     const WMS_USER_PROFILES_TABLE = "wms_user_profiles";
     const PROFILE_MEDIA_BUCKET = "profile-media";
@@ -16546,6 +16548,26 @@
         return normalizeIdentifier(id) || normalizeForMatch(name) || "unknown";
     }
 
+    function staffStatsNameKey(name) {
+        // History from older actions sometimes has no employee ID and can
+        // spell the same FIO in a different order. Token sorting lets it
+        // join the shift roster instead of making a second small card.
+        return normalizeForMatch(name).split(/\s+/).filter(Boolean).sort().join(" ");
+    }
+
+    function staffStatsNamesMatch(left, right) {
+        const leftParts = staffStatsNameKey(left).split(" ").filter(Boolean);
+        const rightParts = staffStatsNameKey(right).split(" ").filter(Boolean);
+        if (!leftParts.length || !rightParts.length) return false;
+        if (leftParts.join(" ") === rightParts.join(" ")) return true;
+        // Some historical events omit patronymic. Match only when at least
+        // two name tokens are shared, so one common surname cannot combine
+        // different people.
+        const shorter = leftParts.length <= rightParts.length ? leftParts : rightParts;
+        const longer = new Set(leftParts.length > rightParts.length ? leftParts : rightParts);
+        return shorter.length >= 2 && shorter.every((part) => longer.has(part));
+    }
+
     function staffStatsActorIsKnown(actor) {
         const id = normalizeIdentifier(actor && actor.id);
         const name = normalizeText(actor && actor.name);
@@ -16590,7 +16612,19 @@
 
     function staffStatsEmployeeForActor(map, actor) {
         if (!staffStatsActorIsKnown(actor)) return null;
-        return ensureStaffStatsRow(map, actor.id, actor.name);
+        const id = normalizeIdentifier(actor && actor.id);
+        const name = normalizeText(actor && actor.name);
+        if (id && map.has(staffStatsKey(id, name))) return map.get(staffStatsKey(id, name));
+        const nameKey = staffStatsNameKey(name);
+        if (nameKey) {
+            const rosterMatch = Array.from(map.values()).find((row) => staffStatsNamesMatch(row.name, name));
+            if (rosterMatch) {
+                if (!rosterMatch.id && id) rosterMatch.id = id;
+                if ((!rosterMatch.name || rosterMatch.name === "Не определено") && name) rosterMatch.name = name;
+                return rosterMatch;
+            }
+        }
+        return ensureStaffStatsRow(map, id, name);
     }
 
     function incrementCounter(target, key, amount) {
@@ -16644,19 +16678,16 @@
 
     function staffStatsDetailsForTask(row, historyRow, metaParts, fallbackTitle) {
         const shks = staffStatsTaskShks(row, historyRow);
-        const meta = (metaParts || []).filter(Boolean).join(" · ");
-        if (!shks.length) {
-            return [{
-                id: row && row.id,
-                title: fallbackTitle || normalizeText(staffStatsPayload(historyRow).title) || (row ? displayTaskTitle(row) : "Задача"),
-                meta,
-            }];
-        }
-        return shks.map((shk) => ({
+        const meta = (metaParts || []).filter(Boolean);
+        // A task may contain a batch of barcodes. The Pulse is an employee
+        // task log, so one action must stay one detail row; barcode count is
+        // merely context, never a multiplier for the task counter.
+        if (shks.length > 1) meta.unshift("ШК в задаче: " + shks.length);
+        return [{
             id: row && row.id,
-            title: "ШК " + shk,
-            meta,
-        }));
+            title: fallbackTitle || normalizeText(staffStatsPayload(historyRow).title) || (row ? displayTaskTitle(row) : "Задача"),
+            meta: meta.join(" · "),
+        }];
     }
 
     function staffStatsAddGroupDetail(target, key, details) {
