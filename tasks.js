@@ -666,6 +666,14 @@
             loaded: false,
             error: "",
         },
+        employeeDirectory: {
+            rows: [],
+            loading: false,
+            saving: false,
+            loaded: false,
+            error: "",
+            query: "",
+        },
         violations: {
             rows: [],
             employeeNames: {},
@@ -14681,7 +14689,7 @@
     }
 
     // Верхний диспетчер модалки Маршрутизатора -- переключает видимость
-    // между 4 видами: "Выгрузки" (старый список по source_format),
+    // между 5 видами: "Выгрузки" (старый список по source_format),
     // "Участки" (renderStatusZonesScreen), "Нарушения" (редактор типов
     // нарушений, перенесён сюда из модалки "Нарушения") и "Без ШК" (вся
     // зона хранения, перенесена из отдельной модалки noShkZoneModal --
@@ -14693,6 +14701,7 @@
         const uploadsWrap = $("statusDictionaryWrap");
         const zonesWrap = $("statusZonesWrap");
         const violationsWrap = $("statusViolationsWrap");
+        const employeesWrap = $("statusEmployeesWrap");
         const noShkWrap = $("statusNoShkWrap");
         document.querySelectorAll("[data-status-view]").forEach((button) => {
             button.classList.toggle("active", button.dataset.statusView === view);
@@ -14700,12 +14709,15 @@
         if (uploadsWrap) uploadsWrap.classList.toggle("hidden", view !== "uploads");
         if (zonesWrap) zonesWrap.classList.toggle("hidden", view !== "zones");
         if (violationsWrap) violationsWrap.classList.toggle("hidden", view !== "violations");
+        if (employeesWrap) employeesWrap.classList.toggle("hidden", view !== "employees");
         if (noShkWrap) noShkWrap.classList.toggle("hidden", view !== "noshk");
         document.querySelectorAll("[data-status-uploads-only]").forEach((el) => el.classList.toggle("hidden", view !== "uploads"));
         document.querySelectorAll("[data-status-violations-only]").forEach((el) => el.classList.toggle("hidden", view !== "violations"));
+        document.querySelectorAll("[data-status-employees-only]").forEach((el) => el.classList.toggle("hidden", view !== "employees"));
         document.querySelectorAll("[data-status-noshk-only]").forEach((el) => el.classList.toggle("hidden", view !== "noshk"));
         if (view === "zones") renderStatusZonesScreen();
         else if (view === "violations") renderViolationTypesEditor();
+        else if (view === "employees") renderEmployeeDirectoryEditor();
         else if (view === "noshk") { if (typeof window.__noShkLoadZone === "function") window.__noShkLoadZone(); }
         else renderStatusDictionaryModal();
         updateStatusViewThumb(instant);
@@ -16082,6 +16094,159 @@
         }
     }
 
+    // ---- Маршрутизатор: справочник исполнителей (ID → ФИО) ----
+
+    const EMPLOYEE_DIRECTORY_RENDER_LIMIT = 200;
+
+    async function loadEmployeeDirectory(force) {
+        if (state.employeeDirectory.loaded && !force) return true;
+        const db = supabaseDb();
+        state.employeeDirectory.loading = true;
+        state.employeeDirectory.error = "";
+        if (!db) {
+            state.employeeDirectory.loading = false;
+            return false;
+        }
+        try {
+            const read = await readOptionalRowsPaged(db, LINEAR_EMP_REP_TABLE, (query) => query
+                .select("linear_emp_id,linear_emp_name,wh_id")
+                .eq("wh_id", WH_ID)
+                .order("linear_emp_id", { ascending: true }));
+            if (!read.ok) throw read.error;
+            state.employeeDirectory.rows = (read.rows || []).map((row) => ({
+                linear_emp_id: normalizeIdentifier(row && row.linear_emp_id),
+                linear_emp_name: normalizeText(row && row.linear_emp_name),
+                wh_id: WH_ID,
+                _draft: false,
+            }));
+            state.employeeDirectory.loaded = true;
+            return true;
+        } catch (error) {
+            state.employeeDirectory.error = "Не удалось загрузить исполнителей: " + (error && error.message ? error.message : String(error));
+            console.warn("employee directory load failed:", error);
+            return false;
+        } finally {
+            state.employeeDirectory.loading = false;
+            renderEmployeeDirectoryEditor();
+        }
+    }
+
+    function employeeDirectoryFilteredRows() {
+        const query = normalizeForMatch(state.employeeDirectory.query);
+        return (state.employeeDirectory.rows || []).map((row, index) => ({ row, index })).filter(({ row }) => {
+            if (!query) return true;
+            return normalizeForMatch([row.linear_emp_id, row.linear_emp_name].filter(Boolean).join(" ")).includes(query);
+        });
+    }
+
+    function employeeDirectoryRowHtml(item) {
+        const row = item.row;
+        const id = normalizeIdentifier(row.linear_emp_id);
+        const isDraft = Boolean(row._draft);
+        return "<div class='employee-directory-row' data-employee-directory-index='" + item.index + "'>"
+            + "<input data-employee-directory-id type='text' inputmode='numeric' pattern='[0-9]*' value='" + escapeHtml(id) + "' placeholder='ID сотрудника'" + (isDraft ? "" : " readonly") + ">"
+            + "<input data-employee-directory-name type='text' value='" + escapeHtml(row.linear_emp_name || "") + "' placeholder='Фамилия Имя Отчество'>"
+            + "</div>";
+    }
+
+    function renderEmployeeDirectoryEditor() {
+        const target = $("employeeDirectoryWrap");
+        if (!target) return;
+        const rows = employeeDirectoryFilteredRows();
+        const visible = rows.slice(0, EMPLOYEE_DIRECTORY_RENDER_LIMIT);
+        const total = (state.employeeDirectory.rows || []).length;
+        target.innerHTML = (state.employeeDirectory.error ? "<div class='status-line error'>" + escapeHtml(state.employeeDirectory.error) + "</div>" : "")
+            + "<div class='employee-directory-toolbar'><input id='employeeDirectorySearch' class='employee-directory-search' type='search' value='" + escapeHtml(state.employeeDirectory.query) + "' placeholder='Найти по ID или ФИО'><span class='employee-directory-count'>" + visible.length + " из " + rows.length + (rows.length !== total ? " · всего " + total : "") + "</span></div>"
+            + (state.employeeDirectory.loading ? "<div class='status-line'>Загружаю исполнителей...</div>" : "")
+            + (rows.length > EMPLOYEE_DIRECTORY_RENDER_LIMIT ? "<div class='status-line'>Показаны первые " + EMPLOYEE_DIRECTORY_RENDER_LIMIT + ". Уточни поиск, чтобы увидеть остальных.</div>" : "")
+            + "<div class='employee-directory-head'><span>ID</span><span>ФИО</span></div>"
+            + "<div class='writeoff-term-list'>" + visible.map(employeeDirectoryRowHtml).join("") + "</div>";
+        const search = $("employeeDirectorySearch");
+        if (search) search.addEventListener("input", (event) => {
+            state.employeeDirectory.query = event.currentTarget.value || "";
+            renderEmployeeDirectoryEditor();
+        });
+        target.querySelectorAll("[data-employee-directory-index]").forEach((rowEl) => {
+            const index = Number(rowEl.getAttribute("data-employee-directory-index"));
+            const row = state.employeeDirectory.rows[index];
+            const idInput = rowEl.querySelector("[data-employee-directory-id]");
+            const nameInput = rowEl.querySelector("[data-employee-directory-name]");
+            if (idInput) idInput.addEventListener("input", (event) => {
+                const value = String(event.currentTarget.value || "").replace(/\D/g, "");
+                event.currentTarget.value = value;
+                row.linear_emp_id = value;
+                row._dirty = true;
+            });
+            if (nameInput) nameInput.addEventListener("input", (event) => {
+                row.linear_emp_name = event.currentTarget.value;
+                row._dirty = true;
+            });
+        });
+    }
+
+    function addEmployeeDirectoryDraft() {
+        state.employeeDirectory.query = "";
+        state.employeeDirectory.rows = [{ linear_emp_id: "", linear_emp_name: "", wh_id: WH_ID, _draft: true }].concat(state.employeeDirectory.rows || []);
+        renderEmployeeDirectoryEditor();
+        requestAnimationFrame(() => {
+            const input = document.querySelector("[data-employee-directory-id]");
+            if (input) input.focus();
+        });
+    }
+
+    function employeeDirectoryRowsForSave() {
+        const seen = new Set();
+        const rows = [];
+        for (const row of (state.employeeDirectory.rows || []).filter((item) => item && (item._draft || item._dirty))) {
+            const id = numericEmployeeId(row && row.linear_emp_id);
+            const name = normalizeText(row && row.linear_emp_name);
+            if (!id && !name) continue;
+            if (!id || !name) return { error: "Для каждого исполнителя укажи и числовой ID, и ФИО." };
+            if (seen.has(id)) return { error: "ID " + id + " указан дважды." };
+            seen.add(id);
+            rows.push({ linear_emp_id: Number(id), linear_emp_name: name, wh_id: Number(WH_ID) });
+        }
+        return { rows };
+    }
+
+    async function saveEmployeeDirectory() {
+        const db = supabaseDb();
+        const status = $("employeeDirectoryStatus");
+        const button = $("saveEmployeeDirectory");
+        const prepared = employeeDirectoryRowsForSave();
+        if (prepared.error) {
+            if (status) status.textContent = prepared.error;
+            return;
+        }
+        if (!prepared.rows.length) {
+            if (status) status.textContent = "Нет изменений для сохранения.";
+            return;
+        }
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен.";
+            return;
+        }
+        if (button) button.disabled = true;
+        state.employeeDirectory.saving = true;
+        if (status) status.textContent = "Сохраняю исполнителей...";
+        try {
+            for (const batch of chunkArray(prepared.rows, 250)) {
+                const { error } = await db.from(LINEAR_EMP_REP_TABLE).upsert(batch, { onConflict: "linear_emp_id" });
+                if (error) throw error;
+            }
+            await loadEmployeeDirectory(true);
+            if (status) status.textContent = "Исполнители сохранены.";
+            toast("Справочник исполнителей обновлён.", "success");
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            state.employeeDirectory.error = "Не удалось сохранить исполнителей: " + message;
+            if (status) status.textContent = state.employeeDirectory.error;
+        } finally {
+            state.employeeDirectory.saving = false;
+            if (button) button.disabled = false;
+        }
+    }
+
     // ---- Нарушения: всплывающая модалка после сохранения вердикта ----
 
     // Зона для подстановки -- для "Чистых списаний" (completePureLossesItemFromDetail)
@@ -16622,9 +16787,9 @@
         // позже. Журнал покрытия (ensureCoverageLogLoaded, без force) --
         // для календаря покрытия статусов в самом виде "Выгрузки"; обычно
         // уже загружен при первом посещении главного экрана, но не
-        // полагаемся на это. Типы нарушений -- для вида "Нарушения",
-        // та же логика "грузим сразу, не ждём переключения вида".
-        await Promise.all([loadStatusDictionary(true), loadRoutingRules(true), ensureCoverageLogLoaded(), loadViolationTypes(true)]);
+        // полагаемся на это. Типы нарушений и справочник исполнителей
+        // подгружаем заранее для своих вкладок.
+        await Promise.all([loadStatusDictionary(true), loadRoutingRules(true), ensureCoverageLogLoaded(), loadViolationTypes(true), loadEmployeeDirectory(true)]);
         renderStatusPilotScreen(true);
     }
 
@@ -22660,6 +22825,8 @@
         $("violationDetailModal").addEventListener("click", (event) => { if (event.target === $("violationDetailModal")) closeViolationDetailModal(); });
         $("addViolationType").addEventListener("click", addViolationTypeDraft);
         $("saveViolationTypes").addEventListener("click", () => { void saveViolationTypesFromModal(); });
+        $("addEmployeeDirectoryRow").addEventListener("click", addEmployeeDirectoryDraft);
+        $("saveEmployeeDirectory").addEventListener("click", () => { void saveEmployeeDirectory(); });
         $("violationsHubModal").addEventListener("click", (event) => { if (event.target === $("violationsHubModal")) closeViolationsHubModal(); });
         $("skipViolationBtn").addEventListener("click", closeViolationModal);
         $("saveViolationBtn").addEventListener("click", () => { void saveViolationFromModal(); });
