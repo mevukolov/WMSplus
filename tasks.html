@@ -149,13 +149,17 @@
         .home-trend-status { display: flex; justify-content: center; margin-top: 14px; }
         .home-trend-status-track { display: none; }
         .home-trend-status-dots { display: inline-flex; align-items: center; gap: 8px; height: 12px; }
-        .home-trend-status-dots i { position: relative; display: block; box-sizing: border-box; width: 8px; height: 8px; overflow: hidden; border-radius: 999px; background: #cbd5e1; transition: width .26s cubic-bezier(.22,.8,.32,1), background-color .18s ease, box-shadow .18s ease; }
-        .home-trend-status-dots i.active { width: 72px; background: #e9e3ff; box-shadow: inset 0 0 0 1px rgba(98,60,234,.12); }
-        .home-trend-status-dots i.active.is-arming { width: 8px; background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
-        .home-trend-status-dots i.active::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, #623cea, #8b5cf6); transform: scaleX(0); transform-origin: left; animation: homeTrendDotProgress 9.74s linear forwards; }
-        .home-trend-status-dots i.active.is-arming::after { animation-play-state: paused; }
-        .home-trend-status-dots i.active.is-collapsing { width: 8px; background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
-        .home-trend-status-dots i.active.is-collapsing::after { animation: none; transform: scaleX(1); opacity: 0; transition: opacity .14s ease; }
+        .home-trend-status-dots button { position: relative; display: block; box-sizing: border-box; width: 8px; height: 8px; margin: 0; padding: 0; overflow: hidden; border: 0; border-radius: 999px; background: #cbd5e1; cursor: pointer; transition: width .26s cubic-bezier(.22,.8,.32,1), background-color .18s ease, box-shadow .18s ease, transform .16s ease; }
+        .home-trend-status-dots button:hover { transform: scale(1.18); background: #94a3b8; }
+        .home-trend-status-dots button:focus-visible { outline: 3px solid rgba(98,60,234,.28); outline-offset: 3px; }
+        .home-trend-status-dots button.active { width: 72px; background: #e9e3ff; box-shadow: inset 0 0 0 1px rgba(98,60,234,.12); }
+        .home-trend-status-dots button.active:hover { transform: none; }
+        .home-trend-status-dots button.active.is-arming { width: 8px; background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
+        .home-trend-status-dots button.active::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, #623cea, #8b5cf6); transform: scaleX(0); transform-origin: left; animation: homeTrendDotProgress 9.74s linear forwards; animation-delay: var(--home-trend-progress-delay, 0ms); }
+        .home-trend-status-dots button.active.is-arming::after, .home-trend-status-dots button.active.is-paused::after { animation-play-state: paused; }
+        .home-trend-status-dots button.active.is-paused { cursor: pointer; box-shadow: inset 0 0 0 1px rgba(98,60,234,.26); }
+        .home-trend-status-dots button.active.is-collapsing { width: 8px; background: #623cea; box-shadow: 0 0 0 3px rgba(98,60,234,.12); }
+        .home-trend-status-dots button.active.is-collapsing::after { animation: none; transform: scaleX(1); opacity: 0; transition: opacity .14s ease; }
         @keyframes homeTrendDotProgress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
         .home-review-btn { display: flex; align-items: center; gap: 16px; width: 100%; margin-top: 14px; padding: 18px 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); text-align: left; color: #0f172a; cursor: pointer; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
         .home-review-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: rgba(98,60,234,.28); }

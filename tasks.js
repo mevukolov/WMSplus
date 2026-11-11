@@ -805,6 +805,9 @@
             violationsError: "",
             rotationTimer: null,
             rotationPending: false,
+            rotationPaused: false,
+            rotationStartedAt: 0,
+            rotationElapsedMs: 0,
             lastSnapshotCaptureAt: 0,
             refreshAfterSnapshot: false,
         },
@@ -3387,17 +3390,47 @@
         const status = $("homeTrendStatus");
         if (!status) return;
         const mode = state.homeTrend.mode;
-        if (!force && status.dataset.mode === mode) return;
+        const paused = String(state.homeTrend.rotationPaused);
+        if (!force && status.dataset.mode === mode && status.dataset.paused === paused) return;
         status.dataset.mode = mode;
+        status.dataset.paused = paused;
         status.setAttribute("aria-label", "Показан график: " + homeTrendModeConfig().title);
         status.innerHTML = "<span class='home-trend-status-track'><i class='home-trend-status-progress'></i></span>"
-            + "<span class='home-trend-status-dots' aria-hidden='true'>"
-            + HOME_TREND_MODES.map((item) => "<i class='" + (item === mode ? "active is-arming" : "") + "'></i>").join("")
+            + "<span class='home-trend-status-dots' role='group' aria-label='Переключение графиков'>"
+            + HOME_TREND_MODES.map((item) => {
+                const active = item === mode;
+                const classes = active ? "active is-arming" + (state.homeTrend.rotationPaused ? " is-paused" : "") : "";
+                const label = active
+                    ? (state.homeTrend.rotationPaused ? "Возобновить автопереключение графиков" : "Остановить автопереключение графиков")
+                    : "Перейти к графику: " + homeTrendModeTitle(item);
+                const progressDelay = active && state.homeTrend.rotationElapsedMs
+                    ? " style='--home-trend-progress-delay:-" + Math.min(9740, state.homeTrend.rotationElapsedMs) + "ms'"
+                    : "";
+                return "<button type='button' class='" + classes + "' data-home-trend-mode='" + item + "' aria-pressed='" + active + "' aria-label='" + escapeHtml(label) + "' title='" + escapeHtml(label) + "'" + progressDelay + "></button>";
+            }).join("")
             + "</span>";
         requestAnimationFrame(() => {
-            const active = status.querySelector(".home-trend-status-dots i.active.is-arming");
+            const active = status.querySelector(".home-trend-status-dots button.active.is-arming");
             if (active) active.classList.remove("is-arming");
         });
+        status.querySelectorAll("[data-home-trend-mode]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const target = button.dataset.homeTrendMode;
+                if (!HOME_TREND_MODES.includes(target)) return;
+                if (target === state.homeTrend.mode) {
+                    setHomeTrendRotationPaused(!state.homeTrend.rotationPaused);
+                    return;
+                }
+                switchHomeTrendMode(target);
+            });
+        });
+    }
+
+    function homeTrendModeTitle(mode) {
+        if (mode === "pulse") return "Пульс смены";
+        if (mode === "pureLosses") return "Чистые списания";
+        if (mode === "violations") return "Фиксация нарушений";
+        return "Остаток задач";
     }
 
     function renderHomeTrendCard(animate) {
@@ -3427,19 +3460,37 @@
         renderHomeTrendCard(animate);
     }
 
-    function rotateHomeTrend(direction) {
+    function setHomeTrendRotationPaused(paused) {
+        const nextPaused = Boolean(paused);
+        if (nextPaused && !state.homeTrend.rotationPaused) {
+            const elapsed = state.homeTrend.rotationStartedAt
+                ? Date.now() - state.homeTrend.rotationStartedAt
+                : state.homeTrend.rotationElapsedMs;
+            state.homeTrend.rotationElapsedMs = Math.max(0, Math.min(9740, elapsed));
+            state.homeTrend.rotationStartedAt = 0;
+            if (state.homeTrend.rotationTimer) {
+                clearTimeout(state.homeTrend.rotationTimer);
+                state.homeTrend.rotationTimer = null;
+            }
+        }
+        state.homeTrend.rotationPaused = nextPaused;
+        renderHomeTrendStatus(true);
+        if (!state.homeTrend.rotationPaused) ensureHomeTrendRotation();
+    }
+
+    function switchHomeTrendMode(target) {
         if (state.homeTrend.rotationPending) return;
         if (state.homeTrend.rotationTimer) {
             clearTimeout(state.homeTrend.rotationTimer);
             state.homeTrend.rotationTimer = null;
         }
+        state.homeTrend.rotationPaused = false;
+        state.homeTrend.rotationStartedAt = 0;
+        state.homeTrend.rotationElapsedMs = 0;
         state.homeTrend.rotationPending = true;
         const current = $("homeTrendStatus");
-        const active = current && current.querySelector(".home-trend-status-dots i.active");
+        const active = current && current.querySelector(".home-trend-status-dots button.active");
         if (active) active.classList.add("is-collapsing");
-        const currentIndex = Math.max(0, HOME_TREND_MODES.indexOf(state.homeTrend.mode));
-        const shift = direction === "previous" ? -1 : 1;
-        const target = HOME_TREND_MODES[(currentIndex + shift + HOME_TREND_MODES.length) % HOME_TREND_MODES.length];
         setTimeout(() => {
             setHomeTrendMode(target, true);
             state.homeTrend.rotationPending = false;
@@ -3447,12 +3498,24 @@
         }, 260);
     }
 
+    function rotateHomeTrend(direction) {
+        const currentIndex = Math.max(0, HOME_TREND_MODES.indexOf(state.homeTrend.mode));
+        const shift = direction === "previous" ? -1 : 1;
+        const target = HOME_TREND_MODES[(currentIndex + shift + HOME_TREND_MODES.length) % HOME_TREND_MODES.length];
+        switchHomeTrendMode(target);
+    }
+
     function ensureHomeTrendRotation() {
-        if (state.homeTrend.rotationTimer) return;
+        if (state.homeTrend.rotationPaused || state.homeTrend.rotationTimer) return;
+        if (!state.homeTrend.rotationStartedAt) {
+            state.homeTrend.rotationStartedAt = Date.now() - state.homeTrend.rotationElapsedMs;
+        }
+        const elapsed = Math.max(0, Date.now() - state.homeTrend.rotationStartedAt);
+        const remaining = Math.max(0, 10000 - elapsed);
         state.homeTrend.rotationTimer = setTimeout(() => {
             state.homeTrend.rotationTimer = null;
             if (state.view === "home") rotateHomeTrend("next");
-        }, 10000);
+        }, remaining);
     }
 
     async function loadHomeShiftPulseTrend() {
