@@ -315,6 +315,8 @@
         .violation-manager-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 9px; border: 1px solid #e2e8f0; border-radius: 13px; background: #f8fafc; }
         .violation-manager-filters input, .violation-manager-filters select { width: 100%; min-width: 0; box-sizing: border-box; min-height: 34px; padding: 7px 9px; border: 1px solid #dbe4f0; border-radius: 9px; color: #334155; background: #fff; font: inherit; font-size: 12px; font-weight: 750; }
         .violation-manager-date-filter { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 4px; color: #64748b; font-size: 11px; font-weight: 900; }
+        .violation-manager-flag-filter { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 7px 9px; box-sizing: border-box; border: 1px solid #dbe4f0; border-radius: 9px; color: #475569; background: #fff; font-size: 11px; font-weight: 850; cursor: pointer; }
+        .violation-manager-flag-filter input { width: auto; min-height: 0; padding: 0; accent-color: var(--accent); }
         .violation-manager-reset { grid-column: 1 / -1; min-height: 32px; padding: 6px 9px; font-size: 12px; }
         .violation-manager-count { margin: 0; color: #64748b; font-size: 12px; font-weight: 800; }
         .violation-manager-list-row { display: grid; gap: 3px; width: 100%; padding: 10px 11px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; text-align: left; color: #334155; font: inherit; cursor: pointer; }
@@ -329,6 +331,11 @@
         .violation-manager-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
         .violation-manager-form .violation-form-field.full { grid-column: 1 / -1; }
         .violation-manager-hint { margin: -2px 0 0; color: #64748b; font-size: 11px; font-weight: 700; }
+        #missingEmployeesModal .tasks-flow-card { width: min(760px, 96vw); max-height: min(82vh, 820px); display: flex; flex-direction: column; }
+        .missing-employees-list { display: grid; gap: 8px; min-height: 0; overflow: auto; }
+        .missing-employee-row { display: grid; grid-template-columns: 140px minmax(0, 1fr) 105px; gap: 8px; align-items: center; padding: 8px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
+        .missing-employee-row input { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #dbe4f0; border-radius: 9px; padding: 9px 10px; color: #242038; background: #fff; font: inherit; font-weight: 800; }
+        .missing-employee-uses { color: #64748b; font-size: 11px; font-weight: 800; text-align: right; }
         .btn-danger { color: #b91c1c; border-color: #fecaca; background: #fff; }
         .btn-danger:hover { color: #fff; border-color: #dc2626; background: #dc2626; }
         .routing-rule-list { display: grid; gap: 12px; }
@@ -2166,7 +2173,7 @@
         @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; }
             .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }
         @media (max-width: 1120px) { .journal-action-list { max-height: none; } }
-        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .violation-type-route-main, .employee-directory-head, .employee-directory-row, .violation-manager-layout, .violation-manager-form, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
+        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .violation-type-route-main, .employee-directory-head, .employee-directory-row, .violation-manager-layout, .violation-manager-form, .missing-employee-row, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
         @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
@@ -2841,10 +2848,28 @@
         </div>
         <div id="violationTypesStatus" class="review-status" data-status-violations-only></div>
         <div class="file-row" data-status-employees-only>
+            <button id="openMissingEmployees" class="btn btn-square" type="button" aria-label="Не добавленные исполнители" title="Не добавленные исполнители">!</button>
             <button id="addEmployeeDirectoryRow" class="btn btn-outline" type="button">Добавить исполнителя</button>
             <button id="saveEmployeeDirectory" class="btn btn-rect" type="button">Сохранить исполнителей</button>
         </div>
         <div id="employeeDirectoryStatus" class="review-status" data-status-employees-only></div>
+    </div>
+</section>
+
+<section id="missingEmployeesModal" class="tasks-flow-modal upload-work" aria-hidden="true" style="z-index:4700;">
+    <div class="tasks-flow-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Не добавленные исполнители</h3>
+                <p class="work-subtitle">Числовые ID из журнала нарушений, для которых в справочнике ещё нет ФИО.</p>
+            </div>
+            <button id="closeMissingEmployees" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="missingEmployeesWrap" class="missing-employees-list"></div>
+        <div class="file-row">
+            <button id="saveMissingEmployees" class="btn btn-rect" type="button">Добавить в справочник</button>
+        </div>
+        <div id="missingEmployeesStatus" class="review-status"></div>
     </div>
 </section>
 

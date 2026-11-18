@@ -674,6 +674,12 @@
             error: "",
             query: "",
         },
+        missingEmployeeDirectory: {
+            rows: [],
+            loading: false,
+            saving: false,
+            error: "",
+        },
         violationManager: {
             rows: [],
             loading: false,
@@ -690,6 +696,7 @@
                 shk: "",
                 culpritId: "",
                 loggedById: "",
+                incorrectCulpritId: false,
                 dateFrom: "",
                 dateTo: "",
                 sort: "created_desc",
@@ -2341,6 +2348,7 @@
         setFlowModalOpen("flowSettingsModal", false);
         setFlowModalOpen("statusPilotModal", false);
         setFlowModalOpen("violationManagerModal", false);
+        setFlowModalOpen("missingEmployeesModal", false);
         setFlowModalOpen("staffStatsModal", false);
         setFlowModalOpen("editTareTaskModal", false);
         setFlowModalOpen("deferTaskModal", false);
@@ -16132,6 +16140,7 @@
             shk: "",
             culpritId: "",
             loggedById: "",
+            incorrectCulpritId: false,
             dateFrom: "",
             dateTo: "",
             sort: "created_desc",
@@ -16141,6 +16150,16 @@
     function violationManagerSelectedRow() {
         const selectedId = normalizeText(state.violationManager.selectedId);
         return (state.violationManager.rows || []).find((row) => normalizeText(row && row.id) === selectedId) || null;
+    }
+
+    function violationHasIncorrectCulpritId(row) {
+        const rawId = normalizeText(row && row.culprit_employee_id);
+        // До перехода на числовой ID свободный текст сохранялся в culprit_name.
+        // В новых строках поле ID заполнено отдельно, поэтому имя в таком случае
+        // не считается ошибкой и не попадает в этот служебный фильтр.
+        if (rawId) return !numericEmployeeId(rawId);
+        const legacyValue = normalizeText(row && row.culprit_name);
+        return Boolean(legacyValue) && !numericEmployeeId(legacyValue);
     }
 
     function violationManagerFilteredRows() {
@@ -16161,6 +16180,7 @@
             if (!matchesText(row.shk, filters.shk)) return false;
             if (!matchesText(row.culprit_employee_id, filters.culpritId)) return false;
             if (!matchesText(row.logged_by_id, filters.loggedById)) return false;
+            if (filters.incorrectCulpritId && !violationHasIncorrectCulpritId(row)) return false;
             const date = moscowDateFromValue(row.created_at);
             if (filters.dateFrom && (!date || date < filters.dateFrom)) return false;
             if (filters.dateTo && (!date || date > filters.dateTo)) return false;
@@ -16192,6 +16212,7 @@
             + "<input id='violationManagerFilterShk' data-violation-manager-filter='shk' type='search' value='" + escapeHtml(filters.shk) + "' placeholder='ШК' aria-label='Фильтр по ШК'>"
             + "<input id='violationManagerFilterCulprit' data-violation-manager-filter='culpritId' type='text' inputmode='numeric' value='" + escapeHtml(filters.culpritId) + "' placeholder='ID виновника' aria-label='Фильтр по ID виновника'>"
             + "<input id='violationManagerFilterLoggedBy' data-violation-manager-filter='loggedById' type='text' inputmode='numeric' value='" + escapeHtml(filters.loggedById) + "' placeholder='ID зафиксировавшего' aria-label='Фильтр по ID зафиксировавшего'>"
+            + "<label class='violation-manager-flag-filter'><input id='violationManagerFilterInvalidCulprit' data-violation-manager-filter='incorrectCulpritId' type='checkbox'" + (filters.incorrectCulpritId ? " checked" : "") + "> Некорректный ID виновного</label>"
             + "<select id='violationManagerFilterSort' data-violation-manager-filter='sort' aria-label='Сортировка'>"
                 + "<option value='created_desc'" + (filters.sort === "created_desc" ? " selected" : "") + ">Сначала новые</option>"
                 + "<option value='created_asc'" + (filters.sort === "created_asc" ? " selected" : "") + ">Сначала старые</option>"
@@ -16306,7 +16327,7 @@
             const rerender = (event) => {
                 const field = event.currentTarget.dataset.violationManagerFilter;
                 if (!field) return;
-                let value = event.currentTarget.value || "";
+                let value = event.currentTarget.type === "checkbox" ? event.currentTarget.checked : (event.currentTarget.value || "");
                 if (field === "culpritId" || field === "loggedById") value = value.replace(/\D/g, "");
                 state.violationManager.filters = { ...(state.violationManager.filters || defaultViolationManagerFilters()), [field]: value };
                 renderViolationManager(event.currentTarget.id);
@@ -16616,6 +16637,135 @@
         } finally {
             state.employeeDirectory.saving = false;
             if (button) button.disabled = false;
+        }
+    }
+
+    // ---- Маршрутизатор: очередь ID без ФИО в справочнике ----
+
+    function missingEmployeeDirectoryKnownIds() {
+        return new Set((state.employeeDirectory.rows || [])
+            .filter((row) => numericEmployeeId(row && row.linear_emp_id) && normalizeText(row && row.linear_emp_name))
+            .map((row) => numericEmployeeId(row.linear_emp_id)));
+    }
+
+    function collectMissingEmployeeDirectoryRows(violations) {
+        const knownIds = missingEmployeeDirectoryKnownIds();
+        const byId = new Map();
+        (violations || []).forEach((row) => {
+            [["culprit", numericEmployeeId(row && row.culprit_employee_id) || numericEmployeeId(row && row.culprit_name)], ["logged", row && row.logged_by_id]].forEach(([role, rawId]) => {
+                const id = numericEmployeeId(rawId);
+                if (!id || knownIds.has(id)) return;
+                const item = byId.get(id) || { id, name: "", count: 0, roles: new Set() };
+                item.count += 1;
+                item.roles.add(role);
+                byId.set(id, item);
+            });
+        });
+        return Array.from(byId.values()).sort((left, right) => right.count - left.count || left.id.localeCompare(right.id));
+    }
+
+    function missingEmployeeUsesLabel(row) {
+        const roles = row.roles || new Set();
+        const roleLabel = roles.has("culprit") && roles.has("logged") ? "виновник и зафиксировавший" : (roles.has("culprit") ? "виновник" : "зафиксировавший");
+        return row.count + " фиксац. · " + roleLabel;
+    }
+
+    function renderMissingEmployeesModal() {
+        const target = $("missingEmployeesWrap");
+        if (!target) return;
+        const rows = state.missingEmployeeDirectory.rows || [];
+        target.innerHTML = (state.missingEmployeeDirectory.loading ? "<div class='status-line'>Ищу ID без ФИО...</div>" : "")
+            + (state.missingEmployeeDirectory.error ? "<div class='status-line error'>" + escapeHtml(state.missingEmployeeDirectory.error) + "</div>" : "")
+            + (!state.missingEmployeeDirectory.loading && !state.missingEmployeeDirectory.error && !rows.length ? "<div class='empty-state'>Все числовые ID из журнала уже есть в справочнике.</div>" : "")
+            + rows.map((row) => "<div class='missing-employee-row' data-missing-employee-id='" + escapeHtml(row.id) + "'>"
+                + "<strong>ID " + escapeHtml(row.id) + "</strong>"
+                + "<input type='text' data-missing-employee-name value='" + escapeHtml(row.name || "") + "' placeholder='Фамилия Имя Отчество'>"
+                + "<span class='missing-employee-uses'>" + escapeHtml(missingEmployeeUsesLabel(row)) + "</span>"
+            + "</div>").join("");
+        target.querySelectorAll("[data-missing-employee-id]").forEach((rowEl) => {
+            const id = rowEl.dataset.missingEmployeeId;
+            const input = rowEl.querySelector("[data-missing-employee-name]");
+            if (!input) return;
+            input.addEventListener("input", (event) => {
+                const row = (state.missingEmployeeDirectory.rows || []).find((item) => item.id === id);
+                if (row) row.name = event.currentTarget.value;
+            });
+        });
+        const save = $("saveMissingEmployees");
+        if (save) save.disabled = state.missingEmployeeDirectory.loading || state.missingEmployeeDirectory.saving || !rows.length;
+    }
+
+    async function loadMissingEmployees() {
+        const db = supabaseDb();
+        state.missingEmployeeDirectory.loading = true;
+        state.missingEmployeeDirectory.error = "";
+        renderMissingEmployeesModal();
+        if (!db) {
+            state.missingEmployeeDirectory.loading = false;
+            state.missingEmployeeDirectory.error = "Supabase недоступен.";
+            renderMissingEmployeesModal();
+            return false;
+        }
+        try {
+            const read = await readOptionalRowsPaged(db, WMS_VIOLATIONS_TABLE, (query) => query
+                .select("culprit_employee_id,logged_by_id"));
+            if (!read.ok) throw read.error;
+            state.missingEmployeeDirectory.rows = collectMissingEmployeeDirectoryRows(read.rows || []);
+            return true;
+        } catch (error) {
+            state.missingEmployeeDirectory.error = "Не удалось загрузить ID из журнала: " + (error && error.message ? error.message : String(error));
+            return false;
+        } finally {
+            state.missingEmployeeDirectory.loading = false;
+            renderMissingEmployeesModal();
+        }
+    }
+
+    async function openMissingEmployeesModal() {
+        if (!ensureDevelopmentAccess("Не добавленные исполнители")) return;
+        setFlowModalOpen("missingEmployeesModal", true);
+        await loadEmployeeDirectory(true);
+        void loadMissingEmployees();
+    }
+
+    function closeMissingEmployeesModal() {
+        setFlowModalOpen("missingEmployeesModal", false);
+    }
+
+    async function saveMissingEmployees() {
+        const db = supabaseDb();
+        const status = $("missingEmployeesStatus");
+        const rows = (state.missingEmployeeDirectory.rows || []).map((row) => ({
+            id: numericEmployeeId(row.id),
+            name: normalizeText(row.name),
+        })).filter((row) => row.id && row.name);
+        if (!rows.length) {
+            if (status) status.textContent = "Укажи ФИО хотя бы для одного ID.";
+            return;
+        }
+        if (!db) {
+            if (status) status.textContent = "Supabase недоступен.";
+            return;
+        }
+        state.missingEmployeeDirectory.saving = true;
+        if (status) status.textContent = "Добавляю исполнителей...";
+        renderMissingEmployeesModal();
+        try {
+            for (const batch of chunkArray(rows, 250)) {
+                const payload = batch.map((row) => ({ linear_emp_id: Number(row.id), linear_emp_name: row.name, wh_id: Number(WH_ID) }));
+                const { error } = await db.from(LINEAR_EMP_REP_TABLE).upsert(payload, { onConflict: "linear_emp_id" });
+                if (error) throw error;
+            }
+            await loadEmployeeDirectory(true);
+            await loadMissingEmployees();
+            toast("Исполнители добавлены в справочник.", "success");
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            state.missingEmployeeDirectory.error = "Не удалось сохранить исполнителей: " + message;
+            if (status) status.textContent = state.missingEmployeeDirectory.error;
+        } finally {
+            state.missingEmployeeDirectory.saving = false;
+            renderMissingEmployeesModal();
         }
     }
 
@@ -23200,6 +23350,10 @@
         $("violationManagerModal").addEventListener("click", (event) => { if (event.target === $("violationManagerModal")) closeViolationManagerModal(); });
         $("addViolationType").addEventListener("click", addViolationTypeDraft);
         $("saveViolationTypes").addEventListener("click", () => { void saveViolationTypesFromModal(); });
+        $("openMissingEmployees").addEventListener("click", () => { void openMissingEmployeesModal(); });
+        $("closeMissingEmployees").addEventListener("click", closeMissingEmployeesModal);
+        $("missingEmployeesModal").addEventListener("click", (event) => { if (event.target === $("missingEmployeesModal")) closeMissingEmployeesModal(); });
+        $("saveMissingEmployees").addEventListener("click", () => { void saveMissingEmployees(); });
         $("addEmployeeDirectoryRow").addEventListener("click", addEmployeeDirectoryDraft);
         $("saveEmployeeDirectory").addEventListener("click", () => { void saveEmployeeDirectory(); });
         $("violationsHubModal").addEventListener("click", (event) => { if (event.target === $("violationsHubModal")) closeViolationsHubModal(); });
