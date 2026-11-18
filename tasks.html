@@ -308,6 +308,25 @@
         .employee-directory-row { border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 8px; }
         .employee-directory-row input { width: 100%; border: 1px solid #e2e8f0; border-radius: 11px; padding: 9px 10px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #fff; }
         .employee-directory-row input[readonly] { color: #64748b; background: #f1f5f9; }
+        #violationManagerModal .violation-manager-card { width: min(1180px, 96vw); height: min(82vh, 880px); max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
+        .violation-manager-layout { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(420px, 1.2fr); gap: 14px; flex: 1; min-height: 0; }
+        .violation-manager-list { min-height: 0; overflow: auto; display: grid; align-content: start; gap: 7px; padding-right: 3px; }
+        .violation-manager-search { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 11px; padding: 10px 12px; font: inherit; color: #242038; background: #fff; }
+        .violation-manager-count { margin: 0; color: #64748b; font-size: 12px; font-weight: 800; }
+        .violation-manager-list-row { display: grid; gap: 3px; width: 100%; padding: 10px 11px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; text-align: left; color: #334155; font: inherit; cursor: pointer; }
+        .violation-manager-list-row:hover { border-color: rgba(98,60,234,.42); background: #faf9ff; }
+        .violation-manager-list-row.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(98,60,234,.12); background: #f8f6ff; }
+        .violation-manager-list-row strong { color: #242038; font-size: 13px; line-height: 1.2; }
+        .violation-manager-list-row span { color: #64748b; font-size: 11px; font-weight: 700; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .violation-manager-editor { min-height: 0; overflow: auto; border: 1px solid #e2e8f0; border-radius: 16px; background: #f8fafc; padding: 14px; }
+        .violation-manager-editor-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+        .violation-manager-editor-head strong { color: #242038; font-size: 16px; }
+        .violation-manager-editor-head span { color: #64748b; font-size: 12px; font-weight: 800; }
+        .violation-manager-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .violation-manager-form .violation-form-field.full { grid-column: 1 / -1; }
+        .violation-manager-hint { margin: -2px 0 0; color: #64748b; font-size: 11px; font-weight: 700; }
+        .btn-danger { color: #b91c1c; border-color: #fecaca; background: #fff; }
+        .btn-danger:hover { color: #fff; border-color: #dc2626; background: #dc2626; }
         .routing-rule-list { display: grid; gap: 12px; }
         #routingRulesModal .tasks-flow-card-wide { position: relative; }
         .routing-rules-close { position: absolute; top: 14px; right: 14px; }
@@ -2143,7 +2162,7 @@
         @media (max-width: 980px) { .prespisok-wrap.is-playing { overflow: auto; } .prespisok-wrap.is-playing .prespisok-play-panel { overflow: visible; } .prespisok-wrap.is-playing .prespisok-side { overflow: visible; } .prespisok-task-card, .prespisok-hud, .prespisok-finish-grid, .prespisok-wrap.is-playing .prespisok-task-card, .prespisok-wrap.is-playing .prespisok-hud, .no-shk-result-card, .no-shk-search-row { grid-template-columns: 1fr; }
             .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .no-shk-photo-thumb { width: 100%; height: 220px; } }
         @media (max-width: 1120px) { .journal-action-list { max-height: none; } }
-        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .violation-type-route-main, .employee-directory-head, .employee-directory-row, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
+        @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .violation-type-route-main, .employee-directory-head, .employee-directory-row, .violation-manager-layout, .violation-manager-form, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
         @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
@@ -2812,6 +2831,7 @@
         </div>
         <div id="statusDictionaryStatus" class="review-status" data-status-uploads-only></div>
         <div class="file-row" data-status-violations-only>
+            <button id="openViolationManager" class="btn btn-square" type="button" aria-label="Редактировать фиксации" title="Редактировать фиксации">✎</button>
             <button id="addViolationType" class="btn btn-outline" type="button">Добавить тип</button>
             <button id="saveViolationTypes" class="btn btn-rect" type="button">Сохранить типы</button>
         </div>
@@ -2821,6 +2841,19 @@
             <button id="saveEmployeeDirectory" class="btn btn-rect" type="button">Сохранить исполнителей</button>
         </div>
         <div id="employeeDirectoryStatus" class="review-status" data-status-employees-only></div>
+    </div>
+</section>
+
+<section id="violationManagerModal" class="tasks-flow-modal upload-work" aria-hidden="true" style="z-index:4600;">
+    <div class="tasks-flow-card tasks-flow-card-wide violation-manager-card">
+        <div class="work-head">
+            <div>
+                <h3 class="work-title">Редактирование фиксаций</h3>
+                <p class="work-subtitle">Журнал всех нарушений. Выбери строку слева, чтобы исправить её данные или удалить ошибочную фиксацию.</p>
+            </div>
+            <button id="closeViolationManager" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div id="violationManagerWrap" class="violation-manager-layout"></div>
     </div>
 </section>
 

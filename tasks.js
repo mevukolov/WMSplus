@@ -674,6 +674,16 @@
             error: "",
             query: "",
         },
+        violationManager: {
+            rows: [],
+            loading: false,
+            saving: false,
+            deleting: false,
+            loaded: false,
+            error: "",
+            query: "",
+            selectedId: "",
+        },
         violations: {
             rows: [],
             employeeNames: {},
@@ -2318,6 +2328,7 @@
         setFlowModalOpen("flowConflictModal", false);
         setFlowModalOpen("flowSettingsModal", false);
         setFlowModalOpen("statusPilotModal", false);
+        setFlowModalOpen("violationManagerModal", false);
         setFlowModalOpen("staffStatsModal", false);
         setFlowModalOpen("editTareTaskModal", false);
         setFlowModalOpen("deferTaskModal", false);
@@ -2965,6 +2976,8 @@
     function employeeNameById(id) {
         const employee = employeeById(id);
         if (employee) return normalizeText(employee.full_name);
+        const directoryEmployee = (state.employeeDirectory && state.employeeDirectory.rows || []).find((row) => normalizeIdentifier(row && row.linear_emp_id) === normalizeIdentifier(id));
+        if (directoryEmployee) return normalizeText(directoryEmployee.linear_emp_name);
         return normalizeText(state.violations && state.violations.employeeNames && state.violations.employeeNames[normalizeText(id)]);
     }
 
@@ -16094,6 +16107,260 @@
         }
     }
 
+    // ---- Маршрутизатор: ручное редактирование журнала нарушений ----
+
+    const VIOLATION_MANAGER_RENDER_LIMIT = 300;
+
+    function violationManagerSelectedRow() {
+        const selectedId = normalizeText(state.violationManager.selectedId);
+        return (state.violationManager.rows || []).find((row) => normalizeText(row && row.id) === selectedId) || null;
+    }
+
+    function violationManagerFilteredRows() {
+        const query = normalizeForMatch(state.violationManager.query);
+        return (state.violationManager.rows || []).filter((row) => {
+            if (!query) return true;
+            return normalizeForMatch([
+                row.id, row.shk, row.task_id, row.task_type, row.zone,
+                row.violation_type, row.verdict, row.culprit_employee_id,
+                row.culprit_name, row.logged_by_id, row.logged_by_name, row.comment,
+            ].filter(Boolean).join(" ")).includes(query);
+        });
+    }
+
+    async function loadViolationManager(force) {
+        if (state.violationManager.loaded && !force) return true;
+        const db = supabaseDb();
+        state.violationManager.loading = true;
+        state.violationManager.error = "";
+        if (!db) {
+            state.violationManager.loading = false;
+            return false;
+        }
+        try {
+            const read = await readOptionalRowsPaged(db, WMS_VIOLATIONS_TABLE, (query) => query
+                .select("*")
+                .order("created_at", { ascending: false }));
+            if (!read.ok) throw read.error;
+            state.violationManager.rows = read.rows || [];
+            if (!violationManagerSelectedRow() && state.violationManager.rows.length) {
+                state.violationManager.selectedId = state.violationManager.rows[0].id;
+            }
+            state.violationManager.loaded = true;
+            return true;
+        } catch (error) {
+            state.violationManager.error = "Не удалось загрузить журнал нарушений: " + (error && error.message ? error.message : String(error));
+            console.warn("violation manager load failed:", error);
+            return false;
+        } finally {
+            state.violationManager.loading = false;
+            renderViolationManager();
+        }
+    }
+
+    function violationManagerTypeOptionsHtml(row) {
+        const currentType = normalizeText(row && row.violation_type);
+        const contextualTypes = violationTypesForZone(normalizeText(row && row.zone));
+        if (currentType && !contextualTypes.includes(currentType)) contextualTypes.unshift(currentType);
+        return contextualTypes.map((label) => "<option value='" + escapeHtml(label) + "'" + (label === currentType ? " selected" : "") + ">" + escapeHtml(label) + "</option>").join("");
+    }
+
+    function violationManagerListRowHtml(row) {
+        const selected = normalizeText(row && row.id) === normalizeText(state.violationManager.selectedId);
+        const culprit = violationEmployeeLabel(row);
+        return "<button type='button' class='violation-manager-list-row" + (selected ? " active" : "") + "' data-violation-manager-select='" + escapeHtml(row.id || "") + "'>"
+            + "<strong>ШК " + escapeHtml(normalizeText(row.shk) || "—") + " · " + escapeHtml(normalizeText(row.violation_type) || "Без типа") + "</strong>"
+            + "<span>" + escapeHtml(formatRuDateTime(row.created_at)) + " · " + escapeHtml(normalizeText(row.zone) || "Участок не указан") + "</span>"
+            + "<span>Виновник: " + escapeHtml(culprit) + "</span>"
+            + "</button>";
+    }
+
+    function violationManagerEditorHtml(row) {
+        if (!row) return "<div class='violation-manager-editor'><div class='empty-state'>Выбери фиксацию слева.</div></div>";
+        const culpritId = violationEmployeeId(row);
+        const loggedById = numericEmployeeId(row && row.logged_by_id);
+        const culpritName = culpritId ? employeeNameById(culpritId) : "";
+        const loggedByName = loggedById ? employeeNameById(loggedById) : "";
+        const price = Number(row && row.task_price);
+        return "<div class='violation-manager-editor'>"
+            + "<div class='violation-manager-editor-head'><strong>Фиксация от " + escapeHtml(formatRuDateTime(row.created_at)) + "</strong><span>ID: " + escapeHtml(row.id || "—") + "</span></div>"
+            + "<div class='violation-manager-form'>"
+            + "<label class='violation-form-field'>ШК<input id='violationManagerShk' type='text' value='" + escapeHtml(row.shk || "") + "' placeholder='Штрихкод'></label>"
+            + "<label class='violation-form-field'>Стоимость задачи<input id='violationManagerPrice' type='number' min='0' step='0.01' value='" + escapeHtml(Number.isFinite(price) ? price : 0) + "'></label>"
+            + "<label class='violation-form-field'>ID задачи<input id='violationManagerTaskId' type='text' value='" + escapeHtml(row.task_id || "") + "' placeholder='ID задачи'></label>"
+            + "<label class='violation-form-field'>Тип задачи<input id='violationManagerTaskType' type='text' value='" + escapeHtml(row.task_type || "") + "' placeholder='Например, ПМ'></label>"
+            + "<label class='violation-form-field'>Участок<select id='violationManagerZone'>" + violationZoneOptionsHtml(normalizeText(row.zone)) + "</select></label>"
+            + "<label class='violation-form-field'>Тип нарушения<select id='violationManagerType'>" + violationManagerTypeOptionsHtml(row) + "</select></label>"
+            + "<label class='violation-form-field'>Вердикт<input id='violationManagerVerdict' type='text' value='" + escapeHtml(row.verdict || "") + "' placeholder='Вердикт'></label>"
+            + "<label class='violation-form-field'>ID виновника<input id='violationManagerCulpritId' type='text' inputmode='numeric' pattern='[0-9]*' value='" + escapeHtml(culpritId) + "' placeholder='ID сотрудника'><span id='violationManagerCulpritHint' class='violation-manager-hint'>" + escapeHtml(culpritName || "ФИО будет подставлено из справочника") + "</span></label>"
+            + "<label class='violation-form-field'>ID зафиксировавшего<input id='violationManagerLoggedById' type='text' inputmode='numeric' pattern='[0-9]*' value='" + escapeHtml(loggedById) + "' placeholder='ID сотрудника'><span id='violationManagerLoggedByHint' class='violation-manager-hint'>" + escapeHtml(loggedByName || "ФИО будет подставлено из справочника") + "</span></label>"
+            + "<label class='violation-form-field full'>Комментарий<textarea id='violationManagerComment' rows='3' placeholder='Комментарий'>" + escapeHtml(row.comment || "") + "</textarea></label>"
+            + "</div>"
+            + "<div class='file-row'><button id='saveViolationManagerRow' class='btn btn-rect' type='button'>Сохранить изменения</button><button id='deleteViolationManagerRow' class='btn btn-outline btn-danger' type='button'>Удалить фиксацию</button></div>"
+            + "<div id='violationManagerStatus' class='review-status'></div>"
+            + "</div>";
+    }
+
+    function renderViolationManager() {
+        const target = $("violationManagerWrap");
+        if (!target) return;
+        const rows = violationManagerFilteredRows();
+        const visible = rows.slice(0, VIOLATION_MANAGER_RENDER_LIMIT);
+        const selected = violationManagerSelectedRow();
+        target.innerHTML = "<div class='violation-manager-list'>"
+            + "<input id='violationManagerSearch' class='violation-manager-search' type='search' value='" + escapeHtml(state.violationManager.query) + "' placeholder='Найти по ШК, ID, ФИО, типу или комментарию'>"
+            + "<p class='violation-manager-count'>" + visible.length + " из " + rows.length + " фиксаций" + (rows.length !== (state.violationManager.rows || []).length ? " · всего " + (state.violationManager.rows || []).length : "") + "</p>"
+            + (state.violationManager.loading ? "<div class='status-line'>Загружаю журнал...</div>" : "")
+            + (state.violationManager.error ? "<div class='status-line error'>" + escapeHtml(state.violationManager.error) + "</div>" : "")
+            + (rows.length > VIOLATION_MANAGER_RENDER_LIMIT ? "<div class='status-line'>Показаны первые " + VIOLATION_MANAGER_RENDER_LIMIT + ". Уточни поиск, чтобы увидеть остальные.</div>" : "")
+            + visible.map(violationManagerListRowHtml).join("")
+            + "</div>"
+            + violationManagerEditorHtml(selected);
+        const search = $("violationManagerSearch");
+        if (search) search.addEventListener("input", (event) => {
+            state.violationManager.query = event.currentTarget.value || "";
+            renderViolationManager();
+        });
+        target.querySelectorAll("[data-violation-manager-select]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.violationManager.selectedId = button.dataset.violationManagerSelect || "";
+                renderViolationManager();
+            });
+        });
+        const zone = $("violationManagerZone");
+        if (zone) zone.addEventListener("change", () => {
+            const typeSelect = $("violationManagerType");
+            const current = typeSelect && typeSelect.value;
+            const types = violationTypesForZone(zone.value);
+            if (typeSelect) {
+                typeSelect.innerHTML = types.map((label) => "<option value='" + escapeHtml(label) + "'>" + escapeHtml(label) + "</option>").join("");
+                if (current) typeSelect.value = current;
+                if (!typeSelect.value && typeSelect.options.length) typeSelect.selectedIndex = 0;
+            }
+        });
+        [["violationManagerCulpritId", "violationManagerCulpritHint"], ["violationManagerLoggedById", "violationManagerLoggedByHint"]].forEach(([inputId, hintId]) => {
+            const input = $(inputId);
+            const hint = $(hintId);
+            if (!input) return;
+            input.addEventListener("input", (event) => {
+                const id = String(event.currentTarget.value || "").replace(/\D/g, "");
+                event.currentTarget.value = id;
+                if (hint) hint.textContent = employeeNameById(id) || "ФИО будет подставлено из справочника";
+            });
+        });
+        const save = $("saveViolationManagerRow");
+        if (save) save.addEventListener("click", () => { void saveViolationManagerRow(); });
+        const remove = $("deleteViolationManagerRow");
+        if (remove) remove.addEventListener("click", () => { void deleteViolationManagerRow(); });
+    }
+
+    function violationManagerFormPayload(row) {
+        const zone = normalizeText($("violationManagerZone") && $("violationManagerZone").value);
+        const violationType = normalizeText($("violationManagerType") && $("violationManagerType").value);
+        const rawPrice = String($("violationManagerPrice") && $("violationManagerPrice").value || "").replace(",", ".");
+        const taskPrice = Number(rawPrice);
+        if (!zone || !violationType) return { error: "Укажи участок и тип нарушения." };
+        if (!Number.isFinite(taskPrice) || taskPrice < 0) return { error: "Стоимость должна быть числом не меньше нуля." };
+        const culpritId = numericEmployeeId($("violationManagerCulpritId") && $("violationManagerCulpritId").value);
+        const loggedById = numericEmployeeId($("violationManagerLoggedById") && $("violationManagerLoggedById").value);
+        return {
+            payload: {
+                shk: normalizeText($("violationManagerShk") && $("violationManagerShk").value) || null,
+                task_id: normalizeText($("violationManagerTaskId") && $("violationManagerTaskId").value) || null,
+                task_type: normalizeText($("violationManagerTaskType") && $("violationManagerTaskType").value) || null,
+                zone,
+                violation_type: violationType,
+                verdict: normalizeText($("violationManagerVerdict") && $("violationManagerVerdict").value) || null,
+                task_price: Math.round(taskPrice * 100) / 100,
+                culprit_employee_id: culpritId || null,
+                culprit_name: culpritId ? (employeeNameById(culpritId) || null) : null,
+                logged_by_id: loggedById || null,
+                logged_by_name: loggedById ? (employeeNameById(loggedById) || null) : null,
+                comment: normalizeText($("violationManagerComment") && $("violationManagerComment").value) || null,
+            },
+        };
+    }
+
+    function invalidateViolationDerivedData() {
+        state.violations.loaded = false;
+        state.homeTrend.violationsLoaded = false;
+        if (!state.homeTrend.violationsLoading) void loadHomeViolationsTrend();
+    }
+
+    async function saveViolationManagerRow() {
+        const row = violationManagerSelectedRow();
+        const db = supabaseDb();
+        const status = $("violationManagerStatus");
+        const button = $("saveViolationManagerRow");
+        if (!row || !db) return;
+        const form = violationManagerFormPayload(row);
+        if (form.error) {
+            if (status) status.textContent = form.error;
+            return;
+        }
+        if (button) button.disabled = true;
+        state.violationManager.saving = true;
+        if (status) status.textContent = "Сохраняю изменения...";
+        try {
+            const { data, error } = await db.from(WMS_VIOLATIONS_TABLE).update(form.payload).eq("id", row.id).select("*").single();
+            if (error) throw error;
+            const index = state.violationManager.rows.findIndex((item) => item.id === row.id);
+            if (index >= 0) state.violationManager.rows[index] = data;
+            invalidateViolationDerivedData();
+            if (status) status.textContent = "Изменения сохранены.";
+            toast("Фиксация нарушения обновлена.", "success");
+            renderViolationManager();
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            if (status) status.textContent = "Не удалось сохранить: " + message;
+        } finally {
+            state.violationManager.saving = false;
+            if (button) button.disabled = false;
+        }
+    }
+
+    async function deleteViolationManagerRow() {
+        const row = violationManagerSelectedRow();
+        const db = supabaseDb();
+        const status = $("violationManagerStatus");
+        const button = $("deleteViolationManagerRow");
+        if (!row || !db) return;
+        const label = "фиксацию «ШК " + (normalizeText(row.shk) || "без ШК") + "» от " + formatRuDateTime(row.created_at);
+        if (!window.confirm("Удалить " + label + "? Это действие нельзя отменить.")) return;
+        if (button) button.disabled = true;
+        state.violationManager.deleting = true;
+        if (status) status.textContent = "Удаляю фиксацию...";
+        try {
+            const { error } = await db.from(WMS_VIOLATIONS_TABLE).delete().eq("id", row.id);
+            if (error) throw error;
+            state.violationManager.rows = state.violationManager.rows.filter((item) => item.id !== row.id);
+            state.violationManager.selectedId = state.violationManager.rows[0] ? state.violationManager.rows[0].id : "";
+            invalidateViolationDerivedData();
+            toast("Фиксация нарушения удалена.", "success");
+            renderViolationManager();
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            if (status) status.textContent = "Не удалось удалить: " + message;
+        } finally {
+            state.violationManager.deleting = false;
+            if (button) button.disabled = false;
+        }
+    }
+
+    async function openViolationManagerModal() {
+        if (!ensureDevelopmentAccess("Редактирование нарушений")) return;
+        state.violationManager.query = "";
+        state.violationManager.selectedId = "";
+        setFlowModalOpen("violationManagerModal", true);
+        renderViolationManager();
+        await Promise.all([loadViolationTypes(), loadEmployeeDirectory(), loadViolationManager(true)]);
+        renderViolationManager();
+    }
+
+    function closeViolationManagerModal() {
+        setFlowModalOpen("violationManagerModal", false);
+    }
+
     // ---- Маршрутизатор: справочник исполнителей (ID → ФИО) ----
 
     const EMPLOYEE_DIRECTORY_RENDER_LIMIT = 200;
@@ -22823,6 +23090,9 @@
         });
         $("closeViolationDetail").addEventListener("click", closeViolationDetailModal);
         $("violationDetailModal").addEventListener("click", (event) => { if (event.target === $("violationDetailModal")) closeViolationDetailModal(); });
+        $("openViolationManager").addEventListener("click", () => { void openViolationManagerModal(); });
+        $("closeViolationManager").addEventListener("click", closeViolationManagerModal);
+        $("violationManagerModal").addEventListener("click", (event) => { if (event.target === $("violationManagerModal")) closeViolationManagerModal(); });
         $("addViolationType").addEventListener("click", addViolationTypeDraft);
         $("saveViolationTypes").addEventListener("click", () => { void saveViolationTypesFromModal(); });
         $("addEmployeeDirectoryRow").addEventListener("click", addEmployeeDirectoryDraft);
