@@ -682,6 +682,18 @@
             loaded: false,
             error: "",
             query: "",
+            filters: {
+                zone: "",
+                violationType: "",
+                taskType: "",
+                verdict: "",
+                shk: "",
+                culpritId: "",
+                loggedById: "",
+                dateFrom: "",
+                dateTo: "",
+                sort: "created_desc",
+            },
             selectedId: "",
         },
         violations: {
@@ -16111,6 +16123,21 @@
 
     const VIOLATION_MANAGER_RENDER_LIMIT = 300;
 
+    function defaultViolationManagerFilters() {
+        return {
+            zone: "",
+            violationType: "",
+            taskType: "",
+            verdict: "",
+            shk: "",
+            culpritId: "",
+            loggedById: "",
+            dateFrom: "",
+            dateTo: "",
+            sort: "created_desc",
+        };
+    }
+
     function violationManagerSelectedRow() {
         const selectedId = normalizeText(state.violationManager.selectedId);
         return (state.violationManager.rows || []).find((row) => normalizeText(row && row.id) === selectedId) || null;
@@ -16118,14 +16145,63 @@
 
     function violationManagerFilteredRows() {
         const query = normalizeForMatch(state.violationManager.query);
-        return (state.violationManager.rows || []).filter((row) => {
-            if (!query) return true;
-            return normalizeForMatch([
+        const filters = state.violationManager.filters || defaultViolationManagerFilters();
+        const matchesText = (value, needle) => !needle || normalizeForMatch(value).includes(normalizeForMatch(needle));
+        const rows = (state.violationManager.rows || []).filter((row) => {
+            const matchesQuery = !query || normalizeForMatch([
                 row.id, row.shk, row.task_id, row.task_type, row.zone,
                 row.violation_type, row.verdict, row.culprit_employee_id,
                 row.culprit_name, row.logged_by_id, row.logged_by_name, row.comment,
             ].filter(Boolean).join(" ")).includes(query);
+            if (!matchesQuery) return false;
+            if (filters.zone && normalizeText(row.zone) !== filters.zone) return false;
+            if (filters.violationType && normalizeText(row.violation_type) !== filters.violationType) return false;
+            if (filters.taskType && normalizeText(row.task_type) !== filters.taskType) return false;
+            if (filters.verdict && normalizeText(row.verdict) !== filters.verdict) return false;
+            if (!matchesText(row.shk, filters.shk)) return false;
+            if (!matchesText(row.culprit_employee_id, filters.culpritId)) return false;
+            if (!matchesText(row.logged_by_id, filters.loggedById)) return false;
+            const date = moscowDateFromValue(row.created_at);
+            if (filters.dateFrom && (!date || date < filters.dateFrom)) return false;
+            if (filters.dateTo && (!date || date > filters.dateTo)) return false;
+            return true;
         });
+        const byCreatedAt = (left, right) => new Date(left.created_at || 0).getTime() - new Date(right.created_at || 0).getTime();
+        if (filters.sort === "created_asc") return rows.sort(byCreatedAt);
+        if (filters.sort === "price_desc") return rows.sort((left, right) => Number(right.task_price || 0) - Number(left.task_price || 0));
+        if (filters.sort === "price_asc") return rows.sort((left, right) => Number(left.task_price || 0) - Number(right.task_price || 0));
+        return rows.sort((left, right) => byCreatedAt(right, left));
+    }
+
+    function violationManagerFilterOptions(values, selected, label) {
+        const unique = Array.from(new Set((values || []).map(normalizeText).filter(Boolean)));
+        if (selected && !unique.includes(selected)) unique.unshift(selected);
+        unique.sort((left, right) => left.localeCompare(right, "ru"));
+        return "<option value=''>" + escapeHtml(label) + "</option>" + unique.map((value) => "<option value='" + escapeHtml(value) + "'" + (value === selected ? " selected" : "") + ">" + escapeHtml(value) + "</option>").join("");
+    }
+
+    function violationManagerFiltersHtml() {
+        const filters = state.violationManager.filters || defaultViolationManagerFilters();
+        const allRows = state.violationManager.rows || [];
+        const values = (field) => allRows.map((row) => row && row[field]);
+        return "<div class='violation-manager-filters'>"
+            + "<select id='violationManagerFilterZone' data-violation-manager-filter='zone' aria-label='Фильтр по участку'>" + violationManagerFilterOptions(values("zone"), filters.zone, "Все участки") + "</select>"
+            + "<select id='violationManagerFilterType' data-violation-manager-filter='violationType' aria-label='Фильтр по типу нарушения'>" + violationManagerFilterOptions(values("violation_type"), filters.violationType, "Все типы нарушений") + "</select>"
+            + "<select id='violationManagerFilterTaskType' data-violation-manager-filter='taskType' aria-label='Фильтр по типу задачи'>" + violationManagerFilterOptions(values("task_type"), filters.taskType, "Все типы задач") + "</select>"
+            + "<select id='violationManagerFilterVerdict' data-violation-manager-filter='verdict' aria-label='Фильтр по вердикту'>" + violationManagerFilterOptions(values("verdict"), filters.verdict, "Все вердикты") + "</select>"
+            + "<input id='violationManagerFilterShk' data-violation-manager-filter='shk' type='search' value='" + escapeHtml(filters.shk) + "' placeholder='ШК' aria-label='Фильтр по ШК'>"
+            + "<input id='violationManagerFilterCulprit' data-violation-manager-filter='culpritId' type='text' inputmode='numeric' value='" + escapeHtml(filters.culpritId) + "' placeholder='ID виновника' aria-label='Фильтр по ID виновника'>"
+            + "<input id='violationManagerFilterLoggedBy' data-violation-manager-filter='loggedById' type='text' inputmode='numeric' value='" + escapeHtml(filters.loggedById) + "' placeholder='ID зафиксировавшего' aria-label='Фильтр по ID зафиксировавшего'>"
+            + "<select id='violationManagerFilterSort' data-violation-manager-filter='sort' aria-label='Сортировка'>"
+                + "<option value='created_desc'" + (filters.sort === "created_desc" ? " selected" : "") + ">Сначала новые</option>"
+                + "<option value='created_asc'" + (filters.sort === "created_asc" ? " selected" : "") + ">Сначала старые</option>"
+                + "<option value='price_desc'" + (filters.sort === "price_desc" ? " selected" : "") + ">Сначала дорогие</option>"
+                + "<option value='price_asc'" + (filters.sort === "price_asc" ? " selected" : "") + ">Сначала дешёвые</option>"
+            + "</select>"
+            + "<label class='violation-manager-date-filter'>С<input id='violationManagerFilterDateFrom' data-violation-manager-filter='dateFrom' type='date' value='" + escapeHtml(filters.dateFrom) + "' aria-label='Дата с'></label>"
+            + "<label class='violation-manager-date-filter'>По<input id='violationManagerFilterDateTo' data-violation-manager-filter='dateTo' type='date' value='" + escapeHtml(filters.dateTo) + "' aria-label='Дата по'></label>"
+            + "<button id='resetViolationManagerFilters' class='btn btn-outline violation-manager-reset' type='button'>Сбросить фильтры</button>"
+            + "</div>";
     }
 
     async function loadViolationManager(force) {
@@ -16201,14 +16277,19 @@
             + "</div>";
     }
 
-    function renderViolationManager() {
+    function renderViolationManager(focusId) {
         const target = $("violationManagerWrap");
         if (!target) return;
         const rows = violationManagerFilteredRows();
         const visible = rows.slice(0, VIOLATION_MANAGER_RENDER_LIMIT);
-        const selected = violationManagerSelectedRow();
+        let selected = violationManagerSelectedRow();
+        if (selected && !rows.some((row) => row.id === selected.id)) {
+            state.violationManager.selectedId = rows[0] ? rows[0].id : "";
+            selected = rows[0] || null;
+        }
         target.innerHTML = "<div class='violation-manager-list'>"
             + "<input id='violationManagerSearch' class='violation-manager-search' type='search' value='" + escapeHtml(state.violationManager.query) + "' placeholder='Найти по ШК, ID, ФИО, типу или комментарию'>"
+            + violationManagerFiltersHtml()
             + "<p class='violation-manager-count'>" + visible.length + " из " + rows.length + " фиксаций" + (rows.length !== (state.violationManager.rows || []).length ? " · всего " + (state.violationManager.rows || []).length : "") + "</p>"
             + (state.violationManager.loading ? "<div class='status-line'>Загружаю журнал...</div>" : "")
             + (state.violationManager.error ? "<div class='status-line error'>" + escapeHtml(state.violationManager.error) + "</div>" : "")
@@ -16219,6 +16300,23 @@
         const search = $("violationManagerSearch");
         if (search) search.addEventListener("input", (event) => {
             state.violationManager.query = event.currentTarget.value || "";
+            renderViolationManager("violationManagerSearch");
+        });
+        target.querySelectorAll("[data-violation-manager-filter]").forEach((control) => {
+            const rerender = (event) => {
+                const field = event.currentTarget.dataset.violationManagerFilter;
+                if (!field) return;
+                let value = event.currentTarget.value || "";
+                if (field === "culpritId" || field === "loggedById") value = value.replace(/\D/g, "");
+                state.violationManager.filters = { ...(state.violationManager.filters || defaultViolationManagerFilters()), [field]: value };
+                renderViolationManager(event.currentTarget.id);
+            };
+            control.addEventListener(control.tagName === "SELECT" || control.type === "date" ? "change" : "input", rerender);
+        });
+        const resetFilters = $("resetViolationManagerFilters");
+        if (resetFilters) resetFilters.addEventListener("click", () => {
+            state.violationManager.query = "";
+            state.violationManager.filters = defaultViolationManagerFilters();
             renderViolationManager();
         });
         target.querySelectorAll("[data-violation-manager-select]").forEach((button) => {
@@ -16252,6 +16350,12 @@
         if (save) save.addEventListener("click", () => { void saveViolationManagerRow(); });
         const remove = $("deleteViolationManagerRow");
         if (remove) remove.addEventListener("click", () => { void deleteViolationManagerRow(); });
+        if (focusId) requestAnimationFrame(() => {
+            const control = $(focusId);
+            if (!control) return;
+            control.focus();
+            if (typeof control.setSelectionRange === "function") control.setSelectionRange(control.value.length, control.value.length);
+        });
     }
 
     function violationManagerFormPayload(row) {
@@ -16350,6 +16454,7 @@
     async function openViolationManagerModal() {
         if (!ensureDevelopmentAccess("Редактирование нарушений")) return;
         state.violationManager.query = "";
+        state.violationManager.filters = defaultViolationManagerFilters();
         state.violationManager.selectedId = "";
         setFlowModalOpen("violationManagerModal", true);
         renderViolationManager();

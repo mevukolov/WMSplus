@@ -312,6 +312,10 @@
         .violation-manager-layout { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(420px, 1.2fr); gap: 14px; flex: 1; min-height: 0; }
         .violation-manager-list { min-height: 0; overflow: auto; display: grid; align-content: start; gap: 7px; padding-right: 3px; }
         .violation-manager-search { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 11px; padding: 10px 12px; font: inherit; color: #242038; background: #fff; }
+        .violation-manager-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 9px; border: 1px solid #e2e8f0; border-radius: 13px; background: #f8fafc; }
+        .violation-manager-filters input, .violation-manager-filters select { width: 100%; min-width: 0; box-sizing: border-box; min-height: 34px; padding: 7px 9px; border: 1px solid #dbe4f0; border-radius: 9px; color: #334155; background: #fff; font: inherit; font-size: 12px; font-weight: 750; }
+        .violation-manager-date-filter { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 4px; color: #64748b; font-size: 11px; font-weight: 900; }
+        .violation-manager-reset { grid-column: 1 / -1; min-height: 32px; padding: 6px 9px; font-size: 12px; }
         .violation-manager-count { margin: 0; color: #64748b; font-size: 12px; font-weight: 800; }
         .violation-manager-list-row { display: grid; gap: 3px; width: 100%; padding: 10px 11px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; text-align: left; color: #334155; font: inherit; cursor: pointer; }
         .violation-manager-list-row:hover { border-color: rgba(98,60,234,.42); background: #faf9ff; }
