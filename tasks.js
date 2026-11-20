@@ -6263,7 +6263,11 @@
             }
             if (closePlans.length) {
                 setActualizeStatus("Закрываю задачи: 0/" + closePlans.length + "...");
-                await runLimitedPool(closePlans, 8, async (plan) => {
+                // Закрытие одной задачи меняет её дочерние ШК и запускает
+                // триггеры маршрутизации. Большая параллельность здесь
+                // конкурирует за одни и те же строки и приводит к таймаутам,
+                // поэтому закрываем короткими пакетами по две задачи.
+                await runLimitedPool(closePlans, 2, async (plan) => {
                     await completeTaskBySystemMovement(plan.row, plan.note);
                     completed += 1;
                 }, (done, total) => {
