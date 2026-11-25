@@ -1318,7 +1318,7 @@
         .status-pilot-view-tabs { position: relative; }
         .status-pilot-view-tabs .review-view-tab { position: relative; z-index: 1; }
         .status-pilot-view-tabs .review-view-tab.active { background: transparent; box-shadow: none; }
-        .violations-stat-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; width: min(100%, 760px); }
+        .violations-stat-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; width: min(100%, 900px); }
         .violations-stat-tabs .review-view-tab { min-width: 0; padding: 9px 14px; white-space: nowrap; text-align: center; }
         .violations-stat-tabs .review-view-thumb { top: 4px; bottom: 4px; margin: 0; }
         .violations-period-control { margin-top: 10px; }
@@ -1359,7 +1359,20 @@
         .violation-top-row:first-child { border-top: 0; }
         .violation-top-row:hover { color: var(--accent-dark); }
         .violation-top-row strong { color: #242038; }
-        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } .violation-overview-head { align-items: flex-start; } .violations-stat-tabs { width: 100%; } .violations-stat-tabs .review-view-tab { padding: 9px 5px; font-size: 11px; white-space: normal; } .violation-period-tabs { width: 100%; } .violation-period-tab { flex: 1; } }
+        .violation-follow-up { display: grid; gap: 14px; margin-top: 12px; }
+        .violation-follow-up-note { color: #64748b; font-size: 12px; font-weight: 700; line-height: 1.4; }
+        .violation-follow-up-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+        .violation-follow-up-card { min-width: 0; padding: 14px; border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; }
+        .violation-follow-up-card h4 { margin: 0; color: #242038; font-size: 15px; }
+        .violation-follow-up-card > p { margin: 4px 0 10px; color: #64748b; font-size: 12px; font-weight: 700; line-height: 1.35; }
+        .violation-follow-up-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .violation-follow-up-table th { padding: 0 6px 8px; color: #64748b; font-size: 10px; letter-spacing: .04em; text-align: left; text-transform: uppercase; }
+        .violation-follow-up-table td { padding: 9px 6px; border-top: 1px solid #e2e8f0; color: #334155; font-weight: 700; vertical-align: top; }
+        .violation-follow-up-table td strong { display: block; color: #242038; }
+        .violation-follow-up-table td small { display: block; margin-top: 2px; color: #64748b; font-size: 11px; font-weight: 700; }
+        .violation-follow-up-table .violation-follow-up-summary { max-width: 200px; color: #475569; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+        @media (max-width: 900px) { .violation-follow-up-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 620px) { .violation-overview-kpis { grid-template-columns: 1fr; } .violation-overview-head { align-items: flex-start; } .violations-stat-tabs { width: 100%; } .violations-stat-tabs .review-view-tab { padding: 9px 5px; font-size: 10px; white-space: normal; } .violation-period-tabs { width: 100%; } .violation-period-tab { flex: 1; } .violation-follow-up-table { font-size: 11px; } .violation-follow-up-table th, .violation-follow-up-table td { padding-left: 4px; padding-right: 4px; } }
         .violation-form { display: grid; gap: 12px; margin-top: 4px; }
         .violation-form-field { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #64748b; }
         .violation-form-field select, .violation-form-field input, .violation-form-field textarea { box-sizing: border-box; width: 100%; font: inherit; color: inherit; border-radius: 10px; border: 1px solid #e2e8f0; padding: 9px 10px; background-color: #fff; }
@@ -1842,6 +1855,29 @@
         .shift-roster-zone { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #334155; }
         .shift-roster-add { justify-self: start; }
         .shift-pure-stats { margin-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        .shift-sorting-total { margin-top: 14px; padding: 14px; border: 1px solid #dbe3ec; border-radius: 16px; background: #f8fafc; }
+        .shift-sorting-total-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+        .shift-sorting-total-head strong { color: #242038; }
+        .shift-sorting-total-head span { color: #64748b; font-size: 12px; line-height: 1.35; }
+        .shift-sorting-total-fields { display: grid; grid-template-columns: minmax(170px, .7fr) minmax(0, 1.3fr); gap: 10px; margin-top: 10px; }
+        .shift-sorting-total input, .shift-sorting-total textarea { box-sizing: border-box; width: 100%; border: 1px solid #dbe3ec; border-radius: 12px; padding: 10px 11px; background: #fff; color: #242038; font: inherit; }
+        .shift-sorting-total textarea { min-height: 42px; resize: vertical; }
+        .calculation-report-shell { display: grid; gap: 14px; }
+        .calculation-period-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .calculation-period-title { flex: 1; min-width: 220px; margin: 0; color: #242038; font-size: 17px; font-weight: 900; text-align: center; }
+        .calculation-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        .calculation-summary-card { border: 1px solid #dbe3ec; border-radius: 16px; padding: 14px; background: #fff; }
+        .calculation-summary-card .label { display: block; color: #64748b; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+        .calculation-summary-card strong { display: block; margin-top: 6px; color: #242038; font-size: 22px; }
+        .calculation-summary-card .hint { display: block; margin-top: 5px; color: #64748b; font-size: 12px; line-height: 1.35; }
+        .calculation-table-wrap { overflow: auto; border: 1px solid #dbe3ec; border-radius: 16px; background: #fff; }
+        .calculation-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
+        .calculation-table th, .calculation-table td { padding: 11px 12px; border-bottom: 1px solid #eef2f7; text-align: right; white-space: nowrap; }
+        .calculation-table th:first-child, .calculation-table td:first-child { text-align: left; }
+        .calculation-table th { position: sticky; top: 0; z-index: 1; background: #f8fafc; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .035em; }
+        .calculation-table tr.is-missing td { background: #fffbeb; }
+        .calculation-table .calc-positive { color: #b45309; font-weight: 900; }
+        .calculation-table-note { margin: 0; color: #64748b; font-size: 13px; line-height: 1.45; }
         .shift-pure-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
         .shift-list-box { border: 1px solid #e2e8f0; border-radius: 16px; padding: 12px; background: #fff; }
         .shift-list-title { margin: 0 0 8px; color: #242038; font-weight: 900; }
@@ -2176,7 +2212,7 @@
         @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .violation-type-route-main, .employee-directory-head, .employee-directory-row, .violation-manager-layout, .violation-manager-form, .missing-employee-row, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
-        @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
+        @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip, .calculation-summary, .shift-sorting-total-fields { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
     </style>
 </head>
 <body>
@@ -2283,6 +2319,11 @@
                 </div>
             </div>
             <div class="tasks-actions">
+                <button id="openCalculationReport" class="tasks-action-card" type="button" data-dev-only>
+                    <span class="tasks-action-icon">%</span>
+                    <h2 class="tasks-action-title">Расчётный период</h2>
+                    <p class="tasks-action-text">Списания с 21-го по 20-е: ежедневная и накопительная доля, прогноз и сравнение.</p>
+                </button>
                 <button id="openStatusPilotUploads" class="tasks-action-card status-pilot-home-card" type="button" data-dev-only>
                     <span class="tasks-action-icon">◈</span>
                     <h2 class="tasks-action-title">Маршрутизатор</h2>
@@ -2457,6 +2498,29 @@
             </div>
         </section>
     </section>
+    <section id="calculationReportPage" class="tasks-page">
+        <div class="tasks-page-head">
+            <button id="homeFromCalculationReport" class="btn btn-outline" type="button" aria-label="Назад">←</button>
+            <div>
+                <h2 class="tasks-page-title">Расчётный период</h2>
+                <p class="tasks-page-note">Период с 21-го числа по 20-е. В расчёт попадают стоимость чистых списаний и факт отсортированного товара.</p>
+            </div>
+            <button id="openCalculationBackfill" class="btn btn-outline" type="button">Бэкофилл реестра (без задач)</button>
+            <input id="calculationBackfillFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+        </div>
+        <section class="calculation-report-shell">
+            <div class="card calculation-period-toolbar">
+                <button id="calculationPeriodPrev" class="btn btn-outline" type="button" aria-label="Предыдущий период">←</button>
+                <p id="calculationPeriodTitle" class="calculation-period-title">Загружаю период…</p>
+                <button id="calculationPeriodNext" class="btn btn-outline" type="button" aria-label="Следующий период">→</button>
+            </div>
+            <div id="calculationReportSummary" class="calculation-summary"></div>
+            <section class="card">
+                <p id="calculationReportNote" class="calculation-table-note"></p>
+                <div id="calculationReportTable" class="calculation-table-wrap"></div>
+            </section>
+        </section>
+    </section>
 </main>
 
 <section id="shiftOpeningModal" class="tasks-flow-modal upload-work" aria-hidden="true">
@@ -2471,6 +2535,17 @@
         <div id="shiftRosterEditor" class="shift-roster"></div>
         <button id="addShiftRosterRow" class="btn btn-outline shift-roster-add" type="button">+ Добавить человека</button>
         <div id="shiftRosterCoverageWarning" class="status-line" style="display:none;"></div>
+        <div class="shift-sorting-total">
+            <div class="shift-sorting-total-head">
+                <strong>Отсортировано за <span id="shiftSortingDateLabel">предыдущий день</span> <small>(необязательно)</small></strong>
+                <span>Можно заполнить позже — расчётный период отметит день как без факта.</span>
+            </div>
+            <div class="shift-sorting-total-fields">
+                <input id="shiftSortingTotalInput" type="text" inputmode="decimal" placeholder="Сумма, ₽">
+                <textarea id="shiftSortingComment" maxlength="500" placeholder="Комментарий (необязательно)"></textarea>
+            </div>
+            <div id="shiftSortingTotalHint" class="status-line">Загружаю сохранённый факт…</div>
+        </div>
         <div class="file-row">
             <label class="btn btn-rect" for="shiftPureLossesFile">Загрузить чистые списания</label>
             <input id="shiftPureLossesFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
@@ -2908,6 +2983,7 @@
                     <button type="button" class="review-view-tab" data-violations-stat-dim="type">По типам</button>
                     <button type="button" class="review-view-tab" data-violations-stat-dim="zone">По участкам</button>
                     <button type="button" class="review-view-tab" data-violations-stat-dim="employee">По сотрудникам</button>
+                    <button type="button" class="review-view-tab" data-violations-stat-dim="followup">Контроль</button>
                 </div>
                 <div id="violationsStatsWrap"></div>
             </div>

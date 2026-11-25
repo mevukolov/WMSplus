@@ -48,6 +48,8 @@
     const LINEAR_EMP_REP_TABLE = "linear_emp_rep";
     const WMS_ACTIVE_TASKS_SNAPSHOT_TABLE = "wms_active_tasks_daily_snapshot";
     const PURE_LOSSES_TABLE = "pure_losses_rep";
+    const WMS_DAILY_SORTING_TOTALS_TABLE = "wms_daily_sorting_totals";
+    const CALCULATION_REPORT_CACHE_TTL_MS = 60 * 1000;
     const LOSSES_TABLE = "losses_rep";
     const SAVE_RPC = "save_wms_manual_upload";
     // Tasks closed with either verdict are already physically resolved --
@@ -114,10 +116,18 @@
         wh_id: ["ID офиса", "ID офиса статуса перед списанием", "ID офиса статуса перед списания", "wh_id"],
         date_lost: ["Дата последнего списания", "date_lost"],
         lr: ["Лостризон последнего списания", "ЛР последнего списания", "ID списания", "lr"],
+        counterparty_id: ["Контрагент ID", "ID контрагента", "counterparty_id"],
         price: ["Сумма списания", "Сумма", "price"],
+        // Эта сумма относится к лог-объекту и именно она участвует в
+        // расчётном периоде. Цена задачи/ШК остаётся отдельной величиной.
+        log_object_amount: ["Часть суммы на лог-объект", "Часть суммы на лог объект", "Сумма на лог-объект", "log_object_amount"],
         posted_flag: ["Флаг оприходования", "Оприходовано", "Флаг оприходован"],
     };
     const PURE_NORMALIZED_COLUMN_VARIANTS = Object.fromEntries(Object.entries(PURE_COLUMN_VARIANTS).map(([key, variants]) => [key, variants.map(normalizeHeaderKey)]));
+
+    function isCalculationCounterparty(value) {
+        return /(^|[^0-9])(6507|6513)(?![0-9])/.test(normalizeText(value));
+    }
     const SUPERSET_COLUMN_VARIANTS = {
         shk: ["ШК", "C - ШК", "C. ШК", "C. - ШК"],
         brand: ["Марка товара", "D - Марка товара", "D. Марка товара"],
@@ -555,6 +565,9 @@
     // Участки чистых списаний -- значения колонки `lr` в pure_losses_rep,
     // отображаются как "<lr> LR".
     const PURE_LOSSES_LR_SECTIONS = [32, 26, 11, 27, 45, 47, 34];
+    // Не даём строкам с отсутствующим либо неизвестным LR исчезать из
+    // рабочей очереди. Это не участок, а диагностическая корзина данных.
+    const PURE_LOSSES_NO_LR_SECTION = "__no_lr__";
     const FLOW_SKIP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
     const FLOW_SCORE_VERSION = "flow-mvp-2026-08-24";
     const FLOW_ALLOWED_USER_IDS = new Set(["1034305"]);
@@ -711,6 +724,10 @@
             error: "",
             statDimension: "overview",
             statPeriodDays: 30,
+            followUpRows: [],
+            followUpLoading: false,
+            followUpLoaded: false,
+            followUpError: "",
         },
         // Контекст всплывающей модалки "Нарушение", открытой поверх
         // taskDetailModal сразу после сохранения вердикта -- не знает о
@@ -837,9 +854,14 @@
         },
         pureLosses: {
             rows: [],
+            recentRows: [],
+            archiveRows: [],
+            scope: "recent",
             loading: false,
             loaded: false,
             loadPromise: null,
+            recentLoaded: false,
+            archiveLoaded: false,
             activeMonth: "",
             activeSection: PURE_LOSSES_LR_SECTIONS[0],
             sectionExpanded: false,
@@ -920,8 +942,20 @@
             pureStats: null,
             purePrepared: null,
             pureFileName: "",
+            sortingTotalLoading: false,
+            sortingTotalLoadedFor: "",
+            sortingTotalAmount: "",
+            sortingTotalComment: "",
             saving: false,
             error: "",
+        },
+        calculationReport: {
+            periodStart: "",
+            loading: false,
+            error: "",
+            currentRows: [],
+            previousRows: [],
+            cache: new Map(),
         },
         printAlert: {
             loading: false,
@@ -2988,6 +3022,115 @@
         return addDays(state.today, -1);
     }
 
+    function calculationPeriodStart(anchorDate) {
+        const iso = normalizeText(anchorDate) || state.today;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+        const date = new Date(iso + "T00:00:00Z");
+        if (date.getUTCDate() < 21) date.setUTCMonth(date.getUTCMonth() - 1);
+        date.setUTCDate(21);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function calculationPeriodEnd(periodStart) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizeText(periodStart))) return "";
+        const date = new Date(periodStart + "T00:00:00Z");
+        date.setUTCMonth(date.getUTCMonth() + 1);
+        date.setUTCDate(20);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function previousCalculationPeriodStart(periodStart) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizeText(periodStart))) return "";
+        const date = new Date(periodStart + "T00:00:00Z");
+        date.setUTCMonth(date.getUTCMonth() - 1);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function calculationPeriodLabel(periodStart) {
+        const end = calculationPeriodEnd(periodStart);
+        return formatRuDate(periodStart) + " — " + formatRuDate(end);
+    }
+
+    function calculationPeriodDays(periodStart) {
+        const end = calculationPeriodEnd(periodStart);
+        if (!periodStart || !end) return [];
+        const days = [];
+        for (let day = periodStart; day <= end; day = addDays(day, 1)) days.push(day);
+        return days;
+    }
+
+    function parseSortingTotal(value) {
+        const raw = normalizeText(value);
+        if (!raw) return null;
+        const amount = normalizePrice(raw);
+        return Number.isFinite(amount) && amount >= 0 ? Math.round(amount * 100) / 100 : null;
+    }
+
+    function updateShiftSortingTotalHint(message, type) {
+        const target = $("shiftSortingTotalHint");
+        if (!target) return;
+        target.textContent = message || "";
+        target.className = "status-line" + (type ? " " + type : "");
+    }
+
+    function shiftSortingTotalDraft() {
+        return parseSortingTotal($("shiftSortingTotalInput") && $("shiftSortingTotalInput").value);
+    }
+
+    async function loadShiftSortingTotal(date) {
+        const db = supabaseDb();
+        if (!db || !date) return;
+        state.shift.sortingTotalLoading = true;
+        state.shift.sortingTotalLoadedFor = "";
+        updateShiftSortingTotalHint("Загружаю сохранённый факт за " + formatRuDate(date) + "…");
+        try {
+            const { data, error } = await db
+                .from(WMS_DAILY_SORTING_TOTALS_TABLE)
+                .select("amount,comment,updated_at")
+                .eq("wh_id", WH_ID)
+                .eq("sorting_date", date)
+                .maybeSingle();
+            if (error) throw error;
+            state.shift.sortingTotalAmount = data && data.amount !== null && data.amount !== undefined ? String(data.amount) : "";
+            state.shift.sortingTotalComment = normalizeText(data && data.comment);
+            if ($("shiftSortingTotalInput")) $("shiftSortingTotalInput").value = state.shift.sortingTotalAmount;
+            if ($("shiftSortingComment")) $("shiftSortingComment").value = state.shift.sortingTotalComment;
+            updateShiftSortingTotalHint(data
+                ? "Сохранённый факт загружен — его можно исправить перед открытием смены."
+                : "Введите фактическую стоимость отсортированного товара за этот день.", data ? "good" : "");
+        } catch (error) {
+            console.warn("shift sorting total load failed:", error);
+            state.shift.sortingTotalAmount = "";
+            state.shift.sortingTotalComment = "";
+            updateShiftSortingTotalHint("Не удалось загрузить прежнее значение. Введите сумму и попробуйте сохранить смену.", "error");
+        } finally {
+            state.shift.sortingTotalLoading = false;
+            state.shift.sortingTotalLoadedFor = date;
+            updateShiftOpeningForm();
+        }
+    }
+
+    async function saveShiftSortingTotal(date) {
+        const db = supabaseDb();
+        const amount = shiftSortingTotalDraft();
+        if (!db) throw new Error("Supabase недоступен.");
+        if (amount === null) throw new Error("Укажите сумму отсортированного товара за " + formatRuDate(date) + ".");
+        const user = currentWmsUser();
+        const { error } = await db.from(WMS_DAILY_SORTING_TOTALS_TABLE).upsert({
+            wh_id: WH_ID,
+            sorting_date: date,
+            amount,
+            comment: normalizeText($("shiftSortingComment") && $("shiftSortingComment").value),
+            entered_by_id: user.id || null,
+            entered_by_name: user.name || null,
+        }, { onConflict: "wh_id,sorting_date" });
+        if (error) throw error;
+        state.shift.sortingTotalAmount = String(amount);
+        state.shift.sortingTotalComment = normalizeText($("shiftSortingComment") && $("shiftSortingComment").value);
+        updateShiftSortingTotalHint("Факт сортировки за " + formatRuDate(date) + " сохранён.", "good");
+        return amount;
+    }
+
     function employeeById(id) {
         const target = normalizeText(id);
         return (state.shift.employees || []).find((employee) => normalizeText(employee.id) === target || normalizeText(employee.employee_id) === target) || null;
@@ -4148,6 +4291,7 @@
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
+        $("calculationReportPage").classList.remove("active");
         renderPrespisokHomeCard();
         renderFlowAccessGate();
         void refreshPrespisokHomeState();
@@ -4401,6 +4545,7 @@
         $("tasksHome").style.display = "none";
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
+        $("calculationReportPage").classList.remove("active");
         $("flowPage").classList.add("active");
         state.flow.loading = true;
         state.flow.status = "Собираю активные задачи и считаю приоритеты...";
@@ -4450,6 +4595,7 @@
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
+        $("calculationReportPage").classList.remove("active");
         $("uploadsPage").classList.add("active");
         setUploadsStatus("");
         await loadUploadMeta();
@@ -4463,6 +4609,7 @@
         $("tasksHome").style.display = "none";
         $("flowPage").classList.remove("active");
         $("uploadsPage").classList.remove("active");
+        $("calculationReportPage").classList.remove("active");
         $("reviewPage").classList.add("active");
         setReviewTab(REVIEW_TAB_PRESORT);
         updatePagerPanelWidth();
@@ -4472,6 +4619,223 @@
             renderPureLosses();
         });
         void ensureReviewTasksLoaded();
+    }
+
+    function calculationPercent(numerator, denominator) {
+        const top = Number(numerator) || 0;
+        const bottom = Number(denominator) || 0;
+        return bottom > 0 ? top / bottom : null;
+    }
+
+    function formatCalculationPercent(value) {
+        return value === null || value === undefined || !Number.isFinite(Number(value))
+            ? "—"
+            : (Number(value) * 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+    }
+
+    function sumCalculationField(rows, field) {
+        return (rows || []).reduce((sum, row) => sum + (Number(row && row[field]) || 0), 0);
+    }
+
+    async function fetchCalculationPeriodRows(periodStart) {
+        const db = supabaseDb();
+        const periodEnd = calculationPeriodEnd(periodStart);
+        if (!db || !periodStart || !periodEnd) throw new Error("Не удалось определить границы периода.");
+        const { data, error } = await db.rpc("wms_calculation_period_daily_report", {
+            p_wh_id: WH_ID,
+            p_start: periodStart,
+            p_end: periodEnd,
+        });
+        if (error) throw error;
+        const byDay = new Map((Array.isArray(data) ? data : []).map((row) => [parseDateTime(row && row.report_date).date, row]));
+        return calculationPeriodDays(periodStart).map((date) => ({
+            ...(byDay.get(date) || {}),
+            date,
+            grossWrittenOff: Number((byDay.get(date) || {}).gross_amount) || 0,
+            resolvedWrittenOff: Number((byDay.get(date) || {}).resolved_amount) || 0,
+            writtenOff: Number((byDay.get(date) || {}).net_amount) || 0,
+            sourceRows: Number((byDay.get(date) || {}).source_rows) || 0,
+            allocationRows: Number((byDay.get(date) || {}).allocation_rows) || 0,
+            // A file may enrich only part of an old day.  That is an
+            // incomplete fact, but not "no upload": keep its real sum
+            // visible instead of replacing it with a misleading blank.
+            hasMissingAllocation: Number((byDay.get(date) || {}).source_rows) > 0 && Number((byDay.get(date) || {}).allocation_rows) === 0,
+            hasPartialAllocation: Number((byDay.get(date) || {}).source_rows) > Number((byDay.get(date) || {}).allocation_rows)
+                && Number((byDay.get(date) || {}).allocation_rows) > 0,
+            sorted: (byDay.get(date) || {}).sorting_amount === null || (byDay.get(date) || {}).sorting_amount === undefined
+                ? null
+                : Number((byDay.get(date) || {}).sorting_amount) || 0,
+        }));
+    }
+
+    function invalidateCalculationReportCache() {
+        state.calculationReport.cache.clear();
+    }
+
+    function loadCalculationPeriodRowsCached(periodStart) {
+        const cached = state.calculationReport.cache.get(periodStart);
+        if (cached && cached.expiresAt > Date.now()) return cached.request;
+        const request = fetchCalculationPeriodRows(periodStart).catch((error) => {
+            state.calculationReport.cache.delete(periodStart);
+            throw error;
+        });
+        state.calculationReport.cache.set(periodStart, {
+            request,
+            expiresAt: Date.now() + CALCULATION_REPORT_CACHE_TTL_MS,
+        });
+        return request;
+    }
+
+    function calculationRowsWithCumulative(rows) {
+        let writtenOff = 0;
+        let sorted = 0;
+        let allocationGapSeen = false;
+        return (rows || []).map((row) => {
+            allocationGapSeen = allocationGapSeen || Boolean(row.hasMissingAllocation);
+            writtenOff += Number(row.writtenOff) || 0;
+            sorted += Number(row.sorted) || 0;
+            return {
+                ...row,
+                cumulativeWrittenOff: allocationGapSeen ? null : writtenOff,
+                cumulativeSorted: allocationGapSeen ? null : sorted,
+                dailyRatio: row.hasMissingAllocation ? null : calculationPercent(row.writtenOff, row.sorted),
+                cumulativeRatio: allocationGapSeen ? null : calculationPercent(writtenOff, sorted),
+            };
+        });
+    }
+
+    function calculationFactEnd(periodStart) {
+        const end = calculationPeriodEnd(periodStart);
+        const currentStart = calculationPeriodStart(state.today);
+        return periodStart === currentStart ? (shiftTargetPureDate() < end ? shiftTargetPureDate() : end) : end;
+    }
+
+    function reportRowsThroughFactEnd(rows, periodStart) {
+        const factEnd = calculationFactEnd(periodStart);
+        return (rows || []).filter((row) => row.date <= factEnd);
+    }
+
+    function calculationForecast(rows, periodStart) {
+        const periodEnd = calculationPeriodEnd(periodStart);
+        const factEnd = calculationFactEnd(periodStart);
+        if (factEnd >= periodEnd) return null;
+        const known = reportRowsThroughFactEnd(rows, periodStart).filter((row) => row.sorted !== null && Number(row.sorted) > 0);
+        const sample = known.slice(-7);
+        if (!sample.length) return null;
+        const actualRows = reportRowsThroughFactEnd(rows, periodStart);
+        const actualWrittenOff = sumCalculationField(actualRows, "writtenOff");
+        const actualSorted = sumCalculationField(actualRows, "sorted");
+        const avgWrittenOff = sumCalculationField(sample, "writtenOff") / sample.length;
+        const avgSorted = sumCalculationField(sample, "sorted") / sample.length;
+        const remainingDays = Math.max(0, Math.round((Date.parse(periodEnd + "T00:00:00Z") - Date.parse(factEnd + "T00:00:00Z")) / 86400000));
+        const writtenOff = actualWrittenOff + avgWrittenOff * remainingDays;
+        const sorted = actualSorted + avgSorted * remainingDays;
+        return { writtenOff, sorted, ratio: calculationPercent(writtenOff, sorted), sampleDays: sample.length, remainingDays };
+    }
+
+    function renderCalculationReport() {
+        const { periodStart, loading, error, currentRows, previousRows } = state.calculationReport;
+        const title = $("calculationPeriodTitle");
+        const summary = $("calculationReportSummary");
+        const table = $("calculationReportTable");
+        const note = $("calculationReportNote");
+        const previousButton = $("calculationPeriodPrev");
+        const nextButton = $("calculationPeriodNext");
+        if (title) title.textContent = periodStart ? calculationPeriodLabel(periodStart) : "Расчётный период";
+        const currentStart = calculationPeriodStart(state.today);
+        if (nextButton) nextButton.disabled = !periodStart || periodStart >= currentStart || loading;
+        if (previousButton) previousButton.disabled = loading;
+        if (!summary || !table || !note) return;
+        if (loading) {
+            summary.innerHTML = Array.from({ length: 4 }, () => "<div class='calculation-summary-card'><span class='label'>Загружаю</span><strong>…</strong></div>").join("");
+            note.textContent = "Собираю чистые списания и факт сортировки…";
+            table.innerHTML = "";
+            return;
+        }
+        if (error) {
+            summary.innerHTML = "";
+            note.textContent = error;
+            table.innerHTML = "";
+            return;
+        }
+        const factRows = reportRowsThroughFactEnd(currentRows, periodStart);
+        const cumulativeRows = calculationRowsWithCumulative(currentRows);
+        const allocationGapRows = factRows.filter((row) => row.hasMissingAllocation);
+        const partialAllocationRows = factRows.filter((row) => row.hasPartialAllocation);
+        const reportHasAllocationGap = allocationGapRows.length > 0;
+        const writtenOff = sumCalculationField(factRows, "writtenOff");
+        const resolvedWrittenOff = sumCalculationField(factRows, "resolvedWrittenOff");
+        const sorted = sumCalculationField(factRows, "sorted");
+        const ratio = reportHasAllocationGap ? null : calculationPercent(writtenOff, sorted);
+        const previousEquivalent = previousRows.slice(0, factRows.length);
+        const previousWrittenOff = sumCalculationField(previousEquivalent, "writtenOff");
+        const previousSorted = sumCalculationField(previousEquivalent, "sorted");
+        const previousRatio = calculationPercent(previousWrittenOff, previousSorted);
+        const delta = ratio !== null && previousRatio !== null ? ratio - previousRatio : null;
+        const forecast = reportHasAllocationGap ? null : calculationForecast(currentRows, periodStart);
+        const summaryCards = [
+            ["Нетто на лог-объект", reportHasAllocationGap ? "Нет данных" : formatMoney(writtenOff), reportHasAllocationGap ? "нет суммы на лог-объект за " + allocationGapRows.length + " дн." : "без LR; вычтено решениями: " + formatMoney(resolvedWrittenOff)],
+            ["Отсортировано", formatMoney(sorted), "факт из открытия следующей смены"],
+            ["Доля списаний", formatCalculationPercent(ratio), previousRatio === null ? "за прошлый период пока нет базы" : ((delta > 0 ? "+" : "") + (delta * 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " п.п. к прошлому периоду")],
+            [forecast ? "Прогноз к 20-му" : "Итог периода", formatCalculationPercent(forecast ? forecast.ratio : ratio), forecast ? "по последним " + forecast.sampleDays + " заполненным дням; осталось " + forecast.remainingDays + " дн." : "полный факт периода"],
+        ];
+        summary.innerHTML = summaryCards.map((card) => "<div class='calculation-summary-card'><span class='label'>" + escapeHtml(card[0]) + "</span><strong>" + escapeHtml(card[1]) + "</strong><span class='hint'>" + escapeHtml(card[2]) + "</span></div>").join("");
+        const factEnd = calculationFactEnd(periodStart);
+        const missingCount = currentRows.filter((row) => row.date <= factEnd && row.sorted === null).length;
+        const calculationRuleNote = "В числитель идёт только «Часть суммы на лог-объект» из файла. Строки без LR исключены. «Найден/Релиз/Списан» уменьшает исходную дату списания, а не дату разбора. ";
+        note.textContent = calculationRuleNote + (reportHasAllocationGap
+            ? "По " + allocationGapRows.length + " дн. есть ШК, но нет суммы на лог-объект. Загрузите файл за эти даты повторно. "
+            : "") + (partialAllocationRows.length
+            ? "По " + partialAllocationRows.length + " дн. отображена частичная сумма: в реестре есть старые ШК без значения на лог-объект. "
+            : "") + (missingCount
+            ? "Не заполнен факт сортировки за " + missingCount + " дн. (подсвечены жёлтым). Введите его при открытии следующей смены."
+            : "Сравнение с прошлым расчётным периодом идёт по одинаковому числу завершённых дней.");
+        table.innerHTML = "<table class='calculation-table'><thead><tr><th>Дата</th><th>Нетто на лог-объект</th><th>Вычтено решениями</th><th>Отсортировано</th><th>За день</th><th>Накопительно на лог-объект</th><th>Отсортировано накопительно</th><th>Накопительно</th></tr></thead><tbody>"
+            + cumulativeRows.map((row) => {
+                const missing = row.date <= factEnd && row.sorted === null;
+                const rowClass = (missing || row.hasMissingAllocation || row.hasPartialAllocation) ? " class='is-missing'" : "";
+                const valueLabel = row.hasMissingAllocation
+                    ? "Нет выгрузки"
+                    : formatMoney(row.writtenOff) + (row.hasPartialAllocation ? " (частично)" : "");
+                return "<tr" + rowClass + "><td>" + escapeHtml(formatRuDate(row.date)) + "</td><td>" + escapeHtml(valueLabel) + "</td><td>" + escapeHtml(row.hasMissingAllocation ? "—" : (row.resolvedWrittenOff ? "− " + formatMoney(row.resolvedWrittenOff) : "—")) + "</td><td>" + escapeHtml(row.sorted === null ? "Нет факта" : formatMoney(row.sorted)) + "</td><td class='calc-positive'>" + escapeHtml(formatCalculationPercent(row.dailyRatio)) + "</td><td>" + escapeHtml(row.cumulativeWrittenOff === null ? "—" : formatMoney(row.cumulativeWrittenOff)) + "</td><td>" + escapeHtml(row.cumulativeSorted === null ? "—" : formatMoney(row.cumulativeSorted)) + "</td><td class='calc-positive'>" + escapeHtml(formatCalculationPercent(row.cumulativeRatio)) + "</td></tr>";
+            }).join("") + "</tbody></table>";
+    }
+
+    async function loadCalculationReport(periodStart) {
+        const start = periodStart || calculationPeriodStart(state.today);
+        state.calculationReport.periodStart = start;
+        state.calculationReport.loading = true;
+        state.calculationReport.error = "";
+        renderCalculationReport();
+        try {
+            const previousStart = previousCalculationPeriodStart(start);
+            const [currentRows, previousRows] = await Promise.all([
+                loadCalculationPeriodRowsCached(start),
+                loadCalculationPeriodRowsCached(previousStart),
+            ]);
+            state.calculationReport.currentRows = currentRows;
+            state.calculationReport.previousRows = previousRows;
+        } catch (error) {
+            console.error("calculation report load failed:", error);
+            state.calculationReport.currentRows = [];
+            state.calculationReport.previousRows = [];
+            state.calculationReport.error = "Не удалось загрузить отчёт: " + (error && error.message ? error.message : String(error));
+        } finally {
+            state.calculationReport.loading = false;
+            renderCalculationReport();
+        }
+    }
+
+    function showCalculationReport() {
+        state.view = "calculation-report";
+        closeFlowModals();
+        setHeroTitle("Расчётный период", { animate: true, hideSubtitle: true, showBack: true });
+        $("tasksHome").style.display = "none";
+        $("flowPage").classList.remove("active");
+        $("uploadsPage").classList.remove("active");
+        $("reviewPage").classList.remove("active");
+        $("calculationReportPage").classList.add("active");
+        void loadCalculationReport(state.calculationReport.periodStart || calculationPeriodStart(state.today));
     }
 
     // Tab order in the switcher (and matching pager panel order) --
@@ -4734,16 +5098,23 @@
         state.shift.pureStats = null;
         state.shift.purePrepared = null;
         state.shift.pureFileName = "";
+        state.shift.sortingTotalAmount = "";
+        state.shift.sortingTotalComment = "";
+        state.shift.sortingTotalLoadedFor = "";
         if ($("shiftPureLossesFile")) $("shiftPureLossesFile").value = "";
         if ($("shiftPureLossesFileName")) $("shiftPureLossesFileName").textContent = "Файл пока не выбран";
         if ($("shiftPureStats")) $("shiftPureStats").innerHTML = "";
         if ($("shiftPureDetails")) $("shiftPureDetails").innerHTML = "";
         if ($("shiftOpeningSubtitle")) {
-            $("shiftOpeningSubtitle").textContent = "Смена за " + formatRuDate(state.today) + ". Чистые списания будут взяты за " + formatRuDate(shiftTargetPureDate()) + ".";
+            $("shiftOpeningSubtitle").textContent = "Смена за " + formatRuDate(state.today) + ". Чистые списания и сумма сортировки будут учтены за " + formatRuDate(shiftTargetPureDate()) + ".";
         }
-        setShiftOpeningStatus("Выберите ответственных и загрузите файл чистых списаний.");
+        if ($("shiftSortingDateLabel")) $("shiftSortingDateLabel").textContent = formatRuDate(shiftTargetPureDate());
+        if ($("shiftSortingTotalInput")) $("shiftSortingTotalInput").value = "";
+        if ($("shiftSortingComment")) $("shiftSortingComment").value = "";
+        setShiftOpeningStatus("Выберите ответственных и загрузите файл чистых списаний. Сумма сортировки пока необязательна.");
         updateShiftOpeningForm();
         setFlowModalOpen("shiftOpeningModal", true);
+        await loadShiftSortingTotal(shiftTargetPureDate());
     }
 
     function closeShiftOpeningModal() {
@@ -4822,6 +5193,7 @@
                 ["Наш СЦ", stats.wh_matched_rows],
                 ["К добавлению", stats.candidate_rows],
                 ["Сумма", formatMoney(stats.candidate_sum_price || 0)],
+                ["На лог-объект", formatMoney(stats.candidate_sum_log_object_amount || 0)],
                 ["Оприход-сигналы", stats.posted_signals],
                 ["Дубли в файле", stats.duplicate_in_file_ignored],
                 ["Отсечено не авто", stats.skipped_by_is_auto],
@@ -4854,6 +5226,9 @@
         try {
             const pureImport = await applyPureLossesImport(state.shift.purePrepared, WH_ID, shiftTargetPureDate());
             const absorbed = await absorbShksIntoPureLossesZone(state.shift.purePrepared);
+            const sortingTotal = shiftSortingTotalDraft() === null
+                ? null
+                : await saveShiftSortingTotal(shiftTargetPureDate());
             const user = currentWmsUser();
             const payload = {
                 wh_id: WH_ID,
@@ -4871,6 +5246,8 @@
                     pure_losses_target_date: shiftTargetPureDate(),
                     pure_losses_stats: state.shift.pureStats || {},
                     pure_losses_import: pureImport,
+                    sorting_total_date: shiftTargetPureDate(),
+                    sorting_total_amount: sortingTotal,
                 },
             };
             const existingResult = await db.from(WMS_SHIFTS_TABLE).select("id").eq("wh_id", WH_ID).eq("shift_date", state.today).neq("status", "cancelled").limit(1);
@@ -4884,6 +5261,7 @@
                 ...(result.data || payload),
                 roster: normalizeShiftRoster(result.data || payload),
             };
+            invalidateCalculationReportCache();
             renderShiftGate();
             closeShiftOpeningModal();
             const absorbedNote = absorbed.length ? " Перенесено в зону «Чистые списания»: " + absorbed.length + "." : "";
@@ -4909,7 +5287,12 @@
             state.review.loading = true;
             renderReview();
             try {
-                state.review.rows = await fetchReviewTaskRows(db);
+                const reviewRows = await fetchReviewTaskRows(db);
+                // Часть ШК одной тары может уже жить в зоне «Чистые
+                // списания». Родительскую задачу физически не меняем, но в
+                // обычном разборе показываем только её оставшийся состав.
+                await attachPureLossesProjection(reviewRows);
+                state.review.rows = reviewRows;
                 // Fresh light rows -- any earlier upgrade-to-full is gone
                 // with them, so the next actualization/quick-no-shk/Flow
                 // entry needs to re-run ensureFullActiveTasksLoaded()
@@ -5009,6 +5392,56 @@
     async function fetchReviewTaskRows(db) {
         const rows = await fetchWmsTaskRows(db, "active");
         return rows.filter(isActiveReviewTask);
+    }
+
+    async function attachPureLossesProjection(rows) {
+        const list = Array.isArray(rows) ? rows : [];
+        list.forEach((row) => {
+            delete row.__pureLossesShks;
+            delete row.__hiddenByPureLosses;
+            delete row.__reviewVisiblePrice;
+        });
+        const taskIds = Array.from(new Set(list.map((row) => normalizeText(row && row.id)).filter(Boolean)));
+        if (!taskIds.length) return;
+        const db = supabaseDb();
+        if (!db) return;
+        try {
+            const pureItems = [];
+            for (const chunk of chunkArray(taskIds, 400)) {
+                const { data, error } = await db
+                    .from(WMS_TASK_ITEMS_TABLE)
+                    .select("task_id,shk,price")
+                    .in("task_id", chunk)
+                    .eq("task_type", "Чистые списания");
+                if (error) throw error;
+                pureItems.push(...(Array.isArray(data) ? data : []));
+            }
+            const byTask = new Map();
+            pureItems.forEach((item) => {
+                const taskId = normalizeText(item && item.task_id);
+                const shk = normalizeIdentifier(item && item.shk);
+                if (!taskId || !shk) return;
+                if (!byTask.has(taskId)) byTask.set(taskId, new Map());
+                byTask.get(taskId).set(shk, Number(item.price) || 0);
+            });
+            list.forEach((row) => {
+                const zoned = byTask.get(normalizeText(row && row.id));
+                if (!zoned || !zoned.size || isPureLossesZoneTask(row)) return;
+                const sourceIds = Array.from(new Set((Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : [])
+                    .map(normalizeIdentifier).filter(Boolean)));
+                const hiddenShks = new Set(sourceIds.filter((shk) => zoned.has(shk)));
+                if (!hiddenShks.size) return;
+                row.__pureLossesShks = hiddenShks;
+                const hiddenPrice = Array.from(hiddenShks).reduce((sum, shk) => sum + (zoned.get(shk) || 0), 0);
+                const originalPrice = Number(row.source_price_sum) || 0;
+                row.__reviewVisiblePrice = Math.max(0, originalPrice - hiddenPrice);
+                row.__hiddenByPureLosses = sourceIds.length > 0 && sourceIds.every((shk) => hiddenShks.has(shk));
+            });
+        } catch (error) {
+            // Проекция — улучшение представления, поэтому при временной
+            // недоступности таблицы задач оставляем обычную очередь живой.
+            console.warn("pure losses projection skipped:", error);
+        }
     }
 
     function refreshExpandedSections() {
@@ -8248,7 +8681,7 @@
     function reviewGroupedRows() {
         const grouped = new Map(activeReviewZones().map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
-            if (isPrespisokTask(row) || requestSectionName(row) || isPureLossesZoneTask(row)) return;
+            if (row.__hiddenByPureLosses || isPrespisokTask(row) || requestSectionName(row) || isPureLossesZoneTask(row)) return;
             const section = grouped.has(taskSectionName(row)) ? taskSectionName(row) : "Другие задачи";
             grouped.get(section).push(row);
         });
@@ -8258,6 +8691,7 @@
     function requestsGroupedRows() {
         const grouped = new Map(REQUEST_SECTIONS.map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
+            if (row.__hiddenByPureLosses) return;
             if (isPrespisokTask(row)) {
                 grouped.get("2-я линия предсписка").push(row);
                 return;
@@ -8269,7 +8703,8 @@
     }
 
     function reviewPrice(row) {
-        const value = Number(row && row.source_price_sum);
+        const projectedValue = Number(row && row.__reviewVisiblePrice);
+        const value = Number.isFinite(projectedValue) ? projectedValue : Number(row && row.source_price_sum);
         return Number.isFinite(value) ? value : 0;
     }
 
@@ -8392,7 +8827,10 @@
     }
 
     function reviewSourceIds(row) {
-        const ids = Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean) : [];
+        const hidden = row && row.__pureLossesShks instanceof Set ? row.__pureLossesShks : null;
+        const ids = Array.isArray(row && row.source_shk_ids)
+            ? row.source_shk_ids.map(normalizeIdentifier).filter((shk) => shk && !(hidden && hidden.has(shk)))
+            : [];
         const tare = normalizeIdentifier(row && row.source_tare_id);
         const preview = ids.slice(0, 4).join(", ");
         const tail = ids.length > 4 ? " +" + (ids.length - 4) : "";
@@ -9350,7 +9788,7 @@
         const taskSub = opts.withSection ? (row.task_type || "-") + " · " + taskSectionName(row) : (row.task_type || "-");
         return "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(taskSub) + "</div>" + (route ? "<div class='review-task-route'>" + escapeHtml(route) + "</div>" : "") + "</td>"
             + "<td class='review-wrap-cell review-name-cell'><div class='review-name-clamp'>" + escapeHtml(truncateReviewName(taskItemName(row), 150) || "-") + "</div></td>"
-            + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
+            + "<td class='review-price-cell' style='" + priceStyle(reviewPrice(row)) + "'>" + escapeHtml(formatMoney(reviewPrice(row))) + "</td>"
             + "<td><span class='review-pill'>" + escapeHtml(status) + "</span>" + specialTagPillsHtml(row) + "</td>"
             + "<td>" + verdictPillHtml(taskVerdictFilterValue(row)) + "</td>";
     }
@@ -9601,7 +10039,7 @@
             const status = displayTaskStatus(row);
             return "<tr class='review-click-row' data-task-detail='" + escapeHtml(row.id) + "'>"
                 + "<td class='review-wrap-cell'><div class='review-task-title'>" + escapeHtml(displayTaskTitle(row)) + "</div><div class='review-task-sub'>" + escapeHtml(row.task_type || "-") + "</div></td>"
-                + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
+                + "<td class='review-price-cell' style='" + priceStyle(reviewPrice(row)) + "'>" + escapeHtml(formatMoney(reviewPrice(row))) + "</td>"
                 + "<td><span class='review-pill'>" + escapeHtml(status) + "</span></td>"
                 + "<td>" + verdictPillHtml(taskVerdictFilterValue(row)) + "</td>"
                 + "</tr>";
@@ -9731,11 +10169,17 @@
     function taskItems(row) {
         const payload = taskPayload(row);
         const fromPayload = Array.isArray(payload.task_items) ? payload.task_items.map(normalizeTaskItem).filter(Boolean) : [];
-        if (fromPayload.length) return fromPayload;
+        const hidden = row && row.__pureLossesShks instanceof Set ? row.__pureLossesShks : null;
+        const visible = (items) => hidden && hidden.size
+            ? items.filter((item) => !hidden.has(normalizeIdentifier(item && item.shk)))
+            : items;
+        if (fromPayload.length) return visible(fromPayload);
         const sourceRows = Array.isArray(payload.rows) ? payload.rows : payload.row ? [payload.row] : [];
         const fromRows = sourceRows.map(taskItemFromSourceRow).filter(Boolean);
-        if (fromRows.length) return fromRows;
-        return (Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : []).map((id) => ({ shk: normalizeIdentifier(id), name: "", nm: "", status: "", price: 0, mx: "", movement: "", row_number: null, raw: {} })).filter((item) => item.shk);
+        if (fromRows.length) return visible(fromRows);
+        return visible((Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : [])
+            .map((id) => ({ shk: normalizeIdentifier(id), name: "", nm: "", status: "", price: 0, mx: "", movement: "", row_number: null, raw: {} }))
+            .filter((item) => item.shk));
     }
 
     function taskItemName(row) {
@@ -12114,7 +12558,7 @@
         const specialPillsHtml = specialTagPillsHtml(row, { interactive: true });
         target.innerHTML = "<div class='task-detail-head'><div>"
             + "<div class='task-detail-created'>Создано " + escapeHtml(formatRuDateTime(row.created_at)) + "</div>"
-            + "<div class='task-detail-title-row'><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='task-detail-price' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</div>" + countdownHtml + "</div>"
+            + "<div class='task-detail-title-row'><h3 class='task-detail-title copyable' data-copy-value='" + escapeHtml(displayTaskTitle(row)) + "' title='Нажми, чтобы скопировать'>" + escapeHtml(displayTaskTitle(row)) + "</h3><div class='task-detail-price' style='" + priceStyle(reviewPrice(row)) + "'>" + escapeHtml(formatMoney(reviewPrice(row))) + "</div>" + countdownHtml + "</div>"
             + "<div class='review-table-subtitle'>" + escapeHtml(row.task_type || "-") + "</div></div>" + taskDetailActionButtons(row, readOnly) + "</div>"
             + "<div class='task-detail-body'>"
             + "<div class='task-info-grid'>" + taskDetailInfo(row) + "</div>"
@@ -13396,6 +13840,7 @@
                 .eq("task_id", synthetic.__syntheticParentId)
                 .eq("shk", synthetic.__syntheticShk);
             if (error) throw error;
+            invalidateCalculationReportCache();
             void writeTaskHistory(
                 { id: synthetic.__syntheticParentId },
                 isDeferred ? "task_deferred" : "task_completed",
@@ -13411,9 +13856,12 @@
                     shk: synthetic.__syntheticShk,
                 }
             );
-            state.pureLosses.rows = (state.pureLosses.rows || []).filter(
+            const remainingRows = (state.pureLosses.rows || []).filter(
                 (row) => !(row.task_id === synthetic.__syntheticParentId && row.shk === synthetic.__syntheticShk)
             );
+            state.pureLosses.rows = remainingRows;
+            if (state.pureLosses.scope === "archive") state.pureLosses.archiveRows = remainingRows;
+            else state.pureLosses.recentRows = remainingRows;
             setReviewStatus(isDeferred ? "ШК отложен до " + formatRuDateTime(reopenAfter) + "." : "ШК завершён.", "good");
             renderPureLosses();
             closeTaskDetail();
@@ -13976,6 +14424,7 @@
     }
 
     function pureLossesSectionLabel(lr) {
+        if (lr === PURE_LOSSES_NO_LR_SECTION) return "Без LR";
         return lr + " LR";
     }
 
@@ -14009,51 +14458,90 @@
     }
 
     function pureLossesGroupedRowsForMonth(monthKey) {
-        const grouped = new Map(PURE_LOSSES_LR_SECTIONS.map((lr) => [lr, []]));
+        const grouped = new Map([
+            ...PURE_LOSSES_LR_SECTIONS.map((lr) => [lr, []]),
+            [PURE_LOSSES_NO_LR_SECTION, []],
+        ]);
         pureLossesRowsForMonth(monthKey).forEach((row) => {
             const lr = pureLossesRowLr(row);
             if (lr !== null && grouped.has(lr)) grouped.get(lr).push(row);
+            else grouped.get(PURE_LOSSES_NO_LR_SECTION).push(row);
         });
         return grouped;
     }
 
-    // Фаза 2 (docs/superpowers/specs/2026-10-09-wms-task-items-phase2-zone-design.md):
-    // гранулярность задачи была неверна для разошедшейся тары -- строка
-    // wms_tasks может содержать и зонированные, и обычные ШК одновременно.
-    // Запрашиваем wms_task_items напрямую, гранулярность -- отдельный ШК.
-    async function loadPureLossesRows() {
+    function pureLossesRecentStart() {
+        const date = new Date(state.today + "T00:00:00Z");
+        date.setUTCDate(1);
+        date.setUTCMonth(date.getUTCMonth() - 1);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function pureLossesScopeLabel(scope) {
+        return scope === "archive" ? "Архив" : "Последние два месяца";
+    }
+
+    function pureLossesScopeIsLoaded(scope) {
+        return scope === "archive" ? state.pureLosses.archiveLoaded : state.pureLosses.recentLoaded;
+    }
+
+    function invalidatePureLossesCache() {
+        state.pureLosses.recentLoaded = false;
+        state.pureLosses.archiveLoaded = false;
+        state.pureLosses.loaded = false;
+    }
+
+    // Фаза 2: очередь ведётся на отдельных wms_task_items. Чтобы не
+    // тянуть всю историю при каждом входе, основной экран берёт только
+    // текущий и предыдущий календарные месяцы; архив загружается лениво.
+    async function loadPureLossesRows(requestedScope) {
+        const scope = requestedScope || state.pureLosses.scope || "recent";
         if (state.pureLosses.loadPromise) return state.pureLosses.loadPromise;
+        state.pureLosses.scope = scope;
+        if (pureLossesScopeIsLoaded(scope)) {
+            state.pureLosses.rows = scope === "archive" ? state.pureLosses.archiveRows : state.pureLosses.recentRows;
+            state.pureLosses.loaded = true;
+            renderPureLosses();
+            return;
+        }
         state.pureLosses.loadPromise = (async () => {
             state.pureLosses.loading = true;
+            state.pureLosses.loaded = false;
             renderPureLosses();
             try {
                 const db = supabaseDb();
-                // Без пагинации PostgREST молча обрезает ответ на 1000 строк
-                // (db-max-rows) -- с ручной загрузкой чистых списаний за
-                // произвольный период активных строк теперь легко больше
-                // тысячи. Та же постраничная схема, что fetchWmsTaskRows
-                // уже использует для wms_tasks.
                 const pageSize = 1000;
                 const maxRows = 50000;
                 const rows = [];
+                const cutoff = pureLossesRecentStart();
                 for (let from = 0; from < maxRows; from += pageSize) {
-                    const { data, error } = await db
+                    let query = db
                         .from(WMS_TASK_ITEMS_TABLE)
                         .select("id,task_id,shk,nm,name,price,task_type,opp_verdict,task_status,zone_payload")
                         .eq("task_type", "Чистые списания")
-                        .neq("task_status", "Завершено")
-                        .range(from, from + pageSize - 1);
+                        .neq("task_status", "Завершено");
+                    query = scope === "archive"
+                        ? query.lt("zone_payload->>pure_losses_date_lost", cutoff)
+                        : query.gte("zone_payload->>pure_losses_date_lost", cutoff);
+                    const { data, error } = await query.range(from, from + pageSize - 1);
                     if (error) throw error;
                     const batch = Array.isArray(data) ? data : [];
                     rows.push(...batch);
                     if (batch.length < pageSize) break;
+                }
+                if (scope === "archive") {
+                    state.pureLosses.archiveRows = rows;
+                    state.pureLosses.archiveLoaded = true;
+                } else {
+                    state.pureLosses.recentRows = rows;
+                    state.pureLosses.recentLoaded = true;
                 }
                 state.pureLosses.rows = rows;
                 state.pureLosses.loaded = true;
             } catch (error) {
                 console.error("pure losses load failed:", error);
                 state.pureLosses.rows = [];
-                toast("Не удалось загрузить чистые списания: " + (error && error.message ? error.message : String(error)), "error");
+                toast("Не удалось загрузить «" + pureLossesScopeLabel(scope).toLowerCase() + "»: " + (error && error.message ? error.message : String(error)), "error");
             } finally {
                 state.pureLosses.loading = false;
                 state.pureLosses.loadPromise = null;
@@ -14085,11 +14573,17 @@
             return;
         }
         const months = pureLossesMonthKeys();
-        if (!months.length) {
-            grid.innerHTML = "<div class='empty-state'>Пусто. Красиво, если это правда.</div>";
-            return;
-        }
-        grid.innerHTML = months.map((monthKey) => {
+        const scope = state.pureLosses.scope || "recent";
+        const archiveTile = scope === "recent"
+            ? "<button type='button' class='review-section-card pure-losses-archive-card' data-pure-losses-scope='archive'>"
+                + "<div class='review-section-name'><span>Архив</span><strong>›</strong></div>"
+                + "<div class='review-section-meta'>Более ранние месяцы · загружается по нажатию</div>"
+                + "</button>"
+            : "<button type='button' class='review-section-card pure-losses-archive-card' data-pure-losses-scope='recent'>"
+                + "<div class='review-section-name'><span>‹ Последние два месяца</span></div>"
+                + "<div class='review-section-meta'>Вернуться к текущей очереди</div>"
+                + "</button>";
+        const monthTiles = months.map((monthKey) => {
             const rows = pureLossesRowsForMonth(monthKey);
             const total = rows.reduce((acc, row) => acc + (Number(row.price) || 0), 0);
             return "<button type='button' class='review-section-card' data-pure-losses-month='" + escapeHtml(monthKey) + "'>"
@@ -14097,6 +14591,22 @@
                 + "<div class='review-section-meta'>Стоимость: " + escapeHtml(formatMoney(total)) + "</div>"
                 + "</button>";
         }).join("");
+        grid.innerHTML = archiveTile + (monthTiles || "<div class='empty-state'>В этом разделе пусто.</div>");
+        grid.querySelectorAll("[data-pure-losses-scope]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const nextScope = button.dataset.pureLossesScope === "archive" ? "archive" : "recent";
+                state.pureLosses.scope = nextScope;
+                state.pureLosses.activeMonth = "";
+                state.pureLosses.sectionExpanded = false;
+                if (pureLossesScopeIsLoaded(nextScope)) {
+                    state.pureLosses.rows = nextScope === "archive" ? state.pureLosses.archiveRows : state.pureLosses.recentRows;
+                    state.pureLosses.loaded = true;
+                    animateSectionModeSwap("pureLossesSectionsGrid", () => renderPureLosses());
+                } else {
+                    void loadPureLossesRows(nextScope);
+                }
+            });
+        });
         grid.querySelectorAll("[data-pure-losses-month]").forEach((button) => {
             button.addEventListener("click", () => {
                 const clicked = button.dataset.pureLossesMonth;
@@ -14129,16 +14639,17 @@
         const expanded = state.pureLosses.sectionExpanded;
         grid.classList.toggle("is-collapsed", expanded);
         if (wrap) wrap.classList.toggle("is-collapsed", expanded);
-        if (!PURE_LOSSES_LR_SECTIONS.includes(state.pureLosses.activeSection)) {
+        const sectionKeys = [...PURE_LOSSES_LR_SECTIONS, PURE_LOSSES_NO_LR_SECTION];
+        if (!sectionKeys.includes(state.pureLosses.activeSection)) {
             state.pureLosses.activeSection = PURE_LOSSES_LR_SECTIONS[0];
         }
         const orderedSections = expanded
-            ? PURE_LOSSES_LR_SECTIONS.slice().sort((a, b) => {
+            ? sectionKeys.slice().sort((a, b) => {
                 const aEmpty = !(grouped.get(a) || []).length;
                 const bEmpty = !(grouped.get(b) || []).length;
                 return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
             })
-            : PURE_LOSSES_LR_SECTIONS;
+            : sectionKeys;
         const monthLabel = pureLossesMonthLabel(monthKey);
         const backTileHtml = expanded
             ? "<button type='button' class='review-section-pill' data-pure-losses-back='1'>‹ " + escapeHtml(monthLabel) + "</button>"
@@ -14165,7 +14676,10 @@
         grid.querySelector("[data-pure-losses-back]").addEventListener("click", backToPureLossesMonths);
         grid.querySelectorAll("[data-pure-losses-lr]").forEach((button) => {
             button.addEventListener("click", () => {
-                const clicked = Number(button.dataset.pureLossesLr) || PURE_LOSSES_LR_SECTIONS[0];
+                const rawSection = button.dataset.pureLossesLr;
+                const clicked = rawSection === PURE_LOSSES_NO_LR_SECTION
+                    ? PURE_LOSSES_NO_LR_SECTION
+                    : (Number(rawSection) || PURE_LOSSES_LR_SECTIONS[0]);
                 if (state.pureLosses.sectionExpanded && state.pureLosses.activeSection === clicked) {
                     collapsePureLossesSection();
                     return;
@@ -17200,15 +17714,86 @@
         });
     }
 
+    function violationFollowUpName(row, fallback) {
+        const name = normalizeText(row && row.employee_name);
+        const id = normalizeText(row && row.employee_id);
+        return name || (id ? "ID " + id : fallback || "—");
+    }
+
+    function violationFollowUpSummary(value) {
+        if (Array.isArray(value)) {
+            return value.map((item) => normalizeText(item && (item.violation_type || item.type || item.name))).filter(Boolean).join(", ");
+        }
+        if (!value || typeof value !== "object") return "Все новые фиксации до даты беседы";
+        return Object.entries(value)
+            .filter(([, count]) => normalizeText(count) !== "0")
+            .map(([type, count]) => normalizeText(type) + (Number.isFinite(Number(count)) ? " · " + count : ""))
+            .join(", ") || "Все новые фиксации до даты беседы";
+    }
+
+    async function loadViolationFollowUp(force) {
+        if (state.violations.followUpLoaded && !force) return true;
+        const db = supabaseDb();
+        state.violations.followUpLoading = true;
+        state.violations.followUpError = "";
+        renderViolationsHubScreen();
+        if (!db) {
+            state.violations.followUpLoading = false;
+            state.violations.followUpError = "Supabase недоступен.";
+            renderViolationsHubScreen();
+            return false;
+        }
+        try {
+            const { data, error } = await db.rpc("desktop_violation_follow_up_overview");
+            if (error) throw error;
+            state.violations.followUpRows = Array.isArray(data) ? data : [];
+            state.violations.followUpLoaded = true;
+            return true;
+        } catch (error) {
+            state.violations.followUpError = "Не удалось загрузить закрепления и беседы: " + (error && error.message ? error.message : String(error));
+            console.warn("violation follow-up overview load skipped:", error);
+            return false;
+        } finally {
+            state.violations.followUpLoading = false;
+            renderViolationsHubScreen();
+        }
+    }
+
+    function violationsFollowUpHtml() {
+        const rows = Array.isArray(state.violations.followUpRows) ? state.violations.followUpRows : [];
+        const pins = rows.filter((row) => normalizeText(row && row.record_kind) === "pin");
+        const talks = rows.filter((row) => normalizeText(row && row.record_kind) === "talk");
+        const pinRows = pins.length
+            ? pins.map((row) => "<tr><td><strong>" + escapeHtml(normalizeText(row.manager_name) || "—") + "</strong><small>ID " + escapeHtml(normalizeText(row.manager_id) || "—") + "</small></td><td><strong>" + escapeHtml(violationFollowUpName(row)) + "</strong><small>ID " + escapeHtml(normalizeText(row.employee_id) || "—") + "</small></td><td>" + escapeHtml(formatRuDateTime(row.created_at)) + "</td></tr>").join("")
+            : "<tr><td colspan='3' class='empty-state'>Пока никто не закреплён.</td></tr>";
+        const talkRows = talks.length
+            ? talks.map((row) => "<tr><td>" + escapeHtml(formatRuDateTime(row.created_at)) + "</td><td><strong>" + escapeHtml(normalizeText(row.manager_name) || "—") + "</strong><small>ID " + escapeHtml(normalizeText(row.manager_id) || "—") + "</small></td><td><strong>" + escapeHtml(violationFollowUpName(row)) + "</strong><small>ID " + escapeHtml(normalizeText(row.employee_id) || "—") + "</small></td><td class='violation-follow-up-summary'>" + escapeHtml(violationFollowUpSummary(row.summary)) + "</td></tr>").join("")
+            : "<tr><td colspan='4' class='empty-state'>Проведённых бесед пока нет.</td></tr>";
+        return "<div class='violation-follow-up'>"
+            + "<div class='violation-follow-up-note'>Закрепления персональные: видно, кто взял исполнителя в работу. Беседа закрывает все фиксации, появившиеся до её даты, для всех пользователей склада.</div>"
+            + "<div class='violation-follow-up-grid'>"
+            + "<section class='violation-follow-up-card'><h4>Закреплённые исполнители</h4><p>Кто у кого закреплён</p><div class='review-table-scroll'><table class='violation-follow-up-table'><thead><tr><th>Руководитель</th><th>Исполнитель</th><th>Закреплён</th></tr></thead><tbody>" + pinRows + "</tbody></table></div></section>"
+            + "<section class='violation-follow-up-card'><h4>Проведённые беседы</h4><p>Кто провёл беседу и какие фиксации были закрыты</p><div class='review-table-scroll'><table class='violation-follow-up-table'><thead><tr><th>Дата</th><th>Проводил</th><th>Исполнитель</th><th>Фиксации</th></tr></thead><tbody>" + talkRows + "</tbody></table></div></section>"
+            + "</div></div>";
+    }
+
     function renderViolationsStats() {
         const target = $("violationsStatsWrap");
         if (!target) return;
         const rows = violationRowsForSelectedPeriod();
         const dimension = state.violations.statDimension || "overview";
+        const periodTabs = $("violationsPeriodTabs");
+        if (periodTabs) periodTabs.hidden = dimension === "followup";
         renderViolationPeriodTabs();
         document.querySelectorAll("#violationsStatsDimTabs .review-view-tab").forEach((tab) => {
             tab.classList.toggle("active", tab.dataset.violationsStatDim === dimension);
         });
+        if (dimension === "followup") {
+            target.innerHTML = (state.violations.followUpError ? "<div class='status-line error'>" + escapeHtml(state.violations.followUpError) + "</div>" : "")
+                + (state.violations.followUpLoading ? "<div class='status-line'>Загружаю контроль закреплений и бесед…</div>" : "")
+                + violationsFollowUpHtml();
+            return;
+        }
         if (dimension === "overview") {
             target.innerHTML = (state.violations.error ? "<div class='status-line error'>" + escapeHtml(state.violations.error) + "</div>" : "")
                 + (state.violations.loading ? "<div class='status-line'>Загружаю...</div>" : "")
@@ -17292,6 +17877,10 @@
         closeFlowModals();
         state.violations.statDimension = "overview";
         state.violations.statPeriodDays = VIOLATION_OVERVIEW_DAY_COUNT;
+        // The control view is operational data, so ask for a fresh snapshot
+        // on every opening instead of leaving an old manager action cached.
+        state.violations.followUpLoaded = false;
+        state.violations.followUpError = "";
         setFlowModalOpen("violationsHubModal", true);
         renderViolationsHubScreen(true);
         await loadViolations(true);
@@ -18667,6 +19256,7 @@
             auto_lr_matched_rows: 0,
             candidate_rows: 0,
             candidate_sum_price: 0,
+            candidate_sum_log_object_amount: 0,
             posted_signals: 0,
             skipped_by_date: 0,
             skipped_by_wh: 0,
@@ -18716,16 +19306,21 @@
                 wh_id: rowWhId,
                 date_lost: dateLost,
                 lr: toIntegerOrNull(lrRaw) ?? toIntegerOrNull(lr) ?? lr,
+                counterparty_id: normalizeText(objectCell(row, normalizedRow, "counterparty_id")),
+                is_calculation_counterparty: isCalculationCounterparty(objectCell(row, normalizedRow, "counterparty_id")),
                 price: normalizePrice(objectCell(row, normalizedRow, "price")) ?? 0,
+                log_object_amount: normalizePrice(objectCell(row, normalizedRow, "log_object_amount")),
             };
             rowsByKey.set(rowKey, incoming);
         });
         rowsByKey.forEach((row) => {
             stats.candidate_sum_price += Number(row.price) || 0;
+            stats.candidate_sum_log_object_amount += Number(row.log_object_amount) || 0;
             addPureCounter(byLr, row.lr, row.price);
             addPureCounter(byStatusBeforeLost, row.shk_state_before_lost, row.price);
         });
         stats.candidate_sum_price = Math.round(stats.candidate_sum_price * 100) / 100;
+        stats.candidate_sum_log_object_amount = Math.round(stats.candidate_sum_log_object_amount * 100) / 100;
         stats.candidate_rows = rowsByKey.size;
         stats.posted_signals = postedRowsByKey.size;
         stats.by_lr = pureCounterRows(byLr);
@@ -18761,9 +19356,12 @@
 
     async function loadExistingPureRowsByShk(shks, whId, targetDate) {
         const result = new Map();
-        for (const chunk of chunkArray(shks, PURE_URL_FILTER_CHUNK_SIZE)) {
-            const rows = await fetchPureRowsByShkChunk(chunk, whId, targetDate);
-            (rows || []).forEach((row) => {
+        const chunks = chunkArray(shks, PURE_URL_FILTER_CHUNK_SIZE);
+        for (let index = 0; index < chunks.length; index += 6) {
+            const rowsByChunk = await Promise.all(
+                chunks.slice(index, index + 6).map((chunk) => fetchPureRowsByShkChunk(chunk, whId, targetDate))
+            );
+            rowsByChunk.flat().forEach((row) => {
                 const shk = normalizeIdentifier(row && row.shk);
                 if (!shk) return;
                 if (!result.has(shk)) result.set(shk, []);
@@ -18806,11 +19404,36 @@
     function buildPureSyncPlan(prepared, existingByShk, whId) {
         const rowsToInsert = [];
         const autoFoundUpdates = [];
-        const stats = { planned_insert_new: 0, skipped_same_date: 0, planned_auto_mark_found: 0 };
+        const logObjectAmountUpdates = [];
+        const stats = { planned_insert_new: 0, skipped_same_date: 0, planned_auto_mark_found: 0, planned_log_object_amount_updates: 0 };
         prepared.rowsByKey.forEach((incoming) => {
             const existingRows = existingByShk.get(incoming.shk) || [];
-            const hasSameDate = existingRows.some((row) => isSamePureShkDateWh(row, incoming.shk, incoming.date_lost, whId));
-            if (hasSameDate) { stats.skipped_same_date += 1; return; }
+            const sameDateRow = existingRows.find((row) => isSamePureShkDateWh(row, incoming.shk, incoming.date_lost, whId));
+            if (sameDateRow) {
+                stats.skipped_same_date += 1;
+                // Files uploaded before this field was introduced can be
+                // safely enriched by re-uploading them: do not duplicate the
+                // Pure Losses row and do not alter its task price.
+                const needsLogObjectAmount = incoming.log_object_amount !== null
+                    && incoming.log_object_amount !== undefined
+                    && normalizePrice(sameDateRow.log_object_amount) === null;
+                const needsCounterparty = Boolean(incoming.counterparty_id)
+                    && (!normalizeText(sameDateRow.counterparty_id)
+                        || sameDateRow.is_calculation_counterparty === null
+                        || sameDateRow.is_calculation_counterparty === undefined);
+                if (needsLogObjectAmount || needsCounterparty) {
+                    logObjectAmountUpdates.push({
+                        idTarget: pureRowIdTarget(sameDateRow),
+                        shk: incoming.shk,
+                        wh_id: incoming.wh_id,
+                        date_lost: incoming.date_lost,
+                        log_object_amount: incoming.log_object_amount,
+                        counterparty_id: incoming.counterparty_id,
+                        is_calculation_counterparty: incoming.is_calculation_counterparty,
+                    });
+                }
+                return;
+            }
             rowsToInsert.push({
                 shk: incoming.shk,
                 nm: incoming.nm,
@@ -18820,7 +19443,10 @@
                 wh_id: incoming.wh_id,
                 date_lost: incoming.date_lost,
                 lr: incoming.lr,
+                counterparty_id: incoming.counterparty_id,
+                is_calculation_counterparty: incoming.is_calculation_counterparty,
                 price: incoming.price,
+                log_object_amount: incoming.log_object_amount,
             });
             stats.planned_insert_new += 1;
         });
@@ -18838,7 +19464,8 @@
             });
         });
         stats.planned_auto_mark_found = autoFoundUpdates.length;
-        return { rowsToInsert, autoFoundUpdates, stats };
+        stats.planned_log_object_amount_updates = logObjectAmountUpdates.length;
+        return { rowsToInsert, autoFoundUpdates, logObjectAmountUpdates, stats };
     }
 
     function extractMissingColumnName(error) {
@@ -18894,6 +19521,24 @@
         throw new Error("Не удалось обновить строку с движением товара: " + error.message);
     }
 
+    async function applyPureLogObjectAmountUpdates(targets) {
+        const rows = (targets || [])
+            .map((target) => ({
+                id: target && target.idTarget && target.idTarget.column === "id" ? Number(target.idTarget.value) : NaN,
+                log_object_amount: target && target.log_object_amount,
+                counterparty_id: target && target.counterparty_id,
+                is_calculation_counterparty: target && target.is_calculation_counterparty,
+            }))
+            .filter((row) => Number.isFinite(row.id));
+        let updated = 0;
+        for (const chunk of chunkArray(rows, 500)) {
+            const { data, error } = await supabaseDb().rpc("wms_pure_losses_fill_log_object_amount", { p_rows: chunk });
+            if (error) throw new Error("Не удалось сохранить сумму на лог-объект: " + error.message);
+            updated += Number(data) || 0;
+        }
+        return updated;
+    }
+
     // Тот же мост в зону "Чистые списания" (wms_pure_losses_absorb_shks),
     // что и у pure_losses.js -- это отдельный, параллельный путь загрузки
     // того же самого файла (при открытии смены), со своей копией
@@ -18930,22 +19575,25 @@
         const db = supabaseDb();
         if (!db) return [];
         const actor = currentWmsUser();
+        const results = [];
         try {
-            const { data, error } = await db.rpc("wms_pure_losses_absorb_shks", {
-                p_rows: rows,
-                p_actor_id: actor.id || null,
-                p_actor_name: actor.name || null,
-            });
-            if (error) throw error;
-            // RPC теперь изолирует ошибки построчно (миграция
-            // 202610280006) и возвращает {results, skipped_items} вместо
-            // голого массива -- конфликтующие ШК больше не валят всю
-            // пачку, но тут (фон открытия смены) по-прежнему best-effort,
-            // пропущенные просто не возвращаем наверх.
-            if (data && Array.isArray(data.skipped_items) && data.skipped_items.length) {
-                console.warn("absorb shks into pure losses zone: пропущено " + data.skipped_items.length + " ШК", data.skipped_items);
+            for (const chunk of chunkArray(rows, 25)) {
+                const { data, error } = await db.rpc("wms_pure_losses_absorb_shks", {
+                    p_rows: chunk,
+                    p_actor_id: actor.id || null,
+                    p_actor_name: actor.name || null,
+                });
+                if (error) throw error;
+                // RPC изолирует ошибки построчно (миграция
+                // 202610280006) и возвращает {results, skipped_items} вместо
+                // голого массива -- конфликтующие ШК больше не валят всю
+                // пачку, но тут (фон открытия смены) по-прежнему best-effort.
+                if (data && Array.isArray(data.skipped_items) && data.skipped_items.length) {
+                    console.warn("absorb shks into pure losses zone: пропущено " + data.skipped_items.length + " ШК", data.skipped_items);
+                }
+                results.push(...(data && Array.isArray(data.results) ? data.results : []));
             }
-            return data && Array.isArray(data.results) ? data.results : [];
+            return results;
         } catch (error) {
             console.warn("absorb shks into pure losses zone (shift opening) skipped:", error);
             return [];
@@ -18966,6 +19614,7 @@
             source_total_rows: (rows || []).length,
             candidate_rows: 0,
             candidate_sum_price: 0,
+            candidate_sum_log_object_amount: 0,
             skipped_by_wh: 0,
             skipped_invalid: 0,
             duplicate_in_file_ignored: 0,
@@ -18977,24 +19626,128 @@
             const rowWhId = normalizeIdentifier(objectCell(row, normalizedRow, "wh_id"));
             if (rowWhId && whId && rowWhId !== whId) { stats.skipped_by_wh += 1; return; }
             if (rowsByKey.has(shk)) { stats.duplicate_in_file_ignored += 1; return; }
-            const dateLost = parseDateTime(objectCell(row, normalizedRow, "date_lost")).date || "";
+            // В ручной выгрузке дата может быть пустой. Для рабочей очереди
+            // RPC и так подставляла бы текущую дату, но реестр и график не
+            // должны получать бездатные строки: фиксируем тот же смысл явно.
+            const dateLost = parseDateTime(objectCell(row, normalizedRow, "date_lost")).date || state.today;
             const lrRaw = objectCell(row, normalizedRow, "lr");
             const lr = normalizeLossReason(lrRaw);
             rowsByKey.set(shk, {
                 shk,
                 nm: toIntegerOrNull(objectCell(row, normalizedRow, "nm")),
                 decription: normalizeText(objectCell(row, normalizedRow, "decription")),
+                wh_id: whId || rowWhId || "",
                 date_lost: dateLost,
                 lr: toIntegerOrNull(lrRaw) ?? toIntegerOrNull(lr) ?? lr,
+                counterparty_id: normalizeText(objectCell(row, normalizedRow, "counterparty_id")),
+                is_calculation_counterparty: isCalculationCounterparty(objectCell(row, normalizedRow, "counterparty_id")),
                 price: normalizePrice(objectCell(row, normalizedRow, "price")) ?? 0,
+                log_object_amount: normalizePrice(objectCell(row, normalizedRow, "log_object_amount")),
             });
         });
         rowsByKey.forEach((row) => {
             stats.candidate_rows += 1;
             stats.candidate_sum_price += Number(row.price) || 0;
+            stats.candidate_sum_log_object_amount += Number(row.log_object_amount) || 0;
         });
         stats.candidate_sum_price = Math.round(stats.candidate_sum_price * 100) / 100;
+        stats.candidate_sum_log_object_amount = Math.round(stats.candidate_sum_log_object_amount * 100) / 100;
         return { rowsByKey, stats };
+    }
+
+    // Recovery path for historical source files.  It touches only
+    // pure_losses_rep: no calls to wms_pure_losses_absorb_shks, hence no
+    // tasks are created, moved or reopened in the Pure Losses queue.
+    function preparePureLossesBackfillRows(rows, whId) {
+        const rowsByKey = new Map();
+        const stats = { source_total_rows: (rows || []).length, candidate_rows: 0, skipped_by_wh: 0, skipped_invalid: 0, duplicate_in_file_ignored: 0 };
+        (rows || []).forEach((row) => {
+            const normalizedRow = buildNormalizedObjectRow(row);
+            const shk = normalizeIdentifier(objectCell(row, normalizedRow, "shk"));
+            const dateLost = parseDateTime(objectCell(row, normalizedRow, "date_lost")).date;
+            if (!shk || !dateLost) { stats.skipped_invalid += 1; return; }
+            const rowWhId = normalizeIdentifier(objectCell(row, normalizedRow, "wh_id"));
+            if (rowWhId && whId && rowWhId !== whId) { stats.skipped_by_wh += 1; return; }
+            const key = shk + "|" + dateLost + "|" + (whId || rowWhId || "");
+            if (rowsByKey.has(key)) { stats.duplicate_in_file_ignored += 1; return; }
+            const lrRaw = objectCell(row, normalizedRow, "lr");
+            const lr = normalizeLossReason(lrRaw);
+            rowsByKey.set(key, {
+                shk,
+                nm: toIntegerOrNull(objectCell(row, normalizedRow, "nm")),
+                decription: normalizeText(objectCell(row, normalizedRow, "decription")),
+                brand: normalizeText(objectCell(row, normalizedRow, "brand")),
+                shk_state_before_lost: normalizeText(objectCell(row, normalizedRow, "shk_state_before_lost")),
+                wh_id: whId || rowWhId || "",
+                date_lost: dateLost,
+                lr: toIntegerOrNull(lrRaw) ?? toIntegerOrNull(lr) ?? lr,
+                counterparty_id: normalizeText(objectCell(row, normalizedRow, "counterparty_id")),
+                is_calculation_counterparty: isCalculationCounterparty(objectCell(row, normalizedRow, "counterparty_id")),
+                price: normalizePrice(objectCell(row, normalizedRow, "price")) ?? 0,
+                log_object_amount: normalizePrice(objectCell(row, normalizedRow, "log_object_amount")),
+            });
+        });
+        stats.candidate_rows = rowsByKey.size;
+        return { rowsByKey, stats };
+    }
+
+    async function backfillCalculationLedgerFromFile(file) {
+        if (!file) return;
+        const note = $("calculationReportNote");
+        if (note) note.textContent = "Читаю файл и заполняю реестр чистых списаний. Задачи создаваться не будут…";
+        try {
+            const rows = await readObjectWorkbookRows(file);
+            const prepared = preparePureLossesBackfillRows(rows, WH_ID);
+            if (!prepared.rowsByKey.size) throw new Error("В файле не нашлось подходящих строк с ШК и датой списания.");
+            const result = await syncManualPureLossesLedger(prepared, WH_ID);
+            invalidatePureLossesCache();
+            invalidateCalculationReportCache();
+            toast(
+                "Реестр обновлён: добавлено " + result.inserted + ", дозаполнено сумм на лог-объект: " + result.logObjectAmountUpdated + ". Задачи не менялись.",
+                "success"
+            );
+            await loadCalculationReport(state.calculationReport.periodStart || calculationPeriodStart(state.today));
+        } catch (error) {
+            console.error("calculation ledger backfill failed:", error);
+            if (note) note.textContent = "Не удалось заполнить реестр: " + (error && error.message ? error.message : String(error));
+            toast("Бэкофилл не выполнен: " + (error && error.message ? error.message : String(error)), "error");
+        } finally {
+            if ($("calculationBackfillFile")) $("calculationBackfillFile").value = "";
+        }
+    }
+
+    // Ручная загрузка раньше шла сразу в рабочую зону и обходила
+    // pure_losses_rep. Из-за этого на графике не было поступления, а файл,
+    // загруженный повторно, не имел общей точки идемпотентности с загрузкой
+    // при открытии смены. Сначала сохраняем уникальные записи в реестр по
+    // ключу ШК + склад + дата списания, затем переносим ШК в рабочую зону.
+    async function syncManualPureLossesLedger(prepared, whId) {
+        const rowsByDate = new Map();
+        (prepared && prepared.rowsByKey instanceof Map ? prepared.rowsByKey : new Map()).forEach((row) => {
+            const dateLost = parseDateTime(row && row.date_lost).date || state.today;
+            if (!rowsByDate.has(dateLost)) rowsByDate.set(dateLost, new Map());
+            rowsByDate.get(dateLost).set(row.shk, { ...row, date_lost: dateLost, wh_id: whId || row.wh_id || "" });
+        });
+        const unsupportedColumns = new Set();
+        let inserted = 0;
+        let alreadyRecorded = 0;
+        const logObjectAmountUpdates = [];
+        for (const [dateLost, rowsByShk] of rowsByDate) {
+            const shks = Array.from(rowsByShk.keys());
+            const existingByShk = await loadExistingPureRowsByShk(shks, whId, dateLost);
+            const syncPlan = buildPureSyncPlan(
+                { rowsByKey: rowsByShk, postedRowsByKey: new Map() },
+                existingByShk,
+                whId
+            );
+            alreadyRecorded += syncPlan.stats.skipped_same_date;
+            for (const chunk of chunkArray(syncPlan.rowsToInsert, PURE_INSERT_CHUNK_SIZE)) {
+                inserted += await insertPureRowsAdaptive(chunk, unsupportedColumns);
+            }
+            logObjectAmountUpdates.push(...syncPlan.logObjectAmountUpdates);
+        }
+        const logObjectAmountUpdated = await applyPureLogObjectAmountUpdates(logObjectAmountUpdates);
+        return { inserted, alreadyRecorded, logObjectAmountUpdated };
     }
 
     function setPureLossesUploadStatus(message, type) {
@@ -19017,6 +19770,7 @@
             ["Строк в файле", stats.source_total_rows],
             ["К загрузке (уникальных ШК)", stats.candidate_rows],
             ["Сумма", formatMoney(stats.candidate_sum_price || 0)],
+            ["На лог-объект", formatMoney(stats.candidate_sum_log_object_amount || 0)],
             ["Дубли в файле", stats.duplicate_in_file_ignored],
             ["Отсечено (другой склад)", stats.skipped_by_wh],
             ["Невалидные строки", stats.skipped_invalid],
@@ -19067,7 +19821,7 @@
     // 202610280006 добавляет накладных расходов на каждую строку). Режем
     // на чанки и шлём последовательно -- тот же PURE_INSERT_CHUNK_SIZE
     // масштаб, что уже используется для вставки в pure_losses_rep.
-    const PURE_LOSSES_UPLOAD_CHUNK_SIZE = 250;
+    const PURE_LOSSES_UPLOAD_CHUNK_SIZE = 25;
 
     // Та же RPC (wms_pure_losses_absorb_shks), что у открытия смены, но
     // вызываем напрямую, а не через absorbShksIntoPureLossesZone -- та
@@ -19089,6 +19843,8 @@
         let processedCount = 0;
         const skippedItems = [];
         try {
+            setPureLossesUploadStatus("Сверяю файл с реестром чистых списаний...");
+            const ledgerResult = await syncManualPureLossesLedger(prepared, WH_ID);
             for (let i = 0; i < chunks.length; i += 1) {
                 setPureLossesUploadStatus("Загружаю " + rows.length + " ШК в «Чистые списания»... (" + (i + 1) + "/" + chunks.length + ")");
                 const { data, error } = await db.rpc("wms_pure_losses_absorb_shks", {
@@ -19108,18 +19864,30 @@
                 skippedItems.push(...chunkSkipped);
             }
             const alreadyThere = rows.length - processedCount - skippedItems.length;
-            state.pureLosses.loaded = false;
+            invalidatePureLossesCache();
+            invalidateCalculationReportCache();
+            // Если оператор вернётся в обычный «Разбор» в той же сессии,
+            // состав тары должен быть пересчитан сразу, а не только после
+            // ручного обновления страницы.
+            void loadReviewTasks();
             if (skippedItems.length) console.warn("pure losses manual upload: пропущено по ошибке", skippedItems);
             setPureLossesUploadStatus(
-                "Готово. Новых задач: " + createdCount + ". Перенесено существующих: " + movedCount
+                "Готово. В реестр добавлено: " + ledgerResult.inserted
+                    + (ledgerResult.alreadyRecorded ? ". Уже было в реестре: " + ledgerResult.alreadyRecorded : "")
+                    + ". Новых задач: " + createdCount + ". Перенесено существующих: " + movedCount
                     + (alreadyThere > 0 ? ". Уже были в «Чистые списания»: " + alreadyThere + "." : ".")
                     + (skippedItems.length ? " Пропущено из-за конфликта: " + skippedItems.length + " (см. консоль)." : ""),
                 skippedItems.length ? "error" : "good"
             );
-            toast("Чистые списания загружены: " + processedCount + " ШК." + (skippedItems.length ? " Пропущено: " + skippedItems.length + "." : ""), skippedItems.length ? "error" : "success");
+            toast(
+                "Чистые списания: в реестр добавлено " + ledgerResult.inserted + ", в очередь обработано " + processedCount + " ШК."
+                    + (skippedItems.length ? " Пропущено: " + skippedItems.length + "." : ""),
+                skippedItems.length ? "error" : "success"
+            );
         } catch (error) {
             console.error("pure losses manual upload failed:", error);
-            state.pureLosses.loaded = false;
+            invalidatePureLossesCache();
+            invalidateCalculationReportCache();
             setPureLossesUploadStatus(
                 "Прервано после " + processedCount + " из " + rows.length + " ШК: " + (error && error.message ? error.message : String(error)) + ". Уже загруженное сохранено, можно загрузить файл повторно -- то, что уже в «Чистые списания», будет пропущено как дубль.",
                 "error"
@@ -19142,9 +19910,11 @@
         for (const target of syncPlan.autoFoundUpdates) {
             if (await applyPureAutoFoundUpdate(target, unsupportedUpdateColumns)) autoMarkedFound += 1;
         }
+        const logObjectAmountUpdated = await applyPureLogObjectAmountUpdates(syncPlan.logObjectAmountUpdates);
         return {
             inserted_new: insertedNew,
             auto_marked_found: autoMarkedFound,
+            log_object_amount_updated: logObjectAmountUpdated,
             planned_insert_new: syncPlan.stats.planned_insert_new,
             planned_auto_mark_found: syncPlan.stats.planned_auto_mark_found,
             skipped_same_date: syncPlan.stats.skipped_same_date,
@@ -23287,6 +24057,24 @@
             void showUploads();
         });
         $("openReview").addEventListener("click", showReviewPage);
+        $("openCalculationReport").addEventListener("click", showCalculationReport);
+        $("homeFromCalculationReport").addEventListener("click", showHome);
+        $("calculationPeriodPrev").addEventListener("click", () => {
+            const start = state.calculationReport.periodStart || calculationPeriodStart(state.today);
+            void loadCalculationReport(previousCalculationPeriodStart(start));
+        });
+        $("calculationPeriodNext").addEventListener("click", () => {
+            const start = state.calculationReport.periodStart || calculationPeriodStart(state.today);
+            const date = new Date(start + "T00:00:00Z");
+            date.setUTCMonth(date.getUTCMonth() + 1);
+            const nextStart = date.toISOString().slice(0, 10);
+            if (nextStart <= calculationPeriodStart(state.today)) void loadCalculationReport(nextStart);
+        });
+        $("openCalculationBackfill").addEventListener("click", () => $("calculationBackfillFile").click());
+        $("calculationBackfillFile").addEventListener("change", () => {
+            const file = $("calculationBackfillFile").files && $("calculationBackfillFile").files[0];
+            if (file) void backfillCalculationLedgerFromFile(file);
+        });
         $("reviewOpenPrespisok").addEventListener("click", () => { void openPrespisokModal(); });
         $("closePrespisokJournal").addEventListener("click", closePrespisokJournalModal);
         $("openReviewZonesFromStatus").addEventListener("click", () => { void openReviewZonesModal(); });
@@ -23322,6 +24110,10 @@
             const file = $("shiftPureLossesFile").files && $("shiftPureLossesFile").files[0];
             if (file) void handleShiftPureLossesFile(file);
         });
+        $("shiftSortingTotalInput").addEventListener("input", updateShiftOpeningForm);
+        $("shiftSortingComment").addEventListener("input", () => {
+            state.shift.sortingTotalComment = normalizeText($("shiftSortingComment").value);
+        });
         $("saveShiftOpening").addEventListener("click", () => { void saveShiftOpening(); });
         $("homeFromFlow").addEventListener("click", showHome);
         $("flowNextTask").addEventListener("click", () => { void issueNextFlowTask(); });
@@ -23337,6 +24129,7 @@
                 state.violations.statDimension = button.dataset.violationsStatDim;
                 renderViolationsStats();
                 updateViolationsStatDimThumb();
+                if (state.violations.statDimension === "followup") void loadViolationFollowUp();
             });
         });
         document.querySelectorAll("#violationsPeriodTabs [data-violation-period-days]").forEach((button) => {
