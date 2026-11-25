@@ -26,7 +26,7 @@
     // 24/7 with nobody around to manually reload it, so it's the single
     // most important place for this check. Bump CLIENT_VERSION here AND
     // version.json's "v" together whenever this file changes.
-    const CLIENT_VERSION = 11;
+    const CLIENT_VERSION = 12;
     setInterval(() => {
         fetch("version.json?bust=" + Date.now(), { cache: "no-store" })
             .then((res) => res.json())
@@ -80,6 +80,7 @@
     let dashboardRows = [];
     let dashboardSlideIndex = 0;
     let dashboardSlideTimer = null;
+    let dashboardPausedForInventory = false;
 
     function dashboardMoscowToday() {
         const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -213,6 +214,15 @@
     }
 
     function renderDashboardSlide(animate) {
+        if (dashboardPausedForInventory) {
+            const zone = document.getElementById("displayZoneWrap");
+            const dashboard = document.getElementById("displayDashboard");
+            const title = document.getElementById("displayTitle");
+            if (zone) zone.classList.remove("is-hidden");
+            if (dashboard) dashboard.classList.remove("is-active");
+            if (title) title.textContent = "Инвентаризация «Без ШК»";
+            return;
+        }
         const slide = DASHBOARD_SLIDES[dashboardSlideIndex];
         const zone = document.getElementById("displayZoneWrap");
         const dashboard = document.getElementById("displayDashboard");
@@ -226,7 +236,9 @@
 
     function scheduleDashboardSlide() {
         clearTimeout(dashboardSlideTimer);
+        if (dashboardPausedForInventory) return;
         dashboardSlideTimer = setTimeout(() => {
+            if (dashboardPausedForInventory) return;
             const active = document.querySelector("#displayDashboard .display-chart-status-dots i.active");
             if (active) active.classList.add("is-collapsing");
             setTimeout(() => {
@@ -242,7 +254,7 @@
             const { data, error } = await supabaseClient.rpc("wms_display_dashboard_trends", { p_days: DASHBOARD_DAYS });
             if (error) throw error;
             dashboardRows = Array.isArray(data) ? data : [];
-            if (DASHBOARD_SLIDES[dashboardSlideIndex] !== "zone") renderDashboardSlide(false);
+            if (!dashboardPausedForInventory && DASHBOARD_SLIDES[dashboardSlideIndex] !== "zone") renderDashboardSlide(false);
         } catch (error) {
             console.warn("display dashboard trends load failed:", error);
         }
@@ -533,6 +545,14 @@
     // to the already-rendered .no-shk-rack elements, it never replaces the
     // racks markup itself. ----------
     let activeSession = null;
+    function syncDashboardForInventory() {
+        const shouldPause = Boolean(activeSession && (activeSession.status === "waiting_for_phone" || activeSession.status === "in_progress"));
+        if (shouldPause === dashboardPausedForInventory) return;
+        dashboardPausedForInventory = shouldPause;
+        clearTimeout(dashboardSlideTimer);
+        renderDashboardSlide(false);
+        if (!shouldPause) scheduleDashboardSlide();
+    }
     let auditedShelfIdsThisSession = new Set();
     // Guards against re-firing the confetti burst / restarting the 5s
     // auto-hide timer if a completed session's row re-renders more than
@@ -602,6 +622,7 @@
         } else {
             auditedShelfIdsThisSession = new Set();
         }
+        syncDashboardForInventory();
         renderInventoryOverlay();
         applyRackAuditColors();
     }
