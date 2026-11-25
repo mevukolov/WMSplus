@@ -1,5 +1,15 @@
 (function () {
     const EXTENDED_MENU_ACCESS_CODE = "extended_menu";
+    // Mobile functions use the very same public.users.accesses array as
+    // desktop pages.  Keeping these codes here (rather than adding fake rows
+    // to public.pages) makes the two application contours explicit in SCUD.
+    const MOBILE_ACCESS_GROUP = [
+        { code: "mobile_app", name: "Доступ к мобильному приложению", note: "Вход в мобильный контур WMS+" },
+        { code: "mobile_problem_item", name: "Проблемный товар", note: "Без ШК, 2 ШК и пустая упаковка" },
+        { code: "mobile_inventory", name: "Инвентаризация", note: "Проверка коробов «Без ШК» по полкам" },
+        { code: "mobile_violations", name: "Нарушения", note: "Список нарушителей, закрепления и беседы" },
+        { code: "mobile_passes", name: "Печать пропусков", note: "Раздел печати пропусков" },
+    ];
     const EDGE_FUNCTION_URL = "https://bgphllmzmlwurfnbagho.supabase.co/functions/v1/admin-manage-employee";
 
     if (typeof supabaseClient === "undefined") {
@@ -161,6 +171,46 @@
         }
 
         accessGroupsWrap.innerHTML = "";
+
+        const mobileBlock = document.createElement("div");
+        mobileBlock.style.marginBottom = "16px";
+        const mobileTitle = document.createElement("div");
+        mobileTitle.style.fontWeight = "700";
+        mobileTitle.style.marginBottom = "6px";
+        mobileTitle.textContent = "Мобильный контур";
+        mobileBlock.appendChild(mobileTitle);
+        MOBILE_ACCESS_GROUP.forEach((access) => {
+            const label = document.createElement("label");
+            label.style.display = "flex";
+            label.style.alignItems = "flex-start";
+            label.style.gap = "6px";
+            label.style.marginBottom = "6px";
+            label.style.cursor = "pointer";
+
+            const chk = document.createElement("input");
+            chk.type = "checkbox";
+            chk.value = access.code;
+            chk.checked = activePages.includes(access.code);
+            chk.style.marginTop = "3px";
+
+            const copy = document.createElement("span");
+            const name = document.createElement("span");
+            name.textContent = access.name;
+            copy.appendChild(name);
+            if (access.note) {
+                const note = document.createElement("small");
+                note.textContent = access.note;
+                note.style.display = "block";
+                note.style.marginTop = "1px";
+                note.style.color = "#64748b";
+                note.style.fontWeight = "500";
+                copy.appendChild(note);
+            }
+
+            label.append(chk, copy);
+            mobileBlock.appendChild(label);
+        });
+        accessGroupsWrap.appendChild(mobileBlock);
 
         const groups = {};
 
