@@ -9112,11 +9112,11 @@
         if (state.review.loading) {
             setReviewStatus("");
             $("reviewSectionsGrid").innerHTML = "";
-            $("reviewTableWrap").innerHTML = "<div class='review-loading-state' role='status' aria-label='Загружаю задачи'>"
-                + "<svg class='review-loading-curve' viewBox='0 0 520 230' aria-hidden='true' focusable='false'>"
-                + "<defs><linearGradient id='reviewLoadingFill' x1='0' y1='0' x2='0' y2='1'><stop offset='0%' stop-color='#623cea' stop-opacity='.26'/><stop offset='100%' stop-color='#623cea' stop-opacity='0'/></linearGradient></defs>"
-                + "<path class='review-loading-grid' d='M24 42H496M24 108H496M24 174H496'/><path class='review-loading-area' d='M28 162 C72 154 79 92 132 99 S178 171 222 136 S285 67 324 96 S381 162 425 123 S463 83 492 64 L492 190 L28 190Z'/><path class='review-loading-line' d='M28 162 C72 154 79 92 132 99 S178 171 222 136 S285 67 324 96 S381 162 425 123 S463 83 492 64'/><g class='review-loading-dots'><circle cx='28' cy='162' r='7'/><circle cx='132' cy='99' r='5'/><circle cx='222' cy='136' r='5'/><circle cx='324' cy='96' r='5'/><circle cx='425' cy='123' r='5'/><circle cx='492' cy='64' r='7'/></g>"
-                + "</svg><strong>Загружаем задачи…</strong>"
+            $("reviewTableWrap").innerHTML = "<div class='violators-loading' role='status' aria-label='Загружаю задачи'>"
+                + "<svg viewBox='0 0 300 132' aria-hidden='true' focusable='false'>"
+                + "<defs><linearGradient id='violatorsLoaderFill' x1='0' y1='0' x2='0' y2='1'><stop stop-color='#623CEA' stop-opacity='.28'/><stop offset='1' stop-color='#623CEA' stop-opacity='0'/></linearGradient></defs>"
+                + "<path class='violators-loader-grid' d='M8 26H292M8 65H292M8 104H292'/><path class='violators-loader-area' d='M10 93 C38 80 44 48 74 56 S108 104 137 73 S178 28 208 54 S242 95 290 37 L290 118 L10 118Z' style='fill:url(#violatorsLoaderFill)'/><path class='violators-loader-line' d='M10 93 C38 80 44 48 74 56 S108 104 137 73 S178 28 208 54 S242 95 290 37'/><g><circle class='violators-loader-point' cx='10' cy='93' r='4'/><circle class='violators-loader-point' cx='74' cy='56' r='4'/><circle class='violators-loader-point' cx='137' cy='73' r='4'/><circle class='violators-loader-point' cx='208' cy='54' r='4'/><circle class='violators-loader-point' cx='290' cy='37' r='4'/></g>"
+                + "</svg><span class='violators-loading-caption'>Загружаем задачи…</span>"
                 + "</div>";
             return;
         }

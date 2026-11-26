@@ -1386,25 +1386,38 @@
         .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; perspective: 900px; transition: opacity .2s ease, transform .34s cubic-bezier(.34,1.56,.64,1); }
         .review-sections-grid.is-mode-out { opacity: 0; transform: scale(.92); }
         .review-sections-grid.is-mode-in { opacity: 0; transform: scale(.9); }
-        .review-loading-state { display: grid; place-items: center; gap: 12px; min-height: 260px; padding: 22px; overflow: hidden; background: linear-gradient(135deg, #fbfcff, #f7f4ff); animation: reviewLoaderIn .28s ease-out both; }
-        .review-loading-curve { display: block; width: min(100%, 520px); height: auto; overflow: visible; }
-        .review-loading-grid { fill: none; stroke: #ded4ff; stroke-width: 1.5; opacity: .78; stroke-dasharray: 1; stroke-dashoffset: 1; animation: reviewLoaderGrid .48s ease-out both; }
-        .review-loading-area { fill: url(#reviewLoadingFill); opacity: 0; animation: reviewLoaderArea 1.7s ease-in-out infinite; }
-        .review-loading-line { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 650; stroke-dashoffset: 650; animation: reviewLoaderLine 1.7s cubic-bezier(.22,.61,.36,1) infinite; }
-        .review-loading-dots circle { fill: #fff; stroke: var(--accent); stroke-width: 5; opacity: 0; transform-box: fill-box; transform-origin: center; animation: reviewLoaderDot 1.7s cubic-bezier(.34,1.56,.64,1) infinite; }
-        .review-loading-dots circle:nth-child(1) { animation-delay: .2s; }
-        .review-loading-dots circle:nth-child(2) { animation-delay: .34s; }
-        .review-loading-dots circle:nth-child(3) { animation-delay: .48s; }
-        .review-loading-dots circle:nth-child(4) { animation-delay: .62s; }
-        .review-loading-dots circle:nth-child(5) { animation-delay: .76s; }
-        .review-loading-dots circle:nth-child(6) { animation-delay: .9s; }
-        .review-loading-state strong { color: #6c6681; font-size: 17px; font-weight: 900; letter-spacing: -.01em; animation: reviewLoaderLabel 1.7s ease-in-out infinite; }
-        @keyframes reviewLoaderIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes reviewLoaderGrid { to { stroke-dashoffset: 0; } }
-        @keyframes reviewLoaderLine { 0% { stroke-dashoffset: 650; opacity: .35; } 48%, 82% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: .35; } }
-        @keyframes reviewLoaderArea { 0%, 30% { opacity: 0; } 52%, 84% { opacity: 1; } 100% { opacity: 0; } }
-        @keyframes reviewLoaderDot { 0%, 35% { opacity: 0; transform: scale(0); } 49%, 84% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.65); } }
-        @keyframes reviewLoaderLabel { 0%, 100% { opacity: .58; } 50% { opacity: 1; } }
+        .violators-loading {
+            height: 100%;
+            min-height: 180px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            gap: 12px;
+            animation: violators-loader-in 260ms ease-out both;
+        }
+        .violators-loading svg { width: min(100%, 290px); height: auto; overflow: visible; }
+        .violators-loading-caption { color: rgba(36,32,56,.62); font-size: 12px; font-weight: 750; }
+        .violators-loader-grid { stroke: rgba(98,60,234,.13); stroke-width: 1; }
+        .violators-loader-area { fill: url(#violatorsLoaderFill); opacity: .55; animation: violators-area-breathe 1.9s ease-in-out infinite; }
+        .violators-loader-line {
+            fill: none;
+            stroke: var(--accent);
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-dasharray: 340;
+            stroke-dashoffset: 340;
+            animation: violators-line-draw 1.55s cubic-bezier(.4,0,.2,1) infinite;
+        }
+        .violators-loader-point { fill: #fff; stroke: var(--accent); stroke-width: 2.5; transform-box: fill-box; transform-origin: center; animation: violators-point-pulse 1.55s ease-in-out infinite; }
+        .violators-loader-point:nth-of-type(2) { animation-delay: .16s; }
+        .violators-loader-point:nth-of-type(3) { animation-delay: .32s; }
+        .violators-loader-point:nth-of-type(4) { animation-delay: .48s; }
+        .violators-loader-point:nth-of-type(5) { animation-delay: .64s; }
+        @keyframes violators-loader-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes violators-line-draw { 0% { stroke-dashoffset: 340; opacity: .35; } 42%, 72% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -18; opacity: .38; } }
+        @keyframes violators-area-breathe { 0%, 100% { opacity: .3; } 50% { opacity: .76; } }
+        @keyframes violators-point-pulse { 0%, 100% { transform: scale(.78); opacity: .52; } 50% { transform: scale(1.18); opacity: 1; } }
         @keyframes sectionItemPop { 0% { opacity: 0; transform: translateY(12px) scale(.88); } 65% { opacity: 1; transform: translateY(-3px) scale(1.03); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
         .review-section-card.is-entering-item, .review-section-pill.is-entering-item { animation: sectionItemPop .46s cubic-bezier(.34,1.56,.64,1) both; }
         .review-section-card { position: relative; min-height: 116px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 18px; text-align: left; cursor: pointer; transform-style: preserve-3d; will-change: transform; transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s ease, border-color .25s ease, background-color .25s ease; }
@@ -2231,7 +2244,7 @@
         @media (max-width: 920px) { .module-grid, .preview-grid, .master-slots, .tasks-flow-card .module-grid, .tasks-flow-card .preview-grid, .inactive-grid, .review-filter-panel, .flow-command-card, .flow-stat-grid, .flow-reasons, .flow-task-grid, .flow-settings-grid, .status-pilot-grid, .staff-stats-summary, .staff-stats-grid, .writeoff-term-head, .writeoff-term-row, .writeoff-term-add, .violation-type-route-main, .employee-directory-head, .employee-directory-row, .violation-manager-layout, .violation-manager-form, .missing-employee-row, .writeoff-reco-summary, .writeoff-reco-problems, .writeoff-reco-statuses { grid-template-columns: 1fr; } .tasks-actions, .tasks-home-group .tasks-actions { grid-template-columns: 1fr; } .task-info-grid { grid-template-columns: 1fr; } .flow-task-panel .task-info-grid { grid-template-columns: 1fr; } .actualize-summary, .journal-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journal-day-grid, .journal-weekdays { grid-template-columns: repeat(7, minmax(0, 1fr)); } .flow-next-btn { width: 100%; min-width: 0; } }
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
-        @media (prefers-reduced-motion: reduce) { .review-loading-state, .review-loading-grid, .review-loading-area, .review-loading-line, .review-loading-dots circle, .review-loading-state strong { animation: none; } .review-loading-grid { stroke-dashoffset: 0; } .review-loading-area, .review-loading-dots circle { opacity: 1; } .review-loading-line { stroke-dashoffset: 0; opacity: 1; } }
+        @media (prefers-reduced-motion: reduce) { .violators-loading, .violators-loader-area, .violators-loader-line, .violators-loader-point { animation: none; } .violators-loader-line { stroke-dashoffset: 0; opacity: 1; } }
         @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip, .calculation-summary, .shift-sorting-total-fields { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
     </style>
 </head>
