@@ -4774,7 +4774,7 @@
         const delta = ratio !== null && previousRatio !== null ? ratio - previousRatio : null;
         const forecast = reportHasAllocationGap ? null : calculationForecast(currentRows, periodStart);
         const summaryCards = [
-            ["Нетто на лог-объект", reportHasAllocationGap ? "Нет данных" : formatMoney(writtenOff), reportHasAllocationGap ? "нет суммы на лог-объект за " + allocationGapRows.length + " дн." : "без LR; вычтено решениями: " + formatMoney(resolvedWrittenOff)],
+            ["Нетто на лог-объект", reportHasAllocationGap ? "Нет данных" : formatMoney(writtenOff), reportHasAllocationGap ? "нет суммы на лог-объект за " + allocationGapRows.length + " дн." : "включая без LR; вычтено решениями: " + formatMoney(resolvedWrittenOff)],
             ["Отсортировано", formatMoney(sorted), "факт из открытия следующей смены"],
             ["Доля списаний", formatCalculationPercent(ratio), previousRatio === null ? "за прошлый период пока нет базы" : ((delta > 0 ? "+" : "") + (delta * 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " п.п. к прошлому периоду")],
             [forecast ? "Прогноз к 20-му" : "Итог периода", formatCalculationPercent(forecast ? forecast.ratio : ratio), forecast ? "по последним " + forecast.sampleDays + " заполненным дням; осталось " + forecast.remainingDays + " дн." : "полный факт периода"],
@@ -4782,7 +4782,7 @@
         summary.innerHTML = summaryCards.map((card) => "<div class='calculation-summary-card'><span class='label'>" + escapeHtml(card[0]) + "</span><strong>" + escapeHtml(card[1]) + "</strong><span class='hint'>" + escapeHtml(card[2]) + "</span></div>").join("");
         const factEnd = calculationFactEnd(periodStart);
         const missingCount = currentRows.filter((row) => row.date <= factEnd && row.sorted === null).length;
-        const calculationRuleNote = "В числитель идёт только «Часть суммы на лог-объект» из файла. Строки без LR исключены. «Найден/Релиз/Списан» уменьшает исходную дату списания, а не дату разбора. ";
+        const calculationRuleNote = "В числитель идёт только «Часть суммы на лог-объект» из файла по контрагентам 6507 и 6513, включая строки без LR. «Найден/Релиз/Списан» уменьшает исходную дату списания, а не дату разбора. ";
         note.textContent = calculationRuleNote + (reportHasAllocationGap
             ? "По " + allocationGapRows.length + " дн. есть ШК, но нет суммы на лог-объект. Загрузите файл за эти даты повторно. "
             : "") + (partialAllocationRows.length
@@ -4835,6 +4835,10 @@
         $("uploadsPage").classList.remove("active");
         $("reviewPage").classList.remove("active");
         $("calculationReportPage").classList.add("active");
+        // The report is small (one row per day), but its values can change
+        // after a manual ledger import. Always ask the server for fresh data
+        // when the page is opened instead of showing a stale in-memory copy.
+        invalidateCalculationReportCache();
         void loadCalculationReport(state.calculationReport.periodStart || calculationPeriodStart(state.today));
     }
 
@@ -5287,12 +5291,7 @@
             state.review.loading = true;
             renderReview();
             try {
-                const reviewRows = await fetchReviewTaskRows(db);
-                // Часть ШК одной тары может уже жить в зоне «Чистые
-                // списания». Родительскую задачу физически не меняем, но в
-                // обычном разборе показываем только её оставшийся состав.
-                await attachPureLossesProjection(reviewRows);
-                state.review.rows = reviewRows;
+                state.review.rows = await fetchReviewTaskRows(db);
                 // Fresh light rows -- any earlier upgrade-to-full is gone
                 // with them, so the next actualization/quick-no-shk/Flow
                 // entry needs to re-run ensureFullActiveTasksLoaded()
@@ -5392,56 +5391,6 @@
     async function fetchReviewTaskRows(db) {
         const rows = await fetchWmsTaskRows(db, "active");
         return rows.filter(isActiveReviewTask);
-    }
-
-    async function attachPureLossesProjection(rows) {
-        const list = Array.isArray(rows) ? rows : [];
-        list.forEach((row) => {
-            delete row.__pureLossesShks;
-            delete row.__hiddenByPureLosses;
-            delete row.__reviewVisiblePrice;
-        });
-        const taskIds = Array.from(new Set(list.map((row) => normalizeText(row && row.id)).filter(Boolean)));
-        if (!taskIds.length) return;
-        const db = supabaseDb();
-        if (!db) return;
-        try {
-            const pureItems = [];
-            for (const chunk of chunkArray(taskIds, 400)) {
-                const { data, error } = await db
-                    .from(WMS_TASK_ITEMS_TABLE)
-                    .select("task_id,shk,price")
-                    .in("task_id", chunk)
-                    .eq("task_type", "Чистые списания");
-                if (error) throw error;
-                pureItems.push(...(Array.isArray(data) ? data : []));
-            }
-            const byTask = new Map();
-            pureItems.forEach((item) => {
-                const taskId = normalizeText(item && item.task_id);
-                const shk = normalizeIdentifier(item && item.shk);
-                if (!taskId || !shk) return;
-                if (!byTask.has(taskId)) byTask.set(taskId, new Map());
-                byTask.get(taskId).set(shk, Number(item.price) || 0);
-            });
-            list.forEach((row) => {
-                const zoned = byTask.get(normalizeText(row && row.id));
-                if (!zoned || !zoned.size || isPureLossesZoneTask(row)) return;
-                const sourceIds = Array.from(new Set((Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : [])
-                    .map(normalizeIdentifier).filter(Boolean)));
-                const hiddenShks = new Set(sourceIds.filter((shk) => zoned.has(shk)));
-                if (!hiddenShks.size) return;
-                row.__pureLossesShks = hiddenShks;
-                const hiddenPrice = Array.from(hiddenShks).reduce((sum, shk) => sum + (zoned.get(shk) || 0), 0);
-                const originalPrice = Number(row.source_price_sum) || 0;
-                row.__reviewVisiblePrice = Math.max(0, originalPrice - hiddenPrice);
-                row.__hiddenByPureLosses = sourceIds.length > 0 && sourceIds.every((shk) => hiddenShks.has(shk));
-            });
-        } catch (error) {
-            // Проекция — улучшение представления, поэтому при временной
-            // недоступности таблицы задач оставляем обычную очередь живой.
-            console.warn("pure losses projection skipped:", error);
-        }
     }
 
     function refreshExpandedSections() {
@@ -8681,7 +8630,7 @@
     function reviewGroupedRows() {
         const grouped = new Map(activeReviewZones().map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
-            if (row.__hiddenByPureLosses || isPrespisokTask(row) || requestSectionName(row) || isPureLossesZoneTask(row)) return;
+            if (isPrespisokTask(row) || requestSectionName(row) || isPureLossesZoneTask(row)) return;
             const section = grouped.has(taskSectionName(row)) ? taskSectionName(row) : "Другие задачи";
             grouped.get(section).push(row);
         });
@@ -8691,7 +8640,6 @@
     function requestsGroupedRows() {
         const grouped = new Map(REQUEST_SECTIONS.map((section) => [section, []]));
         (state.review.rows || []).forEach((row) => {
-            if (row.__hiddenByPureLosses) return;
             if (isPrespisokTask(row)) {
                 grouped.get("2-я линия предсписка").push(row);
                 return;
@@ -8703,8 +8651,7 @@
     }
 
     function reviewPrice(row) {
-        const projectedValue = Number(row && row.__reviewVisiblePrice);
-        const value = Number.isFinite(projectedValue) ? projectedValue : Number(row && row.source_price_sum);
+        const value = Number(row && row.source_price_sum);
         return Number.isFinite(value) ? value : 0;
     }
 
@@ -8827,9 +8774,8 @@
     }
 
     function reviewSourceIds(row) {
-        const hidden = row && row.__pureLossesShks instanceof Set ? row.__pureLossesShks : null;
         const ids = Array.isArray(row && row.source_shk_ids)
-            ? row.source_shk_ids.map(normalizeIdentifier).filter((shk) => shk && !(hidden && hidden.has(shk)))
+            ? row.source_shk_ids.map(normalizeIdentifier).filter(Boolean)
             : [];
         const tare = normalizeIdentifier(row && row.source_tare_id);
         const preview = ids.slice(0, 4).join(", ");
@@ -9164,9 +9110,14 @@
     function renderReview() {
         if (!$("reviewSectionsGrid") || !$("reviewTableWrap")) return;
         if (state.review.loading) {
-            setReviewStatus("Загружаю задачи из Supabase...");
+            setReviewStatus("");
             $("reviewSectionsGrid").innerHTML = "";
-            $("reviewTableWrap").innerHTML = "<div class='empty-state'>Загружаю задачи...</div>";
+            $("reviewTableWrap").innerHTML = "<div class='review-loading-state' role='status' aria-label='Загружаю задачи'>"
+                + "<svg class='review-loading-curve' viewBox='0 0 520 230' aria-hidden='true' focusable='false'>"
+                + "<defs><linearGradient id='reviewLoadingFill' x1='0' y1='0' x2='0' y2='1'><stop offset='0%' stop-color='#623cea' stop-opacity='.26'/><stop offset='100%' stop-color='#623cea' stop-opacity='0'/></linearGradient></defs>"
+                + "<path class='review-loading-grid' d='M24 42H496M24 108H496M24 174H496'/><path class='review-loading-area' d='M28 162 C72 154 79 92 132 99 S178 171 222 136 S285 67 324 96 S381 162 425 123 S463 83 492 64 L492 190 L28 190Z'/><path class='review-loading-line' d='M28 162 C72 154 79 92 132 99 S178 171 222 136 S285 67 324 96 S381 162 425 123 S463 83 492 64'/><g class='review-loading-dots'><circle cx='28' cy='162' r='7'/><circle cx='132' cy='99' r='5'/><circle cx='222' cy='136' r='5'/><circle cx='324' cy='96' r='5'/><circle cx='425' cy='123' r='5'/><circle cx='492' cy='64' r='7'/></g>"
+                + "</svg><strong>Загружаем задачи…</strong>"
+                + "</div>";
             return;
         }
         const grouped = reviewGroupedRows();
@@ -10169,17 +10120,13 @@
     function taskItems(row) {
         const payload = taskPayload(row);
         const fromPayload = Array.isArray(payload.task_items) ? payload.task_items.map(normalizeTaskItem).filter(Boolean) : [];
-        const hidden = row && row.__pureLossesShks instanceof Set ? row.__pureLossesShks : null;
-        const visible = (items) => hidden && hidden.size
-            ? items.filter((item) => !hidden.has(normalizeIdentifier(item && item.shk)))
-            : items;
-        if (fromPayload.length) return visible(fromPayload);
+        if (fromPayload.length) return fromPayload;
         const sourceRows = Array.isArray(payload.rows) ? payload.rows : payload.row ? [payload.row] : [];
         const fromRows = sourceRows.map(taskItemFromSourceRow).filter(Boolean);
-        if (fromRows.length) return visible(fromRows);
-        return visible((Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : [])
+        if (fromRows.length) return fromRows;
+        return (Array.isArray(row && row.source_shk_ids) ? row.source_shk_ids : [])
             .map((id) => ({ shk: normalizeIdentifier(id), name: "", nm: "", status: "", price: 0, mx: "", movement: "", row_number: null, raw: {} }))
-            .filter((item) => item.shk));
+            .filter((item) => item.shk);
     }
 
     function taskItemName(row) {
@@ -19700,13 +19647,21 @@
             const prepared = preparePureLossesBackfillRows(rows, WH_ID);
             if (!prepared.rowsByKey.size) throw new Error("В файле не нашлось подходящих строк с ШК и датой списания.");
             const result = await syncManualPureLossesLedger(prepared, WH_ID);
+            const latestImportedDate = Array.from(prepared.rowsByKey.values())
+                .map((row) => row.date_lost)
+                .filter(Boolean)
+                .sort()
+                .at(-1) || state.today;
             invalidatePureLossesCache();
             invalidateCalculationReportCache();
             toast(
                 "Реестр обновлён: добавлено " + result.inserted + ", дозаполнено сумм на лог-объект: " + result.logObjectAmountUpdated + ". Задачи не менялись.",
                 "success"
             );
-            await loadCalculationReport(state.calculationReport.periodStart || calculationPeriodStart(state.today));
+            // The file may belong to another calculation period than the one
+            // currently on screen. Show the period that actually received
+            // the backfill, otherwise the successful import looks empty.
+            await loadCalculationReport(calculationPeriodStart(latestImportedDate));
         } catch (error) {
             console.error("calculation ledger backfill failed:", error);
             if (note) note.textContent = "Не удалось заполнить реестр: " + (error && error.message ? error.message : String(error));
