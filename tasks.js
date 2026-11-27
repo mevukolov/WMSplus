@@ -2015,8 +2015,8 @@
     // единица (срок разбора -- default_upload_offset_days словаря); для
     // статуса с несколькими активными правилами -- по единице на
     // КАЖДОЕ (у каждого свой upload_offset_days, как и раньше на уровне
-    // правил). '*' (catch-all строка словаря) -- такой же статус, как
-    // любой другой, обрабатывается без особого случая. Только
+    // правил). Резервная строка словаря '*' используется при разборе
+    // выгрузки, но не входит в обязательное покрытие. Только
     // output_key='zone' правила формата считаются -- filter-правила не
     // маршрутизируют и не несут самостоятельного срока разбора.
     // Единицы покрытия для ЦЕЛОГО формата -- requiredStatusUnitsForModule
@@ -2026,7 +2026,7 @@
     function requiredStatusUnitsForFormat(fmt) {
         const units = [];
         (state.statusDictionary.rows || []).forEach((entry) => {
-            if (entry.source_format !== fmt || entry.is_required_for_coverage === false || entry.is_active === false) return;
+            if (entry.source_format !== fmt || entry.status_code === "*" || entry.is_required_for_coverage === false || entry.is_active === false) return;
             const rules = rulesForStatus(fmt, entry.status_code).filter((item) => item.row.output_key !== "filter");
             if (!rules.length) {
                 units.push({ statusCode: entry.status_code, ruleKey: "__default__", offsetDays: Number(entry.default_upload_offset_days) || 0 });
@@ -2259,8 +2259,7 @@
         const missing = [];
         const done = [];
         statuses.forEach((item) => {
-            const code = item.statusCode === "*" ? "Прочее" : item.statusCode;
-            const label = code + " (" + sourceFormatLabel(item.sourceFormat) + ")";
+            const label = item.statusCode + " (" + sourceFormatLabel(item.sourceFormat) + ")";
             if (statusCoveredForDay(item.units, isoDate)) done.push(label);
             else missing.push(label);
         });
