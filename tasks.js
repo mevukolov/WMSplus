@@ -4,6 +4,7 @@
     const WH_ID = "50144199";
     const RUNS_TABLE = "wms_manual_upload_runs";
     const SETTINGS_TABLE = "wms_manual_upload_settings";
+    const ACTUALIZATION_SETTINGS_TABLE = "wms_actualization_settings";
     const WMS_TASKS_TABLE = "wms_tasks";
     const WMS_TASK_SELECT_COLUMNS = "id,source_module,source_id,source_row_id,source_payload,source_shk_ids,source_tare_id,source_price_sum,source_last_movement_at,upload_type,upload_effective_date,task_type,title,description,priority,priority_label,due_date,responsibility_zone,task_status,opp_verdict,last_human_verdict,assignee_employee_id,assignee_name,tags,is_deleted,completed_at,reopened_at,reopen_after,created_at,updated_at,has_pending_no_shk_match";
     // Same as WMS_TASK_SELECT_COLUMNS but source_payload replaced with just
@@ -101,7 +102,41 @@
         comment: ["opp_comment", "comment"],
     };
     const MOVEMENT_AUTO_CLOSE_MINUTES = 10;
-    const MOVEMENT_AUTO_CLOSE_MIN_MS = MOVEMENT_AUTO_CLOSE_MINUTES * 60 * 1000;
+    const ACTUALIZATION_NUMBER_OPERATORS = { gte: "не меньше", gt: "больше", eq: "равно", lt: "меньше", lte: "не больше" };
+    const ACTUALIZATION_LIST_OPERATORS = { in: "один из", not_in: "ни один из" };
+    const ACTUALIZATION_CONDITIONS = {
+        movement: { label: "Разница во времени движения, мин", operators: ACTUALIZATION_NUMBER_OPERATORS, input: "number" },
+        status: { label: "Код последнего статуса Superset", operators: ACTUALIZATION_LIST_OPERATORS, input: "list" },
+        status_text: { label: "Текст последнего статуса Superset", operators: { eq: "равно", contains: "содержит", not_contains: "не содержит" }, input: "text" },
+        status_changed: { label: "Код статуса изменился" },
+        office: { label: "ID последнего склада", operators: ACTUALIZATION_LIST_OPERATORS, input: "list" },
+        outside_office: { label: "Товар ушёл на другой склад" },
+        mx: { label: "Последнее МХ", operators: { contains: "содержит", not_contains: "не содержит", eq: "равно" }, input: "text" },
+        tare: { label: "Последняя тара", operators: ACTUALIZATION_LIST_OPERATORS, input: "list" },
+        tare_changed: { label: "Тара в Superset отличается от тары задачи" },
+        price: { label: "Цена в Superset, ₽", operators: ACTUALIZATION_NUMBER_OPERATORS, input: "number" },
+        in_file: { label: "ШК найден в файле Superset" },
+        duplicate: { label: "Дубль в «Движении после продажи» за ту же дату" },
+        pure_losses: { label: "ШК этой задачи уже перенесён в «Чистые списания»" },
+    };
+    const ACTUALIZATION_AFTER_SALE_ZONE = "Движение после продажи";
+    const ACTUALIZATION_TARE_ACTIONS = {
+        exclude: "Убрать подходящие ШК из тары",
+        split_remaining: "Создать задачи на оставшиеся ШК",
+        close: "Закрыть всю тару",
+    };
+    const DEFAULT_ACTUALIZATION_SETTINGS = {
+        rules: [
+            { kind: "movement", zone: "", enabled: true, minutes: MOVEMENT_AUTO_CLOSE_MINUTES },
+            { kind: "duplicate", zone: "", enabled: true },
+            { kind: "after_sale", zone: "Движение после продажи", enabled: true, otherOffice: true, statuses: ["WRR"] },
+            { kind: "pure_losses", zone: "", enabled: false },
+        ],
+        tareAction: "exclude",
+        routing: "auto",
+        carrierEnabled: true,
+        carrierAction: "отгрузка сторонним перевозчиком",
+    };
     const PRESPISOK_STORAGE_KEY = "wms_prespisok_progress_v1";
     const PRESPISOK_TEST_MODE = false;
     const PRESPISOK_START_MINUTE = 14 * 60 + 30;
@@ -650,6 +685,7 @@
             rows: null,
             module: null,
         },
+        actualizationSettings: { draft: null, updatedAt: "", loading: false, revision: 0 },
         sourceFormatDepth: {
             loaded: false,
             loading: false,
@@ -1144,8 +1180,14 @@
     // true UTC. Without this distinction, a naive "14:08" gets treated as
     // 14:08 UTC and then re-rendered as 17:08 Moscow -- a phantom +3h.
     const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
-    function hasExplicitTimezone(raw) {
-        return /(?:[zZ]|[+-]\d{2}:?\d{2})\s*$/.test(raw);
+    function dateTimeOffsetMs(raw) {
+        const zone = raw.match(/([zZ]|([+-])(\d{2}):?(\d{2}))\s*$/);
+        if (!zone) return MOSCOW_OFFSET_MS;
+        if (!zone[2]) return 0;
+        const hours = Number(zone[3]);
+        const minutes = Number(zone[4]);
+        if (hours > 23 || minutes > 59) return NaN;
+        return (zone[2] === "-" ? -1 : 1) * (hours * 60 + minutes) * 60000;
     }
     function formatIsoDate(year, monthIndex, day) {
         return new Date(Date.UTC(year, monthIndex, day)).toISOString().slice(0, 10);
@@ -1163,12 +1205,13 @@
         }
         const raw = normalizeText(value);
         if (!raw) return { date: "", ts: 0, iso: "", label: "" };
-        const naive = !hasExplicitTimezone(raw);
-        let match = raw.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/);
+        let match = raw.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?/);
         if (match) {
             const calendarDate = formatIsoDate(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
             const hasTime = match[4] !== undefined;
-            const ts = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)) - (hasTime && naive ? MOSCOW_OFFSET_MS : 0);
+            const ms = Number((match[7] || "").padEnd(3, "0").slice(0, 3));
+            const ts = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0), ms) - (hasTime ? dateTimeOffsetMs(raw) : 0);
+            if (!Number.isFinite(ts)) return { date: "", ts: 0, iso: "", label: raw };
             return { date: calendarDate, ts, iso: new Date(ts).toISOString(), label: formatRuDate(calendarDate) };
         }
         match = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
@@ -1177,7 +1220,8 @@
             if (year < 100) year += 2000;
             const calendarDate = formatIsoDate(year, Number(match[2]) - 1, Number(match[1]));
             const hasTime = match[4] !== undefined;
-            const ts = Date.UTC(year, Number(match[2]) - 1, Number(match[1]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)) - (hasTime && naive ? MOSCOW_OFFSET_MS : 0);
+            const ts = Date.UTC(year, Number(match[2]) - 1, Number(match[1]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)) - (hasTime ? dateTimeOffsetMs(raw) : 0);
+            if (!Number.isFinite(ts)) return { date: "", ts: 0, iso: "", label: raw };
             return { date: calendarDate, ts, iso: new Date(ts).toISOString(), label: formatRuDate(calendarDate) };
         }
         const parsed = new Date(raw.replace(" ", "T"));
@@ -5441,10 +5485,17 @@
 
     async function openActualizeTasksModal() {
         closeFlowModals();
+        if (state.actualize.parsing || state.actualize.routingPending || state.actualize.processing) {
+            setFlowModalOpen("actualizeTasksModal", true);
+            return;
+        }
         state.actualize = { copied: false, rows: [], candidates: [], removedShks: new Set(), tareActions: {}, stats: null, supersetDebug: null, processing: false, step: 1 };
         if ($("actualizeSupersetFile")) $("actualizeSupersetFile").value = "";
         if ($("actualizeUploadLabel")) $("actualizeUploadLabel").classList.add("hidden");
         if ($("actualizeResults")) $("actualizeResults").innerHTML = "";
+        $("actualizeCopyBreakdown").replaceChildren();
+        $("actualizeRoutingStatus").textContent = "";
+        renderActualizationRoutingControls();
         setActualizeStatus("Сначала скопируйте список активных ШК.");
         actualizeGoToStep(1);
         setFlowModalOpen("actualizeTasksModal", true);
@@ -5723,21 +5774,37 @@
         }
     }
 
-    function activeTaskShkList() {
+    function activeTaskShkList(rows) {
         const shks = new Set();
-        (state.review.rows || []).filter(isActiveReviewTask).forEach((row) => {
+        const zones = new Map();
+        const tasks = rows.filter(isActiveReviewTask);
+        tasks.forEach((row) => {
+            const section = actualizationTaskZone(row);
+            const zone = zones.get(section) || { tasks: 0, shks: new Set() };
+            zone.tasks += 1;
+            zones.set(section, zone);
             taskItems(row).forEach((item) => {
                 const shk = normalizeIdentifier(item.shk);
-                if (shk) shks.add(shk);
+                if (!shk) return;
+                shks.add(shk);
+                zone.shks.add(shk);
             });
         });
-        return Array.from(shks).sort((a, b) => a.localeCompare(b, "ru", { numeric: true }));
+        return {
+            ids: Array.from(shks).sort((a, b) => a.localeCompare(b, "ru", { numeric: true })),
+            tasks: tasks.length,
+            zones: [...zones].sort((a, b) => b[1].shks.size - a[1].shks.size),
+        };
     }
 
     async function copyActiveShkForActualize() {
-        if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
+        await ensureReviewTasksLoaded();
         await ensureFullActiveTasksLoaded();
-        const ids = activeTaskShkList();
+        if (!state.review.fullLoaded) {
+            setActualizeStatus("Не удалось загрузить полный состав задач. Попробуйте обновить список.", "error");
+            return;
+        }
+        const { ids, tasks, zones } = activeTaskShkList(state.review.rows);
         if (!ids.length) {
             setActualizeStatus("Активных ШК в задачах не нашел.", "error");
             return;
@@ -5745,41 +5812,91 @@
         const copied = await copyText(ids.join("\n"));
         state.actualize.copied = copied;
         if ($("actualizeUploadLabel")) $("actualizeUploadLabel").classList.toggle("hidden", !copied);
-        setActualizeStatus(copied ? "Скопировано активных ШК: " + ids.length + "." : "Браузер заблокировал копирование. Попробуйте еще раз.", copied ? "good" : "error");
+        setActualizeStatus(copied ? "Скопировано " + ids.length.toLocaleString("ru-RU") + " уникальных ШК из " + tasks.toLocaleString("ru-RU") + " активных задач." : "Браузер заблокировал копирование. Попробуйте еще раз.", copied ? "good" : "error");
+        $("actualizeCopyBreakdown").innerHTML = copied ? "<details class='actualization-card'><summary>Из каких участков взяты ШК</summary><div class='actualization-card-body'>"
+            + zones.map(([area, zone]) => "<div><strong>" + escapeHtml(area) + "</strong> · задач: " + zone.tasks.toLocaleString("ru-RU")
+                + " · ШК: " + zone.shks.size.toLocaleString("ru-RU") + "</div>").join("")
+            + "<small>Если ШК встречается в нескольких участках, в общий список он попадает один раз.</small></div></details>" : "";
         if (copied) actualizeGoToStep(2);
     }
 
     async function handleActualizeSupersetFile(file) {
-        if (!file) return;
-        if (!state.review.loaded && !state.review.loading) await loadReviewTasks();
-        await ensureFullActiveTasksLoaded();
-        setActualizeStatus("Читаю Superset...");
+        const run = state.actualize;
+        if (!file || run.parsing || run.routingPending || run.processing) return;
+        run.parsing = true;
+        const input = $("actualizeSupersetFile");
+        if (input) input.disabled = true;
+        run.rows = [];
+        run.candidates = [];
+        run.stats = null;
+        $("applyActualizationRouting").hidden = true;
+        $("actualizeResults").innerHTML = "";
+        $("actualizeRoutingStatus").textContent = "";
+        setActualizeStatus("Читаю Superset…");
         try {
+            await ensureReviewTasksLoaded();
+            await ensureFullActiveTasksLoaded();
+            if (!state.review.fullLoaded) throw new Error("Не удалось загрузить полный состав задач.");
+            const db = supabaseDb();
+            const { settings } = await readActualizationSettings(db);
             const rows = await readSupersetRows(file);
-            setActualizeStatus("Проверяю движения и дубли с Движением после продажи...");
-            const afterSaleIndex = await loadAfterSaleDedupeIndexForTasks(supabaseDb(), state.review.rows || []);
-            state.actualize.rows = rows;
-            state.actualize.stats = actualizeSupersetStats(rows);
-            state.actualize.afterSaleDedupeIndex = afterSaleIndex;
-            state.actualize.candidates = buildMovementCandidates(rows, afterSaleIndex);
-            state.actualize.removedShks = new Set();
-            state.actualize.tareActions = {};
+            if (!rows.length) throw new Error("В файле Superset не найдено строк с ШК.");
+            setActualizeStatus("Применяю правила актуализации…");
+            const candidates = await actualizationCandidates(db, state.review.rows, rows, settings);
+            if (state.actualize !== run) return;
+            run.rows = rows;
+            run.stats = actualizeSupersetStats(rows);
+            run.candidates = candidates;
+            run.removedShks = new Set();
+            run.tareActions = {};
+            run.routingMode = settings.routing;
+            run.routingApplied = false;
             renderActualizeResults();
-            void enrichTaskNomenclatureFromSuperset(rows).catch((error) => console.warn("superset nomenclature enrich skipped:", error));
-            void syncNmDirectoryFromSuperset(rows).catch((error) => console.warn("nm directory sync skipped:", error));
-            void pushSupersetRowsToCache(rows)
-                .then(() => hydrateSupersetCache(rows.map((row) => row.shk)))
-                .then(() => logShkMxBatch(rows))
-                .then(() => loadReviewTasks())
-                .then(() => renderReview())
-                .catch((error) => console.warn("superset cache push skipped:", error));
         } catch (error) {
             console.error("actualize superset failed:", error);
-            setActualizeStatus("Не удалось разобрать Superset: " + (error && error.message ? error.message : String(error)), "error");
+            if (state.actualize === run) setActualizeStatus("Не удалось разобрать Superset: " + (error && error.message ? error.message : String(error)), "error");
+        } finally {
+            run.parsing = false;
+            if (state.actualize === run) renderActualizationRoutingControls();
         }
     }
 
-    async function readSupersetRows(file) {
+    async function applyActualizationRouting(run) {
+        if (!run.rows.length || run.routingMode === "off" || run.routingApplied || run.routingPending) return;
+        run.routingPending = true;
+        const status = $("actualizeRoutingStatus");
+        status.textContent = "Обновляю Superset и маршруты…";
+        renderActualizationRoutingControls();
+        try {
+            await pushSupersetRowsToCache(run.rows);
+            run.routingApplied = true;
+            if (state.actualize === run) status.textContent = "Данные Superset обновлены. Правила маршрутизации применены к подходящим ШК.";
+            void enrichTaskNomenclatureFromSuperset(run.rows).catch((error) => console.warn("superset nomenclature enrich skipped:", error));
+            void syncNmDirectoryFromSuperset(run.rows).catch((error) => console.warn("nm directory sync skipped:", error));
+            void hydrateSupersetCache(run.rows.map((row) => row.shk));
+            void logShkMxBatch(run.rows);
+            await loadReviewTasks();
+        } catch (error) {
+            if (state.actualize === run) status.textContent = (run.routingApplied ? "Данные Superset сохранены. Ошибка обновления: " : "Не удалось обновить все данные Superset: ") + (error?.message || String(error));
+        } finally {
+            run.routingPending = false;
+            if (state.actualize === run) renderActualizationRoutingControls();
+        }
+    }
+
+    function renderActualizationRoutingControls() {
+        const run = state.actualize;
+        const button = $("applyActualizationRouting");
+        const input = $("actualizeSupersetFile");
+        if (button) {
+            button.hidden = !run.rows.length || run.routingMode === "off" || run.routingApplied;
+            button.disabled = Boolean(run.routingPending || run.processing);
+        }
+        if (input) input.disabled = Boolean(run.parsing || run.routingPending || run.processing);
+        if ($("closeMovementTasks")) $("closeMovementTasks").disabled = Boolean(run.routingPending || run.processing);
+    }
+
+    async function readSupersetRows(file, { recordDebug = true } = {}) {
         if (typeof window.XLSX === "undefined") throw new Error("Не загрузилась библиотека XLSX. Обновите страницу и попробуйте еще раз.");
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
@@ -5790,7 +5907,7 @@
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
         const headerIndex = findSupersetHeaderIndex(rows);
         const headerMap = buildSupersetHeaderMap(rows[headerIndex] || []);
-        state.actualize.supersetDebug = {
+        if (recordDebug) state.actualize.supersetDebug = {
             sheet_name: firstSheetName,
             range: sheet["!ref"] || "",
             raw_rows: rows.length,
@@ -5961,7 +6078,7 @@
         return { raw, ts: 0, label: raw || "-" };
     }
 
-    function movementTimeInfo(row, item, supersetRow) {
+    function movementTimeInfo(row, item, supersetRow, minMinutes = MOVEMENT_AUTO_CLOSE_MINUTES) {
         const taskMovement = itemMovementInfo(row, item);
         const supersetRaw = normalizeText(supersetRow && (supersetRow.last_status_iso || supersetRow.last_status_at));
         const supersetParsed = parseDateTime(supersetRaw);
@@ -5972,7 +6089,7 @@
             supersetTs,
             supersetLabel: supersetTs ? formatRuDateTime(supersetRaw || new Date(supersetTs).toISOString()) : (supersetRaw || "-"),
             deltaMs,
-            canAutoClose: Number.isFinite(deltaMs) && deltaMs >= MOVEMENT_AUTO_CLOSE_MIN_MS,
+            canAutoClose: Number.isFinite(deltaMs) && deltaMs >= minMinutes * 60 * 1000,
         };
     }
 
@@ -5986,7 +6103,7 @@
         return sign + minutes + " мин";
     }
 
-    function movementChangeList(row, item, supersetRow) {
+    function movementChangeList(row, item, supersetRow, minMinutes = MOVEMENT_AUTO_CLOSE_MINUTES) {
         if (!supersetRow) return [];
         const changes = [];
         const beforeStatus = normalizeText(item && item.status);
@@ -5999,10 +6116,10 @@
         if (statusChanged) {
             changes.push({ reason: "статус изменился", label: "Статус", before: beforeStatus || "-", after: afterStatus || "-" });
         }
-        const time = movementTimeInfo(row, item, supersetRow);
+        const time = movementTimeInfo(row, item, supersetRow, minMinutes);
         if (time.supersetTs && time.taskMovement.ts) {
             changes.push({
-                reason: time.canAutoClose ? "дата позже минимум на " + MOVEMENT_AUTO_CLOSE_MINUTES + " минут" : "дата без достаточного сдвига",
+                reason: time.canAutoClose ? "дата позже минимум на " + minMinutes + " минут" : "дата без достаточного сдвига",
                 label: "Дата движения",
                 before: time.taskMovement.label || "-",
                 after: time.supersetLabel + " (" + formatMovementDelta(time.deltaMs) + ")",
@@ -6015,49 +6132,218 @@
         return changes;
     }
 
-    function movementReasonList(row, item, supersetRow) {
-        if (!movementTimeInfo(row, item, supersetRow).canAutoClose) return [];
-        return movementChangeList(row, item, supersetRow).map((change) => change.reason);
-    }
-
     function hasConfirmedMovement(row, item, supersetRow) {
         return movementTimeInfo(row, item, supersetRow).canAutoClose;
     }
 
-    function buildMovementCandidates(supersetRows, afterSaleIndex) {
+    function normalizeActualizationCondition(condition) {
+        const field = condition?.field;
+        if (!Object.hasOwn(ACTUALIZATION_CONDITIONS, field)) return null;
+        const definition = ACTUALIZATION_CONDITIONS[field];
+        const operator = definition.operators && (Object.hasOwn(definition.operators, condition.operator)
+            ? condition.operator : Object.keys(definition.operators)[0]);
+        if (!definition.input) return { field };
+        if (definition.input === "number") return { field, operator, value: settingNumber(condition.value, null) };
+        if (definition.input === "list") {
+            const values = Array.isArray(condition.value) ? condition.value : normalizeText(condition.value).split(/[,;\s]+/);
+            return { field, operator, value: [...new Set(values.map(field === "status" ? latinStatusCode : normalizeIdentifier).filter(Boolean))] };
+        }
+        return { field, operator, value: normalizeText(condition.value) };
+    }
+
+    function legacyActualizationRule(rule, legacyRules) {
+        const conditions = [];
+        let zone = normalizeText(rule.zone);
+        const excludeZones = [];
+        if (rule.kind === "movement") conditions.push({ field: "movement", operator: "gte", value: settingNumber(rule.minutes, MOVEMENT_AUTO_CLOSE_MINUTES) });
+        if (rule.kind === "duplicate") conditions.push({ field: "duplicate" });
+        if (rule.kind === "pure_losses") conditions.push({ field: "pure_losses" });
+        if (rule.kind === "after_sale") {
+            if (rule.otherOffice !== false) conditions.push({ field: "outside_office" });
+            const statuses = Array.isArray(rule.statuses) ? rule.statuses : ["WRR"];
+            if (statuses.length) conditions.push({ field: "status", operator: "in", value: statuses });
+        }
+        if (!zone) {
+            excludeZones.push(...legacyRules.filter((other) => other.kind === rule.kind && other.zone).map((other) => other.zone));
+            if (rule.kind === "movement" || rule.kind === "duplicate") excludeZones.push(ACTUALIZATION_AFTER_SALE_ZONE);
+            if (rule.kind === "after_sale") zone = ACTUALIZATION_AFTER_SALE_ZONE;
+        }
+        return { ...rule, name: ACTUALIZATION_RULE_TITLES[rule.kind], zone, excludeZones,
+            match: rule.kind === "after_sale" ? "any" : "all", conditions };
+    }
+
+    function normalizeActualizationSettings(settings) {
+        const defaults = DEFAULT_ACTUALIZATION_SETTINGS;
+        const source = settings || {};
+        const rules = (Array.isArray(source.rules) ? source.rules : defaults.rules).filter((rule) => rule && typeof rule === "object");
+        return {
+            rules: rules
+                .map((rule) => !Array.isArray(rule.conditions) && Object.hasOwn(ACTUALIZATION_RULE_TITLES, rule.kind) ? legacyActualizationRule(rule, rules) : rule)
+                .map((rule) => ({
+                    name: normalizeText(rule.name).slice(0, 100),
+                    zone: normalizeText(rule.zone),
+                    excludeZones: Array.isArray(rule.excludeZones) ? [...new Set(rule.excludeZones.map(normalizeText).filter(Boolean))] : [],
+                    enabled: rule.enabled !== false,
+                    action: rule.action === "skip" ? "skip" : "resolve",
+                    match: rule.match === "any" ? "any" : "all",
+                    conditions: Array.isArray(rule.conditions) ? rule.conditions.map(normalizeActualizationCondition).filter(Boolean) : [],
+                    verdict: normalizeText(rule.verdict).slice(0, 120) || SYSTEM_MOVEMENT_VERDICT,
+                    tareAction: Object.hasOwn(ACTUALIZATION_TARE_ACTIONS, rule.tareAction) ? rule.tareAction : "",
+                })),
+            tareAction: Object.hasOwn(ACTUALIZATION_TARE_ACTIONS, source.tareAction) ? source.tareAction : defaults.tareAction,
+            routing: ["auto", "manual", "off"].includes(source.routing) ? source.routing : defaults.routing,
+            carrierEnabled: source.carrierEnabled !== false,
+            carrierAction: normalizeText(source.carrierAction) || defaults.carrierAction,
+        };
+    }
+
+    async function readActualizationSettings(db) {
+        if (!db) throw new Error("Нет подключения к базе.");
+        const { data, error } = await db.from(ACTUALIZATION_SETTINGS_TABLE)
+            .select("settings,updated_at").eq("wh_id", WH_ID).single();
+        if (error) {
+            if (["42P01", "PGRST205"].includes(error.code)) {
+                return { settings: normalizeActualizationSettings(null), updatedAt: "" };
+            }
+            throw error;
+        }
+        return { settings: normalizeActualizationSettings(data.settings), updatedAt: data.updated_at };
+    }
+
+    function actualizationTaskZone(row) {
+        return isAfterSaleMovementTask(row) ? ACTUALIZATION_AFTER_SALE_ZONE
+            : (isPrespisokTask(row) ? "Предсписок" : (requestSectionName(row) || taskSectionName(row)));
+    }
+
+    function actualizationRulesForTask(row, rules) {
+        const zone = actualizationTaskZone(row);
+        const enabled = rules.filter((rule) => rule.enabled && rule.conditions.length && (rule.zone || !rule.excludeZones.includes(zone)));
+        return enabled.filter((rule) => rule.zone === zone).concat(enabled.filter((rule) => !rule.zone));
+    }
+
+    async function actualizationCandidates(db, taskRows, rows, settings) {
+        const activeTasks = taskRows.filter(isActiveReviewTask);
+        const byTask = new Map(activeTasks.map((row) => [row.id, actualizationRulesForTask(row, settings.rules)]));
+        const needsRule = (field) => activeTasks.some((row) => byTask.get(row.id).some((rule) => rule.conditions.some((condition) => condition.field === field)));
+        const [duplicates, pureItems] = await Promise.all([
+            needsRule("duplicate") ? loadAfterSaleDedupeIndexForTasks(db, activeTasks) : new Map(),
+            needsRule("pure_losses") ? loadActualizationPureItems(db, activeTasks, byTask) : new Set(),
+        ]);
+        return buildMovementCandidates(activeTasks, rows, duplicates, pureItems, byTask, settings.tareAction);
+    }
+
+    async function loadActualizationPureItems(db, taskRows, rulesByTask) {
+        const eligible = taskRows.filter((row) => !isPureLossesZoneTask(row)
+            && rulesByTask.get(row.id).some((rule) => rule.conditions.some((condition) => condition.field === "pure_losses")));
+        const result = new Set();
+        for (const ids of chunkArray(productIdsFromTasks(eligible), 80)) {
+            const response = await readOptionalRowsPaged(db, WMS_TASK_ITEMS_TABLE, (query) => query
+                .select("task_id,shk").eq("task_type", "Чистые списания").in("shk", ids).order("id"));
+            if (!response.ok) throw response.error;
+            response.rows.forEach((item) => result.add(item.task_id + ":" + normalizeIdentifier(item.shk)));
+        }
+        return result;
+    }
+
+    function actualizationConditionMatches(condition, facts) {
+        const actual = facts[condition.field];
+        if (!actualizationConditionHasValue(condition)) return false;
+        const expected = condition.value;
+        switch (condition.operator) {
+        case "gte": return Number.isFinite(actual) && actual >= expected;
+        case "gt": return Number.isFinite(actual) && actual > expected;
+        case "lt": return Number.isFinite(actual) && actual < expected;
+        case "lte": return Number.isFinite(actual) && actual <= expected;
+        case "eq": return typeof expected === "number" ? actual === expected : Boolean(actual) && actual === normalizeForMatch(expected);
+        case "in": return Boolean(actual) && expected.includes(actual);
+        case "not_in": return Boolean(actual) && !expected.includes(actual);
+        case "contains": return Boolean(actual) && actual.includes(normalizeForMatch(expected));
+        case "not_contains": return Boolean(actual) && !actual.includes(normalizeForMatch(expected));
+        default: return Boolean(actual);
+        }
+    }
+
+    function actualizationConditionHasValue(condition) {
+        const input = ACTUALIZATION_CONDITIONS[condition.field].input;
+        if (input === "number") return Number.isFinite(condition.value);
+        if (input === "list") return Boolean(condition.value.length);
+        return input !== "text" || Boolean(condition.value);
+    }
+
+    function actualizationItemFacts(row, item, superset, afterSaleIndex, pureItems) {
+        const status = latinStatusCode(superset?.last_status);
+        const oldStatus = latinStatusCode(item.status);
+        const office = normalizeIdentifier(superset?.last_office);
+        const tare = normalizeIdentifier(superset?.last_tare);
+        const oldTare = normalizeIdentifier(row.source_tare_id);
+        const baseline = superset?.last_status_ts ? itemMovementTs(row, item) : 0;
+        return {
+            movement: baseline ? (superset.last_status_ts - baseline) / 60000 : null,
+            status,
+            status_text: normalizeForMatch(superset?.last_status),
+            status_changed: status && oldStatus && status !== oldStatus,
+            office,
+            outside_office: office && office !== WH_ID,
+            mx: normalizeForMatch(superset?.last_mx),
+            tare,
+            tare_changed: tare && oldTare && tare !== oldTare,
+            price: superset?.price,
+            in_file: Boolean(superset),
+            duplicate: afterSaleIndex.size ? afterSaleDedupeMatch(row, item, afterSaleIndex) : null,
+            pure_losses: !isPureLossesZoneTask(row) && pureItems.has(row.id + ":" + normalizeIdentifier(item.shk)),
+        };
+    }
+
+    function matchActualizationRule(rule, facts) {
+        if (!rule.conditions.length || rule.conditions.some((condition) => !actualizationConditionHasValue(condition))) return null;
+        const matched = rule.conditions.filter((condition) => actualizationConditionMatches(condition, facts));
+        if (!matched.length || (rule.match === "all" && matched.length !== rule.conditions.length)) return null;
+        const fields = new Set(matched.map((condition) => condition.field));
+        const common = { matchedConditions: matched };
+        if (fields.has("movement")) return { ...common, reason: "superset_movement" };
+        if (fields.has("duplicate")) return { ...common, reason: "after_sale_duplicate", afterSaleTask: facts.duplicate.task, afterSaleDate: facts.duplicate.date };
+        if (fields.has("pure_losses")) return { ...common, reason: "pure_losses" };
+        return { ...common, reason: "configured_rule" };
+    }
+
+    function buildMovementCandidates(taskRows, supersetRows, afterSaleIndex, pureItems, rulesByTask, tareAction) {
         const byShk = latestSupersetByShk(supersetRows);
         const candidates = [];
-        (state.review.rows || []).filter(isActiveReviewTask).forEach((row) => {
+        taskRows.forEach((row) => {
             const items = taskItems(row);
             const byItem = new Map();
-            const isAfterSale = isAfterSaleMovementTask(row);
+            const rules = rulesByTask.get(row.id);
+            if (!rules.length) return;
+            const protectedShks = new Set();
             items.forEach((item) => {
                 const shk = normalizeIdentifier(item.shk);
-                const superset = byShk.get(shk) || null;
-                if (isAfterSale) {
-                    const resolveReason = afterSaleMovementResolveReason(superset);
-                    if (resolveReason) byItem.set(shk, { row, item, superset, reason: "after_sale_movement_resolved", resolveReason });
-                    return;
+                if (!shk) return;
+                const superset = byShk.get(shk);
+                const facts = actualizationItemFacts(row, item, superset, afterSaleIndex, pureItems);
+                for (const [ruleRank, rule] of rules.entries()) {
+                    const match = matchActualizationRule(rule, facts);
+                    if (!match) continue;
+                    if (rule.action === "skip") protectedShks.add(shk);
+                    else byItem.set(shk, { row, item, superset, rule, ruleRank, ...match });
+                    break;
                 }
-                if (hasConfirmedMovement(row, item, superset)) byItem.set(shk, { row, item, superset, reason: "superset_movement" });
             });
-            if (!isAfterSale && afterSaleIndex && afterSaleIndex.size) {
-                items.forEach((item) => {
-                    const shk = normalizeIdentifier(item.shk);
-                    if (!shk || byItem.has(shk)) return;
-                    const match = afterSaleDedupeMatch(row, item, afterSaleIndex);
-                    if (match) byItem.set(shk, { row, item, superset: null, reason: "after_sale_duplicate", afterSaleTask: match.task, afterSaleDate: match.date });
-                });
-            }
             const moved = Array.from(byItem.values());
             if (!moved.length) return;
-            const stationary = items.filter((item) => !moved.some((entry) => entry.item.shk === item.shk));
+            const isTare = isTareTask(row);
+            if (protectedShks.size && !isTare) return;
+            const stationary = items.filter((item) => !byItem.has(normalizeIdentifier(item.shk)));
+            const actionRule = rules.find((rule) => rule.tareAction && moved.some((entry) => entry.rule === rule));
+            const proposedAction = actionRule?.tareAction || tareAction;
             candidates.push({
                 row,
                 moved,
                 stationary,
                 allItems: items,
-                type: isTareTask(row) && stationary.length ? "tare_partial" : isTareTask(row) ? "tare_full" : "single",
+                zone: actualizationTaskZone(row),
+                protectedShks,
+                tareAction: proposedAction === "close" && protectedShks.size ? "exclude" : proposedAction,
+                type: isTare && stationary.length ? "tare_partial" : isTare ? "tare_full" : "single",
             });
         });
         return candidates;
@@ -6153,13 +6439,8 @@
             updated_at: now,
         }));
         for (const chunk of chunkArray(payloads, SUPERSET_CACHE_CHUNK_SIZE)) {
-            try {
-                const { error } = await db.from(SUPERSET_CACHE_TABLE).upsert(chunk, { onConflict: "wh_id,shk" });
-                if (error) throw error;
-            } catch (error) {
-                console.warn("superset cache push skipped:", error);
-                return;
-            }
+            const { error } = await db.from(SUPERSET_CACHE_TABLE).upsert(chunk, { onConflict: "wh_id,shk" });
+            if (error) throw error;
         }
     }
 
@@ -6323,12 +6604,12 @@
     }
 
     function actualizeSupersetStats(rows) {
-        const active = new Set(activeTaskShkList());
+        const active = new Set(activeTaskShkList(state.review.rows).ids);
         let matchedActive = 0;
         let outsideOffice = 0;
         let matchedOutsideOffice = 0;
         let emptyOffice = 0;
-        (rows || []).forEach((row) => {
+        latestSupersetByShk(rows).forEach((row) => {
             const isActive = active.has(normalizeIdentifier(row.shk));
             if (isActive) matchedActive += 1;
             const office = normalizeIdentifier(row.last_office);
@@ -6360,17 +6641,12 @@
     function actualizeSummaryHtml(candidates) {
         const stats = state.actualize.stats;
         if (!stats) return "";
-        const movedCount = (candidates || []).reduce((sum, candidate) => sum + (candidate.moved || []).length, 0);
-        const dedupeCount = (candidates || []).reduce((sum, candidate) => sum + (candidate.moved || []).filter((entry) => entry.reason === "after_sale_duplicate").length, 0);
-        const resolvedCount = (candidates || []).reduce((sum, candidate) => sum + (candidate.moved || []).filter((entry) => entry.reason === "after_sale_movement_resolved").length, 0);
-        const movementCount = Math.max(movedCount - dedupeCount - resolvedCount, 0);
+        const movedCount = candidates.reduce((sum, candidate) => sum + candidate.moved.length, 0);
         const partialCount = (candidates || []).filter((candidate) => candidate.type === "tare_partial").length;
         return "<div class='actualize-summary'>"
             + "<div><strong>" + escapeHtml(String(stats.rows)) + "</strong><span>строк проверено</span></div>"
             + "<div><strong>" + escapeHtml(String(stats.matched_active)) + "</strong><span>активных ШК найдено</span></div>"
-            + "<div><strong>" + escapeHtml(String(movementCount)) + "</strong><span>ШК с движением +10 мин</span></div>"
-            + "<div><strong>" + escapeHtml(String(dedupeCount)) + "</strong><span>дублей ORS</span></div>"
-            + "<div><strong>" + escapeHtml(String(resolvedCount)) + "</strong><span>Движение после продажи решено</span></div>"
+            + "<div><strong>" + movedCount + "</strong><span>позиций подошло под правила</span></div>"
             + "<div><strong>" + escapeHtml(String(partialCount)) + "</strong><span>частичных тар</span></div>"
             + "</div>";
     }
@@ -6385,22 +6661,20 @@
         const shk = normalizeIdentifier(entry.item.shk);
         const removed = state.actualize.removedShks.has(shk);
         const isAfterSaleDuplicate = entry.reason === "after_sale_duplicate";
-        const isAfterSaleResolved = entry.reason === "after_sale_movement_resolved";
-        const changes = (isAfterSaleDuplicate || isAfterSaleResolved) ? [] : movementChangeList(entry.row, entry.item, entry.superset);
+        const changes = entry.reason === "superset_movement" ? movementChangeList(entry.row, entry.item, entry.superset) : [];
         const changeHtml = changes.length
             ? changes.map((change) => "<div class='movement-change'><span>" + escapeHtml(change.label) + "</span><strong>" + escapeHtml(change.before) + " → " + escapeHtml(change.after) + "</strong></div>").join("")
             : isAfterSaleDuplicate
                 ? "<div class='movement-change'><span>Схлопывание</span><strong>Уже есть задача “Движение после продажи” за " + escapeHtml(formatRuDate(entry.afterSaleDate)) + "</strong></div>"
-            : isAfterSaleResolved
-                ? "<div class='movement-change'><span>Движение после продажи</span><strong>" + (entry.resolveReason === "office" ? "Офис сменился: " + escapeHtml((entry.superset && entry.superset.last_office) || "-") : "Статус WRR") + "</strong></div>"
-            : "<div class='movement-change'><span>Изменение</span><strong>Не определено</strong></div>";
+            : "";
         const meta = isAfterSaleDuplicate
             ? "ORS-задача: " + (entry.afterSaleTask && entry.afterSaleTask.title ? entry.afterSaleTask.title : "-")
-            : isAfterSaleResolved
-                ? "Статус Superset: " + ((entry.superset && entry.superset.last_status) || "-")
-            : "МХ по Superset: " + ((entry.superset && entry.superset.last_mx) || "-");
+            : entry.superset ? [entry.superset.last_status, entry.superset.last_office, entry.superset.last_mx].filter(Boolean).join(" · ") : "";
+        const explanation = entry.rule.name + " · " + entry.matchedConditions.map(actualizationConditionLabel).join(" и ");
         return "<div class='movement-row" + (removed ? " removed" : "") + "'>"
-            + "<div class='movement-main'>" + escapeHtml(shk) + "<div class='movement-change-list'>" + changeHtml + "</div><div class='movement-meta'>" + escapeHtml(meta) + "</div></div>"
+            + "<div class='movement-main'>" + escapeHtml(shk) + "<div class='movement-meta'>" + escapeHtml(explanation) + "</div>"
+            + "<div class='movement-change-list'>" + changeHtml + "</div><div class='movement-meta'>" + escapeHtml(meta) + "</div>"
+            + "<div class='movement-meta'>Вердикт: " + escapeHtml(entry.rule.verdict) + "</div></div>"
             + "<button class='btn btn-square' type='button' data-remove-movement='" + escapeHtml(shk) + "' title='Убрать из подтверждения'>−</button>"
             + "</div>";
     }
@@ -6411,32 +6685,40 @@
         const candidates = state.actualize.candidates || [];
         const statsLine = actualizeStatsLine();
         if (!candidates.length) {
-            target.innerHTML = actualizeSummaryHtml(candidates) + "<div class='empty-state'>Активных задач с движением минимум на 10 минут позже исходных данных, дублем с “Движением после продажи” или решённым “Движением после продажи” (офис/WRR) не найдено. " + escapeHtml(statsLine) + "</div>";
+            target.innerHTML = actualizeSummaryHtml(candidates) + "<div class='empty-state'>Задач, подходящих под активные правила, не найдено. " + escapeHtml(statsLine) + "</div>";
             setActualizeStatus("Superset прочитан. Кандидатов на закрытие нет.", "good");
+            renderActualizationRoutingControls();
             return;
         }
         const full = candidates.filter((candidate) => candidate.type !== "tare_partial");
         const partial = candidates.filter((candidate) => candidate.type === "tare_partial");
-        const fullHtml = full.map((candidate) => "<div class='shift-list-box'><p class='shift-list-title'>" + escapeHtml(actualizeCandidateTitle(candidate)) + "</p><div class='movement-list'>" + candidate.moved.map(movementRowHtml).join("") + "</div></div>").join("");
+        const closingVerdict = (candidate) => {
+            const rule = actualizationClosingRule(selectedMovedEntries(candidate));
+            return rule ? "<div class='movement-meta'>При закрытии: " + escapeHtml(rule.verdict) + "</div>" : "";
+        };
+        const fullHtml = full.map((candidate) => "<div class='shift-list-box'><p class='shift-list-title'>" + escapeHtml(actualizeCandidateTitle(candidate)) + "</p>"
+            + closingVerdict(candidate) + "<div class='movement-list'>" + candidate.moved.map(movementRowHtml).join("") + "</div></div>").join("");
         const partialHtml = partial.map((candidate) => {
             const tare = actualizeCandidateTitle(candidate);
-            const action = state.actualize.tareActions[candidate.row.id] || "exclude";
+            const action = state.actualize.tareActions[candidate.row.id] || candidate.tareAction;
             const movedExample = candidate.moved[0] ? candidate.moved[0].item.shk : "-";
             const staticExample = candidate.stationary[0] ? candidate.stationary[0].shk : "-";
             return "<div class='movement-tare-card'>"
-                + "<p class='shift-list-title'>" + escapeHtml(tare) + ": часть ШК получила движение</p>"
-                + "<div class='movement-meta'>Пример с движением: " + escapeHtml(movedExample) + ". Пример без движения: " + escapeHtml(staticExample) + ". Получили движение: " + candidate.moved.length + ". Без движения: " + candidate.stationary.length + ".</div>"
+                + "<p class='shift-list-title'>" + escapeHtml(tare) + ": совпала часть ШК</p>"
+                + "<div class='movement-meta'>Подошли: " + candidate.moved.length + " (например, " + escapeHtml(movedExample) + "). Остались: " + candidate.stationary.length + " (например, " + escapeHtml(staticExample) + ").</div>"
+                + (candidate.protectedShks.size ? "<div class='movement-meta'>Правила оставляют в работе ШК: " + candidate.protectedShks.size + ".</div>" : "")
+                + (action === "exclude" ? "" : closingVerdict(candidate))
                 + "<div class='movement-list'>" + candidate.moved.map(movementRowHtml).join("") + "</div>"
                 + "<div class='movement-tare-actions'>"
-                + movementActionButton(candidate.row.id, "close", "Закрыть всю задачу", action)
-                + movementActionButton(candidate.row.id, "exclude", "Исключить ШК с движением", action)
+                + (candidate.protectedShks.size ? "" : movementActionButton(candidate.row.id, "close", "Закрыть всю задачу", action))
+                + movementActionButton(candidate.row.id, "exclude", "Убрать подходящие ШК", action)
                 + movementActionButton(candidate.row.id, "split_remaining", "Создать задачи на оставшиеся ШК", action)
                 + "</div></div>";
         }).join("");
-        target.innerHTML = "<div class='status-line good'>Проверьте движения: в список попали ШК, где время Superset минимум на 10 минут позже исходного времени задачи, ШК, которые уже есть в “Движении после продажи” за ту же дату, и ШК “Движения после продажи”, у которых офис в Superset сменился или появился статус WRR.</div>"
+        target.innerHTML = "<div class='status-line good'>Проверьте ШК, которые подходят под правила актуализации.</div>"
             + actualizeSummaryHtml(candidates)
             + (fullHtml ? "<h4>Полное закрытие</h4>" + fullHtml : "")
-            + (partialHtml ? "<h4>Частичное движение по тарам</h4>" + partialHtml : "")
+            + (partialHtml ? "<h4>Частичные тары</h4>" + partialHtml : "")
             + "<div class='file-row'><button id='closeMovementTasks' class='btn btn-rect task-complete-btn' type='button'>Закрыть задания по ШК</button></div>";
         target.querySelectorAll("[data-remove-movement]").forEach((button) => {
             button.addEventListener("click", () => {
@@ -6453,7 +6735,8 @@
         });
         const closeBtn = $("closeMovementTasks");
         if (closeBtn) closeBtn.addEventListener("click", () => { void closeMovementTasks(); });
-        setActualizeStatus("Найдено задач/тар с движением: " + candidates.length + ".", "good");
+        setActualizeStatus("Подошло задач: " + candidates.length + ".", "good");
+        renderActualizationRoutingControls();
     }
 
     function movementActionButton(rowId, action, label, current) {
@@ -6465,23 +6748,19 @@
     }
 
     function movementPlanNote(prefix, entries) {
-        const selected = entries || [];
-        const shks = selected.map((entry) => normalizeIdentifier(entry.item && entry.item.shk)).filter(Boolean);
-        const afterSale = selected.filter((entry) => entry.reason === "after_sale_duplicate");
-        const resolved = selected.filter((entry) => entry.reason === "after_sale_movement_resolved");
-        const superset = selected.length - afterSale.length - resolved.length;
-        const parts = [];
-        if (superset) parts.push(prefix + ": " + shks.join(", "));
-        if (afterSale.length) {
-            parts.push("Схлопнуто с задачей Движение после продажи: " + afterSale.map((entry) => normalizeIdentifier(entry.item && entry.item.shk)).filter(Boolean).join(", "));
+        const groups = new Map();
+        for (const entry of entries) {
+            if (!groups.has(entry.rule)) groups.set(entry.rule, []);
+            groups.get(entry.rule).push(entry.item.shk);
         }
-        if (resolved.length) {
-            parts.push("Движение после продажи решено (офис/WRR): " + resolved.map((entry) => normalizeIdentifier(entry.item && entry.item.shk)).filter(Boolean).join(", "));
-        }
-        return parts.join(". ") || prefix + ": " + shks.join(", ");
+        return prefix + ". " + [...groups].map(([rule, shks]) => rule.name + " («" + rule.verdict + "»): " + shks.join(", ")).join(". ");
     }
 
-    async function completeTaskBySystemMovement(row, note) {
+    function actualizationClosingRule(entries) {
+        return entries.reduce((best, entry) => !best || entry.ruleRank < best.ruleRank ? entry : best, null)?.rule;
+    }
+
+    async function completeTaskBySystemMovement(row, note, rule) {
         const db = supabaseDb();
         const user = currentWmsUser();
         const now = new Date().toISOString();
@@ -6491,6 +6770,8 @@
                 ...taskReviewPayload(row),
                 comment: note || "Подтверждено движение по Superset",
                 verdict: SYSTEM_MOVEMENT_VERDICT,
+                actualization_verdict: rule.verdict,
+                actualization_rule: rule.name,
                 completed_by_id: user.id || null,
                 completed_by_name: user.name || null,
                 completed_at: now,
@@ -6525,7 +6806,8 @@
         state.review.rows = (state.review.rows || []).filter((item) => item.id !== row.id);
         void writeTaskHistory({ ...row, ...payload, ...data }, "task_system_closed", {
             title: displayTaskTitle(row),
-            verdict: SYSTEM_MOVEMENT_VERDICT,
+            verdict: rule.verdict,
+            actualization_rule: rule.name,
             comment: note || "Подтверждено движение по Superset",
         });
         if (needsSourceWriteback(row)) {
@@ -6559,38 +6841,42 @@
     }
 
     async function closeMovementTasks() {
-        if (state.actualize.processing) return;
+        if (state.actualize.processing || state.actualize.routingPending) return;
         const candidates = state.actualize.candidates || [];
-        if (!candidates.length) return;
+        if (!candidates.some((candidate) => selectedMovedEntries(candidate).length)) {
+            setActualizeStatus("Нечего закрывать: в списке ничего не выбрано.", "good");
+            return;
+        }
         state.actualize.processing = true;
-        const button = $("closeMovementTasks");
-        if (button) button.disabled = true;
+        renderActualizationRoutingControls();
         setActualizeStatus("Готовлю пакет закрытия задач...");
-        // handleActualizeSupersetFile запускает фоновую цепочку сразу после
-        // построения кандидатов (hydrateSupersetCache -> ... -> loadReviewTasks),
-        // а loadReviewTasks ВСЕГДА откатывает state.review.rows обратно к
-        // лёгким заглушкам (fullLoaded=false, см. её же комментарий) -- если
-        // оператор успевает кликнуть "Закрыть" раньше, чем сюда долетит
-        // следующий ensureFullActiveTasksLoaded(), часть кандидатов находит
-        // через findTaskRow уже свежую лёгкую версию и ложно уходит в
-        // "Пропущено (задача ещё не полностью загружена)". Досасываем полные
-        // данные здесь же, прямо перед построением планов закрытия, вместо
-        // того чтобы полагаться на то, что кто-то другой успел это сделать раньше.
-        await ensureFullActiveTasksLoaded();
+        // Обновление маршрутов перечитывает задачи в сокращённом виде.
+        // Для закрытия нужен актуальный полный состав каждой тары.
         let completed = 0;
         let updated = 0;
         let created = 0;
         try {
+            if (state.actualize.routingMode === "auto") await applyActualizationRouting(state.actualize);
+            await ensureFullActiveTasksLoaded();
+            if (!state.review.fullLoaded) throw new Error("Не удалось загрузить полный состав задач.");
             const closePlans = [];
             const updatePlans = [];
             const splitTasks = [];
             const lightSkipped = [];
+            const failed = [];
+            let changedTasks = 0;
+            const currentTasks = new Map(state.review.rows.map((row) => [row.id, row]));
             for (const candidate of candidates) {
                 const selected = selectedMovedEntries(candidate);
                 if (!selected.length) continue;
-                const row = findTaskRow(candidate.row.id) || candidate.row;
+                const row = currentTasks.get(candidate.row.id);
+                if (!row || !isActiveReviewTask(row) || actualizationTaskZone(row) !== candidate.zone) {
+                    changedTasks += 1;
+                    continue;
+                }
+                const rule = actualizationClosingRule(selected);
                 if (!isTareTask(row)) {
-                    closePlans.push({ row, note: movementPlanNote("Подтверждено движение ШК", selected) });
+                    closePlans.push({ row, rule, note: movementPlanNote("ШК прошёл актуализацию", selected) });
                     continue;
                 }
                 if (row.__isLight) {
@@ -6611,36 +6897,40 @@
                 const selectedShks = new Set(selected.map((entry) => normalizeIdentifier(entry.item.shk)));
                 const allItems = taskItems(row);
                 const rest = allItems.filter((item) => !selectedShks.has(normalizeIdentifier(item.shk)));
-                const action = candidate.type === "tare_partial" ? (state.actualize.tareActions[row.id] || "exclude") : (rest.length ? "exclude" : "close");
+                let action = candidate.type === "tare_partial" ? (state.actualize.tareActions[row.id] || candidate.tareAction) : (rest.length ? "exclude" : "close");
+                if (action === "close" && candidate.protectedShks.size) action = "exclude";
                 if (action === "close" || !rest.length) {
-                    closePlans.push({ row, note: movementPlanNote("Подтверждено движение по таре", selected) });
+                    closePlans.push({ row, rule, note: movementPlanNote("Тара закрыта по актуализации", selected) });
                 } else if (action === "split_remaining") {
                     splitTasks.push(...rest.map((item) => ({
                         ...splitTaskFromTare(row, item),
                         assignee_employee_id: row.assignee_employee_id || "",
                         assignee_name: row.assignee_name || "",
                     })));
-                    closePlans.push({ row, note: movementPlanNote("По части тары подтверждено движение. Остаток вынесен в отдельные задачи", selected) });
+                    closePlans.push({ row, rule, note: movementPlanNote("Остаток тары вынесен в отдельные задачи", selected) });
                 } else {
                     updatePlans.push({ row, items: rest, extraPayload: {
                         movement_excluded_shks: Array.from(selectedShks),
                         movement_excluded_at: new Date().toISOString(),
-                    } });
+                    }, note: movementPlanNote("Из тары убраны ШК по актуализации", selected) });
                 }
             }
             const totalActions = closePlans.length + updatePlans.length + (splitTasks.length ? 1 : 0);
-            const lightSkippedNote = () => (lightSkipped.length ? " Пропущено (задача ещё не полностью загружена, повторите после обновления списка): " + lightSkipped.length + "." : "");
+            const skippedNote = (lightSkipped.length ? " Не загрузился полный состав: " + lightSkipped.length + "." : "")
+                + (changedTasks ? " Изменился участок или задача вышла из активных: " + changedTasks + ". Проверьте файл повторно." : "");
             if (!totalActions) {
-                setActualizeStatus(lightSkipped.length ? "Ничего не закрыто." + lightSkippedNote() : "Нечего закрывать: все строки убраны из подтверждения.", lightSkipped.length ? "error" : "good");
+                setActualizeStatus(skippedNote ? "Ничего не закрыто." + skippedNote : "Нечего закрывать: все строки убраны из подтверждения.", skippedNote ? "error" : "good");
                 return;
             }
             if (splitTasks.length) {
                 const chunks = chunkArray(splitTasks, 250);
                 for (let i = 0; i < chunks.length; i += 1) {
                     setActualizeStatus("Создаю отдельные задачи по остаткам: пачка " + (i + 1) + "/" + chunks.length + ", задач " + chunks[i].length + ".");
-                    const { error } = await supabaseDb().rpc(SAVE_RPC, { p_tasks: chunks[i], p_run: {} });
+                    const { data, error } = await supabaseDb().rpc(SAVE_RPC, { p_tasks: chunks[i], p_run: {} });
                     if (error) throw error;
-                    created += chunks[i].length;
+                    const skipped = Array.isArray(data?.skipped_items) ? data.skipped_items : [];
+                    created += chunks[i].length - skipped.length;
+                    if (skipped.length) throw new Error("Не создано задач на остаток: " + skipped.length + ". Создано до остановки: " + created + ". Исходные тары не закрыты.");
                 }
             }
             if (closePlans.length) {
@@ -6650,8 +6940,12 @@
                 // конкурирует за одни и те же строки и приводит к таймаутам,
                 // поэтому закрываем короткими пакетами по две задачи.
                 await runLimitedPool(closePlans, 2, async (plan) => {
-                    await completeTaskBySystemMovement(plan.row, plan.note);
-                    completed += 1;
+                    try {
+                        if (await completeTaskBySystemMovement(plan.row, plan.note, plan.rule)) completed += 1;
+                    } catch (error) {
+                        failed.push(error);
+                        console.error("actualize: task close failed:", plan.row.id, error);
+                    }
                 }, (done, total) => {
                     setActualizeStatus("Закрываю задачи: " + done + "/" + total + ". Обновлено тар: " + updated + ". Создано задач: " + created + ".");
                 });
@@ -6664,11 +6958,14 @@
                     // abort the rest of the batch; isolate it and count it
                     // as skipped instead.
                     try {
-                        await updateTareTaskItems(plan.row, plan.items, plan.extraPayload);
-                        updated += 1;
+                        const updatedRow = await updateTareTaskItems(plan.row, plan.items, plan.extraPayload);
+                        if (updatedRow) {
+                            updated += 1;
+                            void writeTaskHistory(plan.row, "task_actualization_tare_trimmed", { comment: plan.note });
+                        }
                     } catch (planError) {
                         console.error("actualize: skipped one partial tare update:", planError);
-                        lightSkipped.push(plan.row);
+                        failed.push(planError);
                     }
                 }, (done, total) => {
                     setActualizeStatus("Обновляю частичные тары: " + done + "/" + total + ". Закрыто задач: " + completed + ". Создано задач: " + created + ".");
@@ -6676,21 +6973,16 @@
             }
             await loadReviewTasks();
             state.actualize.candidates = [];
-            // Один и тот же текст раньше дублировался в двух блоках с
-            // РАЗНЫМ тоном (этот всегда зелёный, actualizeStatus -- красный
-            // при пропусках) -- выглядело так, будто один блок сообщает об
-            // успехе, а другой тут же противоречит ему. Тон синхронизирован.
-            if ($("actualizeResults")) {
-                $("actualizeResults").innerHTML = "<div class='status-line " + (lightSkipped.length ? "error" : "good") + "'>Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote() + "</div>";
-            }
-            setActualizeStatus("Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + lightSkippedNote(), lightSkipped.length ? "error" : "good");
+            const failureNote = failed.length ? " Ошибок при записи: " + failed.length + ". Первая ошибка: " + (failed[0]?.message || String(failed[0])) : "";
+            if ($("actualizeResults")) $("actualizeResults").replaceChildren();
+            setActualizeStatus("Готово. Завершено задач: " + completed + ". Обновлено тар: " + updated + ". Создано задач: " + created + "." + skippedNote + failureNote, skippedNote || failed.length ? "error" : "good");
             refreshExpandedSections();
         } catch (error) {
             console.error("actualize close movement failed:", error);
             setActualizeStatus("Не удалось закрыть задачи: " + (error && error.message ? error.message : String(error)), "error");
         } finally {
             state.actualize.processing = false;
-            if (button) button.disabled = false;
+            renderActualizationRoutingControls();
         }
     }
 
@@ -8702,22 +8994,6 @@
         return combined.includes("after_sale_movement") || combined.includes("движение после продажи") || /\bors\b/.test(combined);
     }
 
-    // Разбор ОПП // Движение после продажи закрывается НЕ по общему правилу
-    // "статус в Superset минимум на 10 минут позже исходного времени
-    // задачи" (movementTimeInfo) -- у этой зоны нет осмысленного "времени
-    // движения" для сравнения, задача создаётся по одному факту движения
-    // после реализации. Закрывается по двум отдельным условиям из того же
-    // Superset-отчёта: ШК ушёл с этого склада (last_office != WH_ID), или
-    // получил статус WRR. Возвращает причину ("office"/"wrr") или "" если
-    // ни одно условие не выполнено (и строку не трогаем).
-    function afterSaleMovementResolveReason(supersetRow) {
-        if (!supersetRow) return "";
-        const office = normalizeIdentifier(supersetRow.last_office);
-        if (office && office !== WH_ID) return "office";
-        if (latinStatusCode(supersetRow.last_status) === "WRR") return "wrr";
-        return "";
-    }
-
     function afterSaleDedupeDateForItem(row, item) {
         return parseDateTime(item && item.movement).date
             || parseDateTime(row && row.source_last_movement_at).date
@@ -9107,17 +9383,23 @@
         syncRenderedFilterCheckboxes(target, mode);
     }
 
+    // Exact loader from the mobile violations screen. Shared here so every
+    // long-running Review request has the same visual language.
+    function mobileCurveLoaderHtml(label) {
+        return "<div class='violators-loading' role='status' aria-label='" + escapeHtml(label) + "'>"
+            + "<svg viewBox='0 0 300 132' aria-hidden='true' focusable='false'>"
+            + "<defs><linearGradient id='violatorsLoaderFill' x1='0' y1='0' x2='0' y2='1'><stop stop-color='#623CEA' stop-opacity='.28'/><stop offset='1' stop-color='#623CEA' stop-opacity='0'/></linearGradient></defs>"
+            + "<path class='violators-loader-grid' d='M8 26H292M8 65H292M8 104H292'/><path class='violators-loader-area' d='M10 93 C38 80 44 48 74 56 S108 104 137 73 S178 28 208 54 S242 95 290 37 L290 118 L10 118Z' style='fill:url(#violatorsLoaderFill)'/><path class='violators-loader-line' d='M10 93 C38 80 44 48 74 56 S108 104 137 73 S178 28 208 54 S242 95 290 37'/><g><circle class='violators-loader-point' cx='10' cy='93' r='4'/><circle class='violators-loader-point' cx='74' cy='56' r='4'/><circle class='violators-loader-point' cx='137' cy='73' r='4'/><circle class='violators-loader-point' cx='208' cy='54' r='4'/><circle class='violators-loader-point' cx='290' cy='37' r='4'/></g>"
+            + "</svg><span class='violators-loading-caption'>" + escapeHtml(label) + "</span>"
+            + "</div>";
+    }
+
     function renderReview() {
         if (!$("reviewSectionsGrid") || !$("reviewTableWrap")) return;
         if (state.review.loading) {
             setReviewStatus("");
             $("reviewSectionsGrid").innerHTML = "";
-            $("reviewTableWrap").innerHTML = "<div class='violators-loading' role='status' aria-label='Загружаю задачи'>"
-                + "<svg viewBox='0 0 300 132' aria-hidden='true' focusable='false'>"
-                + "<defs><linearGradient id='violatorsLoaderFill' x1='0' y1='0' x2='0' y2='1'><stop stop-color='#623CEA' stop-opacity='.28'/><stop offset='1' stop-color='#623CEA' stop-opacity='0'/></linearGradient></defs>"
-                + "<path class='violators-loader-grid' d='M8 26H292M8 65H292M8 104H292'/><path class='violators-loader-area' d='M10 93 C38 80 44 48 74 56 S108 104 137 73 S178 28 208 54 S242 95 290 37 L290 118 L10 118Z' style='fill:url(#violatorsLoaderFill)'/><path class='violators-loader-line' d='M10 93 C38 80 44 48 74 56 S108 104 137 73 S178 28 208 54 S242 95 290 37'/><g><circle class='violators-loader-point' cx='10' cy='93' r='4'/><circle class='violators-loader-point' cx='74' cy='56' r='4'/><circle class='violators-loader-point' cx='137' cy='73' r='4'/><circle class='violators-loader-point' cx='208' cy='54' r='4'/><circle class='violators-loader-point' cx='290' cy='37' r='4'/></g>"
-                + "</svg><span class='violators-loading-caption'>Загружаем задачи…</span>"
-                + "</div>";
+            $("reviewTableWrap").innerHTML = mobileCurveLoaderHtml("Загружаем задачи…");
             return;
         }
         const grouped = reviewGroupedRows();
@@ -10496,6 +10778,7 @@
         return [
             taskSectionName(row),
             displayTaskStatus(row),
+            actualizationVerdictLabel(row),
             route ? route : "",
             formatMoney(row.source_price_sum),
             isTareTask(row) ? "Тара: " + (normalizeIdentifier(row.source_tare_id) || "-") : "",
@@ -10516,6 +10799,11 @@
     // the closed-tasks list specifically.
     function isAutoActualizedTask(row) {
         return normalizeText(row && row.opp_verdict) === SYSTEM_MOVEMENT_VERDICT;
+    }
+
+    function actualizationVerdictLabel(row) {
+        if (!isAutoActualizedTask(row)) return "";
+        return normalizeText(taskReviewPayload(row).actualization_verdict) || SYSTEM_MOVEMENT_VERDICT;
     }
 
     // Colors a search hit by its verdict tone (same palette as the review
@@ -11873,7 +12161,7 @@
     function taskHistoryBox(row) {
         const review = taskReviewPayload(row);
         const lines = [];
-        const verdict = normalizeText(review.verdict || review.attachment || row.opp_verdict);
+        const verdict = actualizationVerdictLabel(row) || normalizeText(review.verdict || review.attachment || row.opp_verdict);
         if (verdict && verdict !== "Не выбран") {
             const actor = taskCompletionActor(row);
             lines.push((isIncomingFlowRequestTask(row) ? "Вложение" : "Вердикт") + ": " + verdict);
@@ -11904,6 +12192,7 @@
         task_reopened: "Переоткрыто вручную",
         task_auto_reopened: "Переоткрыто автоматически",
         task_system_closed: "Закрыто системой (актуализация)",
+        task_actualization_tare_trimmed: "ШК убраны из тары при актуализации",
         task_prespisok_second_line: "Передано на вторую линию предсписка",
         task_prespisok_uploaded: "ШК в предсписке",
         task_cross_module_touch: "Продолжилось в другом модуле",
@@ -11983,7 +12272,7 @@
             : isCrossModuleTouch
             ? "Продолжилось в: " + (normalizeText(payload.new_task_type) || "другом модуле")
             : isSystemClosed
-            ? "Закрыто автоматически"
+            ? (normalizeText(payload.actualization_rule) ? normalizeText(payload.verdict) || "Закрыто автоматически" : "Закрыто автоматически")
             : isNoShkFound
             ? "Найден без ШК"
             : (normalizeText(payload.verdict) && normalizeText(payload.verdict) !== "Не выбран" ? payload.verdict : taskHistoryEventLabel(item.event_type));
@@ -12299,15 +12588,16 @@
         const review = taskReviewPayload(row);
         const presentTypes = new Set((realHistoryRows || []).map((item) => item.event_type));
         const entries = [];
-        const verdict = normalizeText(review.verdict || review.attachment || row.opp_verdict);
+        const automaticVerdict = actualizationVerdictLabel(row);
+        const verdict = automaticVerdict || normalizeText(review.verdict || review.attachment || row.opp_verdict);
         if (verdict && verdict !== "Не выбран" && !presentTypes.has("task_completed") && !presentTypes.has("task_system_closed") && !presentTypes.has("task_deferred")) {
             const actor = taskCompletionActor(row);
             entries.push({
                 created_at: review.completed_at || row.completed_at || row.updated_at,
-                event_type: "task_completed",
+                event_type: automaticVerdict ? "task_system_closed" : "task_completed",
                 actor_name: actor.name,
                 actor_employee_id: actor.id,
-                payload: { verdict, comment: review.comment },
+                payload: { verdict, comment: review.comment, actualization_rule: review.actualization_rule },
             });
         }
         if (review.defer_reason && !presentTypes.has("task_deferred")) {
@@ -14348,7 +14638,8 @@
                 + "<td><span class='review-pill'>" + escapeHtml(taskEntityTypeLabel(row)) + "</span></td>"
                 + "<td class='review-wrap-cell'>" + escapeHtml(taskItemName(row) || "-") + "</td>"
                 + "<td class='review-price-cell' style='" + priceStyle(row.source_price_sum) + "'>" + escapeHtml(formatMoney(row.source_price_sum)) + "</td>"
-                + "<td><span class='review-pill'>" + escapeHtml(taskStatus(row)) + "</span><div class='review-task-sub'>" + escapeHtml(statusLine) + "</div></td>"
+                + "<td><span class='review-pill'>" + escapeHtml(taskStatus(row)) + "</span><div class='review-task-sub'>" + escapeHtml(statusLine) + "</div>"
+                + (isAutoActualizedTask(row) ? "<div class='review-task-sub'>" + escapeHtml(actualizationVerdictLabel(row)) + "</div>" : "") + "</td>"
                 + "</tr>";
         }).join("");
         target.innerHTML = rows.length ? "<div class='review-table-scroll'><table class='review-data-table'><thead><tr><th>Задача</th><th>Тип задачи</th><th>Наименование</th><th>Стоимость</th><th>Статус</th></tr></thead><tbody>" + body + "</tbody></table></div>" : "<div class='empty-state'>Пока пусто.</div>";
@@ -14512,7 +14803,7 @@
         if (wrap) wrap.classList.remove("is-collapsed");
         if ($("pureLossesTableWrap")) $("pureLossesTableWrap").innerHTML = "";
         if (state.pureLosses.loading) {
-            grid.innerHTML = "<div class='empty-state'>Загружаю чистые списания...</div>";
+            grid.innerHTML = mobileCurveLoaderHtml("Загружаем чистые списания…");
             return;
         }
         if (!state.pureLosses.loaded) {
@@ -14667,7 +14958,7 @@
             return;
         }
         if (state.pureLosses.loading) {
-            target.innerHTML = "<div class='empty-state'>Загружаю чистые списания...</div>";
+            target.innerHTML = mobileCurveLoaderHtml("Загружаем чистые списания…");
             return;
         }
         if (!state.pureLosses.loaded) {
@@ -15198,6 +15489,7 @@
         const view = state.statusDictionary.viewMode || "uploads";
         const uploadsWrap = $("statusDictionaryWrap");
         const zonesWrap = $("statusZonesWrap");
+        const actualizationWrap = $("statusActualizationWrap");
         const violationsWrap = $("statusViolationsWrap");
         const employeesWrap = $("statusEmployeesWrap");
         const noShkWrap = $("statusNoShkWrap");
@@ -15206,19 +15498,272 @@
         });
         if (uploadsWrap) uploadsWrap.classList.toggle("hidden", view !== "uploads");
         if (zonesWrap) zonesWrap.classList.toggle("hidden", view !== "zones");
+        if (actualizationWrap) actualizationWrap.classList.toggle("hidden", view !== "actualization");
         if (violationsWrap) violationsWrap.classList.toggle("hidden", view !== "violations");
         if (employeesWrap) employeesWrap.classList.toggle("hidden", view !== "employees");
         if (noShkWrap) noShkWrap.classList.toggle("hidden", view !== "noshk");
         document.querySelectorAll("[data-status-uploads-only]").forEach((el) => el.classList.toggle("hidden", view !== "uploads"));
+        document.querySelectorAll("[data-status-actualization-only]").forEach((el) => el.classList.toggle("hidden", view !== "actualization"));
         document.querySelectorAll("[data-status-violations-only]").forEach((el) => el.classList.toggle("hidden", view !== "violations"));
         document.querySelectorAll("[data-status-employees-only]").forEach((el) => el.classList.toggle("hidden", view !== "employees"));
         document.querySelectorAll("[data-status-noshk-only]").forEach((el) => el.classList.toggle("hidden", view !== "noshk"));
         if (view === "zones") renderStatusZonesScreen();
+        else if (view === "actualization") void loadActualizationEditor();
         else if (view === "violations") renderViolationTypesEditor();
         else if (view === "employees") renderEmployeeDirectoryEditor();
         else if (view === "noshk") { if (typeof window.__noShkLoadZone === "function") window.__noShkLoadZone(); }
         else renderStatusDictionaryModal();
         updateStatusViewThumb(instant);
+    }
+
+    function actualizationOptionsHtml(options, selected) {
+        return Object.entries(options).map(([value, label]) =>
+            "<option value='" + escapeHtml(value) + "'" + (value === selected ? " selected" : "") + ">" + escapeHtml(label) + "</option>"
+        ).join("");
+    }
+
+    const ACTUALIZATION_RULE_TITLES = {
+        movement: "Товар продолжил движение",
+        duplicate: "Дубль в «Движении после продажи»",
+        after_sale: "Завершение «Движения после продажи»",
+        pure_losses: "Товар уже в «Чистых списаниях»",
+    };
+    const ACTUALIZATION_ROUTING_LABELS = {
+        auto: "Обновлять при подтверждении закрытия",
+        manual: "Обновлять по кнопке",
+        off: "Не обновлять при актуализации",
+    };
+
+    function actualizationConditionLabel(condition) {
+        const field = ACTUALIZATION_CONDITIONS[condition.field];
+        if (!field.input) return field.label;
+        const value = Array.isArray(condition.value) ? condition.value.join(", ") : condition.value;
+        return field.label + " " + field.operators[condition.operator] + " " + (value === null || value === "" ? "…" : value);
+    }
+
+    function actualizationRuleConditionLabel(rule) {
+        if (!rule.conditions.length) return "Добавьте условие";
+        return rule.conditions.map(actualizationConditionLabel).join(rule.match === "any" ? " · ИЛИ · " : " · И · ");
+    }
+
+    function actualizationRuleSummary(rule) {
+        return "<span class='actualization-summary-copy'>"
+            + "<strong>" + escapeHtml(rule.name || "Новое правило") + "</strong>"
+            + "<small>" + escapeHtml(actualizationRuleConditionLabel(rule)) + "</small>"
+            + "<small>" + escapeHtml(rule.zone || "Все участки") + (!rule.zone && rule.excludeZones.length ? " · исключения: " + escapeHtml(rule.excludeZones.join(", ")) : "")
+            + " · " + escapeHtml(rule.action === "skip" ? "Оставить в работе" : rule.verdict) + "</small>"
+            + (rule.tareAction ? "<small>Для частичной тары: " + escapeHtml(ACTUALIZATION_TARE_ACTIONS[rule.tareAction]) + "</small>" : "")
+            + "</span><span class='actualization-badge" + (rule.enabled ? "" : " is-off") + "'>"
+            + (rule.enabled ? "Включено" : "Выключено") + "</span>";
+    }
+
+    function actualizationConditionRowHtml(condition, ruleIndex, conditionIndex) {
+        const field = ACTUALIZATION_CONDITIONS[condition.field];
+        const choices = Object.fromEntries(Object.entries(ACTUALIZATION_CONDITIONS).map(([key, value]) => [key, value.label]));
+        const value = Array.isArray(condition.value) ? condition.value.join(", ") : condition.value;
+        return "<div class='actualization-condition' data-actualization-condition data-index='" + conditionIndex + "'>"
+            + "<label class='actualization-field'>Что проверяем<select data-actualization-condition-field>"
+            + actualizationOptionsHtml(choices, condition.field) + "</select></label>"
+            + (field.operators ? "<label class='actualization-field'>Сравнение<select data-actualization-condition-operator>"
+                + actualizationOptionsHtml(field.operators, condition.operator) + "</select></label>" : "")
+            + (field.input ? "<label class='actualization-field'>" + (field.input === "list" ? "Значения через запятую" : "Значение")
+                + "<input data-actualization-condition-value" + (field.input === "number" ? " inputmode='decimal'" : "")
+                + " value='" + escapeHtml(value) + "'></label>" : "")
+            + "<button class='btn btn-outline actualization-condition-remove' type='button' aria-label='Удалить условие' data-actualization-action='remove-condition' data-index='"
+            + ruleIndex + "'>×</button></div>";
+    }
+
+    function actualizationRuleCardHtml(rule, index, draft, zones, openIndex) {
+        return "<details name='actualization-editor' class='actualization-card' data-actualization-rule" + (index === openIndex ? " open" : "") + ">"
+            + "<summary data-actualization-summary>" + actualizationRuleSummary(rule) + "</summary>"
+            + "<div class='actualization-card-body'><div class='actualization-form-grid'>"
+            + "<label class='actualization-field'>Название<input data-actualization-name maxlength='100' placeholder='Например, упаковка после смены статуса' value='" + escapeHtml(rule.name) + "'></label>"
+            + "<label class='actualization-field'>Где применять<select data-actualization-zone>" + actualizationOptionsHtml(zones, rule.zone) + "</select></label>"
+            + "</div><details data-actualization-exclusions" + (rule.zone ? " hidden" : "") + "><summary>Исключить участки</summary>"
+            + "<div class='actualization-zone-options'>" + Object.entries(zones).filter(([value]) => value).map(([value, label]) =>
+                "<label class='actualization-check'><input type='checkbox' data-actualization-exclude value='" + escapeHtml(value) + "'"
+                + (rule.excludeZones.includes(value) ? " checked" : "") + "> " + escapeHtml(label) + "</label>").join("") + "</div></details>"
+            + "<div class='actualization-conditions'><label class='actualization-field'>Когда срабатывает правило<select data-actualization-match>"
+            + actualizationOptionsHtml({ all: "Все условия (И)", any: "Хотя бы одно условие (ИЛИ)" }, rule.match) + "</select></label>"
+            + rule.conditions.map((condition, conditionIndex) => actualizationConditionRowHtml(condition, index, conditionIndex)).join("")
+            + "<button class='btn btn-outline' type='button' data-actualization-action='add-condition' data-index='" + index + "'>Добавить условие</button></div>"
+            + "<label class='actualization-field'>Если правило сработало<select data-actualization-result-action>"
+            + actualizationOptionsHtml({ resolve: "Предложить закрытие", skip: "Оставить ШК в работе" }, rule.action) + "</select></label>"
+            + "<div class='actualization-form-grid' data-actualization-close-fields" + (rule.action === "skip" ? " hidden" : "") + ">"
+            + "<label class='actualization-field'>Системный вердикт<input data-actualization-verdict list='actualizationVerdictChoices' maxlength='120' value='" + escapeHtml(rule.verdict) + "'></label>"
+            + "<label class='actualization-field'>Если совпала только часть тары<select data-actualization-tare>" + actualizationOptionsHtml({ "": "Как в общих настройках", ...ACTUALIZATION_TARE_ACTIONS }, rule.tareAction) + "</select></label>"
+            + "</div>"
+            + "<label class='actualization-check'><input type='checkbox' data-actualization-active" + (rule.enabled ? " checked" : "") + "> Правило включено</label>"
+            + "<div class='actualization-rule-tools'>"
+            + "<button class='btn btn-outline' type='button' data-actualization-action='up' data-index='" + index + "'" + (index === 0 ? " disabled" : "") + ">↑ Проверять раньше</button>"
+            + "<button class='btn btn-outline' type='button' data-actualization-action='down' data-index='" + index + "'" + (index === draft.rules.length - 1 ? " disabled" : "") + ">↓ Проверять позже</button>"
+            + "<button class='btn btn-outline actualization-remove' type='button' data-actualization-action='remove' data-index='" + index + "'>Удалить правило</button>"
+            + "</div></div></details>";
+    }
+
+    function renderActualizationEditor(openIndex = -1) {
+        const draft = state.actualizationSettings.draft;
+        const target = $("actualizationSettingsFields");
+        if (!draft || !target) return;
+        const zones = { "": "Все участки" };
+        [...new Set(activeReviewZones().concat(["Движение после продажи", "Чистые списания", "Предсписок"], REQUEST_SECTIONS))]
+            .forEach((zone) => { zones[zone] = zone; });
+        draft.rules.forEach((rule) => {
+            if (rule.zone) zones[rule.zone] = rule.zone;
+            rule.excludeZones.forEach((zone) => { zones[zone] = zone; });
+        });
+        target.innerHTML = "<div class='actualization-rule-list'>"
+            + (draft.rules.length ? draft.rules.map((rule, index) => actualizationRuleCardHtml(rule, index, draft, zones, openIndex)).join("") : "<p class='empty-state'>Нет правил. Добавьте правило, чтобы проверять задачи по файлу.</p>")
+            + "</div><datalist id='actualizationVerdictChoices'>"
+            + [...new Set([SYSTEM_MOVEMENT_VERDICT, ...draft.rules.map((rule) => rule.verdict)])].map((verdict) => "<option value='" + escapeHtml(verdict) + "'></option>").join("")
+            + "</datalist><h4 class='actualization-settings-title'>Общие настройки</h4>"
+            + "<div class='actualization-secondary'>"
+            + "<details name='actualization-editor' class='actualization-card'><summary><span class='actualization-summary-copy'><strong>Тара и маршруты</strong><small id='actualizationGeneralSummary'></small></span></summary>"
+            + "<div class='actualization-card-body'>"
+            + "<label class='actualization-field'>Если совпала только часть тары<select id='actualizationTareAction'>" + actualizationOptionsHtml(ACTUALIZATION_TARE_ACTIONS, draft.tareAction) + "</select></label>"
+            + "<label class='actualization-field'>Когда обновлять Superset и маршруты<select id='actualizationRoutingMode'>" + actualizationOptionsHtml(ACTUALIZATION_ROUTING_LABELS, draft.routing) + "</select></label>"
+            + "</div></details>"
+            + "<details name='actualization-editor' class='actualization-card'><summary><span class='actualization-summary-copy'><strong>Отгрузки ПМ и Почты</strong><small id='actualizationCarrierSummary'></small></span></summary>"
+            + "<div class='actualization-card-body'>"
+            + "<label class='actualization-check'><input id='actualizationCarrierEnabled' type='checkbox'" + (draft.carrierEnabled ? " checked" : "") + "> Проверять по номеру передачи</label>"
+            + "<label class='actualization-field'>Что искать в колонке «Действие»<input id='actualizationCarrierAction' value='" + escapeHtml(draft.carrierAction) + "'></label>"
+            + "</div></details></div>";
+        updateActualizationSummaries(draft);
+    }
+
+    function updateActualizationSummaries(draft) {
+        $("actualizationSettingsFields").querySelectorAll("[data-actualization-summary]").forEach((summary, index) => {
+            summary.innerHTML = actualizationRuleSummary(draft.rules[index]);
+        });
+        $("actualizationGeneralSummary").textContent = ACTUALIZATION_TARE_ACTIONS[draft.tareAction] + " · " + ACTUALIZATION_ROUTING_LABELS[draft.routing];
+        $("actualizationCarrierSummary").textContent = (draft.carrierEnabled ? "Проверка включена · " + draft.carrierAction : "Проверка выключена");
+    }
+
+    function markActualizationDraftChanged() {
+        const editor = state.actualizationSettings;
+        editor.revision += 1;
+        $("actualizationTestResult").replaceChildren();
+        if (editor.updatedAt) $("actualizationSettingsStatus").textContent = "Есть несохранённые изменения.";
+    }
+
+    function actualizationDraftFromForm() {
+        const rules = Array.from($("actualizationSettingsFields").querySelectorAll("[data-actualization-rule]"), (row) => ({
+            name: row.querySelector("[data-actualization-name]").value,
+            zone: row.querySelector("[data-actualization-zone]").value,
+            excludeZones: Array.from(row.querySelectorAll("[data-actualization-exclude]:checked"), (input) => input.value),
+            enabled: row.querySelector("[data-actualization-active]").checked,
+            action: row.querySelector("[data-actualization-result-action]").value,
+            match: row.querySelector("[data-actualization-match]").value,
+            conditions: Array.from(row.querySelectorAll("[data-actualization-condition]"), (condition) => ({
+                field: condition.querySelector("[data-actualization-condition-field]").value,
+                operator: condition.querySelector("[data-actualization-condition-operator]")?.value,
+                value: condition.querySelector("[data-actualization-condition-value]")?.value,
+            })),
+            verdict: row.querySelector("[data-actualization-verdict]").value,
+            tareAction: row.querySelector("[data-actualization-tare]").value,
+        }));
+        return normalizeActualizationSettings({
+            rules,
+            tareAction: $("actualizationTareAction").value,
+            routing: $("actualizationRoutingMode").value,
+            carrierEnabled: $("actualizationCarrierEnabled").checked,
+            carrierAction: $("actualizationCarrierAction").value,
+        });
+    }
+
+    function validateActualizationDraft(draft) {
+        draft.rules.forEach((rule, index) => {
+            if (!rule.enabled) return;
+            if (!rule.name) throw new Error("Укажите название правила №" + (index + 1) + ".");
+            if (!rule.conditions.length || rule.conditions.some((condition) => !actualizationConditionHasValue(condition))) {
+                throw new Error("Заполните условия правила «" + rule.name + "».");
+            }
+        });
+    }
+
+    async function loadActualizationEditor() {
+        const editor = state.actualizationSettings;
+        if (editor.loading || editor.draft) return;
+        const status = $("actualizationSettingsStatus");
+        editor.loading = true;
+        status.textContent = "Загружаю настройки…";
+        try {
+            const result = await readActualizationSettings(supabaseDb());
+            if (state.actualizationSettings !== editor) return;
+            editor.draft = result.settings;
+            editor.updatedAt = result.updatedAt;
+            renderActualizationEditor();
+            $("addActualizationRule").disabled = false;
+            $("openActualizationTestFile").disabled = false;
+            $("saveActualizationSettings").disabled = !editor.updatedAt;
+            status.textContent = result.updatedAt ? "" : "Для сохранения настроек нужна миграция базы.";
+        } catch (error) {
+            if (state.actualizationSettings === editor) status.textContent = "Не удалось загрузить настройки: " + (error?.message || String(error));
+        } finally {
+            editor.loading = false;
+        }
+    }
+
+    async function saveActualizationEditor(event) {
+        event.preventDefault();
+        const editor = state.actualizationSettings;
+        const status = $("actualizationSettingsStatus");
+        const button = $("saveActualizationSettings");
+        if (!editor.draft || button.disabled) return;
+        const revision = editor.revision;
+        button.disabled = true;
+        try {
+            if (!editor.updatedAt) throw new Error("Сначала примените миграцию настроек в базе.");
+            const draft = actualizationDraftFromForm();
+            validateActualizationDraft(draft);
+            status.textContent = "Сохраняю настройки…";
+            const { data, error } = await supabaseDb().from(ACTUALIZATION_SETTINGS_TABLE)
+                .update({ settings: draft, updated_at: new Date().toISOString() })
+                .eq("wh_id", WH_ID).eq("updated_at", editor.updatedAt).select("updated_at").maybeSingle();
+            if (error) throw error;
+            if (!data) throw new Error("Строка изменилась в другой вкладке или нет права на сохранение. Откройте маршрутизатор заново.");
+            if (state.actualizationSettings !== editor) return;
+            editor.updatedAt = data.updated_at;
+            status.textContent = editor.revision === revision
+                ? "Сохранено. Настройки применятся при следующей загрузке файла."
+                : "Предыдущие изменения сохранены. Есть новые несохранённые изменения.";
+        } catch (error) {
+            if (state.actualizationSettings === editor) status.textContent = "Не удалось сохранить: " + (error?.message || String(error));
+        } finally {
+            if (state.actualizationSettings === editor) button.disabled = false;
+        }
+    }
+
+    async function previewActualizationSettings(file) {
+        const editor = state.actualizationSettings;
+        const revision = editor.revision;
+        const previewIsCurrent = () => state.actualizationSettings === editor && editor.revision === revision;
+        const target = $("actualizationTestResult");
+        target.innerHTML = "<p class='empty-state'>Проверяю файл по текущим настройкам…</p>";
+        target.scrollIntoView({ block: "nearest" });
+        try {
+            const draft = actualizationDraftFromForm();
+            validateActualizationDraft(draft);
+            const db = supabaseDb();
+            if (!db) throw new Error("Нет подключения к базе.");
+            const [rows, tasks] = await Promise.all([readSupersetRows(file, { recordDebug: false }), fetchWmsTaskRows(db, "active-full")]);
+            const candidates = await actualizationCandidates(db, tasks, rows, draft);
+            if (!previewIsCurrent()) return;
+            const planLabel = (candidate) => candidate.type !== "tare_partial" || candidate.tareAction === "close"
+                ? "Закрыть задачу"
+                : ACTUALIZATION_TARE_ACTIONS[candidate.tareAction] + " · останется " + candidate.stationary.length + " ШК";
+            target.innerHTML = "<div class='actualization-head'><div><h4>Результат проверки</h4>"
+                + "<p>Строк в файле: " + rows.length + " · задач с действием: " + candidates.length + " · проверка без записи</p></div></div>"
+                + (candidates.length ? "<div class='actualization-test-list'>" + candidates.map((candidate) =>
+                    "<details class='actualization-card'><summary><span class='actualization-summary-copy'><strong>" + escapeHtml(actualizeCandidateTitle(candidate)) + "</strong><small>" + escapeHtml(planLabel(candidate)) + "</small></span></summary>"
+                    + "<div class='actualization-card-body'><small>Вердикт всей задачи при закрытии: " + escapeHtml(actualizationClosingRule(candidate.moved)?.verdict) + "</small>"
+                    + candidate.moved.map((entry) => "<small>" + escapeHtml(entry.item.shk) + " · " + escapeHtml(entry.rule.name)
+                        + " · " + escapeHtml(entry.matchedConditions.map(actualizationConditionLabel).join(" и ")) + " · " + escapeHtml(entry.rule.verdict) + "</small>").join("")
+                    + (candidate.stationary.length ? "<small>ШК, оставленные в работе: " + escapeHtml(candidate.stationary.map((item) => item.shk).join(", ")) + "</small>" : "") + "</div></details>"
+                ).join("") + "</div>" : "<p class='empty-state'>Подходящих задач нет.</p>");
+        } catch (error) {
+            if (previewIsCurrent()) target.textContent = "Не удалось проверить файл: " + (error?.message || String(error));
+        }
     }
 
     // Та же JS-измеренная плавающая "таблетка", что и у остальных
@@ -15535,6 +16080,9 @@
 
     function routingRuleTargetOptionsHtml(selectedValue) {
         const options = activeReviewZones().map((section) => ({ value: section, label: section }));
+        if (selectedValue && !options.some((option) => option.value === selectedValue)) {
+            options.unshift({ value: selectedValue, label: selectedValue });
+        }
         return options.map((opt) =>
             "<option value='" + escapeHtml(opt.value) + "'" + (selectedValue === opt.value ? " selected" : "") + ">" + escapeHtml(opt.label) + "</option>"
         ).join("");
@@ -15554,12 +16102,13 @@
             + "<div class='routing-rule-section'>"
             + "<div class='routing-rule-section-label'>Вид правила и выгрузка</div>"
             + "<label class='writeoff-term-active'><input data-rule-is-filter type='checkbox'" + (isFilter ? " checked" : "") + "> Фильтр (не создавать задачу, а не маршрутизировать)</label>"
+            + "<label class='writeoff-term-active'" + (isFilter ? " hidden" : "") + "><input data-rule-upload-fallback type='checkbox'" + (row.is_upload_fallback ? " checked" : "") + "> По умолчанию для новых выгрузок</label>"
             + "<p class='work-subtitle' style='margin:4px 0 0'>Обычное правило (не отмечено) кладёт ШК в зону. Фильтр -- отсеивает строку целиком: если условия совпали, задача вообще не создаётся (например, цена ниже порога).</p>"
             + "<select data-rule-source-format style='margin-top:8px'>" + sourceFormatOptionsHtml(sourceFormat) + "</select>"
             + "<p class='work-subtitle' style='margin:4px 0 0'>В какой выгрузке (по формату файла) правило участвует.</p>"
             + "</div>"
-            + "<div class='routing-rule-section'>"
-            + "<div class='routing-rule-section-label'>Условия (все должны совпасть)</div>"
+            + "<div class='routing-rule-section' data-rule-match-conditions" + (row.is_upload_fallback ? " hidden" : "") + ">"
+            + "<div class='routing-rule-section-label'>Условия</div>"
             + "<div class='routing-rule-conditions' data-rule-conditions>" + conditions.map(routingRuleConditionHtml).join("") + "</div>"
             + "<button type='button' class='btn btn-outline' data-add-condition style='margin-top:8px'>+ Добавить условие</button>"
             + "</div>"
@@ -15612,7 +16161,7 @@
             + formatBadge
             + "<span class='routing-rule-summary-target'>→ " + escapeHtml(targetLabel) + "</span>"
             + fromZoneBadge
-            + "<span class='routing-rule-summary-meta'>" + conditionCount + " " + (conditionCount === 1 ? "условие" : "условий") + "</span>"
+            + "<span class='routing-rule-summary-meta'>" + (row.is_upload_fallback ? "По умолчанию" : conditionCount + " " + (conditionCount === 1 ? "условие" : "условий")) + "</span>"
             + "<span class='routing-rule-summary-status'>" + (isActive ? "активно" : "выключено") + "</span>"
             + "<button type='button' class='btn btn-square' data-rule-summary-remove aria-label='Удалить правило'>×</button>"
             + "</div>";
@@ -15638,7 +16187,8 @@
     function rulesForStatus(sourceFormat, statusCode) {
         return (state.routingRules.rows || [])
             .map((row, index) => ({ row, index }))
-            .filter((item) => item.row.source_format === sourceFormat && item.row.is_active !== false && ruleReferencesStatus(item.row.conditions, statusCode));
+            .filter(({ row }) => row.source_format === sourceFormat && row.is_active !== false
+                && (row.is_upload_fallback ? statusCode === "*" : ruleReferencesStatus(row.conditions, statusCode)));
     }
 
     function renderRoutingRulesModal() {
@@ -15651,7 +16201,8 @@
         const indexed = rows.map((row) => ({ row, index: indexAmongAll(row) }));
         const byPriority = (a, b) => (Number(a.row.priority) || 0) - (Number(b.row.priority) || 0);
         const filterRows = indexed.filter((item) => item.row.output_key === "filter").sort(byPriority);
-        const zoneRows = indexed.filter((item) => item.row.output_key !== "filter").sort(byPriority);
+        const zoneRows = indexed.filter((item) => item.row.output_key !== "filter" && !item.row.is_upload_fallback).sort(byPriority);
+        const fallbackRows = indexed.filter((item) => item.row.is_upload_fallback).sort(byPriority);
         const section = (title, items) => !items.length ? "" : "<div class='routing-rule-section-group'>"
             + "<div class='routing-rule-section-heading'>" + escapeHtml(title) + "</div>"
             + "<div class='routing-rule-summary-list'>" + items.map((item) => routingRuleSummaryRowHtml(item.row, item.index)).join("") + "</div>"
@@ -15664,7 +16215,8 @@
             + (state.routingRules.loading ? "<div class='status-line'>Загружаю правила...</div>" : "")
             + (!rows.length && !state.routingRules.loading ? "<div class='empty-state'>" + (filter ? "У этого статуса нет правил." : "Правил пока нет. Нажмите \"Добавить правило\".") + "</div>" : "")
             + section("Правила (" + zoneRows.length + ")", zoneRows)
-            + section("Фильтры (" + filterRows.length + ")", filterRows);
+            + section("Фильтры (" + filterRows.length + ")", filterRows)
+            + section("По умолчанию для новых выгрузок", fallbackRows);
         const clearButton = target.querySelector("[data-clear-status-filter]");
         if (clearButton) clearButton.addEventListener("click", () => { state.routingRules.statusFilter = null; renderRoutingRulesModal(); });
         wireRoutingRuleSummaryRows(target);
@@ -15699,11 +16251,16 @@
         });
         const isFilterEl = cardEl.querySelector("[data-rule-is-filter]");
         const zoneResultEl = cardEl.querySelector("[data-rule-zone-result]");
-        if (isFilterEl && zoneResultEl) {
-            isFilterEl.addEventListener("change", () => {
-                zoneResultEl.style.display = isFilterEl.checked ? "none" : "";
-            });
-        }
+        const fallback = cardEl.querySelector("[data-rule-upload-fallback]");
+        const conditions = cardEl.querySelector("[data-rule-match-conditions]");
+        const syncKind = () => {
+            zoneResultEl.style.display = isFilterEl.checked ? "none" : "";
+            fallback.closest("label").hidden = isFilterEl.checked;
+            conditions.hidden = !isFilterEl.checked && fallback.checked;
+        };
+        isFilterEl.addEventListener("change", syncKind);
+        fallback.addEventListener("change", syncKind);
+        syncKind();
     }
 
     function openRoutingRuleEditModal(index) {
@@ -15800,7 +16357,9 @@
         const statusFilter = state.routingRules.statusFilter;
         const sourceFormat = (statusFilter && statusFilter.sourceFormat) || "general";
         const dictEntry = statusFilter ? statusDictionaryEntry(sourceFormat, statusFilter.statusCode) : null;
-        const formatZoneRows = rows.filter((row) => (row.source_format || "general") === sourceFormat && (row.output_key || "zone") === "zone");
+        const zoneRows = rows.filter((row) => (row.output_key || "zone") === "zone");
+        const usedPriorities = new Set(zoneRows.map((row) => Number(row.priority)));
+        const formatZoneRows = zoneRows.filter((row) => (row.source_format || "general") === sourceFormat && !row.is_upload_fallback);
         // Приоритет считаем В РАМКАХ формата, а не по всем правилам сразу
         // (иначе можно легко попасть ПОСЛЕ catch-all другого формата с
         // более высоким числом и получить мёртвое правило). Если правило
@@ -15809,9 +16368,12 @@
         // существующий catch-all (вроде "Упаковка: status not_contains
         // RWP") перехватит строку раньше, чем дойдёт до нашего более
         // точного условия.
-        const nextPriority = statusFilter && formatZoneRows.length
-            ? Math.max(1, Math.min(...formatZoneRows.map((row) => Number(row.priority) || 0)) - 1)
-            : formatZoneRows.reduce((max, row) => Math.max(max, Number(row.priority) || 0), 0) + 1;
+        let nextPriority = zoneRows.reduce((max, row) => Math.max(max, Number(row.priority) || 0), 0) + 1;
+        if (statusFilter && formatZoneRows.length) {
+            let earlier = Math.min(...formatZoneRows.map((row) => Number(row.priority))) - 1;
+            while (earlier > 0 && usedPriorities.has(earlier)) earlier -= 1;
+            if (earlier > 0) nextPriority = earlier;
+        }
         state.routingRules.rows = rows.concat({
             // Явный id нужен уже здесь, а не только на сервере: весь
             // массив правил уходит ОДНИМ bulk-upsert вместе с уже
@@ -15862,12 +16424,13 @@
             const logic = logicEl ? logicEl.value : undefined;
             return { attribute, operator, value, rawValue, logic };
         }).filter((condition) => condition.rawValue);
-        if (!name || !conditions.length) return null;
         const cleanConditions = conditions.map(({ attribute, operator, value, logic }) =>
             logic ? { attribute, operator, value, logic } : { attribute, operator, value }
         );
         const isFilterEl = cardEl.querySelector("[data-rule-is-filter]");
         const isFilter = Boolean(isFilterEl && isFilterEl.checked);
+        const isUploadFallback = !isFilter && cardEl.querySelector("[data-rule-upload-fallback]").checked;
+        if (!name || (!conditions.length && !isUploadFallback)) return null;
         const sourceFormatEl = cardEl.querySelector("[data-rule-source-format]");
         const sourceFormat = sourceFormatEl ? sourceFormatEl.value : "general";
         if (isFilter) {
@@ -15879,6 +16442,7 @@
                 is_active: isActive,
                 conditions: cleanConditions,
                 output_key: "filter",
+                is_upload_fallback: false,
                 source_format: sourceFormat,
                 target_task_type: null,
                 grouping_attribute: null,
@@ -15908,8 +16472,10 @@
             priority,
             name,
             is_active: isActive,
-            conditions: cleanConditions,
             output_key: "zone",
+            is_upload_fallback: isUploadFallback,
+            // Preserve persisted conditions for the separate live-task engine.
+            conditions: isUploadFallback ? (existingRow?.created_at ? existingRow.conditions : []) : cleanConditions,
             source_format: sourceFormat,
             target_task_type: targetTaskType,
             grouping_attribute: null,
@@ -15952,11 +16518,27 @@
         // not-null constraint" на id/created_at у новых правил.
         const nowIso = new Date().toISOString();
         const rows = (state.routingRules.rows || [])
-            .filter((row) => row.name && Array.isArray(row.conditions) && row.conditions.length)
+            .filter((row) => row.name && (row.is_upload_fallback || (Array.isArray(row.conditions) && row.conditions.length)))
             .map((row) => ({ ...row, id: row.id || uuidValue(), created_at: row.created_at || nowIso, updated_at: nowIso }));
         if (!rows.length) {
             if (status) status.textContent = "Нет строк для сохранения.";
             return;
+        }
+        const priorities = new Set();
+        const fallbackFormats = new Set();
+        for (const row of rows) {
+            const key = row.output_key + ":" + row.priority;
+            if (priorities.has(key)) {
+                if (status) status.textContent = "Приоритет " + row.priority + " уже занят правилом того же типа.";
+                return;
+            }
+            priorities.add(key);
+            if (!row.is_upload_fallback || row.is_active === false) continue;
+            if (fallbackFormats.has(row.source_format)) {
+                if (status) status.textContent = "Для формата «" + sourceFormatLabel(row.source_format) + "» уже есть активное правило по умолчанию.";
+                return;
+            }
+            fallbackFormats.add(row.source_format);
         }
         // Живой инцидент этой сессии (дважды): zone-правило без from_zone,
         // у которого ВСЕ условия -- только not_contains/gt/gte/lt/lte
@@ -15992,7 +16574,7 @@
         state.routingRules.saving = true;
         if (status) status.textContent = "Сохраняю правила...";
         try {
-            const { error } = await db.from("wms_routing_rules").upsert(rows, { onConflict: "output_key,priority" });
+            const { error } = await db.from("wms_routing_rules").upsert(rows, { onConflict: "id" });
             if (error) throw error;
             state.routingRules.loaded = false;
             await loadRoutingRules(true);
@@ -17841,6 +18423,13 @@
     async function openStatusPilotModal() {
         if (!ensureDevelopmentAccess("Маршрутизатор")) return;
         closeFlowModals();
+        state.actualizationSettings = { draft: null, updatedAt: "", loading: false, revision: 0 };
+        $("addActualizationRule").disabled = true;
+        $("openActualizationTestFile").disabled = true;
+        $("saveActualizationSettings").disabled = true;
+        $("actualizationSettingsFields").replaceChildren();
+        $("actualizationSettingsStatus").textContent = "";
+        $("actualizationTestResult").replaceChildren();
         setFlowModalOpen("statusPilotModal", true);
         renderStatusPilotScreen(true);
         // Правила грузим сразу вместе со словарём -- нужны для вида
@@ -18724,11 +19313,14 @@
         return normalizeForMatch(value).includes("отгрузка сторонним перевозчиком");
     }
 
-    async function confirmPmCarrierShipments(file, setStatus) {
+    async function confirmPmCarrierShipments(file, setStatus, actionText) {
         setStatus = setStatus || setPmCarrierModalStatus;
         setStatus("Читаю проверку отгрузки...");
         const rows = await readWorkbookRows(file, "pmCarrier");
-        const transfers = Array.from(new Set(rows.filter((row) => isShippedCarrierAction(row.action)).map((row) => row.transfer).filter(Boolean)));
+        const matchesAction = actionText
+            ? (row) => normalizeForMatch(row.action).includes(normalizeForMatch(actionText))
+            : (row) => isShippedCarrierAction(row.action);
+        const transfers = Array.from(new Set(rows.filter(matchesAction).map((row) => row.transfer).filter(Boolean)));
         if (!transfers.length) { setStatus("В файле не найдено отгруженных передач (колонка «действие»).", "error"); return; }
         const db = supabaseDb();
         if (!db) { setStatus("Нет подключения к базе.", "error"); return; }
@@ -18776,11 +19368,23 @@
     function wireActualizePmCarrierButton() {
         const input = $("actualizePmCarrierFile");
         if (input) {
-            input.addEventListener("change", () => {
+            input.addEventListener("change", async () => {
                 const file = input.files && input.files[0];
                 if (!file) return;
                 input.value = "";
-                confirmPmCarrierShipments(file, setActualizePmCarrierStatus).catch((error) => setActualizePmCarrierStatus(error && error.message ? error.message : String(error), "error"));
+                input.disabled = true;
+                try {
+                    const { settings } = await readActualizationSettings(supabaseDb());
+                    if (!settings.carrierEnabled) {
+                        setActualizePmCarrierStatus("Проверка отгрузки выключена в настройках актуализации.", "error");
+                        return;
+                    }
+                    await confirmPmCarrierShipments(file, setActualizePmCarrierStatus, settings.carrierAction);
+                } catch (error) {
+                    setActualizePmCarrierStatus(error?.message || String(error), "error");
+                } finally {
+                    input.disabled = false;
+                }
             });
         }
         const copyBtn = $("copyActualizePmCarrierTransfers");
@@ -24127,6 +24731,86 @@
             void saveViolationFromModal();
         });
         $("closeStatusPilot").addEventListener("click", closeStatusPilotModal);
+        $("actualizationSettingsForm").addEventListener("submit", (event) => { void saveActualizationEditor(event); });
+        $("actualizationSettingsFields").addEventListener("input", () => {
+            updateActualizationSummaries(actualizationDraftFromForm());
+            markActualizationDraftChanged();
+        });
+        $("actualizationSettingsFields").addEventListener("change", (event) => {
+            const input = event.target;
+            const card = input.closest("[data-actualization-rule]");
+            if (!card) return;
+            if (input.matches("[data-actualization-zone]")) {
+                card.querySelector("[data-actualization-exclusions]").hidden = Boolean(input.value);
+            }
+            if (input.matches("[data-actualization-result-action]")) {
+                card.querySelector("[data-actualization-close-fields]").hidden = input.value === "skip";
+            }
+            if (!input.matches("[data-actualization-condition-field]")) return;
+            const cards = [...$("actualizationSettingsFields").querySelectorAll("[data-actualization-rule]")];
+            const ruleIndex = cards.indexOf(card);
+            const conditionRow = input.closest("[data-actualization-condition]");
+            const conditionIndex = Number(conditionRow.dataset.index);
+            const condition = normalizeActualizationCondition({ field: input.value });
+            conditionRow.outerHTML = actualizationConditionRowHtml(condition, ruleIndex, conditionIndex);
+            const replacement = card.querySelector("[data-actualization-condition][data-index='" + conditionIndex + "']");
+            (replacement.querySelector("[data-actualization-condition-value]") || replacement.querySelector("select")).focus();
+            updateActualizationSummaries(actualizationDraftFromForm());
+        });
+        $("actualizationSettingsFields").addEventListener("click", (event) => {
+            const button = event.target.closest("[data-actualization-action]");
+            if (!button || !state.actualizationSettings.draft) return;
+            const draft = actualizationDraftFromForm();
+            const index = Number(button.dataset.index);
+            const action = button.dataset.actualizationAction;
+            let nextIndex = -1;
+            if (action === "add-condition" || action === "remove-condition") {
+                const conditions = draft.rules[index].conditions;
+                if (action === "add-condition") conditions.push(normalizeActualizationCondition({ field: "movement" }));
+                else conditions.splice(Number(button.closest("[data-actualization-condition]").dataset.index), 1);
+                nextIndex = index;
+            } else if (action === "remove") draft.rules.splice(index, 1);
+            else {
+                nextIndex = index + (action === "up" ? -1 : 1);
+                if (!draft.rules[nextIndex]) return;
+                [draft.rules[index], draft.rules[nextIndex]] = [draft.rules[nextIndex], draft.rules[index]];
+            }
+            state.actualizationSettings.draft = draft;
+            markActualizationDraftChanged();
+            renderActualizationEditor(nextIndex);
+            const cards = $("actualizationSettingsFields").querySelectorAll("[data-actualization-rule]");
+            const focusCard = cards[nextIndex === -1 ? Math.min(index, cards.length - 1) : nextIndex];
+            const newField = action === "add-condition" && focusCard?.querySelector("[data-actualization-condition]:last-of-type select");
+            (newField || focusCard?.querySelector("summary") || $("addActualizationRule")).focus();
+        });
+        $("addActualizationRule").addEventListener("click", () => {
+            if (!state.actualizationSettings.draft) return;
+            const draft = actualizationDraftFromForm();
+            draft.rules.push(normalizeActualizationSettings({ rules: [{ name: "", conditions: [{ field: "movement" }], enabled: false }] }).rules[0]);
+            state.actualizationSettings.draft = draft;
+            markActualizationDraftChanged();
+            renderActualizationEditor(draft.rules.length - 1);
+            $("actualizationSettingsFields").querySelector("[data-actualization-rule][open] [data-actualization-name]")?.focus();
+        });
+        $("openActualizationTestFile").addEventListener("click", () => {
+            $("actualizationTestFile").click();
+        });
+        $("actualizationTestFile").addEventListener("change", async (event) => {
+            const input = event.currentTarget;
+            const file = input.files?.[0];
+            input.value = "";
+            if (!file || !state.actualizationSettings.draft) return;
+            input.disabled = true;
+            const testButton = $("openActualizationTestFile");
+            const editor = state.actualizationSettings;
+            testButton.disabled = true;
+            try {
+                await previewActualizationSettings(file);
+            } finally {
+                input.disabled = false;
+                if (state.actualizationSettings === editor) testButton.disabled = false;
+            }
+        });
         document.querySelectorAll("#statusPilotModal [data-status-view]").forEach((button) => {
             button.addEventListener("click", () => {
                 if (state.statusDictionary.viewMode === button.dataset.statusView) return;
@@ -24258,6 +24942,7 @@
         $("actualizeStep2Back").addEventListener("click", () => actualizeGoToStep(1));
         $("actualizeStep2Next").addEventListener("click", () => actualizeGoToStep(3));
         $("actualizeStep3Back").addEventListener("click", () => actualizeGoToStep(2));
+        $("applyActualizationRouting").addEventListener("click", () => { void applyActualizationRouting(state.actualize); });
         $("shkExclusionStep2Back").addEventListener("click", () => shkExclusionGoToStep(1));
         $("shkExclusionStep2Next").addEventListener("click", () => shkExclusionGoToStep(3));
         $("shkExclusionStep3Back").addEventListener("click", () => shkExclusionGoToStep(2));

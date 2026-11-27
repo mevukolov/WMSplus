@@ -17,7 +17,7 @@
         .btn:hover { transform: translateY(-1px); }
         .btn:active { transform: scale(.93); }
         body { --tasks-page-pad: 28px; height: 100dvh; min-height: 100dvh; display: flex; background-attachment: fixed; }
-        .tasks-wrap { width: 100%; max-width: 1280px; gap: 16px; height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 8px; padding-bottom: 16px; scrollbar-gutter: stable; align-content: start; box-sizing: border-box; }
+        .tasks-wrap { width: 100%; max-width: 1280px; gap: 16px; height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 0; padding-bottom: 16px; scrollbar-gutter: stable; align-content: start; box-sizing: border-box; }
         .tasks-wrap::-webkit-scrollbar { width: 8px; }
         .tasks-wrap::-webkit-scrollbar-thumb { background: rgba(98,60,234,.26); border-radius: 999px; }
         .tasks-wrap::-webkit-scrollbar-track { background: transparent; }
@@ -380,6 +380,55 @@
         .routing-rule-checkbox-row { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 14px; }
         .routing-rule-checkbox-row label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 900; color: #334155; white-space: nowrap; }
         .routing-rule-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 16px; margin-top: 14px; }
+        #actualizationSettingsForm { display: grid; gap: 14px; padding: 4px 0 12px; }
+        .actualization-head, .actualization-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .actualization-head h4, .actualization-settings-title { margin: 0; color: var(--accent-dark); font-size: 16px; }
+        .actualization-head p { margin: 3px 0 0; color: #526078; font-size: 13px; }
+        #actualizationSettingsFields, .actualization-rule-list { display: grid; gap: 8px; }
+        .actualization-card { min-width: 0; border: 1px solid #dbe3ef; border-radius: 14px; background: #fff; }
+        .actualization-card[open] { border-color: #b9a9fb; }
+        .actualization-card > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 13px; cursor: pointer; list-style: none; }
+        .actualization-card > summary::-webkit-details-marker { display: none; }
+        .actualization-card > summary:hover, .actualization-card[open] > summary { background: #f7f5ff; }
+        .actualization-card > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+        .actualization-card > summary::after { content: ""; inline-size: 7px; block-size: 7px; border: solid #64748b; border-width: 0 2px 2px 0; transform: rotate(45deg); margin: 0 3px 3px 1px; }
+        .actualization-card[open] > summary::after { transform: rotate(225deg); margin-bottom: -3px; }
+        .status-pilot-card .actualization-summary-copy { min-width: 0; display: grid; gap: 3px; margin: 0; }
+        .actualization-summary-copy strong { color: #242038; font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+        .actualization-summary-copy small { color: #526078; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+        .actualization-card > summary .actualization-badge { padding: 3px 8px; margin: 0; border-radius: 999px; color: #166534; background: #dcfce7; font-size: 11px; font-weight: 750; white-space: nowrap; }
+        .actualization-card > summary .actualization-badge.is-off { color: #475569; background: #eef2f7; }
+        .actualization-card-body { display: grid; gap: 12px; padding: 14px; border-top: 1px solid #e2e8f0; }
+        .actualization-form-grid, .actualization-secondary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
+        .actualization-conditions { display: grid; gap: 8px; border: 1px solid #e2e8f0; padding: 10px; background: #f8fafc; border-radius: 10px; }
+        .actualization-conditions > .btn { justify-self: start; }
+        .actualization-condition { display: grid; grid-template-columns: minmax(145px, 2fr) minmax(100px, 1fr) minmax(90px, 1fr) auto; gap: 8px; align-items: end; }
+        .actualization-condition-remove { grid-column: -2; align-self: end; }
+        .actualization-zone-options { display: flex; flex-wrap: wrap; gap: 6px 12px; padding-top: 8px; }
+        .actualization-field { display: grid; min-width: 0; gap: 5px; color: #475569; font-size: 13px; font-weight: 700; }
+        .actualization-field select, .actualization-field input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 7px 10px; border: 1px solid #dbe3ef; border-radius: 9px; background: #fff; color: #242038; font: inherit; }
+        .actualization-check { display: inline-flex; width: fit-content; align-items: center; gap: 7px; color: #334155; font-size: 13px; }
+        .actualization-rule-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+        .actualization-rule-tools .btn { min-height: 32px; }
+        .actualization-rule-tools .btn:disabled { opacity: .36; }
+        .actualization-rule-tools .actualization-remove { margin-inline-start: auto; color: #a11b32; }
+        .actualization-settings-title { margin-top: 8px; }
+        .actualization-secondary .actualization-card > summary, .actualization-test-list .actualization-card > summary { grid-template-columns: minmax(0, 1fr) auto; }
+        .actualization-footer { flex: none; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+        .actualization-footer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
+        .actualization-footer .status-line { flex: 1 1 190px; margin: 0; }
+        .actualization-footer .status-line:empty { display: none; }
+        .actualization-test-list { max-height: 320px; overflow: auto; display: grid; gap: 6px; }
+        .actualization-test-list small { display: block; color: #526078; }
+        .actualization-test-result:empty { display: none; }
+        @media (max-width: 620px) {
+            .actualization-form-grid, .actualization-secondary { grid-template-columns: 1fr; }
+            .actualization-condition { grid-template-columns: minmax(0, 1fr) auto; }
+            .actualization-condition .actualization-field { grid-column: 1; }
+            .actualization-card > summary { gap: 8px; padding: 10px; }
+            .actualization-footer-actions { margin-inline-start: 0; }
+        }
+        #applyActualizationRouting[hidden], #statusActualizationWrap [hidden], #routingRuleEditWrap [hidden] { display: none; }
         .routing-rule-settings-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
         .routing-rule-settings-field > span { font-size: 11px; font-weight: 1000; color: #64748b; text-transform: uppercase; letter-spacing: .03em; }
         .routing-rule-settings-field input, .routing-rule-settings-field select { border: 1px solid #e2e8f0; border-radius: 11px; padding: 9px 10px; box-sizing: border-box; font: inherit; font-weight: 900; color: #242038; background: #fff; width: 100%; }
@@ -1383,20 +1432,30 @@
         .review-pager-panel { flex: 0 0 var(--pager-panel-w, 100%); min-width: 0; }
         .review-toolbar-presort-only { display: flex; flex-direction: row; align-items: center; margin-left: auto; }
         .review-status { color: #64748b; font-size: 13px; min-height: 18px; }
-        .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; perspective: 900px; transition: opacity .2s ease, transform .34s cubic-bezier(.34,1.56,.64,1); }
+        .review-sections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 0; perspective: 900px; transition: opacity .2s ease, transform .34s cubic-bezier(.34,1.56,.64,1); }
         .review-sections-grid.is-mode-out { opacity: 0; transform: scale(.92); }
         .review-sections-grid.is-mode-in { opacity: 0; transform: scale(.9); }
         .violators-loading {
+            width: 100%;
             height: 100%;
-            min-height: 180px;
+            min-height: 220px;
             display: grid;
             place-items: center;
             align-content: center;
             gap: 12px;
             animation: violators-loader-in 260ms ease-out both;
         }
-        .violators-loading svg { width: min(100%, 290px); height: auto; overflow: visible; }
-        .violators-loading-caption { color: rgba(36,32,56,.62); font-size: 12px; font-weight: 750; }
+        /* While a pager page loads, the other pages still determine its
+           shared height. Fill that exact height so the loader stays centred
+           instead of looking glued to the top. */
+        .review-pager-panel:has(.violators-loading) { display: flex; flex-direction: column; min-height: 0; }
+        .review-pager-panel:has(.violators-loading) .review-sections-grid:has(.violators-loading), .review-pager-panel:has(.violators-loading) .review-table-card:has(.violators-loading) { flex: 1 1 auto; min-height: 0; }
+        .review-pager-panel:has(.review-sections-grid .violators-loading) .review-picker-row, .review-pager-panel:has(.review-sections-grid .violators-loading) .review-picker-scroll, .review-pager-panel:has(.review-sections-grid .violators-loading) .review-sections-grid { display: flex; flex: 1 1 auto; min-height: 0; }
+        .review-table-card:has(.violators-loading) { display: flex; border: 0; border-radius: 0; background: transparent; }
+        .review-pager-panel:has(.violators-loading) .violators-loading { flex: 1 1 auto; min-height: 0; }
+        .violators-loading svg { width: min(100%, 360px); height: auto; overflow: visible; }
+        .review-sections-grid > .violators-loading { grid-column: 1 / -1; }
+        .violators-loading-caption { color: rgba(36,32,56,.62); font-size: 14px; font-weight: 750; }
         .violators-loader-grid { stroke: rgba(98,60,234,.13); stroke-width: 1; }
         .violators-loader-area { fill: url(#violatorsLoaderFill); opacity: .55; animation: violators-area-breathe 1.9s ease-in-out infinite; }
         .violators-loader-line {
@@ -2245,7 +2304,7 @@
         @media (max-width: 1100px) { .review-sections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) { .review-sections-grid { grid-template-columns: 1fr; } }
         @media (prefers-reduced-motion: reduce) { .violators-loading, .violators-loader-area, .violators-loader-line, .violators-loader-point { animation: none; } .violators-loader-line { stroke-dashoffset: 0; opacity: 1; } }
-        @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 4px; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip, .calculation-summary, .shift-sorting-total-fields { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
+        @media (max-width: 760px) { body { --tasks-page-pad: 14px; padding: 14px; } .tasks-wrap { padding-right: 0; } .calendar-grid { gap: 5px; } .calendar-day { min-height: 58px; padding: 7px; } .tasks-page-head { display: block; } .tasks-page-head .btn { margin-top: 10px; } .actualize-summary, .movement-change, .journal-stats-strip, .calculation-summary, .shift-sorting-total-fields { grid-template-columns: 1fr; } .task-search { flex-basis: 100%; } .journal-scroll { padding: 12px; } .journal-day-grid, .journal-weekdays { gap: 5px; } .journal-day { min-height: 74px; padding: 7px; } }
     </style>
 </head>
 <body>
@@ -2649,6 +2708,9 @@
                 </div>
             </div>
             <div id="actualizeStatus" class="status-line">Сначала скопируйте список активных ШК.</div>
+            <div id="actualizeCopyBreakdown"></div>
+            <div id="actualizeRoutingStatus" class="status-line" aria-live="polite"></div>
+            <button id="applyActualizationRouting" class="btn btn-outline" type="button" hidden>Обновить Superset и маршруты</button>
             <div id="actualizeResults"></div>
         </div>
         <div class="actualize-step drawer-body-scroll" style="border-top:1px solid #e2e8f0; margin-top:4px; padding-top:16px;">
@@ -2913,7 +2975,7 @@
         <div class="work-head">
             <div>
                 <h3 class="work-title">Маршрутизатор</h3>
-                <p class="work-subtitle">Словарь статусов: название, срок списания, срок разбора, участок по умолчанию -- единая точка правды для выгрузок, маршрутизации и журнала покрытия.</p>
+                <p class="work-subtitle" data-status-uploads-only>Словарь статусов: название, срок списания, срок разбора, участок по умолчанию -- единая точка правды для выгрузок, маршрутизации и журнала покрытия.</p>
             </div>
             <button id="closeStatusPilot" class="btn btn-square" type="button" aria-label="Закрыть">×</button>
         </div>
@@ -2921,6 +2983,7 @@
             <span id="statusViewThumb" class="review-view-thumb" aria-hidden="true"></span>
             <button type="button" class="review-view-tab" data-status-view="uploads">Выгрузки</button>
             <button type="button" class="review-view-tab" data-status-view="zones">Участки</button>
+            <button type="button" class="review-view-tab" data-status-view="actualization">Актуализация</button>
             <button type="button" class="review-view-tab" data-status-view="violations">Нарушения</button>
             <button type="button" class="review-view-tab" data-status-view="employees">Исполнители</button>
             <button type="button" class="review-view-tab" data-status-view="noshk">Без ШК</button>
@@ -2928,6 +2991,19 @@
         <div class="status-pilot-scroll">
             <div id="statusDictionaryWrap" class="writeoff-terms-wrap"></div>
             <div id="statusZonesWrap" class="writeoff-terms-wrap hidden"></div>
+            <div id="statusActualizationWrap" class="hidden">
+                <form id="actualizationSettingsForm" novalidate>
+                    <div class="actualization-head">
+                        <div>
+                            <h4>Когда закрывать задачи</h4>
+                            <p>Сначала правила участка, затем общие. Для каждого ШК срабатывает первое подходящее правило.</p>
+                        </div>
+                        <button id="addActualizationRule" class="btn btn-outline" type="button" disabled>Добавить правило</button>
+                    </div>
+                    <div id="actualizationSettingsFields"></div>
+                    <div id="actualizationTestResult" class="actualization-test-result" aria-live="polite"></div>
+                </form>
+            </div>
             <div id="statusViolationsWrap" class="hidden">
                 <div id="violationTypesWrap" class="writeoff-terms-wrap"></div>
             </div>
@@ -2941,6 +3017,14 @@
                     <button id="editNoShkZoneBtn" class="btn btn-outline" type="button">✎ Управление стеллажами</button>
                 </div>
                 <div id="noShkZoneWrap"></div>
+            </div>
+        </div>
+        <div class="actualization-footer hidden" data-status-actualization-only>
+            <div id="actualizationSettingsStatus" class="status-line" aria-live="polite"></div>
+            <div class="actualization-footer-actions">
+                <input id="actualizationTestFile" class="file-input" type="file" accept=".xlsx,.xls,.csv">
+                <button id="openActualizationTestFile" class="btn btn-outline" type="button" disabled>Проверить на файле</button>
+                <button id="saveActualizationSettings" class="btn btn-rect" type="submit" form="actualizationSettingsForm" disabled>Сохранить настройки</button>
             </div>
         </div>
         <div class="file-row" data-status-uploads-only>
